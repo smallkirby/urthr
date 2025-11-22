@@ -1,0 +1,10 @@
+.{
+    .name = .urthr,
+    .version = "0.0.0",
+    .fingerprint = 0x76f1c1868b44062b,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        ".",
+    },
+}
