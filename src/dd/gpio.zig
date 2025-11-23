@@ -142,5 +142,5 @@ pub fn selectAltFn(pin: u8, alt: Fsel) void {
 // =============================================================
 
 const std = @import("std");
-const urd = @import("urthr");
-const mmio = urd.mmio;
+const common = @import("common");
+const mmio = common.mmio;

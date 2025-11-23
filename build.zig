@@ -11,6 +11,16 @@ pub fn build(b: *std.Build) !void {
     // Options
     // =============================================================
 
+    const s_board = b.option(
+        []const u8,
+        "board",
+        "Target board type",
+    ) orelse "rpi4b";
+    const board_type = board.BoardType.from(s_board) orelse {
+        std.log.err("Unsupported board type: {s}", .{s_board});
+        return error.InvalidBoardType;
+    };
+
     const s_log_level = b.option(
         []const u8,
         "log_level",
@@ -44,17 +54,57 @@ pub fn build(b: *std.Build) !void {
 
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
+    options.addOption(board.BoardType, "board", board_type);
 
     // =============================================================
     // Modules
     // =============================================================
 
-    const urthr_module = blk: {
+    const common_module = blk: {
         const module = b.createModule(.{
-            .root_source_file = b.path("src/urthr.zig"),
+            .root_source_file = b.path("src/common.zig"),
+            .target = target,
+            .optimize = optimize,
         });
-        module.addImport("urthr", module);
+        module.addImport("common", module);
         module.addOptions("options", options);
+
+        break :blk module;
+    };
+
+    const arch_module = blk: {
+        const module = b.createModule(.{
+            .root_source_file = b.path("src/arch.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        module.addImport("common", common_module);
+        module.addOptions("options", options);
+
+        break :blk module;
+    };
+
+    const dd_module = blk: {
+        const module = b.createModule(.{
+            .root_source_file = b.path("src/dd.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        module.addImport("common", common_module);
+        module.addImport("arch", arch_module);
+
+        break :blk module;
+    };
+
+    const board_module = blk: {
+        const module = b.createModule(.{
+            .root_source_file = b.path("src/board.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        module.addImport("common", common_module);
+        module.addImport("arch", arch_module);
+        module.addImport("dd", dd_module);
 
         break :blk module;
     };
@@ -77,7 +127,10 @@ pub fn build(b: *std.Build) !void {
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = b.path("src/arch/aarch64/linker.ld");
         exe.addAssemblyFile(b.path("src/arch/aarch64/entry.S"));
-        exe.root_module.addImport("urthr", urthr_module);
+        exe.root_module.addImport("common", common_module);
+        exe.root_module.addImport("arch", arch_module);
+        exe.root_module.addImport("board", board_module);
+        exe.root_module.addImport("dd", dd_module);
         exe.root_module.addOptions("options", options);
 
         break :blk exe;
@@ -145,15 +198,13 @@ pub fn build(b: *std.Build) !void {
         const unit_test = b.addTest(.{
             .name = "urthr_test",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("src/urthr.zig"),
+                .root_source_file = b.path("src/test.zig"),
                 .target = b.resolveTargetQuery(.{}),
                 .optimize = optimize,
                 .link_libc = true,
             }),
             .use_llvm = true,
         });
-        unit_test.root_module.addImport("urthr", unit_test.root_module);
-        unit_test.root_module.addOptions("options", options);
 
         const run_unit_test = b.addRunArtifact(unit_test);
         const unit_test_step = b.step("test", "Run unit tests");
@@ -170,3 +221,4 @@ fn home() []const u8 {
 // =============================================================
 
 const std = @import("std");
+const board = @import("src/board.zig");
