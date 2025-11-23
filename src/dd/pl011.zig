@@ -213,12 +213,6 @@ pub fn setBase(base: usize) void {
 ///
 /// Caller must ensure that the GPIO and PL011 base addresses are set correctly beforehand.
 pub fn init() void {
-    // Select alternate functions for TXD0 and RXD0 pins.
-    //
-    // TODO: raspi5 has dedicated UART pins.
-    gpio.selectAltFn(14, .alt0); // TXD0
-    gpio.selectAltFn(15, .alt0); // RXD0
-
     // Wait until PL011 is not busy.
     flush();
 
@@ -238,11 +232,11 @@ pub fn init() void {
     }));
 
     // Enable UART, TX and RX.
-    pl011.write(Cr, std.mem.zeroInit(Cr, .{
+    pl011.modify(Cr, .{
         .uarten = true,
         .txe = true,
         .rxe = true,
-    }));
+    });
 
     // Disable receive interrupt.
     pl011.write(Imsc, std.mem.zeroInit(Imsc, .{
@@ -279,8 +273,7 @@ pub fn flush() void {
 const std = @import("std");
 const atomic = std.atomic;
 const fmt = std.fmt;
-const urd = @import("urthr");
-const arch = urd.arch;
-const gpio = urd.dd.gpio;
-const mmio = urd.mmio;
-const util = urd.util;
+const arch = @import("arch");
+const common = @import("common");
+const mmio = common.mmio;
+const util = common.util;
