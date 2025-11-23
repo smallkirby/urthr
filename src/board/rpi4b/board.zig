@@ -1,13 +1,3 @@
-const map = struct {
-    /// Base address of peripheral registers.
-    const peri_base = 0xFE00_0000;
-
-    /// GPIO
-    const gpio = peri_base + 0x0020_0000;
-    /// PL011 UART
-    const pl011 = peri_base + 0x0020_1000;
-};
-
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like GPIO and UART.
@@ -22,6 +12,30 @@ pub fn boot() void {
     dd.pl011.init();
 }
 
+/// Get console instance.
+///
+/// This is a zero const operation with no runtime cost.
+pub fn getConsole() Console {
+    return .{
+        .vtable = .{
+            .putc = console.putc,
+            .flush = console.flush,
+        },
+        .ctx = &.{},
+    };
+}
+
+/// Wrapper functions for console API.
+const console = struct {
+    fn putc(_: *anyopaque, c: u8) void {
+        return dd.pl011.putc(c);
+    }
+
+    fn flush(_: *anyopaque) void {
+        return dd.pl011.flush();
+    }
+};
+
 // =============================================================
 // Imports
 // =============================================================
@@ -29,4 +43,6 @@ pub fn boot() void {
 const std = @import("std");
 const arch = @import("arch");
 const common = @import("common");
+const Console = common.Console;
 const dd = @import("dd");
+const map = @import("memmap.zig");

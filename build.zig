@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) !void {
         .abi = .none,
         .os_tag = .freestanding,
         .ofmt = .elf,
+        .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+            .neon,
+            .fp_armv8,
+        }),
     });
     const optimize = b.standardOptimizeOption(.{});
 
@@ -63,8 +67,6 @@ pub fn build(b: *std.Build) !void {
     const common_module = blk: {
         const module = b.createModule(.{
             .root_source_file = b.path("src/common.zig"),
-            .target = target,
-            .optimize = optimize,
         });
         module.addImport("common", module);
         module.addOptions("options", options);
@@ -75,8 +77,6 @@ pub fn build(b: *std.Build) !void {
     const arch_module = blk: {
         const module = b.createModule(.{
             .root_source_file = b.path("src/arch.zig"),
-            .target = target,
-            .optimize = optimize,
         });
         module.addImport("common", common_module);
         module.addOptions("options", options);
@@ -87,8 +87,6 @@ pub fn build(b: *std.Build) !void {
     const dd_module = blk: {
         const module = b.createModule(.{
             .root_source_file = b.path("src/dd.zig"),
-            .target = target,
-            .optimize = optimize,
         });
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
@@ -99,11 +97,21 @@ pub fn build(b: *std.Build) !void {
     const board_module = blk: {
         const module = b.createModule(.{
             .root_source_file = b.path("src/board.zig"),
-            .target = target,
-            .optimize = optimize,
         });
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
+        module.addImport("dd", dd_module);
+
+        break :blk module;
+    };
+
+    const urthr_module = blk: {
+        const module = b.createModule(.{
+            .root_source_file = b.path("src/urthr.zig"),
+        });
+        module.addImport("common", common_module);
+        module.addImport("arch", arch_module);
+        module.addImport("board", board_module);
         module.addImport("dd", dd_module);
 
         break :blk module;
@@ -131,6 +139,7 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("dd", dd_module);
+        exe.root_module.addImport("urthr", urthr_module);
         exe.root_module.addOptions("options", options);
 
         break :blk exe;
@@ -147,36 +156,29 @@ pub fn build(b: *std.Build) !void {
     };
 
     // =============================================================
-    // Urthr Executable
+    // Run on QEMU
     // =============================================================
 
-    const qemu_bin = b.fmt("{s}/bin/qemu-system-aarch64", .{qemu_dir});
     {
-        var qemu_args = std.array_list.Aligned(
-            []const u8,
-            null,
-        ).empty;
-        defer qemu_args.deinit(b.allocator);
-        try qemu_args.appendSlice(b.allocator, &.{
-            qemu_bin,
-            "-M",
-            "raspi4b",
-            "-kernel",
-            b.fmt("{s}/bin/{s}", .{ b.install_path, kernel8.dest_rel_path }),
-            "-nographic",
-            "-serial",
-            "mon:stdio",
-            "-no-reboot",
-            "-s",
-            "-d",
-            "guest_errors",
-        });
+        const qemu_bin = b.fmt(
+            "{s}/bin/qemu-system-aarch64",
+            .{qemu_dir},
+        );
+        const qemu = Qemu{
+            .qemu = qemu_bin,
+            .machine = board_type,
+            .graphic = .none,
+            .memory = "2G",
+            .kernel = b.fmt(
+                "{s}/bin/{s}",
+                .{ b.install_path, kernel8.dest_rel_path },
+            ),
+            .wait_gdb = wait_qemu,
+        };
 
-        if (wait_qemu) {
-            try qemu_args.append(b.allocator, "-S");
-        }
-
-        const qemu_cmd = b.addSystemCommand(qemu_args.items);
+        const qemu_cmd = b.addSystemCommand(
+            try qemu.command(b.allocator),
+        );
         qemu_cmd.step.dependOn(b.getInstallStep());
 
         const run_qemu = b.step("run", "Run Urthr on QEMU");
@@ -187,8 +189,10 @@ pub fn build(b: *std.Build) !void {
     // Install
     // =============================================================
 
-    b.installArtifact(urthr);
-    b.getInstallStep().dependOn(&kernel8.step);
+    {
+        b.installArtifact(urthr);
+        b.getInstallStep().dependOn(&kernel8.step);
+    }
 
     // =============================================================
     // Unit Tests
@@ -215,6 +219,67 @@ pub fn build(b: *std.Build) !void {
 fn home() []const u8 {
     return std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch "..";
 }
+
+const Qemu = struct {
+    /// QEMU path.
+    qemu: []const u8,
+    /// Machine type.
+    machine: board.BoardType,
+    /// Graphics mode.
+    graphic: enum { none },
+    /// Memory size.
+    memory: []const u8,
+    /// Kernel path.
+    kernel: []const u8,
+    /// Wait for GDB connection on startup.
+    wait_gdb: bool,
+
+    pub fn command(self: Qemu, allocator: std.mem.Allocator) ![]const []const u8 {
+        var args = std.array_list.Aligned([]const u8, null).empty;
+        defer args.deinit(allocator);
+
+        try args.appendSlice(allocator, &.{
+            self.qemu,
+        });
+        try args.appendSlice(allocator, &.{
+            "-M",
+            switch (self.machine) {
+                .rpi4b => "raspi4b",
+                .rpi5 => "raspi5",
+            },
+        });
+        try args.appendSlice(allocator, &.{
+            "-m",
+            self.memory,
+        });
+        try args.appendSlice(allocator, &.{
+            "-kernel",
+            self.kernel,
+        });
+        try args.appendSlice(allocator, &.{switch (self.graphic) {
+            .none => "-nographic",
+        }});
+        try args.appendSlice(allocator, &.{
+            "-serial",
+            "mon:stdio",
+        });
+        try args.appendSlice(allocator, &.{
+            "-no-reboot",
+        });
+        try args.appendSlice(allocator, &.{
+            "-s",
+            "-d",
+            "guest_errors",
+        });
+        if (self.wait_gdb) {
+            try args.appendSlice(allocator, &.{
+                "-S",
+            });
+        }
+
+        return args.toOwnedSlice(allocator);
+    }
+};
 
 // =============================================================
 // Imports
