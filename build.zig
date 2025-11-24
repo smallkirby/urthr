@@ -135,6 +135,7 @@ pub fn build(b: *std.Build) !void {
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = b.path("src/arch/aarch64/linker.ld");
         exe.addAssemblyFile(b.path("src/arch/aarch64/entry.S"));
+        exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);

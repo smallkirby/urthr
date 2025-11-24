@@ -15,8 +15,13 @@ export fn kmain() callconv(.c) noreturn {
     // Init kernel logger.
     urd.klog.set(board.getConsole());
 
+    // Initialize exception handling.
+    urd.exception.initLocal();
+
+    // Print a boot message.
     log.info("Booting Urthr...", .{});
 
+    // Halt.
     while (true) {
         asm volatile ("wfe");
     }
