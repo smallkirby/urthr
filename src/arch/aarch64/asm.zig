@@ -3,16 +3,26 @@ pub fn eret() noreturn {
     unreachable;
 }
 
+pub fn isb() void {
+    asm volatile ("isb");
+}
+
 pub fn mrs(comptime reg: SystemReg) reg.Type() {
     return @bitCast(asm volatile (std.fmt.comptimePrint(
             \\mrs %[ret], {s}
         , .{reg.str()})
-        : [ret] "=r" (-> switch (@sizeOf(SystemReg.Type(reg))) {
+        : [ret] "=r" (-> switch (@sizeOf(reg.Type())) {
             4 => u32,
             8 => u64,
             else => @compileError("Unsupported system register size."),
           }),
     ));
+}
+
+/// Read a system register and return integer value.
+pub fn mrsi(comptime reg: SystemReg) u64 {
+    const IntR = std.meta.Int(.unsigned, @bitSizeOf(reg.Type()));
+    return @as(IntR, @bitCast(mrs(reg)));
 }
 
 pub fn msr(comptime reg: SystemReg, value: reg.Type()) void {
@@ -35,6 +45,10 @@ pub fn modifySreg(comptime reg: SystemReg, value: anytype) void {
         @field(now, field.name) = @field(value, field.name);
     }
     msr(reg, now);
+}
+
+pub fn wfe() void {
+    asm volatile ("wfe");
 }
 
 // =============================================================

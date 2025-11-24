@@ -17,6 +17,14 @@ pub const SystemReg = enum {
     spsr_el2,
     spsr_el3,
 
+    vbar_el1,
+    vbar_el2,
+    vbar_el3,
+
+    esr_el1,
+    esr_el2,
+    esr_el3,
+
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
         return @tagName(self);
@@ -30,6 +38,8 @@ pub const SystemReg = enum {
             .daif => Daif,
             .sp_el0, .sp_el1, .sp_el2, .sp_el3 => Sp,
             .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
+            .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
+            .esr_el1, .esr_el2, .esr_el3 => Esr,
         };
     }
 };
@@ -295,4 +305,160 @@ pub const Spsr = packed struct(u64) {
     exlock: bool,
     /// Reserved.
     _reserved3: u29 = 0,
+};
+
+/// VBAR_ELx.
+///
+/// Vector Base Address Register.
+/// Holds the vector base address for any exception that is taken to ELx.
+pub const Vbar = packed struct(u64) {
+    /// Vector base address.
+    addr: u64,
+};
+
+/// ESR_ELx.
+///
+/// Exception Syndrome Register.
+/// Holds syndrome information for an exception taken to ELx.
+pub const Esr = packed struct(u64) {
+    /// Instruction Specific Syndrome.
+    iss: u25,
+    /// Instruction Length for synchronous exceptions.
+    il: Length,
+    /// Exception class.
+    ec: Class,
+    /// Instruction Specific Syndrome.
+    iss2: u24,
+    /// Reserved.
+    _reserved: u8 = 0,
+
+    pub const Class = enum(u6) {
+        unknown = 0b000000,
+        bti = 0b001011,
+        illegal_exec_state = 0b001110,
+        svc_a32 = 0b010001,
+        hvc_a32 = 0b010010,
+        smc_a32 = 0b010011,
+        svc_a64 = 0b010101,
+        hvc_a64 = 0b010110,
+        smc_a64 = 0b010111,
+        iabort_lower = 0b100000,
+        iabort_cur = 0b100001,
+        pc_align = 0b100010,
+        dabort_lower = 0b100100,
+        dabort_cur = 0b100101,
+        sp_align = 0b100110,
+
+        _,
+    };
+
+    pub const Length = enum(u1) {
+        len16 = 0,
+        len32 = 1,
+    };
+
+    /// Instruction Fault Status Code.
+    ///
+    /// ISS[5:0] when EC is `.iabort_lower` or `iabort_cur`.
+    pub const Ifsc = enum(u6) {
+        addr_size_lvl0 = 0b000000,
+        addr_size_lvl1 = 0b000001,
+        addr_size_lvl2 = 0b000010,
+        addr_size_lvl3 = 0b000011,
+
+        trans_lv0 = 0b000100,
+        trans_lv1 = 0b000101,
+        trans_lv2 = 0b000110,
+        trans_lv3 = 0b000111,
+
+        af_lv1 = 0b001001,
+        af_lv2 = 0b001010,
+        af_lv3 = 0b001011,
+        af_lv0 = 0b001000,
+
+        perm_lv0 = 0b001100,
+        perm_lv1 = 0b001101,
+        perm_lv2 = 0b001110,
+        perm_lv3 = 0b001111,
+
+        _,
+    };
+
+    /// ISS encoding for Data Abort.
+    pub const IssDabort = packed struct(u25) {
+        /// Data Fault Status Code.
+        dfsc: Dfsc,
+        /// Write not Read,
+        ///
+        /// Indicates whether a synchronous abort was caused by an instruction writing to a memory location,
+        /// or by an instruction reading from a memory location.
+        wnr: enum(u1) {
+            read = 0,
+            write = 1,
+        },
+        /// Stage 1 Page Table Walk.
+        ///
+        /// For a stage 2 fault, indicates whether the fault was a stage 2 fault on an access made for a stage 1 translation table walk.
+        /// Otherwise, reserved.
+        s1ptw: u1,
+        /// Cache maintenance.
+        cm: u1,
+        /// External abort type.
+        /// Otherwise, fixed to 0.
+        ea: u1,
+        /// FAR not Valid when a synchronous Externnal abort.
+        fnv: bool,
+        ///
+        lst_set: u2,
+        ///
+        vncr: u1,
+        ///
+        ar_pfv: u1,
+        /// When ISV is set, Sixty Four bit general-purpose register transfer.
+        /// Width of the register accessed by the instruction is 64-bit.
+        sf_fnp: bool,
+        /// If ISV is set, Syndrome Register Transfer.
+        /// The register number of the Wt/Xt/Rt operand of the faulting instruction.
+        srt_wu: u5,
+        ///
+        sse_toplevel: u1,
+        /// When ISV is set, Syndrome Access Size.
+        ///
+        /// Indicates the size of the access attempted by the faulting operation.
+        sas: enum(u2) {
+            byte = 0b00,
+            halfword = 0b01,
+            word = 0b10,
+            doubleword = 0b11,
+        },
+        /// Instruction Syndrome Valid.
+        ///
+        /// Indicates whether the syndrome information in ISS[23:14] is valid.
+        isv: bool,
+    };
+
+    /// Data Abort Fault Status Code.
+    pub const Dfsc = enum(u6) {
+        addr_size_lvl0 = 0b000000,
+        addr_size_lvl1 = 0b000001,
+        addr_size_lvl2 = 0b000010,
+        addr_size_lvl3 = 0b000011,
+
+        trans_lvl0 = 0b000100,
+        trans_lvl1 = 0b000101,
+        trans_lvl2 = 0b000110,
+        trans_lvl3 = 0b000111,
+
+        af_lvl0 = 0b001000,
+        af_lvl1 = 0b001001,
+        af_lvl2 = 0b001010,
+        af_lvl3 = 0b001011,
+
+        perm_lvl0 = 0b001100,
+        perm_lvl1 = 0b001101,
+        perm_lvl2 = 0b001110,
+        perm_lvl3 = 0b001111,
+
+        _,
+    };
 };
