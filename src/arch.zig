@@ -11,3 +11,8 @@ pub const impl = switch (builtin.target.cpu.arch) {
 // =============================================================
 
 const builtin = @import("builtin");
+
+// Force evaluate symbols exported but not referenced in Zig.
+comptime {
+    _ = impl;
+}
