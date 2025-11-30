@@ -77,7 +77,7 @@ pub fn build(b: *std.Build) !void {
 
     const common_module = blk: {
         const module = b.createModule(.{
-            .root_source_file = b.path("src/common.zig"),
+            .root_source_file = b.path("urthr/common.zig"),
         });
         module.addImport("common", module);
         module.addOptions("options", options);
@@ -87,7 +87,7 @@ pub fn build(b: *std.Build) !void {
 
     const arch_module = blk: {
         const module = b.createModule(.{
-            .root_source_file = b.path("src/arch.zig"),
+            .root_source_file = b.path("urthr/arch.zig"),
         });
         module.addImport("common", common_module);
         module.addOptions("options", options);
@@ -97,7 +97,7 @@ pub fn build(b: *std.Build) !void {
 
     const dd_module = blk: {
         const module = b.createModule(.{
-            .root_source_file = b.path("src/dd.zig"),
+            .root_source_file = b.path("urthr/dd.zig"),
         });
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
@@ -107,7 +107,7 @@ pub fn build(b: *std.Build) !void {
 
     const board_module = blk: {
         const module = b.createModule(.{
-            .root_source_file = b.path("src/board.zig"),
+            .root_source_file = b.path("urthr/board.zig"),
         });
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
@@ -118,7 +118,7 @@ pub fn build(b: *std.Build) !void {
 
     const urthr_module = blk: {
         const module = b.createModule(.{
-            .root_source_file = b.path("src/urthr.zig"),
+            .root_source_file = b.path("urthr/urthr.zig"),
         });
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
@@ -183,7 +183,7 @@ pub fn build(b: *std.Build) !void {
     // Preprocess linker scripts.
     const urthr_ld, const pp_urthr = preprocess(
         b,
-        b.path("src/urthr.lds.ld"),
+        b.path("urthr/urthr.lds.ld"),
         "urthr.ld",
         &.{const_header},
     );
@@ -202,7 +202,7 @@ pub fn build(b: *std.Build) !void {
         const exe = b.addExecutable(.{
             .name = "urthr",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
+                .root_source_file = b.path("urthr/main.zig"),
                 .target = target,
                 .optimize = optimize,
             }),
@@ -211,8 +211,8 @@ pub fn build(b: *std.Build) !void {
         });
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = urthr_ld;
-        exe.addAssemblyFile(b.path("src/arch/aarch64/head.S"));
-        exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
+        exe.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
+        exe.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
@@ -253,8 +253,8 @@ pub fn build(b: *std.Build) !void {
         });
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = wyrd_ld;
-        exe.addAssemblyFile(b.path("src/arch/aarch64/head.S"));
-        exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
+        exe.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
+        exe.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
         exe.root_module.addImport("boot", boot_module);
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
@@ -342,7 +342,7 @@ pub fn build(b: *std.Build) !void {
         const unit_test = b.addTest(.{
             .name = "urthr_test",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("src/test.zig"),
+                .root_source_file = b.path("urthr/test.zig"),
                 .target = b.resolveTargetQuery(.{}),
                 .optimize = optimize,
                 .link_libc = true,
@@ -445,6 +445,6 @@ const Qemu = struct {
 // =============================================================
 
 const std = @import("std");
-const board = @import("src/board.zig");
+const board = @import("urthr/board.zig");
 const LazyPath = std.Build.LazyPath;
 const InstallFile = std.Build.Step.InstallFile;
