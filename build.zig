@@ -392,6 +392,11 @@ const Qemu = struct {
     wait_gdb: bool,
 
     pub fn command(self: Qemu, allocator: std.mem.Allocator) ![]const []const u8 {
+        const machine_name = switch (self.machine) {
+            .rpi4b => "raspi4b",
+            .rpi5 => @panic("Raspberry Pi 5 is not yet supported in QEMU"),
+        };
+
         var args = std.array_list.Aligned([]const u8, null).empty;
         defer args.deinit(allocator);
 
@@ -400,10 +405,7 @@ const Qemu = struct {
         });
         try args.appendSlice(allocator, &.{
             "-M",
-            switch (self.machine) {
-                .rpi4b => "raspi4b",
-                .rpi5 => "raspi5",
-            },
+            machine_name,
         });
         try args.appendSlice(allocator, &.{
             "-m",
