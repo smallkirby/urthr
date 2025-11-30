@@ -65,7 +65,7 @@ pub fn log(
     };
 
     writer.print(
-        level_str ++ " " ++ scope_str ++ fmt ++ "\n",
+        level_str ++ " " ++ scope_str ++ fmt ++ "\r\n",
         args,
     ) catch {};
 }
