@@ -1,17 +1,23 @@
-KERNEL_VADDR_BASE   = 0xFFFFFFFF80400000; /* TODO: sync with wyrd */
-STACK_SIZE          = 0x5000;
+#include <constants.autogen.h>
 
-PHDRS {
+PHDRS
+{
+    __boot_stack    PT_LOAD FLAGS(6); /* RW- */
     text            PT_LOAD FLAGS(5); /* R-X */
     rodata          PT_LOAD FLAGS(4); /* R-- */
     data            PT_LOAD FLAGS(6); /* RW- */
-    bss             PT_LOAD FLAGS(6); /* RW- */
-    __early_stack   PT_LOAD FLAGS(6); /* RW- */
 }
 
 SECTIONS
 {
-    . = KERNEL_VADDR_BASE;
+    . = 0;
+
+    .boot_stack (NOLOAD) :
+    {
+      . += LOADER_PHYS;
+
+      _boot_stack = .;
+    } :__boot_stack
 
     .text : ALIGN(4K)
     {
@@ -40,10 +46,6 @@ SECTIONS
       __bss_end = .;
     } :data
 
-    __early_stack (NOLOAD) : ALIGN(4K) {
-      . += STACK_SIZE;
-      _boot_stack  = .;
-    } :__early_stack
-
     __end = .;
 }
+

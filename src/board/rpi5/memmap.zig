@@ -2,10 +2,10 @@
 //!
 //! This file is compiled into C-style header file and used in linker script and assembly code.
 
-/// DRAM (2GiB).
+/// DRAM0 (1016 MiB).
 pub const dram = Range{
     .start = 0x0000_0000,
-    .end = 0x8000_0000,
+    .end = 0x3F80_0000,
 };
 
 // =============================================================
@@ -13,7 +13,7 @@ pub const dram = Range{
 // =============================================================
 
 /// Physical load address of the bootloader.
-pub const loader_phys = 0x0008_0000;
+pub const loader_phys = 0x0020_0000;
 /// DRAM region reserved for the bootloader.
 ///
 /// Bootloader uses this region for its own purposes such as allocating page tables.
@@ -34,19 +34,10 @@ pub const kernel_virt = 0xFFFF_FFFF_8040_0000;
 // Peripherals
 // =============================================================
 
-/// Base address of peripheral registers.
-pub const peri_base = 0xFE00_0000;
-
-/// GPIO
-pub const gpio = Range{
-    .start = peri_base + 0x0020_0000,
-    .end = peri_base + 0x0020_1000,
-};
-
-/// PL011 UART
+/// PL011 UART (debug port)
 pub const pl011 = Range{
-    .start = peri_base + 0x0020_1000,
-    .end = peri_base + 0x0020_2000,
+    .start = 0x0010_7D00_1000,
+    .end = 0x0010_7D00_2000,
 };
 
 // =============================================================
