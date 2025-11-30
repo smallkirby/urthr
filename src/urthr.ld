@@ -1,23 +1,17 @@
-ENTRY_ADDR          = 0x80000;
+KERNEL_VADDR_BASE   = 0xFFFFFFFF80400000; /* TODO: sync with wyrd */
+STACK_SIZE          = 0x5000;
 
-PHDRS
-{
-    __boot_stack    PT_LOAD FLAGS(6); /* RW- */
+PHDRS {
     text            PT_LOAD FLAGS(5); /* R-X */
     rodata          PT_LOAD FLAGS(4); /* R-- */
     data            PT_LOAD FLAGS(6); /* RW- */
+    bss             PT_LOAD FLAGS(6); /* RW- */
+    __early_stack   PT_LOAD FLAGS(6); /* RW- */
 }
 
 SECTIONS
 {
-    . = 0;
-
-    .boot_stack (NOLOAD) :
-    {
-      . += ENTRY_ADDR;
-
-      _boot_stack = .;
-    } :__boot_stack
+    . = KERNEL_VADDR_BASE;
 
     .text : ALIGN(4K)
     {
@@ -45,4 +39,11 @@ SECTIONS
       . = ALIGN(16);
       __bss_end = .;
     } :data
+
+    __early_stack (NOLOAD) : ALIGN(4K) {
+      . += STACK_SIZE;
+      _boot_stack  = .;
+    } :__early_stack
+
+    __end = .;
 }

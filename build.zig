@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) !void {
         .abi = .none,
         .os_tag = .freestanding,
         .ofmt = .elf,
+        .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+            .strict_align,
+        }),
         .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
             .neon,
             .fp_armv8,
@@ -64,6 +67,14 @@ pub fn build(b: *std.Build) !void {
     // Modules
     // =============================================================
 
+    const boot_module = blk: {
+        const module = b.createModule(.{
+            .root_source_file = b.path("boot.zig"),
+        });
+
+        break :blk module;
+    };
+
     const common_module = blk: {
         const module = b.createModule(.{
             .root_source_file = b.path("src/common.zig"),
@@ -118,6 +129,24 @@ pub fn build(b: *std.Build) !void {
     };
 
     // =============================================================
+    // Tools
+    // =============================================================
+
+    const mkimg = blk: {
+        const exe = b.addExecutable(.{
+            .name = "mkimg",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/mkimg/main.zig"),
+                .target = b.standardTargetOptions(.{}),
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("boot", boot_module);
+
+        break :blk exe;
+    };
+
+    // =============================================================
     // Urthr Executable
     // =============================================================
 
@@ -133,8 +162,8 @@ pub fn build(b: *std.Build) !void {
             .use_llvm = true,
         });
         exe.entry = .{ .symbol_name = "_start" };
-        exe.linker_script = b.path("src/arch/aarch64/linker.ld");
-        exe.addAssemblyFile(b.path("src/arch/aarch64/entry.S"));
+        exe.linker_script = b.path("src/urthr.ld");
+        exe.addAssemblyFile(b.path("src/arch/aarch64/head.S"));
         exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
@@ -146,15 +175,72 @@ pub fn build(b: *std.Build) !void {
         break :blk exe;
     };
 
-    const kernel8 = blk: {
+    const urthr_bin = blk: {
         const objcopy = b.addObjCopy(urthr.getEmittedBin(), .{
             .format = .bin,
         });
-
         objcopy.step.dependOn(&urthr.step);
 
-        break :blk b.addInstallBinFile(objcopy.getOutput(), "kernel8.img");
+        const bin = b.addInstallBinFile(objcopy.getOutput(), "urthr.img");
+
+        break :blk bin;
     };
+
+    // =============================================================
+    // Wyrd Executable
+    // =============================================================
+
+    const wyrd = blk: {
+        const exe = b.addExecutable(.{
+            .name = "wyrd",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("wyrd/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .linkage = .static,
+            .use_llvm = true,
+        });
+        exe.entry = .{ .symbol_name = "_start" };
+        exe.linker_script = b.path("wyrd/wyrd.ld");
+        exe.addAssemblyFile(b.path("src/arch/aarch64/head.S"));
+        exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
+        exe.root_module.addImport("boot", boot_module);
+        exe.root_module.addImport("common", common_module);
+        exe.root_module.addImport("arch", arch_module);
+        exe.root_module.addImport("board", board_module);
+        exe.root_module.addImport("dd", dd_module);
+        exe.root_module.addOptions("options", options);
+
+        break :blk exe;
+    };
+
+    const wyrd_bin = blk: {
+        const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
+            .format = .bin,
+        });
+        objcopy.step.dependOn(&wyrd.step);
+
+        const bin = b.addInstallBinFile(objcopy.getOutput(), "wyrd.img");
+
+        break :blk bin;
+    };
+
+    // =============================================================
+    // Kernel image
+    // =============================================================
+
+    const kernel = blk: {
+        const run = b.addRunArtifact(mkimg);
+        run.addFileArg(wyrd_bin.source);
+        run.addFileArg(urthr_bin.source);
+        run.addFileArg(urthr.getEmittedBin());
+        const out = run.addOutputFileArg("kernel8.img");
+
+        break :blk b.addInstallBinFile(out, "kernel8.img");
+    };
+    kernel.step.dependOn(&wyrd_bin.step);
+    kernel.step.dependOn(&urthr_bin.step);
 
     // =============================================================
     // Run on QEMU
@@ -172,7 +258,7 @@ pub fn build(b: *std.Build) !void {
             .memory = "2G",
             .kernel = b.fmt(
                 "{s}/bin/{s}",
-                .{ b.install_path, kernel8.dest_rel_path },
+                .{ b.install_path, kernel.dest_rel_path },
             ),
             .wait_gdb = wait_qemu,
         };
@@ -192,7 +278,8 @@ pub fn build(b: *std.Build) !void {
 
     {
         b.installArtifact(urthr);
-        b.getInstallStep().dependOn(&kernel8.step);
+        b.installArtifact(wyrd);
+        b.getInstallStep().dependOn(&kernel.step);
     }
 
     // =============================================================

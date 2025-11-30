@@ -5,9 +5,10 @@ pub const std_options = std.Options{
     .log_level = urd.klog.log_level,
 };
 
-/// EL1 entry point.
+/// Zig entry point for Urthr kernel.
 ///
-/// This function is called in EL1 with MMU disabled.
+/// This function is called in EL1 with MMU enabled.
+/// UART and entire DRAM regions are identity-mapped, and kernel image is mapped at link address.
 export fn kmain() callconv(.c) noreturn {
     // Early board initialization.
     board.boot();
@@ -19,6 +20,7 @@ export fn kmain() callconv(.c) noreturn {
     urd.exception.initLocal();
 
     // Print a boot message.
+    log.info("", .{});
     log.info("Booting Urthr...", .{});
 
     // Halt.

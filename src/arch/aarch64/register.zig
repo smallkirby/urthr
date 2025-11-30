@@ -25,6 +25,21 @@ pub const SystemReg = enum {
     esr_el2,
     esr_el3,
 
+    tcr_el2,
+    tcr_el1,
+
+    id_aa64mmfr0_el1,
+
+    far_el1,
+    far_el2,
+    far_el3,
+
+    mair_el1,
+    ttbr0_el1,
+    ttbr1_el1,
+
+    sctlr_el1,
+
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
         return @tagName(self);
@@ -40,6 +55,13 @@ pub const SystemReg = enum {
             .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
             .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
             .esr_el1, .esr_el2, .esr_el3 => Esr,
+            .tcr_el2, .tcr_el1 => Tcr,
+            .id_aa64mmfr0_el1 => IdAa64Mmfr0,
+            .far_el1, .far_el2, .far_el3 => Far,
+            .mair_el1 => Mair,
+            .ttbr0_el1 => Ttbr0El1,
+            .ttbr1_el1 => Ttbr1El1,
+            .sctlr_el1 => SctlrEl1,
         };
     }
 };
@@ -461,4 +483,257 @@ pub const Esr = packed struct(u64) {
 
         _,
     };
+};
+
+/// TCR_ELx.
+///
+/// Translation Control Register.
+pub const Tcr = packed struct(u64) {
+    /// The size offset parameter of the memory region addressed by TTBR_EL1.
+    t0sz: u6,
+    /// Reserved.
+    _rsvd0: u1 = 0,
+    /// Translation table walk disable for translations using TTBR0_EL1.
+    epd0: u1 = 0,
+    /// Inner cacheability attribute for memory associated with translation table walks using TTBR0_EL1.
+    irgn0: Cacheability,
+    /// Outer cacheability attribute for memory associated with translation table walks using TTBR0_EL1.
+    orgn0: Cacheability,
+    /// Shareability attribute for memory associated with translation table walks using TTBR0_EL1.
+    sh0: Shareability,
+    /// Granule size for the TTBR0_EL1.
+    tg0: Tg0,
+    /// The size offset of the memory region addressed by TTBR1_EL1.
+    t1sz: u6,
+    /// Selects whether TTBR0_EL1 or TTBR1_EL1 defines the ASID.
+    a1: u1,
+    /// Translation table walk disable for translations using TTBR1_EL1.
+    epd1: u1 = 0,
+    /// Inner cacheability attribute for memory associated with translation table walks using TTBR1_EL1.
+    irgn1: Cacheability,
+    /// Outer cacheability attribute for memory associated with translation table walks using TTBR1_EL1.
+    orgn1: Cacheability,
+    /// Shareability attribute for memory associated with translation table walks using TTBR1_EL1.
+    sh1: Shareability,
+    /// Granule size for the TTBR1_EL1.
+    tg1: Tg1,
+    /// Intermediate Physical Address Size.
+    ips: u3,
+    /// Reserved.
+    _rsvd1: u1 = 0,
+    /// ASID size.
+    as: u1 = 0,
+    /// Reserved.
+    _rsvd2: u27 = 0,
+
+    const Tg0 = enum(u2) {
+        /// 4KiB
+        size_4kib = 0b00,
+        /// 64KiB
+        size_64kib = 0b01,
+        /// 16KiB
+        size_16kib = 0b10,
+    };
+
+    const Tg1 = enum(u2) {
+        /// 4KiB
+        size_4kib = 0b10,
+        /// 64KiB
+        size_64kib = 0b01,
+        /// 16KiB
+        size_16kib = 0b11,
+    };
+
+    const Cacheability = enum(u2) {
+        /// Normal memory, Non-cacheable.
+        nc = 0b00,
+        /// Normal memory, Write-Back Read-Allocate Write-Allocate Cacheable.
+        wbrawac = 0b01,
+        /// Normal memory, Write-Through Read-Allocate Write-Allocate Cacheable.
+        wtranwac = 0b10,
+        /// Normal memory, Write-Back Read-Allocate Write-Allocate Non-Cacheable.
+        wbranwac = 0b11,
+    };
+
+    const Shareability = enum(u2) {
+        /// Non-shareable.
+        non = 0b00,
+        /// Reserved.
+        _reserved = 0b01,
+        /// Outer Sharable.
+        outer = 0b10,
+        /// Inner Sharable.
+        inner = 0b11,
+    };
+};
+
+/// ID_AA64MMFR0_ELn.
+///
+/// Aarch64 Memory Model Feature Register 0.
+/// Provides information about the implemented memory model and memory management support.
+pub const IdAa64Mmfr0 = packed struct(u64) {
+    /// Physical Address range supported.
+    parange: PaRange,
+    /// Number of ASID bits.
+    asidbits: u4,
+    /// BigEnd.
+    bigend: u4,
+    /// SNSMem.
+    snsmem: u4,
+    /// BigEndEL0.
+    bigendel0: u4,
+    /// TGran16.
+    tgran16: u4,
+    /// TGran64.
+    tgran64: u4,
+    /// TGran4.
+    tgran4: u4,
+    /// TGran16_2
+    tgran16_2: u4,
+    /// TGran64_2
+    tgran64_2: u4,
+    /// TGran4_2
+    tgran4_2: u4,
+    /// ExS.
+    exs: u4,
+    /// Reserved.
+    _reserved0: u8 = 0,
+    /// FGT.
+    fgt: u4,
+    /// ECV.
+    ecv: u4,
+
+    /// Physical Address range.
+    const PaRange = enum(u4) {
+        /// 32 bits, 4GB
+        bits_32 = 0b0000,
+        /// 36 bits, 64GB
+        bits_36 = 0b0001,
+        /// 40 bits, 1TB
+        bits_40 = 0b0010,
+        /// 42 bits, 4TB
+        bits_42 = 0b0011,
+        /// 44 bits, 16TB
+        bits_44 = 0b0100,
+        /// 48 bits, 256TB
+        bits_48 = 0b0101,
+        /// 52 bits, 1PB
+        bits_52 = 0b0110,
+        /// 56 bits, 64PB
+        bits_56 = 0b1111,
+    };
+};
+
+/// FAR_ELx.
+///
+/// Fault Address Register.
+pub const Far = packed struct(u64) {
+    /// Fault address.
+    addr: u64,
+};
+
+/// MAIR_ELx.
+///
+/// Memory Attribute Indirection Register.
+pub const Mair = packed struct(u64) {
+    attr0: u8,
+    attr1: u8,
+    attr2: u8,
+    attr3: u8,
+    attr4: u8,
+    attr5: u8,
+    attr6: u8,
+    attr7: u8,
+};
+
+/// TTBR0_EL1.
+///
+/// Translation Table Base Register 0 EL1.
+pub const Ttbr0El1 = packed struct(u64) {
+    /// Translation table base address.
+    addr: u48,
+    /// ASID.
+    asid: u16,
+};
+
+/// TTBR1_EL1.
+///
+/// Translation Table Base Register 0 EL1.
+pub const Ttbr1El1 = packed struct(u64) {
+    /// Translation table base address.
+    addr: u48,
+    /// ASID.
+    asid: u16,
+};
+
+/// SCTLR_EL1.
+///
+/// System Control Register EL1.
+pub const SctlrEl1 = packed struct(u64) {
+    m: bool,
+    a: bool,
+    c: bool,
+    sa: bool,
+    sa0: bool,
+    cp15ben: bool,
+    naa: bool,
+    itd: bool,
+
+    sed: bool,
+    uma: bool,
+    enrctx: bool,
+    eos: bool,
+    i: bool,
+    endb: bool,
+    dze: bool,
+    uct: bool,
+
+    ntwi: bool,
+    _rsvd0: u1 = 0,
+    ntwe: bool,
+    wxn: bool,
+    tscxt: bool,
+    iesb: bool,
+    eis: bool,
+    span: bool,
+
+    e0e: bool,
+    ee: bool,
+    uci: bool,
+    enda: bool,
+    ntlsmd: bool,
+    lsmaoe: bool,
+    enib: bool,
+    enia: bool,
+
+    cmow: bool,
+    mscen: bool,
+    _rsvd1: u1 = 0,
+    bt0: bool,
+    bt1: bool,
+    itfsb: bool,
+    tcf0: u2,
+
+    tcf: u2,
+    ata0: bool,
+    ata: bool,
+    dssbs: bool,
+    tweden: bool,
+    twedel: u4,
+
+    tmt0: bool,
+    tmt: bool,
+    tme0: bool,
+    tme: bool,
+    enasr: bool,
+    enas0: bool,
+
+    enals: bool,
+    epan: bool,
+    tcso0: bool,
+    tcso: bool,
+    entp2: bool,
+    nmi: bool,
+    spintmask: bool,
+    tidcp: bool,
 };
