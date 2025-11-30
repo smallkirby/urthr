@@ -287,9 +287,9 @@ pub fn build(b: *std.Build) !void {
         run.addFileArg(wyrd_bin.source);
         run.addFileArg(urthr_bin.source);
         run.addFileArg(urthr.getEmittedBin());
-        const out = run.addOutputFileArg("kernel8.img");
+        const out = run.addOutputFileArg(board_type.outname());
 
-        break :blk b.addInstallBinFile(out, "kernel8.img");
+        break :blk b.addInstallBinFile(out, board_type.outname());
     };
     kernel.step.dependOn(&wyrd_bin.step);
     kernel.step.dependOn(&urthr_bin.step);
