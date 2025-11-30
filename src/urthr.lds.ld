@@ -1,23 +1,18 @@
-ENTRY_ADDR = 0x80000;
+#include <constants.autogen.h>
 
-PHDRS
-{
-    __boot_stack    PT_LOAD FLAGS(6); /* RW- */
+STACK_SIZE          = 0x5000;
+
+PHDRS {
     text            PT_LOAD FLAGS(5); /* R-X */
     rodata          PT_LOAD FLAGS(4); /* R-- */
     data            PT_LOAD FLAGS(6); /* RW- */
+    bss             PT_LOAD FLAGS(6); /* RW- */
+    __early_stack   PT_LOAD FLAGS(6); /* RW- */
 }
 
 SECTIONS
 {
-    . = 0;
-
-    .boot_stack (NOLOAD) :
-    {
-      . += ENTRY_ADDR;
-
-      _boot_stack = .;
-    } :__boot_stack
+    . = KERNEL_VIRT;
 
     .text : ALIGN(4K)
     {
@@ -46,6 +41,10 @@ SECTIONS
       __bss_end = .;
     } :data
 
+    __early_stack (NOLOAD) : ALIGN(4K) {
+      . += STACK_SIZE;
+      _boot_stack  = .;
+    } :__early_stack
+
     __end = .;
 }
-

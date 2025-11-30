@@ -132,12 +132,14 @@ pub fn build(b: *std.Build) !void {
     // Tools
     // =============================================================
 
+    const tools_target = b.standardTargetOptions(.{});
+
     const mkimg = blk: {
         const exe = b.addExecutable(.{
             .name = "mkimg",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("tools/mkimg/main.zig"),
-                .target = b.standardTargetOptions(.{}),
+                .target = tools_target,
                 .optimize = optimize,
             }),
         });
@@ -145,6 +147,52 @@ pub fn build(b: *std.Build) !void {
 
         break :blk exe;
     };
+
+    const mkconst = blk: {
+        const exe = b.addExecutable(.{
+            .name = "mkconst",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/mkconst/main.zig"),
+                .target = tools_target,
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("board", board_module);
+        exe.root_module.addImport("common", common_module);
+
+        break :blk exe;
+    };
+
+    // =============================================================
+    // Preprocess
+    // =============================================================
+
+    // Generate constants header.
+    const const_header = blk: {
+        const run = b.addRunArtifact(mkconst);
+        const out = run.addOutputFileArg("constants.autogen.h");
+
+        // Install generated header for debug.
+        b.getInstallStep().dependOn(
+            &b.addInstallHeaderFile(out, "constants.autogen.h").step,
+        );
+
+        break :blk out;
+    };
+
+    // Preprocess linker scripts.
+    const urthr_ld, const pp_urthr = preprocess(
+        b,
+        b.path("src/urthr.lds.ld"),
+        "urthr.ld",
+        &.{const_header},
+    );
+    const wyrd_ld, const pp_wyrd = preprocess(
+        b,
+        b.path("wyrd/wyrd.lds.ld"),
+        "wyrd.ld",
+        &.{const_header},
+    );
 
     // =============================================================
     // Urthr Executable
@@ -162,7 +210,7 @@ pub fn build(b: *std.Build) !void {
             .use_llvm = true,
         });
         exe.entry = .{ .symbol_name = "_start" };
-        exe.linker_script = b.path("src/urthr.ld");
+        exe.linker_script = urthr_ld;
         exe.addAssemblyFile(b.path("src/arch/aarch64/head.S"));
         exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
         exe.root_module.addImport("common", common_module);
@@ -171,6 +219,8 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("dd", dd_module);
         exe.root_module.addImport("urthr", urthr_module);
         exe.root_module.addOptions("options", options);
+
+        exe.step.dependOn(&pp_urthr.step);
 
         break :blk exe;
     };
@@ -202,7 +252,7 @@ pub fn build(b: *std.Build) !void {
             .use_llvm = true,
         });
         exe.entry = .{ .symbol_name = "_start" };
-        exe.linker_script = b.path("wyrd/wyrd.ld");
+        exe.linker_script = wyrd_ld;
         exe.addAssemblyFile(b.path("src/arch/aarch64/head.S"));
         exe.addAssemblyFile(b.path("src/arch/aarch64/isr.S"));
         exe.root_module.addImport("boot", boot_module);
@@ -211,6 +261,8 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("dd", dd_module);
         exe.root_module.addOptions("options", options);
+
+        exe.step.dependOn(&pp_wyrd.step);
 
         break :blk exe;
     };
@@ -304,8 +356,25 @@ pub fn build(b: *std.Build) !void {
     }
 }
 
+/// Get home directory path.
 fn home() []const u8 {
     return std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch "..";
+}
+
+/// Create a new preprocess "Run" and return its artifact.
+fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const LazyPath) struct { LazyPath, *InstallFile } {
+    const run = b.addSystemCommand(&.{"cpp"});
+    run.addArg("-P");
+    run.addArg(b.fmt("-I{s}/include", .{b.install_path}));
+    run.addFileArg(input);
+    for (deps) |dep| {
+        run.addFileInput(dep);
+    }
+
+    const out = run.addPrefixedOutputFileArg("-o", output);
+    const ld = b.addInstallFile(out, output);
+
+    return .{ out, ld };
 }
 
 const Qemu = struct {
@@ -375,3 +444,5 @@ const Qemu = struct {
 
 const std = @import("std");
 const board = @import("src/board.zig");
+const LazyPath = std.Build.LazyPath;
+const InstallFile = std.Build.Step.InstallFile;
