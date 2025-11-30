@@ -59,9 +59,14 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     w.log("", .{});
 
     // Print system registers.
+    const esr = am.mrs(.esr_el1);
     w.log("ESR_EL1  : 0x{X:0>16}", .{am.mrsi(.esr_el1)});
+    w.log("  Class  : {X:0>2} ({s})", .{ @intFromEnum(esr.ec), @tagName(esr.ec) });
+    w.log("   ISS1  : {X:0>7}", .{esr.iss});
+    w.log("   ISS2  : {X:0>7}", .{esr.iss2});
     w.log("ELR_EL1  : 0x{X:0>16}", .{am.mrsi(.elr_el1)});
     w.log("SPSR_EL1 : 0x{X:0>16}", .{am.mrsi(.spsr_el1)});
+    w.log("FAR_EL1  : 0x{X:0>16}", .{am.mrsi(.far_el1)});
 
     w.log("", .{});
 
@@ -98,6 +103,16 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     w.log(" x28: 0x{X:0>16}", .{ctx.x28});
     w.log(" x29: 0x{X:0>16}", .{ctx.x29});
     w.log(" x30: 0x{X:0>16}", .{ctx.x30});
+
+    w.log("", .{});
+
+    // Print the stack trace.
+    w.log("Stack Trace:", .{});
+    var it = std.debug.StackIterator.init(null, ctx.x29);
+    var ix: usize = 0;
+    while (it.next()) |frame| : (ix += 1) {
+        w.log("#{d:0>2}: 0x{X:0>16}", .{ ix, frame });
+    }
 
     // Halt the CPU.
     while (true) {

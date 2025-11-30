@@ -1,12 +1,14 @@
+pub const memmap = @import("memmap.zig");
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like GPIO and UART.
 pub fn boot() void {
     // Setup GPIO.
-    dd.gpio.setBase(map.gpio);
+    dd.gpio.setBase(map.gpio.start);
 
     // Setup PL011 UART.
-    dd.pl011.setBase(map.pl011);
+    dd.pl011.setBase(map.pl011.start);
     dd.gpio.selectAltFn(14, .alt0); // TXD0
     dd.gpio.selectAltFn(15, .alt0); // RXD0
     dd.pl011.init();
@@ -14,7 +16,7 @@ pub fn boot() void {
 
 /// Get console instance.
 ///
-/// This is a zero const operation with no runtime cost.
+/// This is a zero cost operation with no runtime overhead.
 pub fn getConsole() Console {
     return .{
         .vtable = .{
