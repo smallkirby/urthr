@@ -1,11 +1,27 @@
 # Urthr
 
+![Zig](https://shields.io/badge/Zig-v0%2E15%2E2-blue?logo=zig&color=F7A41D&style=for-the-badge)
+
 ## Development
 
-### QEMU emulating Raspberry Pi 4
+### Raspberry Pi 4 emulated on QEMU
 
 ```bash
-zig build run --summary all -Dboard=rpi4b -Dlog_level=debug -Doptimize=Debug
+zig build run --summary all -Dlog_level=debug -Doptimize=Debug -Dboard=rpi4b
+```
+
+### Raspberry Pi 5
+
+```bash
+zig build run --summary all -Dlog_level=debug -Doptimize=Debug -Dboard=rpi5
+
+# TODO: copy artifacts and copy them to an SD card
+```
+
+### Unit Tests
+
+```bash
+zig build test --summary all -Doptimize=Debug
 ```
 
 ## Options
