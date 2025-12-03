@@ -1,3 +1,18 @@
+//! Wyrd: Bootloader for Urthr OS
+//!
+//! The purpose of Wyrd is to load Urthr kernel and jump to it.
+//! To achieve this, Wyrd performs the following tasks:
+//!
+//! 1. Initialize the minimum necessary hardware.
+//! 2. Set up MMU with identity mapping for DRAM and UART.
+//! 3. Load Urthr kernel from either serial connection or the tail of herself.
+//! 4. Parse Urthr header and map the kernel to the specified virtual address.
+//!
+//! All jobs done by Wyrd should be regarded as "temporary",
+//! that is, Urthr will take over the system right after Wyrd jumps to it.
+//! Urthr should re-initialize the hardware, mapping, and all other things.
+//! After the re-initialization, Urthr can use the resources used by Wyrd.
+
 /// Override the standard options.
 pub const std_options = std.Options{
     // Logging
@@ -94,34 +109,31 @@ export fn kmain() callconv(.c) noreturn {
         break :blk .{ l0_0, l0_1 };
     };
 
-    // Parse Urthr header and load the kernel.
-    const kentry = blk: {
-        const header: *const UrthrHeader = @ptrFromInt(@intFromPtr(&__end) + 0x10); // TODO: why +0x10
-        if (!header.valid()) {
-            @panic("Invalid Urthr header.");
-        }
+    // Load Urthr kernel.
+    const header = (if (common.options.serial_boot) blk: {
+        log.info("Ready to receive Urthr kernel via serial.", .{});
+        break :blk SrWyrd.startReceive();
+    } else blk: {
+        log.info("Loading Urthr kernel appended to Wyrd binary.", .{});
+        break :blk MemWyrd.load();
+    }) catch |err| {
+        log.err("\n{s}", .{@errorName(err)});
+        util.hexdump(board.memmap.kernel_phys, 256, log.err);
+        @panic("Failed to load Urthr kernel.");
+    };
 
+    // Parse Urthr header and map the kernel.
+    const kentry = blk: {
         // Print Urthr header info.
-        log.info("Urthr header at 0x{X:0>8}", .{@intFromPtr(header)});
+        log.info("Urthr Header", .{});
         log.info("  Magic    : {s}", .{header.magic});
         log.info("  Size     : 0x{X} bytes", .{header.size});
         log.info("  Load At  : 0x{X:0>16}", .{header.load_at});
         log.info("  Entry    : 0x{X:0>16}", .{header.entry});
         log.info("  Checksum : {s}", .{std.fmt.bytesToHex(header.checksum[0..], .upper)});
 
-        // Validate checksum.
-        const imgp: [*]const u8 = @ptrFromInt(@intFromPtr(header) + @sizeOf(UrthrHeader));
-        if (std.mem.eql(u8, header.checksum[0..], &calculateChecksum(imgp[0..header.size]))) {
-            log.info("Checksum valid.", .{});
-        } else {
-            log.info("Checksum invalid. Expected {s}", .{
-                std.fmt.bytesToHex(calculateChecksum(imgp[0..header.size]), .upper),
-            });
-            @panic("Urthr checksum mismatch.");
-        }
-
-        // Load the kernel.
-        break :blk loadKernel(header, l0_1);
+        // Map the kernel to the specified virtual address.
+        break :blk mapKernel(header, l0_1);
     };
 
     // Jump to the kernel entry point.
@@ -148,38 +160,142 @@ fn calculateChecksum(img: []const u8) [boot.UrthrHeader.hash_size]u8 {
     return hash;
 }
 
-/// Load kernel to the given physical memory and map the region.
-fn loadKernel(header: *const UrthrHeader, l0: usize) *KernelEntry {
-
-    // Copy kernel to the load address.
-    {
-        const size = header.size;
-        const imgp: [*]const u8 = @ptrFromInt(@intFromPtr(header) + @sizeOf(UrthrHeader));
-        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_phys);
-
-        @memcpy(loadp[0..size], imgp[0..size]);
-        log.info("Copied Urthr kernel to 0x{X:0>16}", .{@intFromPtr(loadp)});
-    }
-
+/// Map the Urthr kernel into memory and return the entry point.
+fn mapKernel(header: UrthrHeader, l0: usize) *KernelEntry {
     // Map kernel region.
-    {
-        const va = util.rounddown(header.load_at, units.gib);
-        const pa = util.rounddown(board.memmap.kernel_phys, units.gib);
-        const size = (board.memmap.kernel_phys + header.size) - pa;
-        const aligned_size = util.roundup(size, units.gib);
-        arch.mmu.map1gb(
-            l0,
-            pa,
-            va,
-            aligned_size,
-            allocator.interface(),
-        ) catch {
-            @panic("Failed to map Urthr kernel region.");
-        };
-        log.info("Mapped Urthr kernel region: 0x{X:0>16} -> 0x{X:0>16}", .{ va, pa });
-    }
+    const va = util.rounddown(header.load_at, units.gib);
+    const pa = util.rounddown(board.memmap.kernel_phys, units.gib);
+    const size = (board.memmap.kernel_phys + header.size) - pa;
+    const aligned_size = util.roundup(size, units.gib);
+    arch.mmu.map1gb(
+        l0,
+        pa,
+        va,
+        aligned_size,
+        allocator.interface(),
+    ) catch {
+        @panic("Failed to map Urthr kernel region.");
+    };
 
     return @ptrFromInt(header.entry);
+}
+
+/// Load Urthr kernel appended to Wyrd binary.
+const MemWyrd = struct {
+    pub fn load() !UrthrHeader {
+        const header: *const UrthrHeader = @ptrFromInt(getEndAddress());
+        if (!header.valid()) {
+            return error.InvalidHeader;
+        }
+
+        // Copy to the load address while decoding if needed.
+        const phys: [*]u8 = @ptrFromInt(getEndAddress() + @sizeOf(UrthrHeader));
+        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_phys);
+        switch (header.encoding) {
+            // No encoding. Just copy.
+            .none => {
+                @memcpy(loadp[0..header.size], phys[0..header.size]);
+            },
+        }
+
+        // Validate checksum.
+        if (!std.mem.eql(
+            u8,
+            header.checksum[0..],
+            &calculateChecksum(loadp[0..header.size]),
+        )) {
+            return error.InvalidChecksum;
+        }
+
+        return header.*;
+    }
+};
+
+/// Load Urthr kernel via serial connection.
+const SrWyrd = struct {
+    pub fn startReceive() !UrthrHeader {
+        defer {
+            dd.pl011.putc('\r');
+            dd.pl011.putc('\n');
+        }
+
+        // Wait for SYNC request.
+        try waitForString("SYNC");
+        try ack();
+
+        // Receive Header.
+        var header: UrthrHeader = undefined;
+        try feed(std.mem.asBytes(&header));
+
+        // Validate Header.
+        if (!header.valid()) {
+            return error.InvalidHeader;
+        }
+        try ack();
+
+        // Receive binary at right after the Wyrd binary.
+        const phys: [*]u8 = @ptrFromInt(getEndAddress());
+        try feed(phys[0..header.encoded_size]);
+        try ack();
+
+        // Copy to the load address while decoding if needed.
+        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_phys);
+        switch (header.encoding) {
+            // No encoding. Just copy.
+            .none => {
+                @memcpy(loadp[0..header.size], phys[0..header.size]);
+            },
+        }
+
+        // Validate checksum.
+        if (!std.mem.eql(
+            u8,
+            header.checksum[0..],
+            &calculateChecksum(loadp[0..header.size]),
+        )) {
+            return error.InvalidChecksum;
+        }
+
+        // Send COMPLETE response.
+        try ack();
+
+        return header;
+    }
+
+    fn waitForString(s: []const u8) !void {
+        var match_idx: usize = 0;
+
+        while (true) {
+            const c = dd.pl011.getc();
+            if (c == s[match_idx]) {
+                match_idx += 1;
+                if (match_idx == s.len) {
+                    return;
+                }
+            } else {
+                match_idx = 0;
+            }
+        }
+    }
+
+    fn feed(box: []u8) !void {
+        var len: usize = 0;
+        while (len < box.len) {
+            box[len] = dd.pl011.getc();
+            len += 1;
+        }
+    }
+
+    fn ack() !void {
+        for ("ACK") |c| {
+            dd.pl011.putc(c);
+        }
+    }
+};
+
+/// Get the end address of the Wyrd binary.
+fn getEndAddress() usize {
+    return @intFromPtr(&__end) + 0x10; // TODO: why +0x10
 }
 
 // =============================================================

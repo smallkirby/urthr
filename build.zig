@@ -47,6 +47,18 @@ pub fn build(b: *std.Build) !void {
             @panic("Invalid log level");
     };
 
+    const serial_boot = b.option(
+        bool,
+        "serial_boot",
+        "Wyrd waits for serial input to receive kernel image.",
+    ) orelse false;
+
+    const serial = b.option(
+        []const u8,
+        "serial",
+        "Path to serial interface device.",
+    ) orelse null;
+
     const qemu_dir = b.option(
         []const u8,
         "qemu",
@@ -62,6 +74,7 @@ pub fn build(b: *std.Build) !void {
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
     options.addOption(board.BoardType, "board", board_type);
+    options.addOption(bool, "serial_boot", serial_boot);
 
     // =============================================================
     // Modules
@@ -163,6 +176,22 @@ pub fn build(b: *std.Build) !void {
         break :blk exe;
     };
 
+    const srboot = blk: {
+        const exe = b.addExecutable(.{
+            .name = "srboot",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/srboot/main.zig"),
+                .target = tools_target,
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("boot", boot_module);
+        exe.root_module.addImport("common", common_module);
+
+        break :blk exe;
+    };
+    b.installArtifact(srboot);
+
     // =============================================================
     // Preprocess
     // =============================================================
@@ -224,6 +253,7 @@ pub fn build(b: *std.Build) !void {
 
         break :blk exe;
     };
+    b.installArtifact(urthr);
 
     const urthr_bin = blk: {
         const objcopy = b.addObjCopy(urthr.getEmittedBin(), .{
@@ -266,6 +296,7 @@ pub fn build(b: *std.Build) !void {
 
         break :blk exe;
     };
+    b.installArtifact(wyrd);
 
     const wyrd_bin = blk: {
         const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
@@ -279,20 +310,69 @@ pub fn build(b: *std.Build) !void {
     };
 
     // =============================================================
-    // Kernel image
+    // Booter image
     // =============================================================
 
-    const kernel = blk: {
-        const run = b.addRunArtifact(mkimg);
-        run.addFileArg(wyrd_bin.source);
-        run.addFileArg(urthr_bin.source);
-        run.addFileArg(urthr.getEmittedBin());
-        const out = run.addOutputFileArg(board_type.outname());
+    // Booter: the first binary loaded by EL3 firmware.
+    //
+    // On serial boot : Wyrd only.
+    // Otherwise      : Wyrd + Urthr kernel image.
+    const booter = blk: {
+        const booter_name = "booter";
 
-        break :blk b.addInstallBinFile(out, board_type.outname());
+        if (serial_boot) {
+            // Wryd serial is the booter.
+            break :blk b.addInstallBinFile(wyrd_bin.source, booter_name);
+        } else {
+            // Wyrd + Urthr image is the booter.
+            const run = b.addRunArtifact(mkimg);
+            run.addArg("single");
+            run.addArg("--wyrd");
+            run.addFileArg(wyrd_bin.source);
+            run.addArg("--urthr");
+            run.addFileArg(urthr_bin.source);
+            run.addArg("--urthr-elf");
+            run.addFileArg(urthr.getEmittedBin());
+            run.addArg("--output");
+            const out = run.addOutputFileArg(booter_name);
+
+            break :blk b.addInstallBinFile(out, booter_name);
+        }
     };
-    kernel.step.dependOn(&wyrd_bin.step);
-    kernel.step.dependOn(&urthr_bin.step);
+    booter.step.dependOn(&wyrd_bin.step);
+    booter.step.dependOn(&urthr_bin.step);
+    b.getInstallStep().dependOn(&booter.step);
+
+    // =============================================================
+    // Remote
+    // =============================================================
+
+    // Remote: the second binary sent via serial by srboot.
+    if (serial_boot) {
+        const remote_name = "remote";
+
+        const run = b.addRunArtifact(mkimg);
+        run.addArg("split");
+        run.addArg("--urthr");
+        run.addFileArg(urthr_bin.source);
+        run.addArg("--urthr-elf");
+        run.addFileArg(urthr.getEmittedBin());
+        run.addArg("--output");
+        const out = run.addOutputFileArg(remote_name);
+
+        const bin = b.addInstallBinFile(out, remote_name);
+        b.getInstallStep().dependOn(&bin.step);
+    }
+
+    // =============================================================
+    // Install
+    // =============================================================
+
+    {
+        b.getInstallStep().dependOn(
+            &b.addInstallBinFile(booter.source, board_type.outname()).step,
+        );
+    }
 
     // =============================================================
     // Run on QEMU
@@ -310,8 +390,11 @@ pub fn build(b: *std.Build) !void {
             .memory = "2G",
             .kernel = b.fmt(
                 "{s}/bin/{s}",
-                .{ b.install_path, kernel.dest_rel_path },
+                .{ b.install_path, booter.dest_rel_path },
             ),
+            .serial = if (serial) |s| blk: {
+                break :blk if (std.mem.eql(u8, s, "pts")) .pts else .stdio;
+            } else .stdio,
             .wait_gdb = wait_qemu,
         };
 
@@ -322,16 +405,7 @@ pub fn build(b: *std.Build) !void {
 
         const run_qemu = b.step("run", "Run Urthr on QEMU");
         run_qemu.dependOn(&qemu_cmd.step);
-    }
-
-    // =============================================================
-    // Install
-    // =============================================================
-
-    {
-        b.installArtifact(urthr);
-        b.installArtifact(wyrd);
-        b.getInstallStep().dependOn(&kernel.step);
+        run_qemu.dependOn(b.getInstallStep());
     }
 
     // =============================================================
@@ -388,13 +462,20 @@ const Qemu = struct {
     memory: []const u8,
     /// Kernel path.
     kernel: []const u8,
+    /// How to handle serial I/O.
+    serial: enum {
+        /// Redirect serial to stdio.
+        stdio,
+        /// Redirect serial both to stdio and to a PTY.
+        pts,
+    },
     /// Wait for GDB connection on startup.
     wait_gdb: bool,
 
     pub fn command(self: Qemu, allocator: std.mem.Allocator) ![]const []const u8 {
         const machine_name = switch (self.machine) {
             .rpi4b => "raspi4b",
-            .rpi5 => @panic("Raspberry Pi 5 is not yet supported in QEMU"),
+            .rpi5 => "raspi5",
         };
 
         var args = std.array_list.Aligned([]const u8, null).empty;
@@ -419,10 +500,6 @@ const Qemu = struct {
             .none => "-nographic",
         }});
         try args.appendSlice(allocator, &.{
-            "-serial",
-            "mon:stdio",
-        });
-        try args.appendSlice(allocator, &.{
             "-no-reboot",
         });
         try args.appendSlice(allocator, &.{
@@ -430,6 +507,28 @@ const Qemu = struct {
             "-d",
             "guest_errors",
         });
+        switch (self.serial) {
+            .stdio => try args.appendSlice(allocator, &.{
+                "-serial",
+                "mon:stdio",
+            }),
+            .pts => try args.appendSlice(allocator, &.{
+                "-chardev",
+                "stdio,id=term",
+                "-chardev",
+                "pty,id=pty0",
+                "-chardev",
+                "hub,id=hub0,chardevs.0=pty0,chardevs.1=term,mux=on",
+                "-serial",
+                "chardev:hub0",
+                "-monitor",
+                "none",
+                // NOTE: '257' is out of available ASCII range, meaning no escape char.
+                //  This prevents QEMU from interpreting any input bytes as commands.
+                "-echr",
+                "257",
+            }),
+        }
         if (self.wait_gdb) {
             try args.appendSlice(allocator, &.{
                 "-S",

@@ -249,6 +249,11 @@ fn isTxFull() bool {
     return pl011.read(Fr).txff;
 }
 
+/// Check if the receive FIFO is empty.
+fn isRxEmpty() bool {
+    return pl011.read(Fr).rxfe;
+}
+
 /// Put a character to the PL011 UART.
 pub fn putc(c: u8) void {
     // Wait until transmit FIFO is not full.
@@ -257,6 +262,28 @@ pub fn putc(c: u8) void {
     }
     // Write data.
     pl011.write(Dr, std.mem.zeroInit(Dr, .{ .data = c }));
+}
+
+/// Get a character from the PL011 UART.
+///
+/// This function blocks until a character is received.
+pub fn getc() u8 {
+    while (isRxEmpty()) {
+        atomic.spinLoopHint();
+    }
+
+    return pl011.read(Dr).data;
+}
+
+/// Get a character from the PL011 UART if available.
+///
+/// This function returns `null` if no character is available.
+pub fn tryGetc() ?u8 {
+    if (isRxEmpty()) {
+        return null;
+    }
+
+    return pl011.read(Dr).data;
 }
 
 /// Wait until PL011 completes transmitting the current data.

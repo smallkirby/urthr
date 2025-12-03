@@ -4,20 +4,26 @@
 pub const UrthrHeader = extern struct {
     pub const hash_size = 8;
 
+    /// How the Urthr binary is encoded.
+    const Encoding = enum(u32) {
+        /// Not encoded.
+        none = 0,
+    };
+
     /// Magic value.
     magic: [4]u8 = .{ 'U', 'R', 'T', 'H' },
-    /// Reserved.
-    _rsvd: u32 = 0,
+    /// Encoding type.
+    encoding: Encoding = .none,
     /// Size in bytes of the Urthr kernel binary.
     size: u64,
+    /// Size in bytes of the encoded Urthr kernel binary.
+    encoded_size: u64,
     /// Checksum of the Urthr kernel binary.
     checksum: [hash_size]u8,
     /// Virtual address to load the Urthr kernel.
     load_at: u64,
     /// Virtual address of the entry point.
     entry: u64,
-    /// Reserved.
-    _rsvd2: u64 = 0,
 
     comptime {
         if (@sizeOf(UrthrHeader) != 48) {
@@ -28,9 +34,8 @@ pub const UrthrHeader = extern struct {
     /// Check if the header is valid.
     pub fn valid(self: *const UrthrHeader) bool {
         const magic_valid = std.mem.eql(u8, self.magic[0..], "URTH");
-        const rsvd_valid = self._rsvd == 0;
 
-        return magic_valid and rsvd_valid;
+        return magic_valid;
     }
 };
 
