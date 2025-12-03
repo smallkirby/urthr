@@ -1,44 +1,215 @@
 //! mkimg: Make a kernel image file.
+//!
+//! mkimg composes a Urthr kernel image file by combining Wyrd binary,
+//!
+//! There're two mode to compose the image:
+//!
+//! ## Single
+//!
+//! In this mode, Wyrd binary, Urthr header, and Urthr binary are combined into a single binary.
+//!
+//! +-----------+
+//! |   Wyrd    |
+//! +-----------+
+//! |  Header   |
+//! +-----------+
+//! |   Urthr   |
+//! +-----------+
+//!
+//! ## Split
+//!
+//! In this mode, only Urthr header and Urthr binary are combined into a single binary.
+//!
+//! +-----------+
+//! |  Header   |
+//! +-----------+
+//! |   Urthr   |
+//! +-----------+
+//!
+
+const Options = enum {
+    /// Path to Wyrd binary.
+    wyrd,
+    /// Path to Urthr binary.
+    urthr,
+    /// Path to Urthr ELF file.
+    urthr_elf,
+    /// Path to output image file.
+    output,
+};
+
+/// Options map.
+const optmap = std.StaticStringMap(Options).initComptime(&.{
+    .{ "--wyrd", .wyrd },
+    .{ "--urthr", .urthr },
+    .{ "--urthr-elf", .urthr_elf },
+    .{ "--output", .output },
+});
+
+/// Print a usage and exit.
+fn usage(logger: anytype) noreturn {
+    logger("Usage: mkimg (single|split) <args...>", .{});
+    logger(
+        \\Options:
+        \\  --wyrd <path>        Path to Wyrd binary (required for 'single' mode)
+        \\  --urthr <path>       Path to Urthr binary (required)
+        \\  --urthr-elf <path>   Path to Urthr ELF file (required)
+        \\  --output <path>      Path to output image file (required)
+    ,
+        .{},
+    );
+
+    std.process.exit(1);
+}
+
+/// Command line options.
+const Args = struct {
+    wyrd: ?fs.File = null,
+    urthr: ?fs.File = null,
+    urthr_elf: ?fs.File = null,
+    output: ?fs.File = null,
+};
+
+/// Composing mode.
+const Mode = enum {
+    /// Wyrd + Header + Urthr
+    single,
+    /// Header + Urthr
+    split,
+
+    pub fn from(s: []const u8) ?Mode {
+        if (std.mem.eql(u8, s, "single")) {
+            return .single;
+        } else if (std.mem.eql(u8, s, "split")) {
+            return .split;
+        } else {
+            return null;
+        }
+    }
+};
 
 pub fn main() !void {
-    if (os.argv.len != 4 + 1) {
-        log.err("Usage: {s} <wyrd> <urthr> <urthr.elf> <output>", .{os.argv[0]});
-        return error.InvalidArgs;
-    }
+    var args = Args{};
+    var argiter = std.process.args();
+    _ = argiter.next(); // skip program name
 
-    const wyrd_path = std.mem.span(os.argv[1]);
-    const urthr_path = std.mem.span(os.argv[2]);
-    const urthr_elf_path = std.mem.span(os.argv[3]);
-    const output_path = std.mem.span(os.argv[4]);
+    const mode = if (argiter.next()) |arg|
+        Mode.from(arg) orelse usage(log.err)
+    else {
+        usage(log.err);
+    };
 
-    // Open files.
-    const wyrd = try fs.cwd().openFile(wyrd_path, .{});
-    const urthr = try fs.cwd().openFile(urthr_path, .{});
-    const urthr_elf = try fs.cwd().openFile(urthr_elf_path, .{});
-    const kernel = try fs.cwd().createFile(output_path, .{});
-    defer urthr.close();
-    defer wyrd.close();
-    defer urthr_elf.close();
-    defer kernel.close();
-    errdefer {
-        fs.cwd().deleteFile(output_path) catch {
-            log.err("Failed to delete output file: {s}", .{output_path});
-        };
-    }
-
-    var rbuffer: [4096]u8 = undefined;
-    var wbuffer: [4096]u8 = undefined;
-    var kernel_writer = kernel.writer(wbuffer[0..]);
-    const writer_if = &kernel_writer.interface;
-
-    // Parse Urthr kernel.
-    const load_addr, const entry = blk: {
-        var urthr_elf_reader = urthr_elf.reader(&rbuffer);
-        const header = try std.elf.Header.read(&urthr_elf_reader.interface);
-
-        if (!header.is_64) {
-            @panic("mkimg: Urthr ELF is not 64-bit.");
+    // Parse arguments.
+    while (argiter.next()) |arg| {
+        switch (optmap.get(arg) orelse usage(log.err)) {
+            .wyrd => {
+                const path = argiter.next() orelse usage(log.err);
+                args.wyrd = try fs.cwd().openFile(path, .{});
+            },
+            .urthr => {
+                const path = argiter.next() orelse usage(log.err);
+                args.urthr = try fs.cwd().openFile(path, .{});
+            },
+            .urthr_elf => {
+                const path = argiter.next() orelse usage(log.err);
+                args.urthr_elf = try fs.cwd().openFile(path, .{});
+            },
+            .output => {
+                const path = argiter.next() orelse usage(log.err);
+                args.output = try fs.cwd().createFile(path, .{});
+            },
         }
+    }
+
+    // Instantiate MkImage instance based on the mode.
+    var mkimg = MkImage{
+        .mode = mode,
+        .wyrd = args.wyrd,
+        .urthr = args.urthr orelse usage(log.err),
+        .urthr_elf = args.urthr_elf orelse usage(log.err),
+        .output = args.output orelse usage(log.err),
+    };
+    defer mkimg.deinit();
+
+    // Compose the image file.
+    try mkimg.compose();
+}
+
+const MkImage = struct {
+    const Self = @This();
+
+    mode: Mode,
+    wyrd: ?fs.File = null,
+    urthr: fs.File,
+    urthr_elf: fs.File,
+    output: fs.File,
+
+    /// Create the image file.
+    pub fn compose(self: *Self) !void {
+        var wbuf: [4096]u8 = undefined;
+        var writer = self.output.writer(&wbuf);
+
+        // Write Wyrd binary.
+        switch (self.mode) {
+            .single => try copy(&self.wyrd.?, &writer.interface),
+            else => {},
+        }
+
+        // Write Urthr header.
+        try self.writeHeader(&writer.interface);
+
+        // Write Urthr binary.
+        try copy(&self.urthr, &writer.interface);
+    }
+
+    /// Deinitialize to release resources.
+    pub fn deinit(self: *Self) void {
+        if (self.wyrd) |w| {
+            w.close();
+        }
+        self.urthr.close();
+        self.urthr_elf.close();
+        self.output.close();
+    }
+
+    /// Write Urthr header to the given writer.
+    fn writeHeader(self: *Self, w: *std.Io.Writer) !void {
+        const urthr_size = (try self.urthr.stat()).size;
+        const info = try self.parseUrthr();
+
+        // Construct header.
+        var header = boot.UrthrHeader{
+            .size = urthr_size,
+            .encoded_size = self.getEncodedSize(urthr_size),
+            .load_at = info.load_addr,
+            .checksum = undefined,
+            .entry = info.entry,
+            .encoding = .none,
+        };
+        try calculateChecksum(self.urthr, &header);
+
+        // Write header.
+        _ = try w.writeStruct(header, .little);
+
+        try w.flush();
+    }
+
+    /// Copy from the given file to the given writer.
+    fn copy(r: *fs.File, w: *std.Io.Writer) !void {
+        var rbuf: [4096]u8 = undefined;
+
+        var reader = r.reader(&rbuf);
+        _ = try reader.interface.streamRemaining(w);
+
+        try w.flush();
+    }
+
+    /// Parse Urthr ELF file and get kernel info.
+    fn parseUrthr(self: *Self) !UrthrInfo {
+        var rbuf: [4096]u8 = undefined;
+
+        var urthr_elf_reader = self.urthr_elf.reader(&rbuf);
+        const header = try std.elf.Header.read(&urthr_elf_reader.interface);
 
         var piter = header.iterateProgramHeaders(&urthr_elf_reader);
         var min_seg_addr: u64 = std.math.maxInt(u64);
@@ -50,65 +221,25 @@ pub fn main() !void {
             }
         }
 
-        break :blk .{ min_seg_addr, header.entry };
-    };
-
-    // Write Wyrd binary.
-    {
-        var wyrd_reader = wyrd.reader(&rbuffer);
-        _ = try wyrd_reader.interface.streamRemaining(writer_if);
-
-        try kernel_writer.interface.flush();
-    }
-
-    // Write Urthr header.
-    {
-        const urthr_size = (try urthr.stat()).size;
-        var header = boot.UrthrHeader{
-            .size = urthr_size,
-            .load_at = load_addr,
-            .checksum = undefined,
-            .entry = entry,
+        return .{
+            .load_addr = min_seg_addr,
+            .entry = header.entry,
         };
-        try calculateChecksum(urthr, &header);
-
-        _ = try writer_if.writeStruct(header, .little);
-
-        try kernel_writer.interface.flush();
     }
 
-    // Write Urthr binary.
-    {
-        var urthr_reader = urthr.reader(&rbuffer);
-        _ = try urthr_reader.interface.streamRemaining(writer_if);
-
-        try kernel_writer.interface.flush();
-    }
-}
-
-/// Parse kernel ELF file and find load address.
-fn findLoadAddress(elf: fs.File) !u64 {
-    var rbuffer: [4096]u8 = undefined;
-    var min_seg_addr = std.math.maxInt(u64);
-
-    var elf_reader = elf.reader(&rbuffer);
-    const header = try std.elf.Header.read(&elf_reader.interface);
-
-    if (!header.is_64) {
-        @panic("mkimg: Urthr ELF is not 64-bit.");
+    /// Get the encoded size.
+    fn getEncodedSize(_: *Self, size: usize) usize {
+        return size;
     }
 
-    const piter = header.iterateProgramHeaders(elf_reader);
-    while (try piter.next()) |ph| {
-        if (ph.p_type != std.elf.PT_LOAD) continue;
-
-        if (ph.p_vaddr < min_seg_addr) {
-            min_seg_addr = ph.p_vaddr;
-        }
-    }
-
-    return min_seg_addr;
-}
+    /// Urthr kernel information.
+    const UrthrInfo = struct {
+        /// Load address.
+        load_addr: u64,
+        /// Entry point.
+        entry: u64,
+    };
+};
 
 /// Calculate checksum of the given image file.
 fn calculateChecksum(img: fs.File, out: *boot.UrthrHeader) !void {
@@ -136,6 +267,7 @@ fn calculateChecksum(img: fs.File, out: *boot.UrthrHeader) !void {
 
 const std = @import("std");
 const log = std.log.scoped(.mkimg);
+const Base64Encoder = std.base64.Base64Encoder;
 const fs = std.fs;
 const os = std.os;
 const boot = @import("boot");

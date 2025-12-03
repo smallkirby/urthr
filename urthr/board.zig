@@ -21,6 +21,8 @@ pub const BoardType = enum {
     }
 
     /// Get the binary name for this board.
+    ///
+    /// The binary is loaded by the firmware at boot time.
     pub fn outname(self: BoardType) []const u8 {
         return switch (self) {
             .rpi4b => "kernel8.img",
