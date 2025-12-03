@@ -192,17 +192,8 @@ const Icr = packed struct {
 
 // =============================================================
 
-/// UART clock frequency.
-const clk = 48_000_000; // 48 MHz
 /// Target baud rate.
 const baudrate = 115_200;
-/// Integer part of the baud rate divisor.
-const ibrd = clk / (16 * baudrate);
-/// Fractional part of the baud rate divisor.
-const fbrd = blk: {
-    const f = (clk - (16 * baudrate * ibrd)) * 64;
-    break :blk util.roundup(f, 16 * baudrate) / (16 * baudrate);
-};
 
 /// Set the base address of the PL011 UART.
 pub fn setBase(base: usize) void {
@@ -211,8 +202,16 @@ pub fn setBase(base: usize) void {
 
 /// Initialize the PL011 UART.
 ///
-/// Caller must ensure that the GPIO and PL011 base addresses are set correctly beforehand.
-pub fn init() void {
+/// Caller must ensure that the PL011 base addresses are set correctly beforehand.
+pub fn init(clk: anytype) void {
+    // Integer part of the baud rate divisor.
+    const ibrd = clk / (16 * baudrate);
+    // Fractional part of the baud rate divisor.
+    const fbrd = blk: {
+        const f = (clk - (16 * baudrate * ibrd)) * 64;
+        break :blk util.roundup(f, 16 * baudrate) / (16 * baudrate);
+    };
+
     // Wait until PL011 is not busy.
     flush();
 

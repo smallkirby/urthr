@@ -6,7 +6,7 @@ pub const memmap = @import("memmap.zig");
 pub fn boot() void {
     // Setup PL011 UART.
     dd.pl011.setBase(memmap.pl011.start);
-    //dd.pl011.init(); // TODO: what's the appropriate clock value?
+    dd.pl011.init(44_236_800); // 44.237 MHz
 }
 
 /// Get console instance.
