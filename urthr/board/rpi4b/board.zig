@@ -11,7 +11,7 @@ pub fn boot() void {
     dd.pl011.setBase(map.pl011.start);
     dd.gpio.selectAltFn(14, .alt0); // TXD0
     dd.gpio.selectAltFn(15, .alt0); // RXD0
-    dd.pl011.init();
+    dd.pl011.init(48_000_000); // 48 MHz
 }
 
 /// Get console instance.
