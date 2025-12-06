@@ -36,6 +36,12 @@ zig build install --summary all \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
+Send the kernel to boot over serial:
+
+```bash
+./zig-out/bin/srboot ./zig-out/bin/remote <path-to-your-serial-device>
+```
+
 ### Unit Tests
 
 ```bash
