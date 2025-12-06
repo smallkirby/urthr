@@ -6,9 +6,7 @@
 // Module Definition
 // =============================================================
 
-var pl011 = Module{};
-
-const Module = mmio.Module(u32, &.{
+var pl011 = mmio.Module(u32, &.{
     .{ 0x00, Dr },
     .{ 0x04, RsrEcr },
     .{ 0x18, Fr },
@@ -19,7 +17,116 @@ const Module = mmio.Module(u32, &.{
     .{ 0x38, Imsc },
     .{ 0x3C, Ris },
     .{ 0x44, Icr },
-});
+}){};
+
+// =============================================================
+
+/// Target baud rate.
+const baudrate = 115_200;
+
+/// Set the base address of the PL011 UART.
+pub fn setBase(base: usize) void {
+    pl011.setBase(base);
+}
+
+/// Initialize the PL011 UART.
+///
+/// Caller must ensure that the PL011 base addresses are set correctly beforehand.
+pub fn init(clk: anytype) void {
+    // Integer part of the baud rate divisor.
+    const ibrd = clk / (16 * baudrate);
+    // Fractional part of the baud rate divisor.
+    const fbrd = blk: {
+        const f = (clk - (16 * baudrate * ibrd)) * 64;
+        break :blk util.roundup(f, 16 * baudrate) / (16 * baudrate);
+    };
+
+    // Disable first.
+    pl011.modify(Cr, .{ .uarten = false });
+
+    // Wait until PL011 is not busy.
+    flush();
+
+    // Flush the transmit FIFO.
+    pl011.modify(Lcrh, .{ .fen = false });
+
+    // Clear interrupts.
+    pl011.write(Icr, Icr.mask());
+
+    // Set baud rate.
+    pl011.write(Ibrd, ibrd);
+    pl011.write(Fbrd, fbrd);
+
+    // Enable FIFO, set 8n1.
+    pl011.write(Lcrh, std.mem.zeroInit(Lcrh, .{
+        .fen = true,
+        .wlen = .bits8,
+    }));
+
+    // Enable UART, TX and RX.
+    pl011.write(Cr, std.mem.zeroInit(Cr, .{
+        .uarten = true,
+        .txe = true,
+        .rxe = true,
+    }));
+}
+
+/// Check if the transmit FIFO is full.
+fn isTxFull() bool {
+    return pl011.read(Fr).txff;
+}
+
+/// Check if the receive FIFO is empty.
+fn isRxEmpty() bool {
+    return pl011.read(Fr).rxfe;
+}
+
+/// Put a character to the PL011 UART.
+pub fn putc(c: u8) void {
+    // Wait until transmit FIFO is not full.
+    while (isTxFull()) {
+        atomic.spinLoopHint();
+    }
+
+    // Write data.
+    pl011.write(Dr, std.mem.zeroInit(Dr, .{ .data = c }));
+
+    // Wait until transmission is complete.
+    flush();
+}
+
+/// Get a character from the PL011 UART.
+///
+/// This function blocks until a character is received.
+pub fn getc() u8 {
+    while (isRxEmpty()) {
+        atomic.spinLoopHint();
+    }
+
+    return pl011.read(Dr).data;
+}
+
+/// Get a character from the PL011 UART if available.
+///
+/// This function returns `null` if no character is available.
+pub fn tryGetc() ?u8 {
+    if (isRxEmpty()) {
+        return null;
+    }
+
+    return pl011.read(Dr).data;
+}
+
+/// Wait until PL011 completes transmitting the current data.
+pub fn flush() void {
+    while (pl011.read(Fr).busy) {
+        atomic.spinLoopHint();
+    }
+}
+
+// =============================================================
+// Registers
+// =============================================================
 
 /// UARTDR: Data Register.
 const Dr = packed struct {
@@ -218,111 +325,6 @@ const Icr = packed struct {
         return 0x7FF;
     }
 };
-
-// =============================================================
-
-/// Target baud rate.
-const baudrate = 115_200;
-
-/// Set the base address of the PL011 UART.
-pub fn setBase(base: usize) void {
-    pl011.setBase(base);
-}
-
-/// Initialize the PL011 UART.
-///
-/// Caller must ensure that the PL011 base addresses are set correctly beforehand.
-pub fn init(clk: anytype) void {
-    // Integer part of the baud rate divisor.
-    const ibrd = clk / (16 * baudrate);
-    // Fractional part of the baud rate divisor.
-    const fbrd = blk: {
-        const f = (clk - (16 * baudrate * ibrd)) * 64;
-        break :blk util.roundup(f, 16 * baudrate) / (16 * baudrate);
-    };
-
-    // Disable first.
-    pl011.modify(Cr, .{ .uarten = false });
-
-    // Wait until PL011 is not busy.
-    flush();
-
-    // Flush the transmit FIFO.
-    pl011.modify(Lcrh, .{ .fen = false });
-
-    // Clear interrupts.
-    pl011.write(Icr, Icr.mask());
-
-    // Set baud rate.
-    pl011.write(Ibrd, ibrd);
-    pl011.write(Fbrd, fbrd);
-
-    // Enable FIFO, set 8n1.
-    pl011.write(Lcrh, std.mem.zeroInit(Lcrh, .{
-        .fen = true,
-        .wlen = .bits8,
-    }));
-
-    // Enable UART, TX and RX.
-    pl011.write(Cr, std.mem.zeroInit(Cr, .{
-        .uarten = true,
-        .txe = true,
-        .rxe = true,
-    }));
-}
-
-/// Check if the transmit FIFO is full.
-fn isTxFull() bool {
-    return pl011.read(Fr).txff;
-}
-
-/// Check if the receive FIFO is empty.
-fn isRxEmpty() bool {
-    return pl011.read(Fr).rxfe;
-}
-
-/// Put a character to the PL011 UART.
-pub fn putc(c: u8) void {
-    // Wait until transmit FIFO is not full.
-    while (isTxFull()) {
-        atomic.spinLoopHint();
-    }
-
-    // Write data.
-    pl011.write(Dr, std.mem.zeroInit(Dr, .{ .data = c }));
-
-    // Wait until transmission is complete.
-    flush();
-}
-
-/// Get a character from the PL011 UART.
-///
-/// This function blocks until a character is received.
-pub fn getc() u8 {
-    while (isRxEmpty()) {
-        atomic.spinLoopHint();
-    }
-
-    return pl011.read(Dr).data;
-}
-
-/// Get a character from the PL011 UART if available.
-///
-/// This function returns `null` if no character is available.
-pub fn tryGetc() ?u8 {
-    if (isRxEmpty()) {
-        return null;
-    }
-
-    return pl011.read(Dr).data;
-}
-
-/// Wait until PL011 completes transmitting the current data.
-pub fn flush() void {
-    while (pl011.read(Fr).busy) {
-        atomic.spinLoopHint();
-    }
-}
 
 // =============================================================
 // Imports
