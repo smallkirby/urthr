@@ -7,15 +7,33 @@
 ### Raspberry Pi 4 emulated on QEMU
 
 ```bash
-zig build run --summary all -Dlog_level=debug -Doptimize=Debug -Dboard=rpi4b
+zig build run --summary all \
+  -Dlog_level=debug \
+  -Doptimize=Debug \
+  -Dboard=rpi4b
 ```
 
 ### Raspberry Pi 5
 
-```bash
-zig build run --summary all -Dlog_level=debug -Doptimize=Debug -Dboard=rpi5
+All-in-one kernel:
 
-# TODO: copy artifacts and copy them to an SD card
+```bash
+zig build install --summary all \
+  -Dlog_level=debug \
+  -Doptimize=Debug \
+  -Dboard=rpi5 \
+  -Dsdcard=<path-to-your-sdcard-device>
+```
+
+Serial booteloader + kernel:
+
+```bash
+zig build install --summary all \
+  -Dlog_level=debug \
+  -Doptimize=Debug \
+  -Dboard=rpi5 \
+  -Dserial_boot \
+  -Dsdcard=<path-to-your-sdcard-device>
 ```
 
 ### Unit Tests

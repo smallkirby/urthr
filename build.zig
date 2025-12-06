@@ -59,6 +59,12 @@ pub fn build(b: *std.Build) !void {
         "Path to serial interface device.",
     ) orelse null;
 
+    const sdcard = b.option(
+        []const u8,
+        "sdcard",
+        "Path to SD card to install the kernel image.",
+    ) orelse null;
+
     const qemu_dir = b.option(
         []const u8,
         "qemu",
@@ -369,9 +375,19 @@ pub fn build(b: *std.Build) !void {
     // =============================================================
 
     {
+        // Install booter as an appropriate name for the board.
         b.getInstallStep().dependOn(
             &b.addInstallBinFile(booter.source, board_type.outname()).step,
         );
+
+        // Copy to the SD card if specified.
+        if (sdcard) |path| {
+            const run = b.addSystemCommand(&.{"cp"});
+            run.addFileArg(booter.source);
+            run.addArg(b.fmt("{s}/{s}", .{ path, board_type.outname() }));
+
+            b.getInstallStep().dependOn(&run.step);
+        }
     }
 
     // =============================================================
