@@ -1,6 +1,16 @@
 //! srboot: Send a Urthr kernel over serial to boot.
 
+var terminate_thread: std.atomic.Value(bool) = .init(false);
+
 pub fn main() !void {
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer _ = gpa.deinit();
+
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdin_buf: [4096]u8 = undefined;
+    var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+
     if (os.argv.len != 2 + 1) {
         log.err("Usage: {s} <urthr.elf> <serial device>", .{os.argv[0]});
         return error.InvalidArgs;
@@ -19,18 +29,86 @@ pub fn main() !void {
     });
     defer sr.close();
 
+    // Print UART log until Enter is pressed.
+    log.info("Press <Enter> to start booting Urthr kernel.", .{});
+    try waitEnterWhileUart(
+        &sr,
+        &stdin_reader.interface,
+        &stdout_writer.interface,
+    );
+
+    // Send Urthr kernel over serial.
     var srboot = SrBoot{
         .sr = &sr,
         .urthr = &urthr,
     };
     try srboot.boot();
+
+    // Print UART log until interrupted.
+    log.info("Completed booting. Press <Enter> to exit.", .{});
+    try waitEnterWhileUart(
+        &sr,
+        &stdin_reader.interface,
+        &stdout_writer.interface,
+    );
+}
+
+/// Wait <Enter> key press while printing UART output.
+fn waitEnterWhileUart(sr: *fs.File, stdin: *std.Io.Reader, stdout: *std.Io.Writer) !void {
+    terminate_thread.store(false, .release);
+    var thread = try std.Thread.spawn(
+        .{},
+        printUartThread,
+        .{ sr, stdout },
+    );
+
+    while (true) {
+        if (try stdin.takeByte() == '\n') break;
+    }
+
+    terminate_thread.store(true, .release);
+    thread.join();
+}
+
+/// Thread function to print UART output.
+fn printUartThread(sr: *fs.File, stdout: *std.Io.Writer) void {
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer _ = gpa.deinit();
+
+    const wait_time_ns = 10 * std.time.ns_per_ms;
+    var buf: [1]u8 = undefined;
+    var continue_poll = true;
+
+    var poller = std.Io.poll(
+        gpa.allocator(),
+        enum { uart },
+        .{ .uart = sr.* },
+    );
+    defer poller.deinit();
+
+    // Poll UART and print received data to stdout.
+    while (continue_poll and !terminate_thread.load(.acquire)) {
+        continue_poll = poller.pollTimeout(wait_time_ns) catch {
+            @panic("Failed to poll stdin.");
+        };
+        var reader = poller.reader(.uart);
+
+        // Read until no more data is available.
+        while (true) {
+            _ = reader.readSliceShort(&buf) catch break;
+            stdout.writeByte(buf[0]) catch {
+                @panic("Failed to write to stdout.");
+            };
+            stdout.flush() catch {};
+        }
+    }
+
+    log.info("UART print thread exiting.", .{});
 }
 
 const SrBoot = struct {
     const Self = @This();
 
-    /// Input buffer.
-    buffer: [4096]u8 = undefined,
     /// Length of data in the buffer.
     len: usize = 0,
     /// Current state.
@@ -101,34 +179,25 @@ const SrBoot = struct {
         try self.waitAck();
     }
 
-    fn getc(self: *Self) !void {
-        var buf: [1]u8 = undefined;
-        _ = try self.sr.readAll(&buf);
-
-        self.buffer[self.len] = buf[0];
-        self.len += 1;
-    }
-
-    fn data(self: Self) []const u8 {
-        return self.buffer[0..self.len];
-    }
-
-    fn clear(self: *Self) void {
-        self.len = 0;
-    }
-
     fn waitAck(self: *Self) !void {
-        self.clear();
+        try self.waitForString("ACK");
+    }
+
+    fn waitForString(self: *Self, s: []const u8) !void {
+        var buf: [1]u8 = undefined;
+        var match_idx: usize = 0;
 
         while (true) {
-            try self.getc();
-
-            if (std.mem.eql(u8, self.data(), "ACK")) {
-                break;
+            _ = try self.sr.read(&buf);
+            if (buf[0] == s[match_idx]) {
+                match_idx += 1;
+                if (match_idx == s.len) {
+                    return;
+                }
+            } else {
+                match_idx = 0;
             }
         }
-
-        self.clear();
     }
 };
 
