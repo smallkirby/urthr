@@ -17,6 +17,7 @@ const Module = mmio.Module(u32, &.{
     .{ 0x2C, Lcrh },
     .{ 0x30, Cr },
     .{ 0x38, Imsc },
+    .{ 0x3C, Ris },
     .{ 0x44, Icr },
 });
 
@@ -46,8 +47,6 @@ const RsrEcr = packed struct {
     be: bool,
     /// Overrun error.
     oe: bool,
-    /// Reserved.
-    _rsvd: u4 = 0,
 };
 
 /// UARTFR: Flag Register.
@@ -70,8 +69,6 @@ const Fr = packed struct {
     txfe: bool,
     /// Ring indicator.
     ri: bool,
-    /// Reserved.
-    _rsvd: u6 = 0,
 };
 
 /// UARTIBRD: Integer Baud Rate Register.
@@ -99,7 +96,12 @@ const Lcrh = packed struct {
     /// FIFO enable.
     fen: bool,
     /// Word length.
-    wlen: u2,
+    wlen: enum(u2) {
+        bits8 = 0b11,
+        bits7 = 0b10,
+        bits6 = 0b01,
+        bits5 = 0b00,
+    },
     /// Stick parity select.
     sps: bool,
 };
@@ -158,8 +160,32 @@ const Imsc = packed struct {
     beim: bool,
     /// Overrun error interrupt mask.
     oeim: bool,
-    /// Reserved.
-    _rsvd: u5 = 0,
+};
+
+/// UARTRIS: Raw Interrupt Status Register.
+const Ris = packed struct {
+    /// nUARTRI modem interrupt status.
+    rirmis: bool,
+    /// nUARTCTS modem interrupt status.
+    ctsmmis: bool,
+    /// nUARTDCD modem interrupt status.
+    dcdmmis: bool,
+    /// nUARTDSR modem interrupt status.
+    dsrmmis: bool,
+    /// Receive interrupt status.
+    rxris: bool,
+    /// Transmit interrupt status.
+    txris: bool,
+    /// Receive timeout interrupt status.
+    rtris: bool,
+    /// Framing error interrupt status.
+    feris: bool,
+    /// Parity error interrupt status.
+    peris: bool,
+    /// Break error interrupt status.
+    beris: bool,
+    /// Overrun error interrupt status.
+    oeris: bool,
 };
 
 /// UARTICR: Interrupt Clear Register.
@@ -186,8 +212,11 @@ const Icr = packed struct {
     beic: bool,
     /// Overrun error interrupt clear.
     oeic: bool,
-    /// Reserved.
-    _rsvd: u5 = 0,
+
+    /// Get the mask for all bits.
+    pub fn mask() std.meta.Int(.unsigned, @bitSizeOf(Icr)) {
+        return 0x7FF;
+    }
 };
 
 // =============================================================
@@ -212,11 +241,17 @@ pub fn init(clk: anytype) void {
         break :blk util.roundup(f, 16 * baudrate) / (16 * baudrate);
     };
 
+    // Disable first.
+    pl011.modify(Cr, .{ .uarten = false });
+
     // Wait until PL011 is not busy.
     flush();
 
-    // Disable first.
-    pl011.write(Cr, 0);
+    // Flush the transmit FIFO.
+    pl011.modify(Lcrh, .{ .fen = false });
+
+    // Clear interrupts.
+    pl011.write(Icr, Icr.mask());
 
     // Set baud rate.
     pl011.write(Ibrd, ibrd);
@@ -225,21 +260,14 @@ pub fn init(clk: anytype) void {
     // Enable FIFO, set 8n1.
     pl011.write(Lcrh, std.mem.zeroInit(Lcrh, .{
         .fen = true,
-        .wlen = 0b11,
-        .pen = false,
-        .stp2 = false,
+        .wlen = .bits8,
     }));
 
     // Enable UART, TX and RX.
-    pl011.modify(Cr, .{
+    pl011.write(Cr, std.mem.zeroInit(Cr, .{
         .uarten = true,
         .txe = true,
         .rxe = true,
-    });
-
-    // Disable receive interrupt.
-    pl011.write(Imsc, std.mem.zeroInit(Imsc, .{
-        .rxim = true,
     }));
 }
 
@@ -259,8 +287,12 @@ pub fn putc(c: u8) void {
     while (isTxFull()) {
         atomic.spinLoopHint();
     }
+
     // Write data.
     pl011.write(Dr, std.mem.zeroInit(Dr, .{ .data = c }));
+
+    // Wait until transmission is complete.
+    flush();
 }
 
 /// Get a character from the PL011 UART.
