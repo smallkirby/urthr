@@ -83,6 +83,7 @@ export fn kmain() callconv(.c) noreturn {
             dram.start,
             dram.start,
             dram.size(),
+            1,
             allocator.interface(),
         ) catch {
             @panic("Failed to map DRAM for Wyrd.");
@@ -96,6 +97,7 @@ export fn kmain() callconv(.c) noreturn {
             uart.start,
             uart.start,
             uart.size(),
+            0,
             allocator.interface(),
         ) catch {
             @panic("Failed to map UART for Wyrd.");
@@ -172,6 +174,7 @@ fn mapKernel(header: UrthrHeader, l0: usize) *KernelEntry {
         pa,
         va,
         aligned_size,
+        1,
         allocator.interface(),
     ) catch {
         @panic("Failed to map Urthr kernel region.");

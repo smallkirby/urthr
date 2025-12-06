@@ -22,7 +22,7 @@ pub fn init(allocator: PageAllocator) Error!struct { usize, usize } {
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(l0: usize, pa: usize, va: usize, size: usize, allocator: PageAllocator) Error!void {
+pub fn map1gb(l0: usize, pa: usize, va: usize, size: usize, index: u3, allocator: PageAllocator) Error!void {
     if (pa % page_size != 0) return Error.InvalidArgument;
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
@@ -47,7 +47,7 @@ pub fn map1gb(l0: usize, pa: usize, va: usize, size: usize, allocator: PageAlloc
             .valid = true,
             .type = .block,
             .lattr = LowerAttr{
-                .memattr = 0,
+                .memattr = index,
                 .ap = .prpw,
                 .sh = .inner,
             },
@@ -83,7 +83,8 @@ pub fn enable(l0_0: usize, l0_1: usize) void {
 
     // Configure MAIR_EL1.
     const mair = std.mem.zeroInit(regs.Mair, .{
-        .attr0 = 0b0100_0100, // Inner-non-cacheable, Outer-non-cacheable
+        .attr0 = 0b0000_0000, // Device-nGnRnE
+        .attr1 = 0b0100_0100, // Normal memory
     });
     am.msr(.mair_el1, mair);
 
