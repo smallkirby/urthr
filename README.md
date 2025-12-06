@@ -53,6 +53,8 @@ zig build test --summary all -Doptimize=Debug
 | Option | Type | Description | Default |
 |---|---|---|---|
 | `board` | String: `rpi4b`, `rpi5` | Target board. | `rpi4b` |
+| `serial_boot` | Flag | Generate bootloader and kernel as a separate binary. | `false` |
+| `sdcard` | Path | Path to mounted SD card device. | - |
 | `log_level` | String: `debug`, `info`, `warn`, `error` | Logging level. Output under the logging level is suppressed. | `info` |
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
