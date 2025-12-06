@@ -2,16 +2,43 @@
 // Module Definition
 // =============================================================
 
-var gpio = Module{};
-
-const Module = mmio.Module(u32, &.{
+var gpio = mmio.Module(u32, &.{
     .{ 0x00, Gpfsel0 },
     .{ 0x04, Gpfsel1 },
     .{ 0x08, Gpfsel2 },
     .{ 0x0C, Gpfsel3 },
     .{ 0x10, Gpfsel4 },
     .{ 0x14, Gpfsel5 },
-});
+}){};
+
+// =============================================================
+
+/// Set the base address of the GPIO module.
+pub fn setBase(base: usize) void {
+    gpio.setBase(base);
+}
+
+/// Select the alternate function for the specified GPIO pin.
+pub fn selectAltFn(pin: u8, alt: Fsel) void {
+    const reg_index = pin / 10;
+    const field_index = pin % 10;
+
+    if (5 < reg_index) {
+        @panic("selectAltFn(): GPIO pin out of range.");
+    }
+    const Gpfsel = mmio.Register(u32, u32);
+    const addr = gpio.base + reg_index * 4;
+
+    const old = Gpfsel.read(addr);
+    const shift: u5 = @intCast(@bitSizeOf(Fsel) * field_index);
+    const mask = @as(u32, 0b111) << shift;
+    const new = (old & ~mask) | @as(u32, @intFromEnum(alt)) << shift;
+    Gpfsel.write(addr, new);
+}
+
+// =============================================================
+// Registers
+// =============================================================
 
 const Fsel = enum(u3) {
     input = 0b000,
@@ -111,31 +138,6 @@ const Gpfsel5 = packed struct(u32) {
     fsel57: Fsel,
     _rsvd: u8 = 0,
 };
-
-// =============================================================
-
-/// Set the base address of the GPIO module.
-pub fn setBase(base: usize) void {
-    gpio.setBase(base);
-}
-
-/// Select the alternate function for the specified GPIO pin.
-pub fn selectAltFn(pin: u8, alt: Fsel) void {
-    const reg_index = pin / 10;
-    const field_index = pin % 10;
-
-    if (5 < reg_index) {
-        @panic("selectAltFn(): GPIO pin out of range.");
-    }
-    const Gpfsel = mmio.Register(u32, u32);
-    const addr = gpio.base + reg_index * 4;
-
-    const old = Gpfsel.read(addr);
-    const shift: u5 = @intCast(@bitSizeOf(Fsel) * field_index);
-    const mask = @as(u32, 0b111) << shift;
-    const new = (old & ~mask) | @as(u32, @intFromEnum(alt)) << shift;
-    Gpfsel.write(addr, new);
-}
 
 // =============================================================
 // Imports
