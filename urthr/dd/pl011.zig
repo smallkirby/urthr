@@ -21,9 +21,6 @@ var pl011 = mmio.Module(u32, &.{
 
 // =============================================================
 
-/// Target baud rate.
-const baudrate = 115_200;
-
 /// Set the base address of the PL011 UART.
 pub fn setBase(base: usize) void {
     pl011.setBase(base);
@@ -32,7 +29,7 @@ pub fn setBase(base: usize) void {
 /// Initialize the PL011 UART.
 ///
 /// Caller must ensure that the PL011 base addresses are set correctly beforehand.
-pub fn init(clk: anytype) void {
+pub fn init(clk: anytype, baudrate: u64) void {
     // Integer part of the baud rate divisor.
     const ibrd = clk / (16 * baudrate);
     // Fractional part of the baud rate divisor.
@@ -54,8 +51,8 @@ pub fn init(clk: anytype) void {
     pl011.write(Icr, Icr.mask());
 
     // Set baud rate.
-    pl011.write(Ibrd, ibrd);
-    pl011.write(Fbrd, fbrd);
+    pl011.write(Ibrd, @as(u16, @intCast(ibrd)));
+    pl011.write(Fbrd, @as(u6, @intCast(fbrd)));
 
     // Enable FIFO, set 8n1.
     pl011.write(Lcrh, std.mem.zeroInit(Lcrh, .{
