@@ -6,7 +6,7 @@ pub const memmap = @import("memmap.zig");
 pub fn boot() void {
     // Setup PL011 UART.
     dd.pl011.setBase(memmap.pl011.start);
-    dd.pl011.init(44_236_800); // 44.237 MHz
+    dd.pl011.init(44_236_800, 921_600); // 44.237 MHz, 921600 bps
 }
 
 /// Get console instance.
