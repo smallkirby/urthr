@@ -178,15 +178,15 @@ const MkImage = struct {
         const info = try self.parseUrthr();
 
         // Construct header.
-        var header = boot.UrthrHeader{
+        var urthr_reader = self.urthr.reader(&.{});
+        const header = UrthrHeader{
             .size = urthr_size,
             .encoded_size = self.getEncodedSize(urthr_size),
             .load_at = info.load_addr,
-            .checksum = undefined,
+            .checksum = try UrthrHeader.calcChecksum(&urthr_reader.interface),
             .entry = info.entry,
             .encoding = .none,
         };
-        try calculateChecksum(self.urthr, &header);
 
         // Write header.
         _ = try w.writeStruct(header, .little);
@@ -241,26 +241,6 @@ const MkImage = struct {
     };
 };
 
-/// Calculate checksum of the given image file.
-fn calculateChecksum(img: fs.File, out: *boot.UrthrHeader) !void {
-    var rbuffer: [4096]u8 = undefined;
-    var input: [4096]u8 = undefined;
-
-    var hasher = std.crypto.hash.Blake3.init(.{});
-    var reader = img.reader(&rbuffer);
-
-    while (true) {
-        const n = try reader.interface.readSliceShort(input[0..]);
-        hasher.update(input[0..n]);
-
-        if (n < input.len) {
-            break;
-        }
-    }
-
-    hasher.final(out.checksum[0..]);
-}
-
 // =============================================================
 // Imports
 // =============================================================
@@ -271,3 +251,4 @@ const Base64Encoder = std.base64.Base64Encoder;
 const fs = std.fs;
 const os = std.os;
 const boot = @import("boot");
+const UrthrHeader = boot.UrthrHeader;

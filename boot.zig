@@ -4,8 +4,13 @@
 pub const UrthrHeader = extern struct {
     pub const hash_size = 8;
 
+    pub const Error = error{
+        /// Failed to read from the reader.
+        ReadFailed,
+    };
+
     /// How the Urthr binary is encoded.
-    const Encoding = enum(u32) {
+    pub const Encoding = enum(u32) {
         /// Not encoded.
         none = 0,
     };
@@ -36,6 +41,27 @@ pub const UrthrHeader = extern struct {
         const magic_valid = std.mem.eql(u8, self.magic[0..], "URTH");
 
         return magic_valid;
+    }
+
+    /// Calculate checksum.
+    pub fn calcChecksum(r: *std.Io.Reader) Error![hash_size]u8 {
+        var ret: [hash_size]u8 = undefined;
+        var rbuffer: [4096]u8 = undefined;
+
+        var hasher = std.crypto.hash.Blake3.init(.{});
+
+        while (true) {
+            const n = try r.readSliceShort(rbuffer[0..]);
+            hasher.update(rbuffer[0..n]);
+
+            if (n < rbuffer.len) {
+                break;
+            }
+        }
+
+        hasher.final(&ret);
+
+        return ret;
     }
 };
 

@@ -151,17 +151,6 @@ export fn kmain() callconv(.c) noreturn {
     }
 }
 
-/// Calculate the checksum of the given image.
-fn calculateChecksum(img: []const u8) [boot.UrthrHeader.hash_size]u8 {
-    var hasher = std.crypto.hash.Blake3.init(.{});
-    hasher.update(img);
-
-    var hash: [boot.UrthrHeader.hash_size]u8 = undefined;
-    hasher.final(&hash);
-
-    return hash;
-}
-
 /// Map the Urthr kernel into memory and return the entry point.
 fn mapKernel(header: UrthrHeader, l0: usize) *KernelEntry {
     // Map kernel region.
@@ -202,11 +191,9 @@ const MemWyrd = struct {
         }
 
         // Validate checksum.
-        if (!std.mem.eql(
-            u8,
-            header.checksum[0..],
-            &calculateChecksum(loadp[0..header.size]),
-        )) {
+        var reader = std.Io.Reader.fixed(loadp[0..header.size]);
+        const checksum = try UrthrHeader.calcChecksum(&reader);
+        if (!std.mem.eql(u8, header.checksum[0..], &checksum)) {
             return error.InvalidChecksum;
         }
 
@@ -251,11 +238,9 @@ const SrWyrd = struct {
         }
 
         // Validate checksum.
-        if (!std.mem.eql(
-            u8,
-            header.checksum[0..],
-            &calculateChecksum(loadp[0..header.size]),
-        )) {
+        var reader = std.Io.Reader.fixed(loadp[0..header.size]);
+        const checksum = try UrthrHeader.calcChecksum(&reader);
+        if (!std.mem.eql(u8, header.checksum[0..], &checksum)) {
             return error.InvalidChecksum;
         }
 
