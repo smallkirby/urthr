@@ -7,6 +7,11 @@ const num_ents = page_size / @sizeOf(PageDesc);
 /// Virtual address space range in bits.
 const va_range = 48;
 
+/// Table pointed to by TTBR0_EL1.
+var l0_0: []TableDesc = undefined;
+/// Table pointed to by TTBR1_EL1.
+var l0_1: []TableDesc = undefined;
+
 /// Translation level.
 ///
 /// 5-level translation is not supported.
@@ -15,18 +20,18 @@ const Level = u2;
 /// Initialize MMU with the given level 0 table address.
 ///
 /// MMU is not enabled by this function.
-pub fn init(allocator: PageAllocator) Error!struct { usize, usize } {
-    const l0_0 = try allocNewTable(allocator, TableDesc);
-    const l0_1 = try allocNewTable(allocator, TableDesc);
-    return .{ @intFromPtr(l0_0.ptr), @intFromPtr(l0_1.ptr) };
+pub fn init(allocator: PageAllocator) Error!void {
+    l0_0 = try allocNewTable(allocator, TableDesc);
+    l0_1 = try allocNewTable(allocator, TableDesc);
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(l0: usize, pa: usize, va: usize, size: usize, index: u3, allocator: PageAllocator) Error!void {
+pub fn map1gb(pa: usize, va: usize, size: usize, index: u3, allocator: PageAllocator) Error!void {
     if (pa % page_size != 0) return Error.InvalidArgument;
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
 
+    const l0 = getRoot(va);
     const asize = util.roundup(size, units.gib);
     const l0tbl = getTable(TableDesc, l0);
 
@@ -37,7 +42,9 @@ pub fn map1gb(l0: usize, pa: usize, va: usize, size: usize, index: u3, allocator
         const l0desc = &l0tbl[getIndex(0, cur_va)];
         if (!l0desc.valid or !l0desc.table) {
             const l1tbl = try allocNewTable(allocator, PageDesc);
-            l0desc.* = TableDesc.new(@intFromPtr(l1tbl.ptr));
+            l0desc.* = TableDesc.new(
+                @intFromPtr(allocator.translateP(l1tbl).ptr),
+            );
         }
 
         const l1tbl = getTable(PageDesc, l0desc.next());
@@ -63,7 +70,10 @@ pub fn map1gb(l0: usize, pa: usize, va: usize, size: usize, index: u3, allocator
 }
 
 /// Enable MMU.
-pub fn enable(l0_0: usize, l0_1: usize) void {
+pub fn enable(allocator: PageAllocator) void {
+    const l0_0_phys = @intFromPtr(allocator.translateP(l0_0).ptr);
+    const l0_1_phys = @intFromPtr(allocator.translateP(l0_1).ptr);
+
     // Configure TCR_EL1.
     const tcr = regs.Tcr{
         .t0sz = 64 - va_range,
@@ -90,11 +100,11 @@ pub fn enable(l0_0: usize, l0_1: usize) void {
 
     // Set TTBR0_EL1 and TTBR1_EL1.
     const ttbr0 = regs.Ttbr0El1{
-        .addr = @intCast(l0_0),
+        .addr = @intCast(l0_0_phys),
         .asid = 0,
     };
     const ttbr1 = regs.Ttbr1El1{
-        .addr = @intCast(l0_1),
+        .addr = @intCast(l0_1_phys),
         .asid = 0,
     };
     am.msr(.ttbr0_el1, ttbr0);
@@ -130,10 +140,21 @@ fn getIndex(level: Level, va: usize) usize {
 
 /// Allocate a new table of the specified descriptor type.
 fn allocNewTable(allocator: PageAllocator, T: type) Error![]T {
-    const page = try allocator.allocPages(1);
+    const page = try allocator.allocPagesV(1);
     const table = getTable(T, page);
+
     @memset(table, std.mem.zeroInit(T, .{ .valid = false }));
+
     return table;
+}
+
+/// Get the root page table corresponding to the given virtual address.
+fn getRoot(va: usize) []TableDesc {
+    if (va >> 48 == 0) {
+        return l0_0;
+    } else {
+        return l0_1;
+    }
 }
 
 // =============================================================
