@@ -28,10 +28,12 @@ const KernelEntry = fn () callconv(.c) noreturn;
 
 /// Reserved DRAM region for Wyrd bootloader.
 const wyrd_reserved = board.memmap.loader_reserved;
-/// Memory size in bytes.
-const workbuf_size = wyrd_reserved.size();
 /// Memory start address.
 const workbuf_start = if (wyrd_reserved.start == 0) wyrd_reserved.start + 0x1000 else wyrd_reserved;
+/// Memory end address.
+const workbuf_end = wyrd_reserved.end;
+/// Memory size in bytes.
+const workbuf_size = workbuf_end - workbuf_start;
 /// Pointer to the DRAM reserved for Wyrd bootloader.
 const workbuf = @as([*]allowzero u8, @ptrFromInt(workbuf_start))[0..workbuf_size];
 
@@ -70,16 +72,15 @@ export fn kmain() callconv(.c) noreturn {
     }
 
     // Identity map and enable MMU.
-    _, const l0_1 = blk: {
+    {
         // Init L0 page table.
-        const l0_0, const l0_1 = arch.mmu.init(allocator.interface()) catch {
+        arch.mmu.init(allocator.interface()) catch {
             @panic("Failed to initialize MMU.");
         };
 
         // Identity mapping for DRAM.
         const dram = board.memmap.dram;
         arch.mmu.map1gb(
-            l0_0,
             dram.start,
             dram.start,
             dram.size(),
@@ -93,7 +94,6 @@ export fn kmain() callconv(.c) noreturn {
         // Identity mapping for UART.
         const uart = board.memmap.pl011;
         arch.mmu.map1gb(
-            l0_0,
             uart.start,
             uart.start,
             uart.size(),
@@ -105,11 +105,9 @@ export fn kmain() callconv(.c) noreturn {
         log.info("Identity-mapped (UART): 0x{X:0>8} - 0x{X:0>8}", .{ uart.start, uart.end });
 
         // Enable MMU.
-        arch.mmu.enable(l0_0, l0_1);
+        arch.mmu.enable(allocator.interface());
         log.info("MMU enabled.", .{});
-
-        break :blk .{ l0_0, l0_1 };
-    };
+    }
 
     // Load Urthr kernel.
     const header = (if (common.options.serial_boot) blk: {
@@ -135,7 +133,7 @@ export fn kmain() callconv(.c) noreturn {
         log.info("  Checksum : {s}", .{std.fmt.bytesToHex(header.checksum[0..], .upper)});
 
         // Map the kernel to the specified virtual address.
-        break :blk mapKernel(header, l0_1);
+        break :blk mapKernel(header);
     };
 
     // Jump to the kernel entry point.
@@ -152,14 +150,13 @@ export fn kmain() callconv(.c) noreturn {
 }
 
 /// Map the Urthr kernel into memory and return the entry point.
-fn mapKernel(header: UrthrHeader, l0: usize) *KernelEntry {
+fn mapKernel(header: UrthrHeader) *KernelEntry {
     // Map kernel region.
     const va = util.rounddown(header.load_at, units.gib);
     const pa = util.rounddown(board.memmap.kernel_phys, units.gib);
     const size = (board.memmap.kernel_phys + header.size) - pa;
     const aligned_size = util.roundup(size, units.gib);
     arch.mmu.map1gb(
-        l0,
         pa,
         va,
         aligned_size,

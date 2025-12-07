@@ -18,6 +18,8 @@ next: usize,
 const vtable = PageAllocator.Vtable{
     .allocPages = allocPages,
     .freePages = freePages,
+    .virt2phys = virt2phys,
+    .phys2virt = phys2virt,
 };
 
 /// Initialize the allocator.
@@ -56,6 +58,14 @@ fn allocPages(ctx: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
 
 fn freePages(_: *anyopaque, _: []u8) void {
     @panic("FixedAllocator does not support freePages");
+}
+
+fn virt2phys(_: *const anyopaque, vaddr: usize) usize {
+    return vaddr;
+}
+
+fn phys2virt(_: *const anyopaque, paddr: usize) usize {
+    return paddr;
 }
 
 // =============================================================
