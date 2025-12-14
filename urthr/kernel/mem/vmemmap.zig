@@ -19,7 +19,7 @@ pub const device = Range{
 
 pub const kernel = Range{
     .start = 0xFFFF_FF00_0000_0000,
-    .end = 0xFFFF_FFFF_FFFF_FFFF,
+    .end = 0xFFFF_FFF0_0000_0000,
 };
 
 // =============================================================

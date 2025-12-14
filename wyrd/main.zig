@@ -79,11 +79,12 @@ export fn kmain() callconv(.c) noreturn {
         };
 
         // Identity mapping for DRAM.
-        const dram = board.memmap.dram;
+        const dram = board.memmap.primary_dram;
         arch.mmu.map1gb(
             dram.start,
             dram.start,
             dram.size(),
+            .kernel_rwx,
             .normal,
             allocator.interface(),
         ) catch {
@@ -97,6 +98,7 @@ export fn kmain() callconv(.c) noreturn {
             uart.start,
             uart.start,
             uart.size(),
+            .kernel_rw,
             .device,
             allocator.interface(),
         ) catch {
@@ -118,7 +120,7 @@ export fn kmain() callconv(.c) noreturn {
         break :blk MemWyrd.load();
     }) catch |err| {
         log.err("\n{s}", .{@errorName(err)});
-        util.hexdump(board.memmap.kernel, 256, log.err);
+        util.hexdump(board.memmap.kernel_entry, 256, log.err);
         @panic("Failed to load Urthr kernel.");
     };
 
@@ -160,6 +162,7 @@ fn mapKernel(header: UrthrHeader) *KernelEntry {
         pa,
         va,
         aligned_size,
+        .kernel_rwx,
         .normal,
         allocator.interface(),
     ) catch {
@@ -179,7 +182,7 @@ const MemWyrd = struct {
 
         // Copy to the load address while decoding if needed.
         const phys: [*]u8 = @ptrFromInt(getEndAddress() + @sizeOf(UrthrHeader));
-        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel);
+        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_entry);
         switch (header.encoding) {
             // No encoding. Just copy.
             .none => {
@@ -226,7 +229,7 @@ const SrWyrd = struct {
         try ack();
 
         // Copy to the load address while decoding if needed.
-        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel);
+        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_entry);
         switch (header.encoding) {
             // No encoding. Just copy.
             .none => {

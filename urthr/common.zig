@@ -1,5 +1,6 @@
 //! Common library code that can be used in every module.
 
+pub const mem = @import("common/mem.zig");
 pub const mmio = @import("common/mmio.zig");
 pub const util = @import("common/util.zig");
 
