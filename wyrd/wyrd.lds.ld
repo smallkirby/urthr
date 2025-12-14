@@ -14,7 +14,7 @@ SECTIONS
 
     .boot_stack (NOLOAD) :
     {
-      . += LOADER_PHYS;
+      . += P_LOADER;
 
       _boot_stack = .;
     } :__boot_stack

@@ -17,6 +17,18 @@ var l0_1: []TableDesc = undefined;
 /// 5-level translation is not supported.
 const Level = u2;
 
+/// Page attribute for mapping.
+pub const Attribute = enum(u3) {
+    /// Device memory.
+    ///
+    /// Strongly ordered, non-cacheable.
+    device = 0,
+    /// Normal memory.
+    ///
+    /// Cacheable.
+    normal = 1,
+};
+
 /// Initialize MMU with the given level 0 table address.
 ///
 /// MMU is not enabled by this function.
@@ -26,7 +38,7 @@ pub fn init(allocator: PageAllocator) Error!void {
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(pa: usize, va: usize, size: usize, index: u3, allocator: PageAllocator) Error!void {
+pub fn map1gb(pa: usize, va: usize, size: usize, attr: Attribute, allocator: PageAllocator) Error!void {
     if (pa % page_size != 0) return Error.InvalidArgument;
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
@@ -54,7 +66,7 @@ pub fn map1gb(pa: usize, va: usize, size: usize, index: u3, allocator: PageAlloc
             .valid = true,
             .type = .block,
             .lattr = LowerAttr{
-                .memattr = index,
+                .memattr = @intFromEnum(attr),
                 .ap = .prpw,
                 .sh = .inner,
             },
