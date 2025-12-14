@@ -1,6 +1,6 @@
 //! Physical memory map of Raspberry Pi 4B.
 //!
-//! This file is compiled into C-style header file and used in linker script and assembly code.
+//! This file is referenced by mkconst tool.
 
 /// DRAM (2GiB).
 pub const dram = Range{
@@ -13,7 +13,8 @@ pub const dram = Range{
 // =============================================================
 
 /// Physical load address of the bootloader.
-pub const loader_phys = 0x0008_0000;
+pub const loader = 0x0008_0000;
+
 /// DRAM region reserved for the bootloader.
 ///
 /// Bootloader uses this region for its own purposes such as allocating page tables.
@@ -25,10 +26,7 @@ pub const loader_reserved = Range{
 };
 
 /// Physical load address of the kernel.
-pub const kernel_phys = 0x0040_0000;
-
-/// Virtual load address of the kernel.
-pub const kernel_virt = 0xFFFF_FFFF_8040_0000;
+pub const kernel = 0x0040_0000;
 
 // =============================================================
 // Peripherals

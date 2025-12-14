@@ -24,12 +24,36 @@ pub fn main() !void {
     // Put a header comment.
     try putHeaderComment(writer_if);
 
-    // Iterate through decls in the input Zig file.
+    // Iterate through decls for physical memory map.
+    try writer_if.writeAll(
+        \\
+        \\// =============================================================
+        \\// Physical Memory Map
+        \\// =============================================================
+        \\
+        \\
+    );
     inline for (@typeInfo(map).@"struct".decls) |field| {
         const name = field.name;
         const value = @field(map, name);
 
-        try writeItem(value, name, writer_if);
+        try writeItem(value, name, writer_if, "P_");
+    }
+
+    // Iterate through decls for virtual memory map.
+    try writer_if.writeAll(
+        \\
+        \\// =============================================================
+        \\// Virtual Memory Map
+        \\// =============================================================
+        \\
+        \\
+    );
+    inline for (@typeInfo(vmemmap).@"struct".decls) |field| {
+        const name = field.name;
+        const value = @field(vmemmap, name);
+
+        try writeItem(value, name, writer_if, "V_");
     }
 }
 
@@ -47,7 +71,7 @@ fn putHeaderComment(writer: *std.io.Writer) !void {
 }
 
 /// Write a single constant declaration to the output writer.
-fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer) !void {
+fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer, prefix: []const u8) !void {
     var out_name: [256]u8 = undefined;
     var out_value: [256]u8 = undefined;
 
@@ -67,7 +91,10 @@ fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer) !void {
                 .{},
             );
 
-            try writer.print("#define {s} 0x{s}\n\n", .{ namep, out_value[0..valuen] });
+            try writer.print(
+                "#define {s}{s} 0x{s}\n\n",
+                .{ prefix, namep, out_value[0..valuen] },
+            );
         },
 
         Range => {
@@ -84,7 +111,10 @@ fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer) !void {
                 .upper,
                 .{},
             );
-            try writer.print("#define {s}_START 0x{s}\n", .{ namep, out_value[0..start] });
+            try writer.print(
+                "#define {s}{s}_START 0x{s}\n",
+                .{ prefix, namep, out_value[0..start] },
+            );
 
             // End
             const end = std.fmt.printInt(
@@ -94,7 +124,10 @@ fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer) !void {
                 .upper,
                 .{},
             );
-            try writer.print("#define {s}_END 0x{s}\n", .{ namep, out_value[0..end] });
+            try writer.print(
+                "#define {s}{s}_END 0x{s}\n",
+                .{ prefix, namep, out_value[0..end] },
+            );
 
             // Size
             const size = std.fmt.printInt(
@@ -104,7 +137,10 @@ fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer) !void {
                 .upper,
                 .{},
             );
-            try writer.print("#define {s}_SIZE 0x{s}\n", .{ namep, out_value[0..size] });
+            try writer.print(
+                "#define {s}{s}_SIZE 0x{s}\n",
+                .{ prefix, namep, out_value[0..size] },
+            );
 
             try writer.print("\n", .{});
         },
@@ -130,4 +166,5 @@ const board = @import("board").impl;
 const board_name = @import("board").description();
 const map = board.memmap;
 const common = @import("common");
+const vmemmap = @import("vmemmap");
 const Range = common.Range;

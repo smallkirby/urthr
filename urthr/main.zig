@@ -23,7 +23,18 @@ export fn kmain() callconv(.c) noreturn {
     log.info("", .{});
     log.info("Booting Urthr...", .{});
 
+    // Init early page allocator.
+    const pa_reserved = common.Range{
+        .start = board.memmap.loader_reserved.end,
+        .end = board.memmap.loader_reserved.end + 1 * units.mib,
+    };
+    urd.boot.initAllocator(pa_reserved.start, pa_reserved.size());
+    log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
+
+    // Initialize mappings.
+
     // Halt.
+    log.err("Reached unreachable EOL.", .{});
     while (true) {
         asm volatile ("wfe");
     }
@@ -37,6 +48,8 @@ const std = @import("std");
 const log = std.log.scoped(.main);
 const arch = @import("arch");
 const board = @import("board").impl;
+const common = @import("common");
+const units = common.units;
 const dd = @import("dd");
 const urd = @import("urthr");
 

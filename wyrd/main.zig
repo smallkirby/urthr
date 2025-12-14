@@ -84,7 +84,7 @@ export fn kmain() callconv(.c) noreturn {
             dram.start,
             dram.start,
             dram.size(),
-            1,
+            .normal,
             allocator.interface(),
         ) catch {
             @panic("Failed to map DRAM for Wyrd.");
@@ -97,7 +97,7 @@ export fn kmain() callconv(.c) noreturn {
             uart.start,
             uart.start,
             uart.size(),
-            0,
+            .device,
             allocator.interface(),
         ) catch {
             @panic("Failed to map UART for Wyrd.");
@@ -118,7 +118,7 @@ export fn kmain() callconv(.c) noreturn {
         break :blk MemWyrd.load();
     }) catch |err| {
         log.err("\n{s}", .{@errorName(err)});
-        util.hexdump(board.memmap.kernel_phys, 256, log.err);
+        util.hexdump(board.memmap.kernel, 256, log.err);
         @panic("Failed to load Urthr kernel.");
     };
 
@@ -153,14 +153,14 @@ export fn kmain() callconv(.c) noreturn {
 fn mapKernel(header: UrthrHeader) *KernelEntry {
     // Map kernel region.
     const va = util.rounddown(header.load_at, units.gib);
-    const pa = util.rounddown(board.memmap.kernel_phys, units.gib);
-    const size = (board.memmap.kernel_phys + header.size) - pa;
+    const pa = util.rounddown(board.memmap.kernel, units.gib);
+    const size = (board.memmap.kernel + header.size) - pa;
     const aligned_size = util.roundup(size, units.gib);
     arch.mmu.map1gb(
         pa,
         va,
         aligned_size,
-        1,
+        .normal,
         allocator.interface(),
     ) catch {
         @panic("Failed to map Urthr kernel region.");
@@ -179,7 +179,7 @@ const MemWyrd = struct {
 
         // Copy to the load address while decoding if needed.
         const phys: [*]u8 = @ptrFromInt(getEndAddress() + @sizeOf(UrthrHeader));
-        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_phys);
+        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel);
         switch (header.encoding) {
             // No encoding. Just copy.
             .none => {
@@ -226,7 +226,7 @@ const SrWyrd = struct {
         try ack();
 
         // Copy to the load address while decoding if needed.
-        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel_phys);
+        const loadp: [*]u8 = @ptrFromInt(board.memmap.kernel);
         switch (header.encoding) {
             // No encoding. Just copy.
             .none => {
