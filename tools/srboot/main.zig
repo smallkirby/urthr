@@ -29,6 +29,9 @@ pub fn main() !void {
     });
     defer sr.close();
 
+    // Configure baudrate.
+    try setBaudrate(&sr, 921600);
+
     // Print UART log until Enter is pressed.
     log.info("Press <Enter> to start booting Urthr kernel.", .{});
     try waitEnterWhileUart(
@@ -51,6 +54,22 @@ pub fn main() !void {
         &stdin_reader.interface,
         &stdout_writer.interface,
     );
+}
+
+/// Set the baudrate of the serial device.
+fn setBaudrate(sr: *fs.File, comptime baudrate: u32) !void {
+    const linux = std.os.linux;
+    const speed: linux.speed_t = switch (baudrate) {
+        19200 => .B19200,
+        921600 => .B921600,
+        else => @compileError("Unsupported baudrate"),
+    };
+
+    var termios: linux.termios = undefined;
+    _ = linux.tcgetattr(sr.handle, &termios);
+    termios.ispeed = speed;
+    termios.ospeed = speed;
+    _ = linux.tcsetattr(sr.handle, linux.TCSA.NOW, &termios);
 }
 
 /// Wait <Enter> key press while printing UART output.
