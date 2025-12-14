@@ -143,6 +143,7 @@ pub fn build(b: *std.Build) !void {
         module.addImport("arch", arch_module);
         module.addImport("board", board_module);
         module.addImport("dd", dd_module);
+        module.addImport("urthr", module);
 
         break :blk module;
     };

@@ -1,5 +1,6 @@
 pub const exception = @import("kernel/exception.zig");
 pub const klog = @import("kernel/klog.zig");
+pub const mem = @import("kernel/mem.zig");
 
 /// APIs for early boot stage.
 pub const boot = struct {
@@ -16,5 +17,10 @@ pub const boot = struct {
     pub fn initAllocator(start: usize, size: usize) void {
         const ptr: [*]u8 = @ptrFromInt(start);
         allocator.init(ptr[0..size]);
+    }
+
+    /// Get the early page allocator.
+    pub fn getAllocator() *BootAllocator {
+        return &allocator;
     }
 };

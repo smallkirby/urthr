@@ -1,7 +1,12 @@
-pub const Error = PageAllocator.Error;
+pub const Error = error{
+    /// Current mapping does not match the requested mapping.
+    InvalidMapping,
+} || PageAllocator.Error;
 
 /// Page size in bytes.
 const page_size = 4 * units.kib;
+/// Page size shift.
+const page_shift = 12;
 /// The number of descriptors in a table.
 const num_ents = page_size / @sizeOf(PageDesc);
 /// Virtual address space range in bits.
@@ -17,18 +22,6 @@ var l0_1: []TableDesc = undefined;
 /// 5-level translation is not supported.
 const Level = u2;
 
-/// Page attribute for mapping.
-pub const Attribute = enum(u3) {
-    /// Device memory.
-    ///
-    /// Strongly ordered, non-cacheable.
-    device = 0,
-    /// Normal memory.
-    ///
-    /// Cacheable.
-    normal = 1,
-};
-
 /// Initialize MMU with the given level 0 table address.
 ///
 /// MMU is not enabled by this function.
@@ -37,45 +30,97 @@ pub fn init(allocator: PageAllocator) Error!void {
     l0_1 = try allocNewTable(allocator, TableDesc);
 }
 
-/// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(pa: usize, va: usize, size: usize, attr: Attribute, allocator: PageAllocator) Error!void {
+/// Maps the VA to PA using 4KiB pages.
+pub fn map4kb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribute, allocator: PageAllocator) Error!void {
     if (pa % page_size != 0) return Error.InvalidArgument;
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
 
-    const l0 = getRoot(va);
+    const asize = util.roundup(size, page_size);
+
+    for (0..asize / page_size) |i| {
+        const cur_pa = pa + i * page_size;
+        const cur_va = va + i * page_size;
+        const desc = try lookupSpawn(cur_va, 3, allocator);
+
+        desc.* = PageDesc{
+            .valid = true,
+            .type = .page,
+            .lattr = LowerAttr{
+                .memattr = getAttrIndex(attr),
+                .ap = Perm.from(perm),
+                .sh = .inner,
+            },
+            .oa = @truncate(cur_pa >> page_shift),
+            .uattr = UpperAttr{
+                .dbm = false,
+                .contiguous = false,
+                .pxn = !perm.kx,
+                .uxn = !perm.ux,
+            },
+        };
+    }
+}
+
+/// Maps the VA to PA using 2MiB pages.
+pub fn map2mb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribute, allocator: PageAllocator) Error!void {
+    if (pa % page_size != 0) return Error.InvalidArgument;
+    if (va % page_size != 0) return Error.InvalidArgument;
+    if (size % page_size != 0) return Error.InvalidArgument;
+
+    const asize = util.roundup(size, units.mib);
+
+    for (0..asize / units.mib) |i| {
+        const cur_pa = pa + i * page_size;
+        const cur_va = va + i * page_size;
+        const desc = try lookupSpawn(cur_va, 2, allocator);
+
+        desc.* = PageDesc{
+            .valid = true,
+            .type = .block,
+            .lattr = LowerAttr{
+                .memattr = getAttrIndex(attr),
+                .ap = Perm.from(perm),
+                .sh = .inner,
+            },
+            .oa = @truncate(cur_pa >> page_shift),
+            .uattr = UpperAttr{
+                .dbm = false,
+                .contiguous = false,
+                .pxn = !perm.kx,
+                .uxn = !perm.ux,
+            },
+        };
+    }
+}
+
+/// Maps the VA to PA using 1GiB pages.
+pub fn map1gb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribute, allocator: PageAllocator) Error!void {
+    if (pa % page_size != 0) return Error.InvalidArgument;
+    if (va % page_size != 0) return Error.InvalidArgument;
+    if (size % page_size != 0) return Error.InvalidArgument;
+
     const asize = util.roundup(size, units.gib);
-    const l0tbl = getTable(TableDesc, l0);
 
     for (0..asize / units.gib) |i| {
         const cur_pa = pa + i * page_size;
         const cur_va = va + i * page_size;
+        const desc = try lookupSpawn(cur_va, 1, allocator);
 
-        const l0desc = &l0tbl[getIndex(0, cur_va)];
-        if (!l0desc.valid or !l0desc.table) {
-            const l1tbl = try allocNewTable(allocator, PageDesc);
-            l0desc.* = TableDesc.new(
-                @intFromPtr(allocator.translateP(l1tbl).ptr),
-            );
-        }
-
-        const l1tbl = getTable(PageDesc, l0desc.next());
-        const l1desc = &l1tbl[getIndex(1, cur_va)];
-
-        l1desc.* = PageDesc{
+        desc.* = PageDesc{
             .valid = true,
             .type = .block,
             .lattr = LowerAttr{
-                .memattr = @intFromEnum(attr),
-                .ap = .prpw,
+                .memattr = getAttrIndex(attr),
+                .ap = Perm.from(perm),
                 .sh = .inner,
             },
-            .oa = @truncate(cur_pa >> 12),
+            .oa = @truncate(cur_pa >> page_shift),
             .uattr = UpperAttr{
                 .dbm = false,
                 .contiguous = false,
-                .pxn = false,
-                .uxn = false,
+                .pxn = !perm.kx,
+                .uxn = !perm.ux,
             },
         };
     }
@@ -130,6 +175,34 @@ pub fn enable(allocator: PageAllocator) void {
     am.msr(.sctlr_el1, sctlr);
 }
 
+/// Lookup the page descriptor for the given virtual address.
+///
+/// If the descriptor does not exist, spawn a new table descriptor recursively.
+fn lookupSpawn(va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
+    var tbl = getRoot(va);
+
+    var cur_level: Level = 0;
+    while (cur_level < level) : (cur_level += 1) {
+        const desc = &tbl[getIndex(cur_level, va)];
+
+        // Spawn a new table.
+        if (!desc.valid) {
+            const new_tbl = try allocNewTable(allocator, TableDesc);
+            desc.* = TableDesc.new(@intFromPtr(allocator.translateP(new_tbl).ptr));
+        }
+
+        // The region is already mapped as a block or page.
+        if (!desc.table) {
+            return Error.InvalidMapping;
+        }
+
+        // Descend to the next level.
+        tbl = getTable(TableDesc, desc.next());
+    }
+
+    return @ptrCast(&tbl[getIndex(level, va)]);
+}
+
 /// Get a table of the specified descriptor type.
 fn getTable(T: type, tbl: anytype) []T {
     const value = switch (@typeInfo(@TypeOf(tbl))) {
@@ -167,6 +240,14 @@ fn getRoot(va: usize) []TableDesc {
     } else {
         return l0_1;
     }
+}
+
+/// Get the MAIR index for the given attribute.
+fn getAttrIndex(attr: Attribute) u3 {
+    return switch (attr) {
+        .device => 0,
+        .normal => 1,
+    };
 }
 
 // =============================================================
@@ -321,6 +402,19 @@ const Perm = enum(u2) {
     pr = 0b10,
     /// Privileged Read-Only, Unprivileged Read-Only.
     prr = 0b11,
+
+    /// Convert the given permission to Stage 1 data access permission.
+    pub fn from(perm: Permission) Perm {
+        if (perm.kr and perm.kw and perm.ur and perm.uw) {
+            return .prpwrw;
+        } else if (perm.kr and perm.kw) {
+            return .prpw;
+        } else if (perm.kr and perm.ur) {
+            return .prr;
+        } else {
+            return .pr;
+        }
+    }
 };
 
 // =============================================================
@@ -331,6 +425,8 @@ const std = @import("std");
 const common = @import("common");
 const units = common.units;
 const util = common.util;
+const Attribute = common.mem.Attribute;
+const Permission = common.mem.Permission;
 const PageAllocator = common.PageAllocator;
 
 const am = @import("asm.zig");

@@ -1,6 +1,10 @@
 /// Exception table defined in `isr.S`.
 extern const exception_table: *void;
 
+/// Whether we are currently handling an exception.
+/// TODO: should be per-CPU.
+var in_handling: bool = false;
+
 /// Initialize exception handling for this CPU.
 pub fn initLocal() void {
     am.msr(.vbar_el1, .{ .addr = @intFromPtr(&exception_table) });
@@ -57,6 +61,15 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     w.log("=== Oops! ===============================", .{});
     w.log("Type: {s}", .{kind});
     w.log("", .{});
+
+    if (in_handling) {
+        w.log("!!! Double fault detected !!!", .{});
+
+        while (true) {
+            am.wfe();
+        }
+    }
+    in_handling = true;
 
     // Print system registers.
     const esr = am.mrs(.esr_el1);

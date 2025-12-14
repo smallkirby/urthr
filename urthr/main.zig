@@ -31,7 +31,10 @@ export fn kmain() callconv(.c) noreturn {
     urd.boot.initAllocator(pa_reserved.start, pa_reserved.size());
     log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
 
-    // Initialize mappings.
+    zmain() catch |err| {
+        log.err("Error: {t}", .{err});
+        @panic("Abort.");
+    };
 
     // Halt.
     log.err("Reached unreachable EOL.", .{});
@@ -40,13 +43,20 @@ export fn kmain() callconv(.c) noreturn {
     }
 }
 
+/// Zig calling convention entry.
+fn zmain() !void {
+    // Initialize mappings.
+    log.info("Initializing MMU.", .{});
+    try urd.mem.init();
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const log = std.log.scoped(.main);
-const arch = @import("arch");
+const arch = @import("arch").impl;
 const board = @import("board").impl;
 const common = @import("common");
 const units = common.units;
