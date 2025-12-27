@@ -9,8 +9,9 @@ pub fn init() Error!void {
     // Arch-specific MMU preparation.
     try arch.mmu.init(allocator);
 
-    // Kernel mapping: 2MiB granule, RWX, normal.
-    try arch.mmu.map2mb(
+    // Kernel mapping: 1GiB granule, RWX, normal.
+    log.debug("Mapping kernel.", .{});
+    try arch.mmu.map1gb(
         pmap.kernel,
         vmap.kernel.start,
         vmap.kernel.size(),
@@ -20,6 +21,7 @@ pub fn init() Error!void {
     );
 
     // Linear mapping: 1GiB granule, RW, normal.
+    log.debug("Mapping linear memory.", .{});
     {
         var cur = vmap.linear.start;
 
@@ -38,6 +40,7 @@ pub fn init() Error!void {
     }
 
     // Temporary device identity mapping: 4KiB granule, RW, device.
+    log.debug("Mapping device memory.", .{});
     {
         const peri = pmap.pl011;
 

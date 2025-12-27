@@ -75,8 +75,8 @@ fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer, prefix: [
     var out_name: [256]u8 = undefined;
     var out_value: [256]u8 = undefined;
 
-    switch (@TypeOf(value)) {
-        comptime_int => {
+    switch (@typeInfo(@TypeOf(value))) {
+        .comptime_int => {
             // Name
             const namep = std.ascii.upperString(
                 &out_name,
@@ -97,61 +97,109 @@ fn writeItem(value: anytype, name: []const u8, writer: *std.io.Writer, prefix: [
             );
         },
 
-        Range => {
-            const namep = std.ascii.upperString(
-                &out_name,
-                name,
-            );
+        .@"struct" => {
+            switch (@TypeOf(value)) {
+                Range => {
+                    try writeRangeItem(
+                        value,
+                        name,
+                        writer,
+                        prefix,
+                    );
+                },
 
-            // Start
-            const start = std.fmt.printInt(
-                &out_value,
-                value.start,
-                16,
-                .upper,
-                .{},
-            );
-            try writer.print(
-                "#define {s}{s}_START 0x{s}\n",
-                .{ prefix, namep, out_value[0..start] },
-            );
-
-            // End
-            const end = std.fmt.printInt(
-                &out_value,
-                value.end,
-                16,
-                .upper,
-                .{},
-            );
-            try writer.print(
-                "#define {s}{s}_END 0x{s}\n",
-                .{ prefix, namep, out_value[0..end] },
-            );
-
-            // Size
-            const size = std.fmt.printInt(
-                &out_value,
-                value.end - value.start,
-                16,
-                .upper,
-                .{},
-            );
-            try writer.print(
-                "#define {s}{s}_SIZE 0x{s}\n",
-                .{ prefix, namep, out_value[0..size] },
-            );
-
-            try writer.print("\n", .{});
+                else => return unsupportedType(value),
+            }
         },
 
-        else => {
-            log.err("Unsupported type for constant generation: {s}", .{@typeName(@TypeOf(value))});
-            return;
+        .array => |array| {
+            switch (array.child) {
+                Range => {
+                    const ptr: [*]const Range = @ptrCast(&value);
+                    for (ptr[0..array.len], 0..) |range, i| {
+                        const name_indexed = try std.fmt.bufPrint(
+                            &out_name,
+                            "{s}_{d}",
+                            .{ name, i },
+                        );
+
+                        try writeRangeItem(
+                            range,
+                            name_indexed,
+                            writer,
+                            prefix,
+                        );
+                    }
+                },
+
+                else => return unsupportedType(value),
+            }
         },
+
+        else => return unsupportedType(value),
     }
 
     try writer.flush();
+}
+
+/// Write a Range item to the output writer.
+fn writeRangeItem(value: Range, name: []const u8, writer: *std.io.Writer, prefix: []const u8) !void {
+    var out_name: [256]u8 = undefined;
+    var out_value: [256]u8 = undefined;
+
+    const namep = std.ascii.upperString(
+        &out_name,
+        name,
+    );
+
+    // Start
+    const start = std.fmt.printInt(
+        &out_value,
+        value.start,
+        16,
+        .upper,
+        .{},
+    );
+    try writer.print(
+        "#define {s}{s}_START 0x{s}\n",
+        .{ prefix, namep, out_value[0..start] },
+    );
+
+    // End
+    const end = std.fmt.printInt(
+        &out_value,
+        value.end,
+        16,
+        .upper,
+        .{},
+    );
+    try writer.print(
+        "#define {s}{s}_END 0x{s}\n",
+        .{ prefix, namep, out_value[0..end] },
+    );
+
+    // Size
+    const size = std.fmt.printInt(
+        &out_value,
+        value.end - value.start,
+        16,
+        .upper,
+        .{},
+    );
+    try writer.print(
+        "#define {s}{s}_SIZE 0x{s}\n",
+        .{ prefix, namep, out_value[0..size] },
+    );
+
+    try writer.print("\n", .{});
+}
+
+/// Print an error for unsupported type.
+fn unsupportedType(value: anytype) void {
+    log.err(
+        "Unsupported type for constant generation: {s}",
+        .{@typeName(@TypeOf(value))},
+    );
 }
 
 // =============================================================

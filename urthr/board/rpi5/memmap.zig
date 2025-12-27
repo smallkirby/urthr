@@ -2,15 +2,14 @@
 //!
 //! This file is referenced by mkconst tool.
 
-/// DRAM0 (1016 MiB).
-pub const primary_dram = Range{
-    .start = 0x0000_0000,
-    .end = 0x3F80_0000,
-};
-
 /// Available DRAM regions.
 pub const drams = [_]Range{
-    primary_dram,
+    // 1016 MiB
+    .{
+        .start = 0x0000_0000,
+        .end = 0x3F80_0000,
+    },
+    // 7168 MiB
     .{
         .start = 0x0000_4000_0000,
         .end = 0x0002_0000_0000,
@@ -30,14 +29,24 @@ pub const loader = 0x0020_0000;
 ///
 /// Kernel can use the region after it ensures that the region is free.
 pub const loader_reserved = Range{
-    .start = primary_dram.start,
-    .end = primary_dram.start + 0x0010_0000,
+    .start = drams[0].start,
+    .end = loader,
 };
 
-/// Physical address of the kernel.
-pub const kernel = 0x0000_0000;
-/// Physical load address of the kernel.
-pub const kernel_entry = 0x0040_0000;
+/// Physical load address of the kernel image.
+pub const kernel = 0x0040_0000;
+
+comptime {
+    if (loader_reserved.end > loader) {
+        @compileError("Condition not met: loader_reserved.end <= loader");
+    }
+    if (loader >= kernel) {
+        @compileError("Condition not met: loader < kernel");
+    }
+    if (kernel >= drams[0].end) {
+        @compileError("Condition not met: kernel < drams[0].end");
+    }
+}
 
 // =============================================================
 // Peripherals
