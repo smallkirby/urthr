@@ -14,7 +14,7 @@ pub fn init() Error!void {
     try arch.mmu.map1gb(
         pmap.kernel,
         vmap.kernel.start,
-        vmap.kernel.size(),
+        util.roundup(kernelSize(), units.gib),
         .kernel_rwx,
         .normal,
         allocator,
@@ -58,6 +58,14 @@ pub fn init() Error!void {
     arch.mmu.enable(allocator);
 }
 
+/// End virtual address of kernel image.
+extern const __end: *void;
+
+/// Get the size in bytes of the kernel image.
+fn kernelSize() usize {
+    return @intFromPtr(__end) - urd.mem.vmap.kernel.start;
+}
+
 // =============================================================
 // Imports
 // =============================================================
@@ -67,6 +75,8 @@ const log = std.log.scoped(.mem);
 const arch = @import("arch").impl;
 const board = @import("board").impl;
 const common = @import("common");
+const units = common.units;
+const util = common.util;
 const PageAllocator = common.PageAllocator;
 const urd = @import("urthr");
 const pmap = board.memmap;
