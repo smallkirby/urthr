@@ -12,7 +12,7 @@ PHDRS {
 
 SECTIONS
 {
-    . = V_KERNEL_START + P_KERNEL_ENTRY;
+    . = V_KERNEL_START + P_KERNEL;
 
     .text : ALIGN(4K)
     {
