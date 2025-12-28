@@ -77,10 +77,17 @@ pub fn build(b: *std.Build) !void {
         "QEMU waits for GDB connection.",
     ) orelse false;
 
+    const enable_rtt = b.option(
+        bool,
+        "rtt",
+        "Enable runtime tests in the kernel.",
+    ) orelse false;
+
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
     options.addOption(board.BoardType, "board", board_type);
     options.addOption(bool, "serial_boot", serial_boot);
+    options.addOption(bool, "enable_rtt", enable_rtt);
 
     // =============================================================
     // Modules

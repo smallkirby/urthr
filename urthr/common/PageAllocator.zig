@@ -71,7 +71,7 @@ pub fn freePagesP(self: Self, slice: []u8) void {
 ///
 /// The slice points to a physical address.
 pub fn freePagesV(self: Self, slice: []u8) void {
-    const paddr = self.vtable.virt2phys(@intFromPtr(slice.ptr));
+    const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(slice.ptr));
     const pslice: [*]u8 = @ptrFromInt(paddr);
 
     return self.vtable.freePages(self.ptr, pslice[0..slice.len]);
@@ -91,6 +91,7 @@ pub fn translateP(self: Self, vobj: anytype) @TypeOf(vobj) {
                 return @as([*]C, @ptrFromInt(paddr))[0..vobj.len];
             },
         },
+        .int => return self.vtable.virt2phys(self.ptr, vobj),
         else => @compileError("Unsupported type."),
     };
 }
@@ -109,6 +110,7 @@ pub fn translateV(self: Self, pobj: anytype) @TypeOf(pobj) {
                 return @as([*]C, @ptrFromInt(vaddr))[0..pobj.len];
             },
         },
+        .int => return self.vtable.phys2virt(self.ptr, pobj),
         else => @compileError("Unsupported type."),
     };
 }

@@ -33,6 +33,7 @@ pub const SystemReg = enum {
     far_el1,
     far_el2,
     far_el3,
+    pfar_el1,
 
     mair_el1,
     ttbr0_el1,
@@ -58,6 +59,7 @@ pub const SystemReg = enum {
             .tcr_el2, .tcr_el1 => Tcr,
             .id_aa64mmfr0_el1 => IdAa64Mmfr0,
             .far_el1, .far_el2, .far_el3 => Far,
+            .pfar_el1 => Pfar,
             .mair_el1 => Mair,
             .ttbr0_el1 => Ttbr0El1,
             .ttbr1_el1 => Ttbr1El1,
@@ -629,6 +631,14 @@ pub const IdAa64Mmfr0 = packed struct(u64) {
 /// Fault Address Register.
 pub const Far = packed struct(u64) {
     /// Fault address.
+    addr: u64,
+};
+
+/// PFAR_ELx.
+///
+/// Physical Fault Address Register.
+pub const Pfar = packed struct(u64) {
+    /// Physical fault address.
     addr: u64,
 };
 

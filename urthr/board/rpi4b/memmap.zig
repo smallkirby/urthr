@@ -28,7 +28,7 @@ pub const loader_reserved = Range{
     .end = loader,
 };
 
-/// Physical load address of the kernel image.
+/// Physical load address of the kernel
 pub const kernel = 0x0040_0000;
 
 comptime {

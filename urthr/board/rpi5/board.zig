@@ -9,6 +9,9 @@ pub fn boot() void {
     dd.pl011.init(44_236_800, 921_600); // 44.237 MHz, 921600 bps
 }
 
+/// De-initialize loader resources.
+pub fn deinitLoader() void {}
+
 /// Get console instance.
 ///
 /// This is a zero cost operation with no runtime overhead.

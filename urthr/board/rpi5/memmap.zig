@@ -1,4 +1,4 @@
-//! Physical memory map of Raspberry Pi 4B.
+//! Physical memory map of Raspberry Pi 5.
 //!
 //! This file is referenced by mkconst tool.
 
@@ -37,6 +37,9 @@ pub const loader_reserved = Range{
 pub const kernel = 0x0040_0000;
 
 comptime {
+    if (drams[0].start > loader_reserved.start) {
+        @compileError("Condition not met: drams[0].start <= loader_reserved.start");
+    }
     if (loader_reserved.end > loader) {
         @compileError("Condition not met: loader_reserved.end <= loader");
     }

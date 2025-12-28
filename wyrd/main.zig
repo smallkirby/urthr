@@ -29,7 +29,7 @@ const KernelEntry = fn () callconv(.c) noreturn;
 /// Reserved DRAM region for Wyrd bootloader.
 const wyrd_reserved = board.memmap.loader_reserved;
 /// Memory start address.
-const workbuf_start = if (wyrd_reserved.start == 0) wyrd_reserved.start + 0x1000 else wyrd_reserved;
+const workbuf_start = if (wyrd_reserved.start == 0) wyrd_reserved.start + 0x1000 else wyrd_reserved.start;
 /// Memory end address.
 const workbuf_end = wyrd_reserved.end;
 /// Memory size in bytes.
