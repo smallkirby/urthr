@@ -6,9 +6,6 @@ pub const std_options = std.Options{
 };
 
 /// Zig entry point for Urthr kernel.
-///
-/// This function is called in EL1 with MMU enabled.
-/// UART and entire DRAM regions are identity-mapped, and kernel image is mapped at link address.
 export fn kmain() callconv(.c) noreturn {
     // Early board initialization.
     board.boot();
@@ -37,9 +34,7 @@ export fn kmain() callconv(.c) noreturn {
 
     // Halt.
     log.err("Reached unreachable EOL.", .{});
-    while (true) {
-        asm volatile ("wfe");
-    }
+    urd.eol();
 }
 
 /// Zig calling convention entry.
@@ -47,6 +42,13 @@ fn zmain() !void {
     // Initialize mappings.
     log.info("Initializing MMU.", .{});
     try urd.mem.init();
+
+    // Deinit loader.
+    board.deinitLoader();
+
+    // Initialize page allocator.
+    log.info("Initializing page allocator.", .{});
+    urd.mem.initPageAllocator();
 }
 
 // =============================================================

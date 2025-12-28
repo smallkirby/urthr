@@ -1,6 +1,20 @@
 pub const exception = @import("kernel/exception.zig");
 pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
+pub const rtt = @import("kernel/rtt.zig");
+
+pub const LogFn = klog.LogFn;
+pub const SpinLock = @import("kernel/SpinLock.zig");
+
+/// Runtime tests enabled.
+pub const enable_rtt = options.enable_rtt;
+
+/// Reached end of life.
+pub fn eol() noreturn {
+    while (true) {
+        arch.halt();
+    }
+}
 
 /// APIs for early boot stage.
 pub const boot = struct {
@@ -24,3 +38,10 @@ pub const boot = struct {
         return &allocator;
     }
 };
+
+// =============================================================
+// Imports
+// =============================================================
+
+const arch = @import("arch").impl;
+const options = @import("common").options;

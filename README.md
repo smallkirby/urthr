@@ -10,7 +10,8 @@
 zig build run --summary all \
   -Dlog_level=debug \
   -Doptimize=Debug \
-  -Dboard=rpi4b
+  -Dboard=rpi4b \
+  -Drtt
 ```
 
 ### Raspberry Pi 5
@@ -22,6 +23,7 @@ zig build install --summary all \
   -Dlog_level=debug \
   -Doptimize=Debug \
   -Dboard=rpi5 \
+  -Drtt \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
@@ -33,6 +35,7 @@ zig build install --summary all \
   -Doptimize=Debug \
   -Dboard=rpi5 \
   -Dserial_boot \
+  -Drtt \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
@@ -57,5 +60,6 @@ zig build test --summary all -Doptimize=Debug
 | `sdcard` | Path | Path to mounted SD card device. | - |
 | `log_level` | String: `debug`, `info`, `warn`, `error` | Logging level. Output under the logging level is suppressed. | `info` |
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
+| `rtt` | Flag | Enable runtime tests. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 | `qemu` | Path | Path to QEMU (aarch64) directory. | `$HOME/qemu-aarch64` |

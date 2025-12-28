@@ -1,3 +1,6 @@
+/// Logger function type
+pub const LogFn = *const fn (comptime format: []const u8, args: anytype) void;
+
 /// Log level.
 ///
 /// Can be configured by compile-time options. See build.zig.

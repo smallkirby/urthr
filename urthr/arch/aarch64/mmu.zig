@@ -36,11 +36,12 @@ pub fn map4kb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribu
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
 
+    const granule = page_size;
     const asize = util.roundup(size, page_size);
 
     for (0..asize / page_size) |i| {
-        const cur_pa = pa + i * page_size;
-        const cur_va = va + i * page_size;
+        const cur_pa = pa + i * granule;
+        const cur_va = va + i * granule;
         const desc = try lookupSpawn(cur_va, 3, allocator);
 
         desc.* = PageDesc{
@@ -68,11 +69,12 @@ pub fn map2mb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribu
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
 
+    const granule = 2 * units.mib;
     const asize = util.roundup(size, units.mib);
 
     for (0..asize / units.mib) |i| {
-        const cur_pa = pa + i * page_size;
-        const cur_va = va + i * page_size;
+        const cur_pa = pa + i * granule;
+        const cur_va = va + i * granule;
         const desc = try lookupSpawn(cur_va, 2, allocator);
 
         desc.* = PageDesc{
@@ -100,11 +102,12 @@ pub fn map1gb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribu
     if (va % page_size != 0) return Error.InvalidArgument;
     if (size % page_size != 0) return Error.InvalidArgument;
 
+    const granule = 1 * units.gib;
     const asize = util.roundup(size, units.gib);
 
     for (0..asize / units.gib) |i| {
-        const cur_pa = pa + i * page_size;
-        const cur_va = va + i * page_size;
+        const cur_pa = pa + i * granule;
+        const cur_va = va + i * granule;
         const desc = try lookupSpawn(cur_va, 1, allocator);
 
         desc.* = PageDesc{
@@ -151,7 +154,7 @@ pub fn enable(allocator: PageAllocator) void {
     // Configure MAIR_EL1.
     const mair = std.mem.zeroInit(regs.Mair, .{
         .attr0 = 0b0000_0000, // Device-nGnRnE
-        .attr1 = 0b0100_0100, // Normal memory
+        .attr1 = 0b1111_1111, // Normal: Outer Write-Back Write-Allocate, Inner Write-Back Write-Allocate
     });
     am.msr(.mair_el1, mair);
 
@@ -173,6 +176,37 @@ pub fn enable(allocator: PageAllocator) void {
     sctlr.c = true; // Enable data cache
     sctlr.m = true; // Enable MMU
     am.msr(.sctlr_el1, sctlr);
+
+    // Clear all caches.
+    am.isb();
+    am.dsb(.sy);
+    asm volatile ("tlbi vmalle1");
+    am.dsb(.sy);
+}
+
+/// Translate the given virtual address to physical address by walking the page tables.
+pub fn translateWalk(va: usize, allocator: PageAllocator) ?usize {
+    var tbl = allocator.translateV(getRoot(va));
+
+    var cur_level: Level = 0;
+    while (cur_level <= 3) : (cur_level += 1) {
+        const tdesc: *const TableDesc = &tbl[getIndex(cur_level, va)];
+        const pdesc: *const PageDesc = @ptrCast(tdesc);
+
+        if (!tdesc.valid) {
+            return null;
+        }
+
+        if (cur_level == 3 or pdesc.type == .block) {
+            const page_desc: *const PageDesc = @ptrCast(tdesc);
+            return @as(usize, @intCast(page_desc.oa)) << 12;
+        }
+
+        // Descend to the next level.
+        tbl = getTable(TableDesc, allocator.translateV(tdesc.next()));
+    }
+
+    return null;
 }
 
 /// Lookup the page descriptor for the given virtual address.

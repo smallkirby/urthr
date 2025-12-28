@@ -3,6 +3,22 @@ pub fn eret() noreturn {
     unreachable;
 }
 
+const DsbOption = enum {
+    sy,
+    ish,
+    nsh,
+    osh,
+};
+
+pub fn dsb(option: DsbOption) void {
+    switch (option) {
+        .sy => asm volatile ("dsb sy"),
+        .ish => asm volatile ("dsb ish"),
+        .nsh => asm volatile ("dsb nsh"),
+        .osh => asm volatile ("dsb osh"),
+    }
+}
+
 pub fn isb() void {
     asm volatile ("isb");
 }
