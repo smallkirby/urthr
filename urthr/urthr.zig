@@ -25,7 +25,7 @@ pub fn eol() noreturn {
 
 /// APIs for early boot stage.
 pub const boot = struct {
-    const BootAllocator = @import("kernel/BootAllocator.zig");
+    const BootAllocator = @import("kernel/mem/BootAllocator.zig");
 
     /// Early page allocator instance.
     var allocator: BootAllocator = undefined;
