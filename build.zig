@@ -83,11 +83,18 @@ pub fn build(b: *std.Build) !void {
         "Enable runtime tests in the kernel.",
     ) orelse false;
 
+    const restart = b.option(
+        bool,
+        "restart",
+        "Restart the CPU instead of halting on panic.",
+    ) orelse false;
+
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
     options.addOption(board.BoardType, "board", board_type);
     options.addOption(bool, "serial_boot", serial_boot);
     options.addOption(bool, "enable_rtt", enable_rtt);
+    options.addOption(bool, "restart_on_panic", restart);
 
     // =============================================================
     // Modules

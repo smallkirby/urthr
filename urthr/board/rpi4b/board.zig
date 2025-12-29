@@ -12,6 +12,9 @@ pub fn boot() void {
     dd.gpio.selectAltFn(14, .alt0); // TXD0
     dd.gpio.selectAltFn(15, .alt0); // RXD0
     dd.pl011.init(48_000_000, 921_600); // 48 MHz, 921600 bps
+
+    // Setup PM.
+    rdd.pm.setBase(map.pm.start);
 }
 
 /// De-initialize loader resources.
@@ -28,6 +31,13 @@ pub fn getConsole() Console {
         },
         .ctx = &.{},
     };
+}
+
+/// Trigger a system cold reset.
+///
+/// This function returns before the reset actually happens.
+pub fn reset() void {
+    rdd.pm.reset();
 }
 
 /// Wrapper functions for console API.
@@ -51,3 +61,4 @@ const common = @import("common");
 const Console = common.Console;
 const dd = @import("dd");
 const map = @import("memmap.zig");
+const rdd = @import("dd.zig");

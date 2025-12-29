@@ -41,16 +41,28 @@ pub fn init() Error!void {
     // Temporary device identity mapping: 4KiB granule, RW, device.
     log.debug("Mapping device memory.", .{});
     {
-        const peri = pmap.pl011;
-
-        try arch.mmu.map4kb(
-            peri.start,
-            peri.start,
-            peri.size(),
-            .kernel_rw,
-            .device,
-            allocator,
-        );
+        {
+            const peri = pmap.pl011;
+            try arch.mmu.map4kb(
+                peri.start,
+                peri.start,
+                peri.size(),
+                .kernel_rw,
+                .device,
+                allocator,
+            );
+        }
+        {
+            const peri = pmap.pm;
+            try arch.mmu.map4kb(
+                peri.start,
+                peri.start,
+                peri.size(),
+                .kernel_rw,
+                .device,
+                allocator,
+            );
+        }
     }
 
     // Switch to the new page table.
