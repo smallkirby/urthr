@@ -11,6 +11,13 @@ pub const enable_rtt = options.enable_rtt;
 
 /// Reached end of life.
 pub fn eol() noreturn {
+    if (options.restart_on_panic) {
+        var console = board.getConsole();
+        _ = console.println("Restarting CPU...");
+
+        board.reset();
+    }
+
     while (true) {
         arch.halt();
     }
@@ -45,3 +52,4 @@ pub const boot = struct {
 
 const arch = @import("arch").impl;
 const options = @import("common").options;
+const board = @import("board").impl;

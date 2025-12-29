@@ -23,6 +23,7 @@ zig build install --summary all \
   -Dlog_level=debug \
   -Doptimize=Debug \
   -Dboard=rpi5 \
+  -Drestart \
   -Drtt \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
@@ -35,6 +36,7 @@ zig build install --summary all \
   -Doptimize=Debug \
   -Dboard=rpi5 \
   -Dserial_boot \
+  -Drestart \
   -Drtt \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
@@ -63,3 +65,4 @@ zig build test --summary all -Doptimize=Debug
 | `rtt` | Flag | Enable runtime tests. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 | `qemu` | Path | Path to QEMU (aarch64) directory. | `$HOME/qemu-aarch64` |
+| `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |

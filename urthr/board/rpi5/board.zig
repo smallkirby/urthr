@@ -7,6 +7,9 @@ pub fn boot() void {
     // Setup PL011 UART.
     dd.pl011.setBase(memmap.pl011.start);
     dd.pl011.init(44_236_800, 921_600); // 44.237 MHz, 921600 bps
+
+    // Setup PM.
+    rdd.pm.setBase(memmap.pm.start);
 }
 
 /// De-initialize loader resources.
@@ -23,6 +26,13 @@ pub fn getConsole() Console {
         },
         .ctx = &.{},
     };
+}
+
+/// Trigger a system cold reset.
+///
+/// This function returns before the reset actually happens.
+pub fn reset() void {
+    rdd.pm.reset();
 }
 
 /// Wrapper functions for console API.
@@ -45,3 +55,4 @@ const arch = @import("arch");
 const common = @import("common");
 const Console = common.Console;
 const dd = @import("dd");
+const rdd = @import("dd.zig");
