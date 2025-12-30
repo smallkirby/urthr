@@ -41,5 +41,6 @@ pub const Range = struct {
 
 test {
     _ = mmio;
+    _ = typing;
     _ = util;
 }

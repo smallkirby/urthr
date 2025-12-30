@@ -453,22 +453,33 @@ pub fn build(b: *std.Build) !void {
     // Unit Tests
     // =============================================================
 
-    {
-        const unit_test = b.addTest(.{
-            .name = "urthr_test",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("urthr/test.zig"),
-                .target = b.resolveTargetQuery(.{}),
-                .optimize = optimize,
-                .link_libc = true,
-            }),
-            .use_llvm = true,
-        });
+    var ut = UnitTests.new(b);
 
-        const run_unit_test = b.addRunArtifact(unit_test);
-        const unit_test_step = b.step("test", "Run unit tests");
-        unit_test_step.dependOn(&run_unit_test.step);
-    }
+    try ut.addTestModule(
+        "common_test",
+        b.path("urthr/common.zig"),
+        &.{},
+        optimize,
+    );
+    try ut.addTestModule(
+        "dd_test",
+        b.path("urthr/dd.zig"),
+        &.{
+            .{ .name = "common", .module = common_module },
+            .{ .name = "arch", .module = arch_module },
+        },
+        optimize,
+    );
+    try ut.addTestModule(
+        "urthr_test",
+        b.path("urthr/urthr.zig"),
+        &.{
+            .{ .name = "common", .module = common_module },
+            .{ .name = "dd", .module = dd_module },
+            .{ .name = "urthr", .module = null },
+        },
+        optimize,
+    );
 }
 
 /// Get home directory path.
@@ -491,6 +502,51 @@ fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const 
 
     return .{ out, ld };
 }
+
+const ImportPair = struct {
+    name: []const u8,
+    module: ?*std.Build.Module,
+};
+
+const UnitTests = struct {
+    build: *std.Build,
+    step: *std.Build.Step,
+
+    pub fn new(b: *std.Build) UnitTests {
+        return UnitTests{
+            .build = b,
+            .step = b.step("test", "Run unit tests"),
+        };
+    }
+
+    pub fn addTestModule(
+        self: *UnitTests,
+        comptime name: []const u8,
+        root: LazyPath,
+        imports: []const ImportPair,
+        optimize: std.builtin.OptimizeMode,
+    ) !void {
+        const unit_test = self.build.addTest(.{
+            .name = name,
+            .root_module = self.build.createModule(.{
+                .root_source_file = root,
+                .target = self.build.resolveTargetQuery(.{}),
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+            .use_llvm = true,
+        });
+        for (imports) |import| {
+            unit_test.root_module.addImport(
+                import.name,
+                import.module orelse unit_test.root_module,
+            );
+        }
+
+        const run_unit_test = self.build.addRunArtifact(unit_test);
+        self.step.dependOn(&run_unit_test.step);
+    }
+};
 
 const Qemu = struct {
     /// QEMU path.

@@ -150,6 +150,7 @@ fn kernelSize() usize {
 // =============================================================
 
 test {
+    _ = BinAllocator;
     _ = BuddyAllocator;
 }
 

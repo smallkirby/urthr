@@ -183,7 +183,8 @@ const TestPageAllocator = struct {
     pub const vtable = PageAllocator.Vtable{
         .allocPages = allocPages,
         .freePages = freePages,
-        .freePagesRaw = freePagesRaw,
+        .virt2phys = virt2phys,
+        .phys2virt = phys2virt,
     };
 
     const Error = PageAllocator.Error;
@@ -199,7 +200,7 @@ const TestPageAllocator = struct {
         };
     }
 
-    pub fn allocPages(_: *anyopaque, num_pages: usize, _: mem.Zone) Error![]align(mem.size_4kib) u8 {
+    pub fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(mem.size_4kib) u8 {
         const ret = try std.heap.page_allocator.alloc(
             u8,
             mem.size_4kib * num_pages,
@@ -213,6 +214,14 @@ const TestPageAllocator = struct {
 
     pub fn freePagesRaw(_: *anyopaque, _: mem.Virt, _: usize) Error!void {
         return;
+    }
+
+    pub fn virt2phys(_: *const anyopaque, addr: usize) usize {
+        return addr;
+    }
+
+    pub fn phys2virt(_: *const anyopaque, addr: usize) usize {
+        return addr;
     }
 };
 
