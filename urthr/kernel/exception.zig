@@ -2,6 +2,9 @@
 pub fn initLocal() void {
     arch.exception.setConsole(board.getConsole());
     arch.exception.initLocal();
+
+    // Set terminator function.
+    arch.exception.setTerminator(urd.eol);
 }
 
 // =============================================================
@@ -11,3 +14,4 @@ pub fn initLocal() void {
 const std = @import("std");
 const board = @import("board").impl;
 const arch = @import("arch").impl;
+const urd = @import("urthr");
