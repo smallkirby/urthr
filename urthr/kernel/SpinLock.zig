@@ -32,7 +32,7 @@ pub fn lockDisableIrq(self: *SpinLock) u64 {
         return ie;
     } else {
         lock(self);
-        return false;
+        return 0;
     }
 }
 
