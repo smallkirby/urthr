@@ -1,3 +1,18 @@
+pub const Error = error{
+    /// Out of memory.
+    OutOfMemory,
+    /// Virtual memory allocation failed.
+    OutOfVirtualMemory,
+    /// The argument is invalid.
+    InvalidArgument,
+    /// Current mapping does not match the requested mapping.
+    InvalidMapping,
+    /// The specified region is invalid.
+    InvalidRegion,
+    /// Resource not available.
+    NotAvailable,
+};
+
 /// Memory permission.
 pub const Permission = struct {
     /// User readable.

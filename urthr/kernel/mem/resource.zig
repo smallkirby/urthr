@@ -28,8 +28,6 @@ pub const MemoryResource = struct {
     start: usize,
     /// Size in bytes of the memory resource.
     size: usize,
-    /// Memory type.
-    kind: Kind,
 
     /// Memory this resource belongs to.
     parent: ?*MemoryResource = null,
@@ -37,30 +35,6 @@ pub const MemoryResource = struct {
     children: ResourceList = .{},
     /// List head.
     list_head: ResourceList.Head = .{},
-
-    /// Type of the memory resource.
-    const Kind = enum {
-        /// Unknown memory type. Regarded as reserved.
-        unknown,
-        /// Reserved by firmware.
-        reserved,
-        /// System RAM.
-        system_ram,
-        /// Norn RAM. Kernel image is loaded here.
-        norn_image,
-        /// PCI device.
-        pci,
-
-        pub fn toString(self: Kind) []const u8 {
-            return switch (self) {
-                .unknown => "Unknown",
-                .reserved => "Reserved",
-                .system_ram => "System RAM",
-                .norn_image => "Norn Image",
-                .pci => "PCI",
-            };
-        }
-    };
 
     /// Add a child memory resource to this resource.
     pub fn appendChild(
@@ -89,7 +63,6 @@ pub const MemoryResource = struct {
             .name = name,
             .start = start,
             .size = size,
-            .kind = self.kind,
             .parent = self,
             .children = .{},
         };
@@ -111,7 +84,6 @@ pub fn requestResource(
     name: []const u8,
     start: usize,
     size: usize,
-    kind: MemoryResource.Kind,
     allocator: Allocator,
 ) ResourceError!*MemoryResource {
     if (start % mem.size_4kib != 0) {
@@ -136,7 +108,6 @@ pub fn requestResource(
         .name = name,
         .start = start,
         .size = size,
-        .kind = kind,
     };
     resources.insertSorted(resource, compareResources);
 
@@ -177,7 +148,7 @@ pub fn debugPrintResources(logger: anytype) void {
         logger("{X:0>12}-{X:0>12} : {s}", .{
             res.start,
             res.start + res.size,
-            res.name orelse res.kind.toString(),
+            res.name orelse "",
         });
 
         var child_current = res.children.first;
@@ -185,7 +156,7 @@ pub fn debugPrintResources(logger: anytype) void {
             logger("\t{X:0>12}-{X:0>12} : {s}", .{
                 child.start,
                 child.start + child.size,
-                child.name orelse child.kind.toString(),
+                child.name orelse "",
             });
         }
     }

@@ -1,4 +1,4 @@
-pub const Error = arch.mmu.Error || resource.ResourceError;
+pub const Error = common.mem.Error;
 
 pub const resource = @import("mem/resource.zig");
 
@@ -9,10 +9,17 @@ pub const size_2mib = 2 * units.mib;
 /// Size in bytes of 1GiB.
 pub const size_1gib = 1 * units.gib;
 
+/// Virtual address type.
+pub const Virt = usize;
+/// Physical address type.
+pub const Phys = usize;
+
 /// Buddy allocator instance.
 var buddy_allocator: BuddyAllocator = undefined;
 /// Bin allocator instance.
 var bin_allocator: BinAllocator = undefined;
+/// VM allocator instance.
+var vm_allocator: VmAllocator = undefined;
 
 /// Initialize memory management.
 ///
@@ -81,6 +88,28 @@ pub fn init() Error!void {
     arch.mmu.enable(allocator);
 }
 
+/// Initialize allocators.
+pub fn initAllocators() void {
+    // Page allocator.
+    const avails = board.memmap.drams;
+    var reserveds = [_]Range{
+        // Kernel image
+        .{
+            .start = pmap.kernel,
+            .end = pmap.kernel + kernelSize(),
+        },
+        // Early allocator region
+        urd.boot.getAllocator().getUsedRegion(),
+    };
+    buddy_allocator.init(&avails, &reserveds, log.debug);
+
+    // Bin allocator.
+    bin_allocator.init(getPageAllocator());
+
+    // VM allocator.
+    vm_allocator.init(vmap.vmem.start, vmap.vmem.end);
+}
+
 /// Initialize memory resources.
 pub fn initResources() Error!void {
     const allocator = getGeneralAllocator();
@@ -91,7 +120,6 @@ pub fn initResources() Error!void {
             "System RAM",
             dram.start,
             dram.size(),
-            .system_ram,
             allocator,
         );
 
@@ -106,30 +134,14 @@ pub fn initResources() Error!void {
     }
 }
 
-/// Initialize the page allocator.
-pub fn initPageAllocator() void {
-    const avails = board.memmap.drams;
-    var reserveds = [_]Range{
-        // Kernel image
-        .{
-            .start = pmap.kernel,
-            .end = pmap.kernel + kernelSize(),
-        },
-        // Early allocator region
-        urd.boot.getAllocator().getUsedRegion(),
-    };
-
-    buddy_allocator.init(&avails, &reserveds, log.debug);
+/// Remap the I/O memory regions of the board.
+pub fn remapBoard() Error!void {
+    try board.remap(vm_allocator.interface());
 }
 
 /// Get the page allocator.
 pub fn getPageAllocator() PageAllocator {
     return buddy_allocator.interface();
-}
-
-/// Initialize the general-purpose allocator.
-pub fn initGeneralAllocator() void {
-    bin_allocator.init(getPageAllocator());
 }
 
 /// Get the general-purpose allocator.
@@ -173,3 +185,4 @@ const pmap = board.memmap;
 const vmap = @import("mem/vmemmap.zig");
 const BinAllocator = @import("mem/BinAllocator.zig");
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
+const VmAllocator = @import("mem/VmAllocator.zig");
