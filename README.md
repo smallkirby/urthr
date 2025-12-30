@@ -2,6 +2,11 @@
 
 ![Zig](https://shields.io/badge/Zig-v0%2E15%2E2-blue?logo=zig&color=F7A41D&style=for-the-badge)
 
+![Lint](https://github.com/smallkirby/urthr/actions/workflows/lint.yml/badge.svg)
+![Unit Tests](https://github.com/smallkirby/urthr/actions/workflows/unittest.yml/badge.svg)
+![Runtime Test Rpi4b](https://github.com/smallkirby/urthr/actions/workflows/runtime-test.yml/badge.svg)
+![Build Rpi5](https://github.com/smallkirby/urthr/actions/workflows/build.yml/badge.svg)
+
 ## Development
 
 ### Raspberry Pi 4 emulated on QEMU
@@ -64,5 +69,5 @@ zig build test --summary all -Doptimize=Debug
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
 | `rtt` | Flag | Enable runtime tests. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
-| `qemu` | Path | Path to QEMU (aarch64) directory. | `$HOME/qemu-aarch64` |
+| `qemu` | Path | Path to QEMU (aarch64) directory. | `$HOME/qemu-aarch64/bin` |
 | `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |
