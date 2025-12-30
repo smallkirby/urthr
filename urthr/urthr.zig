@@ -23,6 +23,20 @@ pub fn eol() noreturn {
     }
 }
 
+/// Print an unimplemented message and reach end of life.
+///
+/// - `msg`: Message to print.
+pub fn unimplemented(comptime msg: []const u8) noreturn {
+    @branchHint(.cold);
+
+    var console = board.getConsole();
+    _ = console.println("UNIMPLEMENTED: ");
+    _ = console.println(msg);
+    _ = console.println("\n");
+
+    eol();
+}
+
 /// APIs for early boot stage.
 pub const boot = struct {
     const BootAllocator = @import("kernel/mem/BootAllocator.zig");

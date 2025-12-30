@@ -47,16 +47,18 @@ fn zmain() !void {
     board.deinitLoader();
 
     // Initialize page allocator.
-    log.info("Initializing page allocator.", .{});
-    urd.mem.initPageAllocator();
-
-    // Initialize general-purpose allocator.
-    log.info("Initializing general-purpose allocator.", .{});
-    urd.mem.initGeneralAllocator();
+    log.info("Initializing allocators.", .{});
+    urd.mem.initAllocators();
 
     // Initialize memory resources.
     log.info("Initializing memory resources.", .{});
     try urd.mem.initResources();
+
+    // Remap board I/O memory.
+    log.info("Remapping board I/O memory.", .{});
+    try urd.mem.remapBoard();
+    log.debug("Memory Map:", .{});
+    urd.mem.resource.debugPrintResources(log.debug);
 }
 
 // =============================================================
