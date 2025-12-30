@@ -49,6 +49,14 @@ fn zmain() !void {
     // Initialize page allocator.
     log.info("Initializing page allocator.", .{});
     urd.mem.initPageAllocator();
+
+    // Initialize general-purpose allocator.
+    log.info("Initializing general-purpose allocator.", .{});
+    urd.mem.initGeneralAllocator();
+
+    // Initialize memory resources.
+    log.info("Initializing memory resources.", .{});
+    try urd.mem.initResources();
 }
 
 // =============================================================

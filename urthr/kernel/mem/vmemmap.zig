@@ -17,6 +17,11 @@ pub const device = Range{
     .end = 0xFFFF_E000_0000_0000,
 };
 
+pub const vmem = Range{
+    .start = 0xFFFF_E000_0000_0000,
+    .end = 0xFFFF_F000_0000_0000,
+};
+
 pub const kernel = Range{
     .start = 0xFFFF_FF00_0000_0000,
     .end = 0xFFFF_FFF0_0000_0000,
