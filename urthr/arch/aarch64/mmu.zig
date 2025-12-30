@@ -60,6 +60,8 @@ pub fn map4kb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribu
                 .uxn = !perm.ux,
             },
         };
+
+        flush();
     }
 }
 
@@ -93,6 +95,8 @@ pub fn map2mb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribu
                 .uxn = !perm.ux,
             },
         };
+
+        flush();
     }
 }
 
@@ -126,6 +130,8 @@ pub fn map1gb(pa: usize, va: usize, size: usize, perm: Permission, attr: Attribu
                 .uxn = !perm.ux,
             },
         };
+
+        flush();
     }
 }
 
@@ -137,14 +143,14 @@ pub fn enable(allocator: PageAllocator) void {
     // Configure TCR_EL1.
     const tcr = regs.Tcr{
         .t0sz = 64 - va_range,
-        .irgn0 = .nc,
-        .orgn0 = .nc,
+        .irgn0 = .wbrawac,
+        .orgn0 = .wbrawac,
         .sh0 = .inner,
         .tg0 = .size_4kib,
         .t1sz = 64 - va_range,
         .a1 = 0,
-        .irgn1 = .nc,
-        .orgn1 = .nc,
+        .irgn1 = .wbrawac,
+        .orgn1 = .wbrawac,
         .sh1 = .inner,
         .tg1 = .size_4kib,
         .ips = 0b101, // 48-bit PA
@@ -175,13 +181,28 @@ pub fn enable(allocator: PageAllocator) void {
     sctlr.i = true; // Enable instruction cache
     sctlr.c = true; // Enable data cache
     sctlr.m = true; // Enable MMU
-    am.msr(.sctlr_el1, sctlr);
 
-    // Clear all caches.
-    am.isb();
-    am.dsb(.sy);
-    asm volatile ("tlbi vmalle1");
-    am.dsb(.sy);
+    asm volatile (
+        \\isb
+        \\dsb sy
+        \\tlbi vmalle1
+        \\dsb sy
+        \\isb
+        \\msr SCTLR_EL1, %[sctlr]
+        :
+        : [sctlr] "r" (@as(u64, @bitCast(sctlr))),
+    );
+}
+
+/// Flush all TLB entries.
+fn flush() void {
+    asm volatile (
+        \\isb
+        \\dsb sy
+        \\tlbi vmalle1
+        \\dsb sy
+        \\isb
+    );
 }
 
 /// Translate the given virtual address to physical address by walking the page tables.
@@ -213,7 +234,7 @@ pub fn translateWalk(va: usize, allocator: PageAllocator) ?usize {
 ///
 /// If the descriptor does not exist, spawn a new table descriptor recursively.
 fn lookupSpawn(va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
-    var tbl = getRoot(va);
+    var tbl = allocator.translateV(getRoot(va));
 
     var cur_level: Level = 0;
     while (cur_level < level) : (cur_level += 1) {
@@ -223,6 +244,8 @@ fn lookupSpawn(va: usize, level: Level, allocator: PageAllocator) Error!*PageDes
         if (!desc.valid) {
             const new_tbl = try allocNewTable(allocator, TableDesc);
             desc.* = TableDesc.new(@intFromPtr(allocator.translateP(new_tbl).ptr));
+
+            flush();
         }
 
         // The region is already mapped as a block or page.
@@ -231,7 +254,7 @@ fn lookupSpawn(va: usize, level: Level, allocator: PageAllocator) Error!*PageDes
         }
 
         // Descend to the next level.
-        tbl = getTable(TableDesc, desc.next());
+        tbl = allocator.translateV(getTable(TableDesc, desc.next()));
     }
 
     return @ptrCast(&tbl[getIndex(level, va)]);
