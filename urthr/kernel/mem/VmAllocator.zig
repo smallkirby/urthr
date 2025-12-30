@@ -27,6 +27,24 @@ const vtable = IoAllocator.Vtable{
     .reserve = reserve,
 };
 
+/// Initialize a VmAllocator instance.
+pub fn init(self: *Self, comptime vstart: Virt, comptime vend: Virt) void {
+    self.* = .{
+        ._lock = .{},
+        ._area_list = .{},
+        ._vstart = vstart,
+        ._vend = vend,
+    };
+}
+
+/// Get the IoAllocator interface.
+pub fn interface(self: *Self) IoAllocator {
+    return IoAllocator{
+        .ptr = self,
+        .vtable = &vtable,
+    };
+}
+
 /// Single virtually contiguous area.
 const VmArea = struct {
     /// Start virtual address of this area.
@@ -265,54 +283,9 @@ const GuardPagePosition = enum {
     none,
 };
 
-/// Initialize a VmAllocator instance.
-pub fn init(self: *Self, comptime vstart: Virt, comptime vend: Virt) void {
-    self.* = .{
-        ._lock = .{},
-        ._area_list = .{},
-        ._vstart = vstart,
-        ._vend = vend,
-    };
-}
-
-/// Allocates a memory from vmap region.
-///
-/// The allocated memory is virtually contiguous, but can be backed by non-contiguous physical pages.
-pub fn virtualAlloc(self: *VmAllocator, size: usize, guard: GuardPagePosition) Error![]u8 {
-    const ie = self._lock.lockDisableIrq();
-    defer self._lock.unlockRestoreIrq(ie);
-
-    // Allocate a virtual memory range.
-    const vmarea = try VmArea.allocateVrange(
-        self,
-        size,
-        mem.size_4kib,
-        guard,
-    );
-    errdefer VmArea.freeVrange(self, vmarea);
-
-    // Allocate backing physical pages and map them to the allocated virtual memory area.
-    try vmarea.allocateMapPhysicalPages();
-
-    // Returns the slice with the exact requested size.
-    return vmarea.usableSlice(size);
-}
-
-/// Frees a memory allocated by `virtualAlloc()`.
-pub fn virtualFree(self: *VmAllocator, ptr: []u8) void {
-    const ie = self._lock.lockDisableIrq();
-    defer self._lock.unlockRestoreIrq(ie);
-
-    const vmarea_node = self._area_list.find(@intFromPtr(ptr.ptr)) orelse {
-        @panic("Invalid pointer passed to VmAllocator.virtualFree()");
-    };
-    const vmarea = vmarea_node.container();
-
-    vmarea.freeUnmapPhysicalPages() catch |err| {
-        log.err("Failed to unmap physical pages for virtual memory area: {s}", .{@errorName(err)});
-    };
-    VmArea.freeVrange(self, vmarea);
-}
+// =============================================================
+// Interface Implementation
+// =============================================================
 
 /// Map the given physical I/O memory region into the virtual address space.
 fn ioremap(ctx: *anyopaque, paddr: usize, size: usize) IoAllocator.Error!usize {
@@ -375,6 +348,7 @@ fn ioremap(ctx: *anyopaque, paddr: usize, size: usize) IoAllocator.Error!usize {
     return vmarea_node.start;
 }
 
+/// Reserve the given physical I/O memory region.
 fn reserve(_: *anyopaque, name: []const u8, paddr: usize, size: usize) IoAllocator.Error!void {
     _ = try resource.requestResource(
         name,
@@ -384,13 +358,9 @@ fn reserve(_: *anyopaque, name: []const u8, paddr: usize, size: usize) IoAllocat
     );
 }
 
-/// Get the IoAllocator interface.
-pub fn interface(self: *Self) IoAllocator {
-    return IoAllocator{
-        .ptr = self,
-        .vtable = &vtable,
-    };
-}
+// =============================================================
+// Utilities
+// =============================================================
 
 /// Get a general-purpose allocator.
 fn gallocator() Allocator {
