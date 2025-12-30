@@ -5,6 +5,9 @@ extern const exception_table: *void;
 /// TODO: should be per-CPU.
 var in_handling: bool = false;
 
+/// Called when an exception handler reaches the end.
+var terminator: ?*const fn () void = null;
+
 /// Initialize exception handling for this CPU.
 pub fn initLocal() void {
     am.msr(.vbar_el1, .{ .addr = @intFromPtr(&exception_table) });
@@ -15,6 +18,11 @@ pub fn initLocal() void {
 /// Set the console used to print exception information.
 pub fn setConsole(c: Console) void {
     console = c;
+}
+
+/// Set the terminator function called at the end of exception handlers.
+pub fn setTerminator(f: @TypeOf(terminator)) void {
+    terminator = f;
 }
 
 // =============================================================
@@ -125,6 +133,11 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     var ix: usize = 0;
     while (it.next()) |frame| : (ix += 1) {
         w.log("#{d:0>2}: 0x{X:0>16}", .{ ix, frame });
+    }
+
+    // Call the terminator if set.
+    if (terminator) |term_fn| {
+        term_fn();
     }
 
     // Halt the CPU.
