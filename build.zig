@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) !void {
         []const u8,
         "qemu",
         "Path to QEMU install directory",
-    ) orelse b.fmt("{s}/qemu-aarch64", .{home()});
+    ) orelse b.fmt("{s}/qemu-aarch64/bin", .{home()});
 
     const wait_qemu = b.option(
         bool,
@@ -421,7 +421,7 @@ pub fn build(b: *std.Build) !void {
 
     {
         const qemu_bin = b.fmt(
-            "{s}/bin/qemu-system-aarch64",
+            "{s}/qemu-system-aarch64",
             .{qemu_dir},
         );
         const qemu = Qemu{
