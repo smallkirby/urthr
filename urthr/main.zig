@@ -5,6 +5,9 @@ pub const std_options = std.Options{
     .log_level = urd.klog.log_level,
 };
 
+/// Override the standard panic function.
+pub const panic = @import("kernel/panic.zig").panic_fn;
+
 /// Zig entry point for Urthr kernel.
 export fn kmain() callconv(.c) noreturn {
     // Early board initialization.
