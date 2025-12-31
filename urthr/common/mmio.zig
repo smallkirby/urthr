@@ -61,10 +61,17 @@ pub fn Register(T: type, Width: type) type {
     };
 }
 
+pub const Align = union(enum) {
+    /// Automatic alignment based on the register width with check of maximum alignment size.
+    natural: type,
+    /// Mandatory alignment size in bytes.
+    size: type,
+};
+
 /// Defines a module consisting of multiple MMIO registers.
 ///
 /// `fields` is a list of MMIO registers that belong to this module.
-pub fn Module(Width: type, comptime fields: []const struct { usize, type }) type {
+pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) type {
     comptime {
         for (fields, 0..) |field, i| {
             if (i + 1 == fields.len) break;
@@ -90,12 +97,20 @@ pub fn Module(Width: type, comptime fields: []const struct { usize, type }) type
             self.base = base;
         }
 
+        /// Get the required alignment for the register.
+        fn getAlignment(T: type) type {
+            return switch (Width) {
+                .natural => |max| std.meta.Int(.unsigned, @min(@bitSizeOf(T), @bitSizeOf(max))),
+                .size => |size| size,
+            };
+        }
+
         /// Get the register field information.
         fn getRegister(T: type) struct { usize, type } {
             inline for (fields) |field| {
                 const offset, const U = field;
                 if (U == T) {
-                    return .{ offset, Register(T, Width) };
+                    return .{ offset, Register(T, getAlignment(T)) };
                 }
             }
             @compileError("Register not found in Module: " ++ @typeName(T));
@@ -190,7 +205,7 @@ test Module {
         x: u16,
         y: bool,
     };
-    const M = Module(u32, &.{
+    const M = Module(.{ .size = u32 }, &.{
         .{ 0x00, A },
         .{ 0x08, B },
     });

@@ -2,7 +2,7 @@
 // Module Definition
 // =============================================================
 
-var gpio = mmio.Module(u32, &.{
+var gpio = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, Gpfsel0 },
     .{ 0x04, Gpfsel1 },
     .{ 0x08, Gpfsel2 },

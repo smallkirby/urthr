@@ -6,7 +6,7 @@
 // Module Definition
 // =============================================================
 
-var pl011 = mmio.Module(u32, &.{
+var pl011 = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, Dr },
     .{ 0x04, RsrEcr },
     .{ 0x18, Fr },
