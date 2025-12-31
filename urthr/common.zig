@@ -1,5 +1,6 @@
 //! Common library code that can be used in every module.
 
+pub const bits = @import("common/bits.zig");
 pub const mem = @import("common/mem.zig");
 pub const mmio = @import("common/mmio.zig");
 pub const typing = @import("common/typing.zig");
@@ -42,6 +43,7 @@ pub const Range = struct {
 // =============================================================
 
 test {
+    _ = bits;
     _ = mmio;
     _ = typing;
     _ = util;

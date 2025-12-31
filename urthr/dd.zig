@@ -4,6 +4,7 @@
 
 pub const gpio = @import("dd/gpio.zig");
 pub const pl011 = @import("dd/pl011.zig");
+pub const sdhc = @import("dd/sdhc.zig");
 
 // =============================================================
 // Tests

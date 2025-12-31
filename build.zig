@@ -95,6 +95,12 @@ pub fn build(b: *std.Build) !void {
         "Enable specified QEMU verbose log outputs.",
     ) orelse "";
 
+    const sdin = b.option(
+        []const u8,
+        "sdin",
+        "Path to SD card image file for QEMU.",
+    ) orelse null;
+
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
     options.addOption(board.BoardType, "board", board_type);
@@ -442,6 +448,7 @@ pub fn build(b: *std.Build) !void {
             .serial = if (serial) |s| blk: {
                 break :blk if (std.mem.eql(u8, s, "pts")) .pts else .stdio;
             } else .stdio,
+            .sd = sdin,
             .verbose_logs = qemu_log,
             .wait_gdb = wait_qemu,
         };
@@ -573,6 +580,8 @@ const Qemu = struct {
         /// Redirect serial both to stdio and to a PTY.
         pts,
     },
+    /// Path to SD card image file.
+    sd: ?[]const u8,
     /// QEMU verbose log outputs.
     verbose_logs: []const u8,
     /// Wait for GDB connection on startup.
@@ -634,6 +643,12 @@ const Qemu = struct {
                 "-echr",
                 "257",
             }),
+        }
+        if (self.sd) |sd_path| {
+            try args.appendSlice(allocator, &.{
+                "-sd",
+                sd_path,
+            });
         }
         if (self.wait_gdb) {
             try args.appendSlice(allocator, &.{

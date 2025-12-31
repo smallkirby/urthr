@@ -149,6 +149,11 @@ pub fn getGeneralAllocator() Allocator {
     return bin_allocator.interface();
 }
 
+/// Get the VM allocator.
+pub fn getVmAllocator() IoAllocator {
+    return vm_allocator.interface();
+}
+
 /// End virtual address of kernel image.
 extern const __end: *void;
 
@@ -179,6 +184,7 @@ const common = @import("common");
 const units = common.units;
 const util = common.util;
 const PageAllocator = common.PageAllocator;
+const IoAllocator = common.IoAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
 const pmap = board.memmap;
