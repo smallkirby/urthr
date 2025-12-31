@@ -89,6 +89,12 @@ pub fn build(b: *std.Build) !void {
         "Restart the CPU instead of halting on panic.",
     ) orelse false;
 
+    const qemu_log = b.option(
+        []const u8,
+        "qemu_log",
+        "Enable specified QEMU verbose log outputs.",
+    ) orelse "";
+
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
     options.addOption(board.BoardType, "board", board_type);
@@ -436,6 +442,7 @@ pub fn build(b: *std.Build) !void {
             .serial = if (serial) |s| blk: {
                 break :blk if (std.mem.eql(u8, s, "pts")) .pts else .stdio;
             } else .stdio,
+            .verbose_logs = qemu_log,
             .wait_gdb = wait_qemu,
         };
 
@@ -566,6 +573,8 @@ const Qemu = struct {
         /// Redirect serial both to stdio and to a PTY.
         pts,
     },
+    /// QEMU verbose log outputs.
+    verbose_logs: []const u8,
     /// Wait for GDB connection on startup.
     wait_gdb: bool,
 
@@ -630,6 +639,24 @@ const Qemu = struct {
             try args.appendSlice(allocator, &.{
                 "-S",
             });
+        }
+
+        // Enable verbose logs.
+        var logiter = std.mem.splitAny(u8, self.verbose_logs, ",");
+        while (logiter.next()) |log| {
+            if (log.len == 0) continue;
+
+            if (std.mem.eql(u8, log, "sd")) {
+                try args.appendSlice(allocator, &.{
+                    "-trace",
+                    "sdhci_*",
+                    "-trace",
+                    "sdcard_*",
+                });
+                continue;
+            }
+
+            @panic("Unsupported QEMU log option.");
         }
 
         return args.toOwnedSlice(allocator);
