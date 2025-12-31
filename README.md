@@ -65,6 +65,7 @@ zig build test --summary all -Doptimize=Debug
 | `board` | String: `rpi4b`, `rpi5` | Target board. | `rpi4b` |
 | `serial_boot` | Flag | Generate bootloader and kernel as a separate binary. | `false` |
 | `sdcard` | Path | Path to mounted SD card device. | - |
+| `sdin` | Path | Path to SD card image file to be used by QEMU. | - |
 | `log_level` | String: `debug`, `info`, `warn`, `error` | Logging level. Output under the logging level is suppressed. | `info` |
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
 | `rtt` | Flag | Enable runtime tests. | `false` |

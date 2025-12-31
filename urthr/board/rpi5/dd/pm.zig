@@ -4,7 +4,7 @@
 // Module Definition
 // =============================================================
 
-var pm = mmio.Module(u32, &.{
+var pm = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x1C, Rstc },
     .{ 0x24, Wdog },
 }){};

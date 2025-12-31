@@ -50,6 +50,12 @@ comptime {
 /// Base address of peripheral registers.
 pub const peri_base = 0xFE00_0000;
 
+/// Power management block.
+pub const pm = Range{
+    .start = peri_base + 0x0010_0000,
+    .end = peri_base + 0x0010_1000,
+};
+
 /// GPIO
 pub const gpio = Range{
     .start = peri_base + 0x0020_0000,
@@ -62,10 +68,10 @@ pub const pl011 = Range{
     .end = peri_base + 0x0020_2000,
 };
 
-/// Power management block.
-pub const pm = Range{
-    .start = 0xFE10_0000,
-    .end = 0xFE10_1000,
+/// SD Host Controller Interface.
+pub const sdhc = Range{
+    .start = peri_base + 0x0034_0000,
+    .end = peri_base + 0x0034_1000,
 };
 
 // =============================================================
