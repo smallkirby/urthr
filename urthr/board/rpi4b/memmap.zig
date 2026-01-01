@@ -69,9 +69,9 @@ pub const pl011 = Range{
 };
 
 /// SD Host Controller Interface.
-pub const sdhc = Range{
-    .start = peri_base + 0x0034_0000,
-    .end = peri_base + 0x0034_1000,
+pub const sdhost = Range{
+    .start = peri_base + 0x0030_0000,
+    .end = peri_base + 0x0030_1000,
 };
 
 // =============================================================

@@ -1,3 +1,27 @@
+/// Extract a value of type `T`  from `value` at the specified `offset`.
+///
+/// - `T`: The type of the value to extract.
+/// - `value`: The value to extract from. Can be any type whose size is the power of two and smaller than or equal to 8 bytes.
+/// - `offset`: The bit offset to extract the value.
+pub fn extract(T: type, value: anytype, comptime offset: usize) T {
+    const size_T = @bitSizeOf(T);
+    const size_value = @bitSizeOf(@TypeOf(value));
+
+    if (size_T + offset > size_value) {
+        @compileError(std.fmt.comptimePrint(
+            "extract: offset out of range: {s}, {s}, {d}",
+            .{ @typeName(T), @typeName(@TypeOf(value)), offset },
+        ));
+    }
+
+    const RepV = RepInt(@TypeOf(value));
+    const RepT = RepInt(T);
+
+    const rep_value: RepV = @bitCast(value);
+    const t: RepT = @truncate(rep_value >> offset);
+    return @bitCast(t);
+}
+
 /// Concatnate two values and returns new value with twice the bit width.
 ///
 /// - `T` : Type of the output value.
@@ -72,18 +96,86 @@ pub inline fn concatAny(T: type, a: anytype, b: @TypeOf(a)) T {
     return (@as(T, a) << width_U) | @as(T, b);
 }
 
+/// Set the nth bit.
+///
+/// - `val` : The integer to modify.
+/// - `nth` : The bit position to set.
+pub fn set(val: anytype, nth: anytype) @TypeOf(val) {
+    const int_nth = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("isset: invalid type"),
+    };
+    return val | (@as(@TypeOf(val), 1) << @intCast(int_nth));
+}
+
+/// Unset the nth bit.
+///
+/// - `val` : The integer to modify.
+/// - `nth` : The bit position to unset.
+pub fn unset(val: anytype, nth: anytype) @TypeOf(val) {
+    const int_nth = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("isset: invalid type"),
+    };
+    return val & ~(@as(@TypeOf(val), 1) << @intCast(int_nth));
+}
+
+/// Check if the nth bit is set.
+///
+/// - `val` : The integer to check.
+/// - `nth` : The bit position to check.
+pub fn isset(val: anytype, nth: anytype) bool {
+    const int_nth = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("isset: invalid type"),
+    };
+    return ((val >> @intCast(int_nth)) & 1) != 0;
+}
+
+/// Get the representative integer type.
+fn RepInt(T: type) type {
+    return switch (@sizeOf(T)) {
+        1 => u8,
+        2 => u16,
+        4 => u32,
+        8 => u64,
+        else => @compileError(std.fmt.comptimePrint(
+            "Invalid argument to RepInt: {s}",
+            .{@typeName(T)},
+        )),
+    };
+}
+
 // =============================================================
 // Tests
 // =============================================================
 
 const testing = std.testing;
 
-test "concat" {
+test extract {
+    const S = packed struct(u64) {
+        a: u8,
+        b: u8,
+        c: u16,
+        d: u32,
+    };
+    const s = S{ .a = 0x12, .b = 0x21, .c = 0x3456, .d = 0x789ABCDE };
+
+    try testing.expectEqual(@as(u8, 0x12), extract(u8, s, 0));
+    try testing.expectEqual(@as(u8, 0x21), extract(u8, s, 8));
+    try testing.expectEqual(@as(u16, 0x3456), extract(u16, s, 16));
+    try testing.expectEqual(@as(u32, 0x789ABCDE), extract(u32, s, 32));
+}
+
+test concat {
     try testing.expectEqual(0b10, concat(u2, @as(u1, 1), @as(u1, 0)));
     try testing.expectEqual(0x1234, concat(u16, 0x12, 0x34));
 }
 
-test "concatMany" {
+test concatMany {
     try testing.expectEqual(0b1_1_0, concatMany(u3, .{
         @as(u1, 1),
         @as(u1, 1),
@@ -94,6 +186,26 @@ test "concatMany" {
         @as(u64, 0x3333_4444_5555_6666),
         @as(u32, 0x7777_8888),
     }));
+}
+
+test set {
+    try testing.expectEqual(0b11, set(0b01, 1));
+    try testing.expectEqual(0b101, set(0b001, 2));
+    try testing.expectEqual(0b1000_0000, set(0b0000_0000, 7));
+}
+
+test unset {
+    try testing.expectEqual(0b01, unset(@as(u32, 0b11), 1));
+    try testing.expectEqual(0b001, unset(@as(u32, 0b101), 2));
+    try testing.expectEqual(0b101, unset(@as(u32, 0b101), 1));
+    try testing.expectEqual(0b0000_0000, unset(@as(u32, 0b1000_0000), 7));
+}
+
+test isset {
+    try testing.expectEqual(true, isset(0b10, 1));
+    try testing.expectEqual(false, isset(0b10, 0));
+    try testing.expectEqual(true, isset(0b1000_0000, 7));
+    try testing.expectEqual(false, isset(0b1000_0000, 99));
 }
 
 // =============================================================

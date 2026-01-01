@@ -60,6 +60,11 @@ pub fn init() void {
         @panic("SDHC driver supports only Version 3.00.");
     }
 
+    // Detect card.
+    if (!sdhc.read(PresentState).card_inserted) {
+        @panic("No SD card inserted.");
+    }
+
     // Setup clock.
     initClock();
 
@@ -70,7 +75,8 @@ pub fn init() void {
     initBus();
 
     // Initialize card.
-    initCard();
+    const card_info = initCard();
+    log.debug("SD card detected: {t}, RCA={X:0>4}", .{ card_info.spec, card_info.rca });
 }
 
 /// Reset entire Host Controller.
@@ -175,45 +181,139 @@ fn initBus() void {
 }
 
 /// Initialize SD card and identification.
-fn initCard() void {
+fn initCard() CardInfo {
     var f8 = true;
-    var sdio = true;
+    var ccs = false;
 
-    // CMD0
-    _ = issueCmd(0, 0);
-
-    // CMD8
+    // CMD0: GO_IDLE_STATE
     {
-        const res = issueCmd(8, 0x1AA);
+        issueCmd(0, false, 0).unwrap();
+    }
+
+    // CMD8: SEND_IF_COND
+    {
+        const res = issueCmd(8, false, 0x1AA);
 
         if (res.err.cmd_timeout) {
             f8 = false;
-        } else if (!res.err.isNoError()) {
-            @panic("SDHC CMD8 error.");
-        }
+        } else res.unwrap();
     }
 
-    // CMD5:
+    // ACMD41: SEND_OP_COND
     {
-        const res = issueCmd(5, 0);
+        const Acmd41 = packed struct(u32) {
+            /// Voltage Window.
+            volt_window: u24,
+            /// S18R.
+            s18r: bool = false,
+            /// Reserved.
+            _rsvd0: u3 = 0,
+            /// XPC.
+            xpc: bool = false,
+            /// Reserved.
+            _rsvd1: u1 = 0,
+            /// Card Capacity Status.
+            ccs: bool,
+            /// Busy.
+            busy: bool = false,
+        };
 
-        if (res.err.cmd_timeout) {
-            sdio = false;
-        } else if (!res.err.isNoError()) {
-            @panic("SDHC CMD5 error.");
+        var ocr: u32 = undefined;
+        while (true) {
+            const acmd_bit_pos = 5;
+            const res55 = issueCmd(55, false, 0).unwrapValue();
+            if (!bits.isset(res55, acmd_bit_pos)) {
+                @panic("CMD55 has succeeded but ACMD not supported.");
+            }
+
+            const res = issueCmd(41, true, @bitCast(Acmd41{
+                .volt_window = 0x00FF80,
+                .ccs = true,
+            }));
+            res.unwrap();
+
+            ocr = @truncate(res.value);
+            const busy_bit_pos = 31;
+            if (bits.isset(ocr, busy_bit_pos)) {
+                break;
+            }
         }
+
+        const ccs_bit_pos = 30;
+        ccs = bits.isset(ocr, ccs_bit_pos);
     }
+
+    // CMD2: ALL_SEND_CID
+    {
+        const Cid = extern struct {
+            // CRC is consumed internally and not included here.
+            /// Manufacturing date.
+            date: u16,
+            /// Product serial number.
+            psn: u32 align(1),
+            /// Product revision.
+            rev: u8,
+            /// Product name.
+            name: [5]u8,
+            /// OEM / Application ID.
+            oem_id: [2]u8,
+            /// Manufacturer ID.
+            mid: u8,
+        };
+        comptime if (@bitSizeOf(Cid) != 128) @compileError("Invalid CID size.");
+
+        const res = issueCmd(2, false, 0).unwrapValue();
+        const cid: Cid = @bitCast(@as(u128, @truncate(res >> 0)));
+
+        log.debug(
+            "CID: PSN={X:0>8}, REV={d}, NAME={s}, MID={d}",
+            .{ cid.psn, cid.rev, cid.name, cid.mid },
+        );
+    }
+
+    // CMD3: SEND_RELATIVE_ADDR
+    const rca = blk: {
+        const res = issueCmd(3, false, 0).unwrapValue();
+        break :blk @as(u16, @truncate(res >> 16));
+    };
+
+    return CardInfo{
+        .spec = if (!f8) .sdsc1 else if (!ccs) .sdsc2 else .sdhc,
+        .rca = rca,
+    };
 }
 
+/// Response and error value for SDHC command.
 const CommandResponse = struct {
+    /// Command.
+    cmd: struct {
+        /// Command index.
+        idx: u6,
+        /// Is an application-specific command.
+        acmd: bool,
+    },
     /// Command response value.
-    value: u128,
+    value: u136,
     /// Error value.
     err: ErrorInterruptStatus,
+
+    pub fn unwrap(self: CommandResponse) void {
+        if (!self.err.isNoError()) {
+            log.err("{s}CMD{d} error: {}", .{
+                if (self.cmd.acmd) "S" else "", self.cmd.idx, self.err,
+            });
+            @panic("Unrecoverable SDHC command error.");
+        }
+    }
+
+    pub fn unwrapValue(self: CommandResponse) u136 {
+        self.unwrap();
+        return self.value;
+    }
 };
 
 /// Issue a command to the SD card.
-fn issueCmd(idx: u6, arg: u32) CommandResponse {
+fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
     // Wait until command and data lines are free.
     while (sdhc.read(PresentState).cmd or sdhc.read(PresentState).dat) {
         std.atomic.spinLoopHint();
@@ -225,17 +325,55 @@ fn issueCmd(idx: u6, arg: u32) CommandResponse {
     // Set argument.
     sdhc.write(Argument, Argument{ .value = arg });
 
+    // Response type.
+    const res_type: u3 = if (!acmd) switch (idx) {
+        // R0
+        0 => 0,
+        // R1
+        55 => 1,
+        // R2
+        2 => 2,
+        // R6
+        3 => 6,
+        // R7
+        8 => 7,
+        else => unreachable,
+    } else switch (idx) {
+        // R1
+        41 => 1,
+        else => unreachable,
+    };
+
     // Set command.
-    const res_type: @FieldType(Command, "response") = switch (idx) {
+    const res_length: @FieldType(Command, "response") = switch (res_type) {
         0 => .no,
-        8 => .l48,
-        else => .no,
+        2 => .l136,
+        1 => .l48,
+        6 => .l48,
+        7 => .l48,
+        else => unreachable,
+    };
+    const idx_check = switch (res_type) {
+        0 => false,
+        1 => true,
+        2 => false,
+        6 => true,
+        7 => true,
+        else => unreachable,
+    };
+    const crc_check = switch (res_type) {
+        0 => false,
+        1 => true,
+        2 => false,
+        6 => true,
+        7 => true,
+        else => unreachable,
     };
     sdhc.write(Command, Command{
-        .response = res_type,
+        .response = res_length,
         .sub = false,
-        .crc = false,
-        .idx = false,
+        .crc = crc_check,
+        .idx = idx_check,
         .data = false,
         .ctype = .normal,
         .command = idx,
@@ -256,20 +394,31 @@ fn issueCmd(idx: u6, arg: u32) CommandResponse {
     const res3 = sdhc.read(Response3).value;
 
     return CommandResponse{
+        .cmd = .{ .idx = idx, .acmd = acmd },
         .value = bits.concatMany(u128, .{ res3, res2, res1, res0 }),
         .err = err_status,
     };
 }
 
+const CardInfo = struct {
+    /// Capacity of the card.
+    spec: CardSpec,
+    /// Relative card address.
+    rca: u16,
+};
+
+const CardSpec = enum {
+    /// SD Standard Capacity v1.01 or v1.10.
+    sdsc1,
+    /// SD Standard Capacity v2.00 or v3.00.
+    sdsc2,
+    /// SD High Capacity or SD Extended Capacity.
+    sdhc,
+};
+
 // =============================================================
 // Registers
 // =============================================================
-
-/// Error for SDHC command.
-const CmdError = error{
-    /// Command Timeout.
-    Timeout,
-};
 
 // =============================================================
 //  Host Controller Interface Register
@@ -326,9 +475,9 @@ const Command = packed struct(u16) {
     response: enum(u2) {
         /// No response.
         no = 0b00,
-        /// Response Length 136.
+        /// R2: Response Length 136.
         l136 = 0b01,
-        /// R7: Response Length 48.
+        /// R1, R3, R6, R7, R8: Response Length 48.
         l48 = 0b10,
         /// Response Length 48 check Busy after response.
         l48_busy = 0b11,
