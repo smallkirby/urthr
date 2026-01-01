@@ -1,3 +1,16 @@
+/// Convert from big-endian to native-endian
+pub fn fromBigEndian(value: anytype) @TypeOf(value) {
+    if (builtin.cpu.arch.endian() == .big) {
+        return value;
+    } else {
+        return @byteSwap(value);
+    }
+}
+/// Convert from native-endian to big-endian
+pub fn toBigEndian(value: anytype) @TypeOf(value) {
+    return fromBigEndian(value);
+}
+
 /// Extract a value of type `T`  from `value` at the specified `offset`.
 ///
 /// - `T`: The type of the value to extract.
@@ -137,15 +150,19 @@ pub fn isset(val: anytype, nth: anytype) bool {
 
 /// Get the representative integer type.
 fn RepInt(T: type) type {
-    return switch (@sizeOf(T)) {
-        1 => u8,
-        2 => u16,
-        4 => u32,
-        8 => u64,
-        else => @compileError(std.fmt.comptimePrint(
-            "Invalid argument to RepInt: {s}",
-            .{@typeName(T)},
-        )),
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => T,
+        else => switch (@sizeOf(T)) {
+            1 => u8,
+            2 => u16,
+            4 => u32,
+            8 => u64,
+            16 => u128,
+            else => @compileError(std.fmt.comptimePrint(
+                "Invalid argument to RepInt: {s}",
+                .{@typeName(T)},
+            )),
+        },
     };
 }
 
@@ -213,3 +230,4 @@ test isset {
 // =============================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
