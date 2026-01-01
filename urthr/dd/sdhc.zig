@@ -16,11 +16,13 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
     .{ 0x04, Bsize },
     .{ 0x06, Bcount16 },
     .{ 0x08, Argument },
+    .{ 0x0C, TransferMode },
     .{ 0x0E, Command },
     .{ 0x10, Response0 },
     .{ 0x14, Response1 },
     .{ 0x18, Response2 },
     .{ 0x1C, Response3 },
+    .{ 0x20, BufferDataPort },
     .{ 0x24, PresentState },
     .{ 0x28, HostControl1 },
     .{ 0x29, PowerControl },
@@ -42,6 +44,27 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
 // =============================================================
 // API
 // =============================================================
+
+/// SD card information.
+const CardInfo = struct {
+    /// Capacity of the card.
+    spec: Spec,
+    /// Relative card address.
+    rca: u16,
+    /// Card Specific Data.
+    csd: Csd,
+    /// SD Configuration Register.
+    scr: Scr,
+
+    const Spec = enum {
+        /// SD Standard Capacity v1.01 or v1.10.
+        sdsc1,
+        /// SD Standard Capacity v2.00 or v3.00.
+        sdsc2,
+        /// SD High Capacity or SD Extended Capacity.
+        sdhc,
+    };
+};
 
 /// Set the base address of the SD Host Controller.
 pub fn setBase(base: usize) void {
@@ -77,6 +100,7 @@ pub fn init() void {
     // Initialize card.
     const card_info = initCard();
     log.debug("SD card detected: {t}, RCA={X:0>4}", .{ card_info.spec, card_info.rca });
+    log.debug("Physical Layer Spec Version: {t}", .{card_info.scr.getPhysVersion()});
 }
 
 /// Reset entire Host Controller.
@@ -187,12 +211,12 @@ fn initCard() CardInfo {
 
     // CMD0: GO_IDLE_STATE
     {
-        _ = issueCmd(0, false, 0).unwrap();
+        _ = issueCmd(0, false, 0, null).unwrap();
     }
 
     // CMD8: SEND_IF_COND
     {
-        const res = issueCmd(8, false, 0x1AA);
+        const res = issueCmd(8, false, 0x1AA, null);
 
         if (res.err.cmd_timeout) {
             f8 = false;
@@ -224,7 +248,7 @@ fn initCard() CardInfo {
             const ocr = issueCmd(41, true, @bitCast(Acmd41{
                 .volt_window = 0x00FF80,
                 .ccs = true,
-            })).unwrap().as(Ocr);
+            }), null).unwrap().as(Ocr);
 
             if (ocr.not_busy) {
                 break ocr.ccs;
@@ -234,7 +258,7 @@ fn initCard() CardInfo {
 
     // CMD2: ALL_SEND_CID
     {
-        const cid = issueCmd(2, false, 0).unwrap().as(Cid);
+        const cid = issueCmd(2, false, 0, null).unwrap().as(Cid);
 
         log.debug(
             "CID: PSN={X:0>8}, REV={d}, NAME={s}, MID={d}",
@@ -244,13 +268,13 @@ fn initCard() CardInfo {
 
     // CMD3: SEND_RELATIVE_ADDR
     const rca = blk: {
-        const res = issueCmd(3, false, 0).unwrap().as(u32);
+        const res = issueCmd(3, false, 0, null).unwrap().as(u32);
         break :blk @as(u16, @truncate(res >> 16));
     };
 
     // CMD9: SEND_CSD
     const csd = blk: {
-        const res = issueCmd(9, false, @as(u32, rca) << 16).unwrap().as(u128);
+        const res = issueCmd(9, false, @as(u32, rca) << 16, null).unwrap().as(u128);
         break :blk Csd.from(res);
     };
 
@@ -262,14 +286,17 @@ fn initCard() CardInfo {
 
     // CMD7: SELECT_CARD
     {
-        _ = issueCmd(7, false, @as(u32, rca) << 16).unwrap();
+        _ = issueCmd(7, false, @as(u32, rca) << 16, null).unwrap();
     }
 
     // ACMD51: SEND_SCR
     const scr: Scr = blk: {
-        // TODO
+        var scr: Scr = undefined;
 
-        break :blk undefined;
+        _ = declareAcmd(rca);
+        _ = issueCmd(51, true, 0, std.mem.asBytes(&scr)).unwrap();
+
+        break :blk scr;
     };
 
     return CardInfo{
@@ -280,27 +307,6 @@ fn initCard() CardInfo {
     };
 }
 
-/// SD card information.
-const CardInfo = struct {
-    /// Capacity of the card.
-    spec: Spec,
-    /// Relative card address.
-    rca: u16,
-    /// Card Specific Data.
-    csd: Csd,
-    /// SD Configuration Register.
-    scr: Scr,
-
-    const Spec = enum {
-        /// SD Standard Capacity v1.01 or v1.10.
-        sdsc1,
-        /// SD Standard Capacity v2.00 or v3.00.
-        sdsc2,
-        /// SD High Capacity or SD Extended Capacity.
-        sdhc,
-    };
-};
-
 // =============================================================
 // Commands
 // =============================================================
@@ -308,7 +314,7 @@ const CardInfo = struct {
 /// Send CMD55 to declare next command as application-specific.
 fn declareAcmd(rca: ?u16) void {
     const arg = if (rca) |v| @as(u32, v) << 16 else 0;
-    const status = issueCmd(55, false, arg).unwrap().as(CardStatus);
+    const status = issueCmd(55, false, arg, null).unwrap().as(CardStatus);
 
     if (!status.app_cmd) {
         @panic("CMD55 has succeeded but ACMD not supported.");
@@ -316,7 +322,7 @@ fn declareAcmd(rca: ?u16) void {
 }
 
 /// Issue a command to the SD card.
-fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
+fn issueCmd(idx: u6, acmd: bool, arg: u32, data: ?[]u8) CommandResponse {
     // Wait until command and data lines are free.
     while (sdhc.read(PresentState).cmd or sdhc.read(PresentState).dat) {
         std.atomic.spinLoopHint();
@@ -328,6 +334,31 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
     // Set argument.
     sdhc.write(Argument, Argument{ .value = arg });
 
+    if (data) |buf| {
+        if (buf.len % 4 != 0) {
+            @panic("SDHC data buffer length must be multiple of 4 bytes.");
+        }
+
+        // Set transfer mode if data is present.
+        sdhc.write(TransferMode, TransferMode{
+            .dma_enable = false,
+            .block_count_enable = true,
+            .auto_cmd_enable = .disabled,
+            .data_direction = .read,
+            .multi_block = if (buf.len > 1) .multiple else .single,
+            .response_type = .r1,
+            .response_err_check = false,
+            .response_int_disable = false,
+        });
+
+        // Set block size and count.
+        sdhc.write(Bsize, Bsize{
+            .bsize = @intCast(buf.len * @sizeOf(u8)),
+            .boundary = .k4,
+        });
+        sdhc.write(Bcount16, 1);
+    }
+
     // Set command.
     const res_type = ResponseType.of(idx, acmd);
     sdhc.write(Command, Command{
@@ -335,7 +366,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
         .sub = false,
         .crc = res_type.crccheck(),
         .idx = res_type.idxcheck(),
-        .data = false,
+        .data = data != null,
         .ctype = .normal,
         .command = idx,
     });
@@ -349,6 +380,24 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
     if (res_type.busy()) while (sdhc.read(PresentState).dat) {
         std.atomic.spinLoopHint();
     };
+
+    // Read data if needed.
+    if (data) |buf| {
+        while (!sdhc.read(NormalInterruptStatus).buf_read_ready) {
+            std.atomic.spinLoopHint();
+        }
+
+        const buf_len = buf.len / @sizeOf(u32);
+        const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
+        for (0..buf_len) |i| {
+            p[buf_len - i - 1] = bits.fromBigEndian((sdhc.read(BufferDataPort).value));
+        }
+
+        // Wait until data transfer is complete.
+        while (!sdhc.read(NormalInterruptStatus).transfer_complete) {
+            std.atomic.spinLoopHint();
+        }
+    }
 
     // Check error status.
     const err_status = sdhc.read(ErrorInterruptStatus);
@@ -806,6 +855,31 @@ const Scr = packed struct(u64) {
     sd_spec: u4,
     /// SCR Structure.
     scr_structure: u4,
+
+    /// Physical Layer Specification Version.
+    pub const PhysVersion = enum {
+        /// Version 1.0 and 1.01
+        v1_0,
+        /// Version 1.1
+        v1_1,
+        /// Version 2.0
+        v2,
+        /// Version 3.0
+        v3,
+        /// Version 4.0
+        v4,
+    };
+
+    pub fn getPhysVersion(self: Scr) PhysVersion {
+        if (self.sd_specx != 0) @panic("Unsupported SCR specx value.");
+
+        return switch (self.sd_spec) {
+            0 => .v1_0,
+            1 => .v1_1,
+            2 => if (!self.sd_spec3) .v2 else if (!self.sd_spec4) .v3 else .v4,
+            else => @panic("Unsupported SCR spec value."),
+        };
+    }
 };
 
 // =============================================================
@@ -859,6 +933,52 @@ const Bcount16 = packed struct(u16) {
 const Argument = packed struct(u32) {
     /// Command Argument.
     value: u32,
+};
+
+/// Transfer Mode Register.
+const TransferMode = packed struct(u16) {
+    /// DMA Enable.
+    dma_enable: bool,
+    /// Block Count Enable.
+    block_count_enable: bool,
+    /// Auto CMD Enable.
+    auto_cmd_enable: enum(u2) {
+        /// Auto CMD Disabled.
+        disabled = 0b00,
+        /// Auto CMD12 Enable.
+        cmd12 = 0b01,
+        /// Auto CMD23 Enable.
+        cmd23 = 0b10,
+        /// Auto CMD Auto Select.
+        auto_select = 0b11,
+    },
+    /// Data Transfer Direction Select.
+    data_direction: enum(u1) {
+        /// Write (Host to Card).
+        write = 0,
+        /// Read (Card to Host).
+        read = 1,
+    },
+    /// Multi / Single Block Select.
+    multi_block: enum(u1) {
+        /// Single Block.
+        single = 0,
+        /// Multiple Block.
+        multiple = 1,
+    },
+    /// Response Type Select.
+    response_type: enum(u1) {
+        /// Memory
+        r1 = 0,
+        /// SDIO
+        r5 = 1,
+    },
+    /// Response Error Check Enable.
+    response_err_check: bool,
+    /// Response Interrupt Disable.
+    response_int_disable: bool,
+    /// Reserved.
+    _rsvd: u7 = 0,
 };
 
 /// Command Register.
@@ -920,6 +1040,12 @@ const Response2 = packed struct(u32) {
 /// Response Register 3.
 const Response3 = packed struct(u32) {
     /// Response bits [127:96].
+    value: u32,
+};
+
+/// Buffer Data Port Register.
+const BufferDataPort = packed struct(u32) {
+    /// Buffer Data Port.
     value: u32,
 };
 
