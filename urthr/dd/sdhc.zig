@@ -180,14 +180,14 @@ fn initBus() void {
     });
 }
 
-/// Initialize SD card and identification.
+/// Initialize, identify, and select the SD card.
 fn initCard() CardInfo {
     var f8 = true;
     var ccs = false;
 
     // CMD0: GO_IDLE_STATE
     {
-        issueCmd(0, false, 0).unwrap();
+        _ = issueCmd(0, false, 0).unwrap();
     }
 
     // CMD8: SEND_IF_COND
@@ -196,7 +196,7 @@ fn initCard() CardInfo {
 
         if (res.err.cmd_timeout) {
             f8 = false;
-        } else res.unwrap();
+        } else _ = res.unwrap();
     }
 
     // ACMD41: SEND_OP_COND
@@ -218,52 +218,23 @@ fn initCard() CardInfo {
             busy: bool = false,
         };
 
-        var ocr: u32 = undefined;
-        while (true) {
-            const acmd_bit_pos = 5;
-            const res55 = issueCmd(55, false, 0).unwrapValue();
-            if (!bits.isset(res55, acmd_bit_pos)) {
-                @panic("CMD55 has succeeded but ACMD not supported.");
-            }
+        ccs = while (true) {
+            declareAcmd(null);
 
-            const res = issueCmd(41, true, @bitCast(Acmd41{
+            const ocr = issueCmd(41, true, @bitCast(Acmd41{
                 .volt_window = 0x00FF80,
                 .ccs = true,
-            }));
-            res.unwrap();
+            })).unwrap().as(Ocr);
 
-            ocr = @truncate(res.value);
-            const busy_bit_pos = 31;
-            if (bits.isset(ocr, busy_bit_pos)) {
-                break;
+            if (ocr.not_busy) {
+                break ocr.ccs;
             }
-        }
-
-        const ccs_bit_pos = 30;
-        ccs = bits.isset(ocr, ccs_bit_pos);
+        };
     }
 
     // CMD2: ALL_SEND_CID
     {
-        const Cid = extern struct {
-            // CRC is consumed internally and not included here.
-            /// Manufacturing date.
-            date: u16,
-            /// Product serial number.
-            psn: u32 align(1),
-            /// Product revision.
-            rev: u8,
-            /// Product name.
-            name: [5]u8,
-            /// OEM / Application ID.
-            oem_id: [2]u8,
-            /// Manufacturer ID.
-            mid: u8,
-        };
-        comptime if (@bitSizeOf(Cid) != 128) @compileError("Invalid CID size.");
-
-        const res = issueCmd(2, false, 0).unwrapValue();
-        const cid: Cid = @bitCast(@as(u128, @truncate(res >> 0)));
+        const cid = issueCmd(2, false, 0).unwrap().as(Cid);
 
         log.debug(
             "CID: PSN={X:0>8}, REV={d}, NAME={s}, MID={d}",
@@ -273,44 +244,76 @@ fn initCard() CardInfo {
 
     // CMD3: SEND_RELATIVE_ADDR
     const rca = blk: {
-        const res = issueCmd(3, false, 0).unwrapValue();
+        const res = issueCmd(3, false, 0).unwrap().as(u32);
         break :blk @as(u16, @truncate(res >> 16));
+    };
+
+    // CMD9: SEND_CSD
+    const csd = blk: {
+        const res = issueCmd(9, false, @as(u32, rca) << 16).unwrap().as(u128);
+        break :blk Csd.from(res);
+    };
+
+    // Check consistency between ACMD41 and CSD.
+    switch (csd) {
+        .v1 => if (f8 and ccs) @panic("Inconsistent F8/CCS and CSD v1."),
+        .v2 => if (!f8 or !ccs) @panic("Inconsistent F8/CCS and CSD v2."),
+    }
+
+    // CMD7: SELECT_CARD
+    {
+        _ = issueCmd(7, false, @as(u32, rca) << 16).unwrap();
+    }
+
+    // ACMD51: SEND_SCR
+    const scr: Scr = blk: {
+        // TODO
+
+        break :blk undefined;
     };
 
     return CardInfo{
         .spec = if (!f8) .sdsc1 else if (!ccs) .sdsc2 else .sdhc,
         .rca = rca,
+        .csd = csd,
+        .scr = scr,
     };
 }
 
-/// Response and error value for SDHC command.
-const CommandResponse = struct {
-    /// Command.
-    cmd: struct {
-        /// Command index.
-        idx: u6,
-        /// Is an application-specific command.
-        acmd: bool,
-    },
-    /// Command response value.
-    value: u136,
-    /// Error value.
-    err: ErrorInterruptStatus,
+/// SD card information.
+const CardInfo = struct {
+    /// Capacity of the card.
+    spec: Spec,
+    /// Relative card address.
+    rca: u16,
+    /// Card Specific Data.
+    csd: Csd,
+    /// SD Configuration Register.
+    scr: Scr,
 
-    pub fn unwrap(self: CommandResponse) void {
-        if (!self.err.isNoError()) {
-            log.err("{s}CMD{d} error: {}", .{
-                if (self.cmd.acmd) "S" else "", self.cmd.idx, self.err,
-            });
-            @panic("Unrecoverable SDHC command error.");
-        }
-    }
-
-    pub fn unwrapValue(self: CommandResponse) u136 {
-        self.unwrap();
-        return self.value;
-    }
+    const Spec = enum {
+        /// SD Standard Capacity v1.01 or v1.10.
+        sdsc1,
+        /// SD Standard Capacity v2.00 or v3.00.
+        sdsc2,
+        /// SD High Capacity or SD Extended Capacity.
+        sdhc,
+    };
 };
+
+// =============================================================
+// Commands
+// =============================================================
+
+/// Send CMD55 to declare next command as application-specific.
+fn declareAcmd(rca: ?u16) void {
+    const arg = if (rca) |v| @as(u32, v) << 16 else 0;
+    const status = issueCmd(55, false, arg).unwrap().as(CardStatus);
+
+    if (!status.app_cmd) {
+        @panic("CMD55 has succeeded but ACMD not supported.");
+    }
+}
 
 /// Issue a command to the SD card.
 fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
@@ -325,55 +328,13 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
     // Set argument.
     sdhc.write(Argument, Argument{ .value = arg });
 
-    // Response type.
-    const res_type: u3 = if (!acmd) switch (idx) {
-        // R0
-        0 => 0,
-        // R1
-        55 => 1,
-        // R2
-        2 => 2,
-        // R6
-        3 => 6,
-        // R7
-        8 => 7,
-        else => unreachable,
-    } else switch (idx) {
-        // R1
-        41 => 1,
-        else => unreachable,
-    };
-
     // Set command.
-    const res_length: @FieldType(Command, "response") = switch (res_type) {
-        0 => .no,
-        2 => .l136,
-        1 => .l48,
-        6 => .l48,
-        7 => .l48,
-        else => unreachable,
-    };
-    const idx_check = switch (res_type) {
-        0 => false,
-        1 => true,
-        2 => false,
-        6 => true,
-        7 => true,
-        else => unreachable,
-    };
-    const crc_check = switch (res_type) {
-        0 => false,
-        1 => true,
-        2 => false,
-        6 => true,
-        7 => true,
-        else => unreachable,
-    };
+    const res_type = ResponseType.of(idx, acmd);
     sdhc.write(Command, Command{
-        .response = res_length,
+        .response = res_type.length(),
         .sub = false,
-        .crc = crc_check,
-        .idx = idx_check,
+        .crc = res_type.crccheck(),
+        .idx = res_type.idxcheck(),
         .data = false,
         .ctype = .normal,
         .command = idx,
@@ -383,6 +344,11 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
     while (!sdhc.read(NormalInterruptStatus).cmd_complete) {
         std.atomic.spinLoopHint();
     }
+
+    // Wait until data line is free.
+    if (res_type.busy()) while (sdhc.read(PresentState).dat) {
+        std.atomic.spinLoopHint();
+    };
 
     // Check error status.
     const err_status = sdhc.read(ErrorInterruptStatus);
@@ -395,29 +361,455 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32) CommandResponse {
 
     return CommandResponse{
         .cmd = .{ .idx = idx, .acmd = acmd },
-        .value = bits.concatMany(u128, .{ res3, res2, res1, res0 }),
+        .value = .{ ._data = bits.concatMany(u128, .{ res3, res2, res1, res0 }) },
         .err = err_status,
     };
 }
 
-const CardInfo = struct {
-    /// Capacity of the card.
-    spec: CardSpec,
-    /// Relative card address.
-    rca: u16,
+/// Response and error value for SDHC command.
+const CommandResponse = struct {
+    /// Command.
+    cmd: struct {
+        /// Command index.
+        idx: u6,
+        /// Is an application-specific command.
+        acmd: bool,
+    },
+    /// Command response value.
+    value: Value,
+    /// Error value.
+    err: ErrorInterruptStatus,
+
+    const Value = struct {
+        /// 128-bit full response data.
+        _data: u128,
+    };
+
+    /// Unwrap the command response, panicking on error.
+    pub fn unwrap(self: CommandResponse) CommandResponse {
+        if (!self.err.isNoError()) {
+            log.err("{s}CMD{d} error: {}", .{
+                if (self.cmd.acmd) "S" else "", self.cmd.idx, self.err,
+            });
+            @panic("Unrecoverable SDHC command error.");
+        }
+
+        return self;
+    }
+
+    /// Convert the response value to the specified type.
+    pub fn as(self: CommandResponse, T: type) T {
+        const size = @bitSizeOf(T);
+        const truncated: std.meta.Int(.unsigned, size) = @truncate(self.value._data);
+
+        return @bitCast(truncated);
+    }
+
+    /// Get the raw response value.
+    pub fn raw(self: CommandResponse) u128 {
+        return self.value._data;
+    }
 };
 
-const CardSpec = enum {
-    /// SD Standard Capacity v1.01 or v1.10.
-    sdsc1,
-    /// SD Standard Capacity v2.00 or v3.00.
-    sdsc2,
-    /// SD High Capacity or SD Extended Capacity.
-    sdhc,
+/// Response type of SD command.
+const ResponseType = enum(u3) {
+    r0,
+    /// R1 (normal response command).
+    r1,
+    /// R1b
+    r1b,
+    /// R2 (CID, CSD register).
+    r2,
+    /// R3 (OCR register).
+    r3,
+    /// R6 (RCA response).
+    r6,
+    /// R7 (Card interface condition).
+    r7,
+
+    /// Get the response type for the given command.
+    pub fn of(cmd_idx: u6, acmd: bool) ResponseType {
+        return if (!acmd) switch (cmd_idx) {
+            // CMD
+            0 => .r0,
+            55 => .r1,
+            7 => .r1b,
+            2, 9 => .r2,
+            3 => .r6,
+            8 => .r7,
+            else => unreachable,
+        } else switch (cmd_idx) {
+            // ACMD
+            51 => .r1,
+            41 => .r3,
+            else => unreachable,
+        };
+    }
+
+    /// The response needs to wait until the card is not busy.
+    pub fn busy(self: ResponseType) bool {
+        return switch (self) {
+            .r1b => true,
+            else => false,
+        };
+    }
+
+    /// Length of the response.
+    pub fn length(self: ResponseType) @FieldType(Command, "response") {
+        return switch (self) {
+            .r0 => .no,
+            .r1 => .l48,
+            .r1b => .l48,
+            .r2 => .l136,
+            .r3 => .l48,
+            .r6 => .l48,
+            .r7 => .l48,
+        };
+    }
+
+    /// The response needs index check.
+    pub fn idxcheck(self: ResponseType) bool {
+        return switch (self) {
+            .r0 => false,
+            .r1 => true,
+            .r1b => true,
+            .r2 => false,
+            .r3 => false,
+            .r6 => true,
+            .r7 => true,
+        };
+    }
+
+    /// The response needs CRC check.
+    pub fn crccheck(self: ResponseType) bool {
+        return switch (self) {
+            .r0 => false,
+            .r1 => true,
+            .r1b => true,
+            .r2 => false,
+            .r3 => false,
+            .r6 => true,
+            .r7 => true,
+        };
+    }
 };
 
 // =============================================================
-// Registers
+// SD Registers
+// =============================================================
+
+/// Card Status Register.
+const CardStatus = packed struct(u32) {
+    /// Reserved.
+    _rsvd0: u3 = 0,
+    /// AKE_SEQ_ERROR.
+    ake_seq_error: bool,
+    /// Reserved.
+    _rsvd1: u1 = 0,
+    /// APP_CMD
+    app_cmd: bool,
+    /// FX_EVENT
+    fx_event: bool,
+    /// Reserved.
+    _rsvd2: u1 = 0,
+    /// READY_FOR_DATA
+    read_for_data: bool,
+    /// CURRENT_STATE
+    current_state: enum(u4) {
+        idle = 0,
+        ready = 1,
+        ident = 2,
+        stby = 3,
+        tran = 4,
+        data = 5,
+        rcv = 6,
+        prg = 7,
+        dis = 8,
+        _,
+    },
+    /// ERASE_RESET
+    erase_reset: bool,
+    /// CARD_ECC_DISABLED
+    card_ecc_disabled: bool,
+    /// WP_ERASE_SKIP
+    wp_erase_skip: bool,
+    /// CSD_OVERWRITE
+    csd_overwrite: bool,
+    /// Reserved.
+    _rsvd3: u2 = 0,
+    /// ERROR
+    err: bool,
+    /// CC_ERROR
+    cc_error: bool,
+    /// CARD_ECC_FAILED
+    card_ecc_failed: bool,
+    /// ILLEGAL_COMMAND
+    illegal_command: bool,
+    /// COM_CRC_ERROR
+    com_crc_error: bool,
+    /// LOCK_UNLOCK_FAILED
+    lock_unlock_failed: bool,
+    /// CARD_IS_LOCKED
+    card_is_locked: bool,
+    /// WP_VIOLATION
+    wp_violation: bool,
+    /// ERASE_PARAM
+    erase_param: bool,
+    /// ERASE_SEQ_ERROR
+    erase_seq_error: bool,
+    /// BLOCK_LEN_ERROR
+    block_len_error: bool,
+    /// ADDRESS_ERROR
+    address_error: bool,
+    /// OUT_OF_RANGE
+    out_of_range: bool,
+};
+
+/// Operation Conditions Register.
+const Ocr = packed struct(u32) {
+    /// Reserved.
+    _rsvd0: u15 = 0,
+    /// 2.7-2.8
+    v2_7_to_v2_8: bool,
+    /// 2.8-2.9
+    v2_8_to_v2_9: bool,
+    /// 2.9-3.0
+    v2_9_to_v3_0: bool,
+    /// 3.0-3.1
+    v3_0_to_v3_1: bool,
+    /// 3.1-3.2
+    v3_1_to_v3_2: bool,
+    /// 3.2-3.3
+    v3_2_to_v3_3: bool,
+    /// 3.3-3.4
+    v3_3_to_v3_4: bool,
+    /// 3.4-3.5
+    v3_4_to_v3_5: bool,
+    /// 3.5-3.6
+    v3_5_to_v3_6: bool,
+    /// Switching to 1.8V Accepted
+    s18a: bool,
+    /// Reserved.
+    _rsvd1: u2 = 0,
+    /// Over 2TB support Status
+    co2t: bool,
+    /// Reserved.
+    _rsvd2: u1 = 0,
+    /// UHS-II Card Status
+    uhs2status: bool,
+    /// Card Capacity Status
+    ccs: bool,
+    /// Card power up status bit
+    not_busy: bool,
+};
+
+/// Card Identification Register.
+const Cid = extern struct {
+    /// Manufacturing date.
+    date: u16,
+    /// Product serial number.
+    psn: u32 align(1),
+    /// Product revision.
+    rev: u8,
+    /// Product name.
+    name: [5]u8,
+    /// OEM / Application ID.
+    oem_id: [2]u8,
+    /// Manufacturer ID.
+    mid: u8,
+};
+
+/// Card Specific Data.
+const Csd = union(CsdStructure) {
+    v1: CsdV1,
+    v2: CsdV2,
+
+    pub fn from(value: u128) Csd {
+        const typ: CsdStructure = @enumFromInt(bits.extract(u2, value, 126));
+        const raw: u120 = @truncate(value);
+        return switch (typ) {
+            .v1 => .{ .v1 = @bitCast(raw) },
+            .v2 => .{ .v2 = @bitCast(raw) },
+            _ => @panic("Unrecognized CSD structure."),
+        };
+    }
+
+    /// Version of CSD structure.
+    const CsdStructure = enum(u2) {
+        /// Version 1.0 (SDCD)
+        v1 = 0,
+        /// Version 2.0 (SDHC/SDXC)
+        v2 = 1,
+        _,
+    };
+
+    /// CSD Version 1.0
+    const CsdV1 = packed struct(u120) {
+        /// Reserved.
+        _rsvd0: u1 = 0,
+        /// Write protection until power cycle.
+        wp_upc: bool,
+        /// File format.
+        format: u2,
+        /// Temporary write protection.
+        tpm_wp: bool,
+        /// Permanent write protection.
+        perm_wp: bool,
+        /// Copy flag.
+        copy: bool,
+        /// File format group.
+        format_grp: bool,
+        /// Reserved.
+        _rsvd1: u5 = 0,
+        /// Partial blocks for write allowed.
+        write_bl_partial: bool,
+        /// Max write data block length.
+        write_bl_len: u4,
+        /// Write speed factor.
+        r2w_factor: u3,
+        /// Reserved.
+        _rsvd2: u2 = 0,
+        /// Write protect group enable.
+        wp_grp_enable: bool,
+        /// Write protect group size.
+        wp_grp_size: u7,
+        /// Erase sector size.
+        sector_size: u7,
+        /// Erase single block enable.
+        erase_blk_en: bool,
+        /// Device size multiplier.
+        c_size_mult: u3,
+        /// Max write current @VDD max.
+        vdd_w_curr_max: u3,
+        /// Max write current @VDD min.
+        vdd_w_curr_min: u3,
+        /// Max read current @VDD max.
+        vdd_r_curr_max: u3,
+        /// Max read current @VDD min.
+        vdd_r_curr_min: u3,
+        /// Device size.
+        c_size: u12,
+        /// Reserved.
+        _rsvd4: u2 = 0,
+        /// DSR implemented.
+        dsr_imp: bool,
+        /// Read block misalignment.
+        read_blk_misalign: bool,
+        /// Write block misalignment.
+        write_blk_misalign: bool,
+        /// Partial blocks for read allowed.
+        read_bl_partial: bool,
+        /// Max read data block length.
+        read_bl_len: u4,
+        /// Card command classes.
+        ccc: u12,
+        /// Max data transfer rate.
+        tran_speed: u8,
+        /// Data read access time 2.
+        nsac: u8,
+        /// Data read access time 1.
+        taac: u8,
+        /// Reserved.
+        _rsvd5: u6 = 0,
+        /// CSD structure.
+        csd_structure: Csd.CsdStructure,
+    };
+
+    /// CSD Version 2.0
+    const CsdV2 = packed struct(u120) {
+        /// Reserved.
+        _rsvd0: u2 = 0,
+        /// File format.
+        format: u2,
+        /// Temporary write protection.
+        tpm_wp: bool,
+        /// Permanent write protection.
+        perm_wp: bool,
+        /// Copy flag.
+        copy: bool,
+        /// File format group.
+        format_grp: bool,
+        /// Reserved.
+        _rsvd1: u5 = 0,
+        /// Partial blocks for write allowed.
+        write_bl_partial: bool,
+        /// Max write data block length.
+        write_bl_len: u4,
+        /// Write speed factor.
+        r2w_factor: u3,
+        /// Reserved.
+        _rsvd2: u2 = 0,
+        /// Write protect group enable.
+        wp_grp_enable: bool,
+        /// Write protect group size.
+        wp_grp_size: u7,
+        /// Erase sector size.
+        sector_size: u7,
+        /// Erase single block enable.
+        erase_blk_en: bool,
+        /// Reserved.
+        _rsvd3: u1 = 0,
+        /// Device size.
+        c_size: u22,
+        /// Reserved.
+        _rsvd4: u6 = 0,
+        /// DSR implemented.
+        dsr_imp: bool,
+        /// Read block misalignment.
+        read_blk_misalign: bool,
+        /// Write block misalignment.
+        write_blk_misalign: bool,
+        /// Partial blocks for read allowed.
+        read_bl_partial: bool,
+        /// Max read data block length.
+        read_bl_len: u4,
+        /// Card command classes.
+        ccc: u12,
+        /// Max data transfer rate.
+        tran_speed: u8,
+        /// Data read access time 2.
+        nsac: u8,
+        /// Data read access time 1.
+        taac: u8,
+        /// Reserved.
+        _rsvd5: u6 = 0,
+        /// CSD structure.
+        csd_structure: Csd.CsdStructure,
+    };
+};
+
+/// SD Configuration Register.
+///
+/// Supports only SCR version 1.0.
+const Scr = packed struct(u64) {
+    /// Reserved for manufacturer usage.
+    _rsvd0: u32 = 0,
+    /// Command Support bits.
+    cmd_support: u5,
+    /// Reserved.
+    _rsvd1: u1 = 0,
+    /// Spec. Version 5.00 or higher.
+    sd_specx: u4,
+    /// Spec. Version 4.00 or higher.
+    sd_spec4: bool,
+    /// Extended Security Support.
+    ex_security: u4,
+    /// Spec. Version 3.00 or higher.
+    sd_spec3: bool,
+    /// DAT Bus widths supported.
+    sd_bus_widths: u4,
+    /// CPRM Security Support.
+    sd_security: u3,
+    /// data_status_after erases
+    data_stat_after_erase: bool,
+    /// SD Memory Card - Spec. Version.
+    sd_spec: u4,
+    /// SCR Structure.
+    scr_structure: u4,
+};
+
+// =============================================================
+// I/O Registers
 // =============================================================
 
 // =============================================================
