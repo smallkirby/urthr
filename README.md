@@ -62,7 +62,7 @@ zig build test --summary all -Doptimize=Debug
 
 | Option | Type | Description | Default |
 |---|---|---|---|
-| `board` | String: `rpi4b`, `rpi5` | Target board. | `rpi4b` |
+| `board` | String: `rpi4b`, `rpi5`, `virt` | Target board. | `rpi4b` |
 | `serial_boot` | Flag | Generate bootloader and kernel as a separate binary. | `false` |
 | `sdcard` | Path | Path to mounted SD card device. | - |
 | `sdin` | Path | Path to SD card image file to be used by QEMU. | - |
