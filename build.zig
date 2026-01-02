@@ -506,10 +506,11 @@ fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const 
     const run = b.addSystemCommand(&.{"cpp"});
     run.addArg("-P");
     run.addArg(b.fmt("-I{s}/include", .{b.install_path}));
-    run.addFileArg(input);
     for (deps) |dep| {
+        run.addPrefixedDirectoryArg("-I", dep.dirname());
         run.addFileInput(dep);
     }
+    run.addFileArg(input);
 
     const out = run.addPrefixedOutputFileArg("-o", output);
     const ld = b.addInstallFile(out, output);
