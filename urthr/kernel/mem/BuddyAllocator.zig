@@ -212,7 +212,7 @@ const FreeList = struct {
 /// Manages free lists of each order for single memory zone.
 const Arena = struct {
     /// Available number of page orders.
-    const avail_orders: usize = 17;
+    const avail_orders: usize = 10;
     /// If the number of free blocks is larger than this threshold, try merge adjacent blocks.
     const merge_threshold: usize = 10;
 
@@ -525,7 +525,7 @@ fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
     }
 
     // Free all pages and see if they are merged.
-    // The state of the arena may change due to split & merge logbic.
+    // The state of the arena may change due to split & merge logic.
     {
         // Free pages in the order of allocation.
         var cur = allocated_pages_order0.first;
