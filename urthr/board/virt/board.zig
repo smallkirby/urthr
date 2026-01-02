@@ -46,7 +46,25 @@ pub inline fn getTempMaps() []const common.Range {
 ///
 /// This function returns before the reset actually happens.
 pub fn reset() void {
-    // TODO: implement
+    const arg: extern struct {
+        v: u64,
+        status: u64,
+    } = .{
+        .v = 0x20026,
+        .status = 0,
+    };
+
+    asm volatile (
+        \\mov x0, #0x18
+        \\mov x1, %[arg]
+        \\hlt #0xF000
+        :
+        : [arg] "r" (&arg),
+    );
+
+    while (true) {
+        arch.halt();
+    }
 }
 
 /// Wrapper functions for console API.
@@ -65,7 +83,7 @@ const console = struct {
 // =============================================================
 
 const std = @import("std");
-const arch = @import("arch");
+const arch = @import("arch").impl;
 const common = @import("common");
 const Console = common.Console;
 const IoAllocator = common.IoAllocator;
