@@ -45,13 +45,13 @@ pub inline fn getTempMaps() []const common.Range {
 /// Trigger a system cold reset.
 ///
 /// This function returns before the reset actually happens.
-pub fn reset() void {
+pub fn reset(status: u8) void {
     const arg: extern struct {
         v: u64,
         status: u64,
     } = .{
         .v = 0x20026,
-        .status = 0,
+        .status = status,
     };
 
     asm volatile (

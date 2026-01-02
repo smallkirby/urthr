@@ -387,7 +387,7 @@ fn failure() noreturn {
     @branchHint(.cold);
 
     // Otherwise, halt the CPU.
-    urd.eol();
+    urd.eol(1);
 }
 
 // =============================================================
