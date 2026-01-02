@@ -45,6 +45,14 @@ pub fn getConsole() Console {
     };
 }
 
+/// Get the regions that must be identity-mapped during boot.
+pub inline fn getTempMaps() []const common.Range {
+    return &[_]common.Range{
+        memmap.pl011,
+        memmap.pm,
+    };
+}
+
 /// Trigger a system cold reset.
 ///
 /// This function returns before the reset actually happens.

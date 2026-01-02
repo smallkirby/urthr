@@ -32,16 +32,18 @@ pub fn init() Error!void {
 
     // Kernel mapping: 2MiB granule, RWX, normal.
     log.debug("Mapping kernel.", .{});
-    rtt.expectEqual(0, pmap.kernel % size_2mib);
-    rtt.expectEqual(0, vmap.kernel.start % size_2mib);
-    try arch.mmu.map2mb(
-        pmap.kernel,
-        vmap.kernel.start,
-        util.roundup(kernelSize(), 2 * units.mib),
-        .kernel_rwx,
-        .normal,
-        allocator,
-    );
+    {
+        rtt.expectEqual(0, pmap.kernel % size_2mib);
+        rtt.expectEqual(0, vmap.kernel.start % size_2mib);
+        try arch.mmu.map2mb(
+            pmap.kernel,
+            vmap.kernel.start,
+            util.roundup(kernelSize(), 2 * units.mib),
+            .kernel_rwx,
+            .normal,
+            allocator,
+        );
+    }
 
     // Linear mapping: 1GiB granule, RW, normal.
     log.debug("Mapping linear memory.", .{});
@@ -61,23 +63,11 @@ pub fn init() Error!void {
     // Temporary device identity mapping: 4KiB granule, RW, device.
     log.debug("Mapping device memory.", .{});
     {
-        {
-            const peri = pmap.pl011;
+        for (board.getTempMaps()) |range| {
             try arch.mmu.map4kb(
-                peri.start,
-                peri.start,
-                peri.size(),
-                .kernel_rw,
-                .device,
-                allocator,
-            );
-        }
-        {
-            const peri = pmap.pm;
-            try arch.mmu.map4kb(
-                peri.start,
-                peri.start,
-                peri.size(),
+                range.start,
+                range.start,
+                range.size(),
                 .kernel_rw,
                 .device,
                 allocator,
