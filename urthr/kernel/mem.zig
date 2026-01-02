@@ -30,12 +30,14 @@ pub fn init() Error!void {
     // Arch-specific MMU preparation.
     try arch.mmu.init(allocator);
 
-    // Kernel mapping: 1GiB granule, RWX, normal.
+    // Kernel mapping: 2MiB granule, RWX, normal.
     log.debug("Mapping kernel.", .{});
-    try arch.mmu.map1gb(
+    rtt.expectEqual(0, pmap.kernel % size_2mib);
+    rtt.expectEqual(0, vmap.kernel.start % size_2mib);
+    try arch.mmu.map2mb(
         pmap.kernel,
-        vmap.kernel.start + pmap.kernel,
-        util.roundup(kernelSize(), units.gib),
+        vmap.kernel.start,
+        util.roundup(kernelSize(), 2 * units.mib),
         .kernel_rwx,
         .normal,
         allocator,
@@ -159,7 +161,7 @@ extern const __end: *void;
 
 /// Get the size in bytes of the kernel image.
 fn kernelSize() usize {
-    return @intFromPtr(__end) - urd.mem.vmap.kernel.start;
+    return @intFromPtr(&__end) - urd.mem.vmap.kernel.start;
 }
 
 // =============================================================
@@ -187,6 +189,7 @@ const PageAllocator = common.PageAllocator;
 const IoAllocator = common.IoAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
+const rtt = urd.rtt;
 const pmap = board.memmap;
 const vmap = @import("mem/vmemmap.zig");
 const BinAllocator = @import("mem/BinAllocator.zig");
