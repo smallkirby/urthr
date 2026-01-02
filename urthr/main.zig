@@ -37,7 +37,7 @@ export fn kmain() callconv(.c) noreturn {
 
     // Halt.
     log.err("Reached unreachable EOL.", .{});
-    urd.eol();
+    urd.eol(0);
 }
 
 /// Zig calling convention entry.

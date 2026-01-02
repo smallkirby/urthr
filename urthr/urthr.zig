@@ -10,12 +10,14 @@ pub const SpinLock = @import("kernel/SpinLock.zig");
 pub const enable_rtt = options.enable_rtt;
 
 /// Reached end of life.
-pub fn eol() noreturn {
+///
+/// `status` argument is used only if the board supports reset with status code.
+pub fn eol(status: u8) noreturn {
     if (options.restart_on_panic) {
         var console = board.getConsole();
         _ = console.println("Restarting CPU...");
 
-        board.reset();
+        board.reset(status);
     }
 
     while (true) {
@@ -34,7 +36,7 @@ pub fn unimplemented(comptime msg: []const u8) noreturn {
     _ = console.println(msg);
     _ = console.println("\n");
 
-    eol();
+    eol(4);
 }
 
 /// APIs for early boot stage.

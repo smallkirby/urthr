@@ -15,7 +15,7 @@ fn panic(msg: []const u8, _: ?*builtin.StackTrace, _: ?usize) noreturn {
     // Check if a double panic occurred.
     if (panicked.load(.acquire)) {
         log.err("Double panic detected. Halting.", .{});
-        urd.eol();
+        urd.eol(2);
     }
     panicked.store(true, .release);
 
@@ -28,7 +28,7 @@ fn panic(msg: []const u8, _: ?*builtin.StackTrace, _: ?usize) noreturn {
     }
 
     // Reached end of life.
-    urd.eol();
+    urd.eol(1);
 }
 
 // =============================================================

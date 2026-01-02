@@ -56,7 +56,9 @@ pub inline fn getTempMaps() []const common.Range {
 /// Trigger a system cold reset.
 ///
 /// This function returns before the reset actually happens.
-pub fn reset() void {
+///
+/// Argument is ignored.
+pub fn reset(_: u8) void {
     rdd.pm.reset();
 }
 

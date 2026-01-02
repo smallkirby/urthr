@@ -6,7 +6,7 @@ extern const exception_table: *void;
 var in_handling: bool = false;
 
 /// Called when an exception handler reaches the end.
-var terminator: ?*const fn () void = null;
+var terminator: ?*const fn (u8) void = null;
 
 /// Initialize exception handling for this CPU.
 pub fn initLocal() void {
@@ -137,7 +137,7 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
 
     // Call the terminator if set.
     if (terminator) |term_fn| {
-        term_fn();
+        term_fn(3);
     }
 
     // Halt the CPU.
