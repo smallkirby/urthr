@@ -154,11 +154,12 @@ export fn kmain() callconv(.c) noreturn {
 /// Map the Urthr kernel into memory and return the entry point.
 fn mapKernel(header: UrthrHeader) *KernelEntry {
     // Map kernel region.
-    const va = util.rounddown(header.load_at, units.gib);
-    const pa = util.rounddown(board.memmap.kernel, units.gib);
+    const page_size = 4 * units.kib;
+    const va = util.rounddown(header.load_at, page_size);
+    const pa = util.rounddown(board.memmap.kernel, page_size);
     const size = (board.memmap.kernel + header.size) - pa;
-    const aligned_size = util.roundup(size, units.gib);
-    arch.mmu.map1gb(
+    const aligned_size = util.roundup(size, page_size);
+    arch.mmu.map4kb(
         pa,
         va,
         aligned_size,
