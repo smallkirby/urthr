@@ -57,3 +57,13 @@ jobs:
             -Dqemu=$QEMU_DIR/bin \
             -Drtt \
             -Drestart
+
+      - name: Runtime Tests (virt)
+        run: |
+          zig build run --summary all \
+            -Dlog_level=debug \
+            -Doptimize=${{ matrix.BUILD_TYPE }} \
+            -Dboard=virt \
+            -Dqemu=$QEMU_DIR/bin \
+            -Drtt \
+            -Drestart
