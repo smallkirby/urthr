@@ -591,6 +591,7 @@ const Qemu = struct {
         const machine_name = switch (self.machine) {
             .rpi4b => "raspi4b",
             .rpi5 => "raspi5",
+            .virt => "virt-9.0,gic-version=3,secure=off,virtualization=on",
         };
 
         var args = std.array_list.Aligned([]const u8, null).empty;
@@ -603,6 +604,13 @@ const Qemu = struct {
             "-M",
             machine_name,
         });
+        switch (self.machine) {
+            .virt => try args.appendSlice(allocator, &.{
+                "-cpu",
+                "cortex-a76",
+            }),
+            else => {},
+        }
         try args.appendSlice(allocator, &.{
             "-m",
             self.memory,

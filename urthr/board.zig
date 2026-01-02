@@ -9,6 +9,8 @@ pub const BoardType = enum {
     rpi4b,
     /// Raspberry Pi 5
     rpi5,
+    /// QEMU virt machine
+    virt,
 
     /// Get the board type from its name.
     pub fn from(name: []const u8) ?BoardType {
@@ -27,6 +29,7 @@ pub const BoardType = enum {
         return switch (self) {
             .rpi4b => "kernel8.img",
             .rpi5 => "kernel_2712.img",
+            .virt => "virt.img",
         };
     }
 };
@@ -35,6 +38,7 @@ pub const BoardType = enum {
 pub const impl = switch (common.options.board) {
     .rpi4b => @import("board/rpi4b/board.zig"),
     .rpi5 => @import("board/rpi5/board.zig"),
+    .virt => @import("board/virt/board.zig"),
 };
 
 /// Get the name of the board.
@@ -42,6 +46,7 @@ pub fn description() []const u8 {
     return switch (common.options.board) {
         .rpi4b => "Raspberry Pi 4B",
         .rpi5 => "Raspberry Pi 5",
+        .virt => "QEMU virt machine",
     };
 }
 
