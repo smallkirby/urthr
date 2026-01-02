@@ -44,7 +44,7 @@ jobs:
           tar -xf zig.tar.xz
           echo "$(pwd)/zig-x86_64-linux-${{env.ZIG_VERSION}}" >> $GITHUB_PATH
 
-      - name: Build (all-in-one)
+      - name: Build (Raspberry Pi5, all-in-one)
         run: |
           zig build install --summary all \
             -Dlog_level=debug \
@@ -53,7 +53,7 @@ jobs:
             -Drestart \
             -Drtt
 
-      - name: Build (serial BL)
+      - name: Build (Raspberry Pi5, serial BL)
         run: |
           zig build install --summary all \
             -Dlog_level=debug \
