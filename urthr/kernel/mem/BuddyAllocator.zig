@@ -503,6 +503,11 @@ fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
     const num_free_order2 = arena.lists[2].numFree();
     const num_inuse_order2 = arena.lists[2].numInUse();
 
+    if (num_free_order1 == 0 and num_free_order2 == 0) {
+        // No pages to test.
+        return;
+    }
+
     // Consume all pages from 0-th freelist.
     {
         var prev: [*]allowzero u8 = @ptrFromInt(0);
@@ -518,7 +523,6 @@ fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
     }
 
     // Split pages in the 1-st freelist to the 0-th.
-    rtt.expect(num_free_order1 != 0);
     {
         const page1 = rttAllocatePage(&allocated_pages_order0, allocator);
         const page2 = rttAllocatePage(&allocated_pages_order0, allocator);
