@@ -484,6 +484,17 @@ fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
     const allocator = buddy_allocator.interface();
     const arena = &buddy_allocator.arena;
 
+    // Allocate 3 pages (from 2-th freelist) and check the alignment.
+    {
+        const page = allocator.allocPagesV(3) catch {
+            @panic("Unexpected failure in rttTestBuddyAllocator()");
+        };
+        // Must be aligned to 16 KiB.
+        rtt.expectEqual(0, @intFromPtr(page.ptr) & 0x3_FFF);
+        allocator.freePagesV(page);
+    }
+
+    // Record the initial state.
     var allocated_pages_order0 = TestingAllocatedList{};
     const num_free_order0 = arena.lists[0].numFree();
     const num_inuse_order0 = arena.lists[0].numInUse();
@@ -491,16 +502,6 @@ fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
     const num_inuse_order1 = arena.lists[1].numInUse();
     const num_free_order2 = arena.lists[2].numFree();
     const num_inuse_order2 = arena.lists[2].numInUse();
-
-    // Allocate 3 pages (from 2-th freelist) and check the alignment.
-    {
-        const page = allocator.allocPagesP(3) catch {
-            @panic("Unexpected failure in rttTestBuddyAllocator()");
-        };
-        // Must be aligned to 16 KiB.
-        rtt.expectEqual(0, @intFromPtr(page.ptr) & 0x3_FFF);
-        allocator.freePagesP(page);
-    }
 
     // Consume all pages from 0-th freelist.
     {
@@ -517,9 +518,11 @@ fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
     }
 
     // Split pages in the 1-st freelist to the 0-th.
+    rtt.expect(num_free_order1 != 0);
     {
         const page1 = rttAllocatePage(&allocated_pages_order0, allocator);
         const page2 = rttAllocatePage(&allocated_pages_order0, allocator);
+
         // Two pages must be contiguous because they are split from the same block.
         rtt.expectEqual(@intFromPtr(page1.ptr) + page_size, @intFromPtr(page2.ptr));
     }
