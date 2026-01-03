@@ -45,7 +45,7 @@ pub const MemoryResource = struct {
         allocator: Allocator,
     ) ResourceError!*MemoryResource {
         if (start < self.start or start + size > self.start + self.size) {
-            return ResourceError.InvalidArgument;
+            @panic("Invalid region requested for child resource.");
         }
         const end = start + size;
 

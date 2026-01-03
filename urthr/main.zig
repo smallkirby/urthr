@@ -32,7 +32,7 @@ export fn kmain() callconv(.c) noreturn {
     log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
 
     zmain() catch |err| {
-        log.err("ERROR: {t}", .{err});
+        log.err("ERROR: {}", .{err});
     };
 
     // Halt.
