@@ -62,6 +62,11 @@ pub fn init(self: *Self, avails: []const Range, reserveds: []Range, log_fn: ?urd
         var cur = avail.start;
         const end = avail.start + avail.size();
 
+        // Avoid using physical address 0.
+        if (cur == 0) {
+            cur = page_size;
+        }
+
         for (reserveds) |r| {
             const reserved_start = r.start;
             const reserved_end = reserved_start + util.roundup(r.size(), page_size);
@@ -411,8 +416,8 @@ fn allocPages(ctx: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
     defer self.lock.unlock();
 
     const vpages = try self.arena.allocPages(num_pages);
-    const vptr: [*]u8 = @ptrFromInt(virt2phys(@intFromPtr(vpages.ptr)));
-    return @alignCast(vptr[0..vpages.len]);
+    const pptr: [*]u8 = @ptrFromInt(virt2phys(@intFromPtr(vpages.ptr)));
+    return @alignCast(pptr[0..vpages.len]);
 }
 
 fn freePages(ctx: *anyopaque, pages: []u8) void {
