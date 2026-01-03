@@ -65,7 +65,7 @@ pub fn init() void {
 pub fn getConfIoType0() dd.pci.ConfIo(dd.pci.HeaderType0) {
     return dd.pci.ConfIo(dd.pci.HeaderType0){ .method = .{ .brcm = .{
         .data_base = pcie.base + 0x8000,
-        .config_base = pcie.base + 0x9000,
+        .address_base = pcie.base + 0x9000,
     } } };
 }
 
@@ -73,7 +73,7 @@ pub fn getConfIoType0() dd.pci.ConfIo(dd.pci.HeaderType0) {
 pub fn getConfIoType1() dd.pci.ConfIo(dd.pci.HeaderType1) {
     return dd.pci.ConfIo(dd.pci.HeaderType1){ .method = .{ .brcm = .{
         .data_base = pcie.base + 0x8000,
-        .config_base = pcie.base + 0x9000,
+        .address_base = pcie.base + 0x9000,
     } } };
 }
 
