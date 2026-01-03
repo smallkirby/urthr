@@ -75,8 +75,26 @@ pub inline fn getTempMaps() []const common.Range {
 /// This function returns before the reset actually happens.
 ///
 /// Argument is ignored.
-pub fn reset(_: u8) void {
-    rdd.pm.reset();
+pub fn reset(status: u8) void {
+    if (options.enable_rtt) {
+        const arg: extern struct {
+            v: u64,
+            status: u64,
+        } = .{
+            .v = 0x20026,
+            .status = status,
+        };
+
+        asm volatile (
+            \\mov x0, #0x18
+            \\mov x1, %[arg]
+            \\hlt #0xF000
+            :
+            : [arg] "r" (&arg),
+        );
+    } else {
+        rdd.pm.reset();
+    }
 }
 
 /// Wrapper functions for console API.
@@ -99,6 +117,7 @@ const arch = @import("arch");
 const common = @import("common");
 const Console = common.Console;
 const IoAllocator = common.IoAllocator;
+const options = common.options;
 const dd = @import("dd");
 const map = @import("memmap.zig");
 const rdd = @import("dd.zig");

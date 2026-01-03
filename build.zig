@@ -659,10 +659,11 @@ const Qemu = struct {
                 sd_path,
             });
         }
-        if (self.machine == .virt) {
-            try args.appendSlice(allocator, &.{
+        switch (self.machine) {
+            .rpi4b, .virt => try args.appendSlice(allocator, &.{
                 "-semihosting",
-            });
+            }),
+            else => {},
         }
         if (self.wait_gdb) {
             try args.appendSlice(allocator, &.{
