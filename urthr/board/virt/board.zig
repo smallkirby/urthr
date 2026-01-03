@@ -22,6 +22,11 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
 
+/// Initialize peripherals.
+pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
+    _ = allocator;
+}
+
 /// Get console instance.
 ///
 /// This is a zero cost operation with no runtime overhead.
