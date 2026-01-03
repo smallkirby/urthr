@@ -118,7 +118,7 @@ pub fn ConfIo(Module: type) type {
             const Self = @This();
 
             /// Base address of configuration address.
-            config_base: usize,
+            address_base: usize,
             /// Base address of configuration data.
             data_base: usize,
 
@@ -128,7 +128,7 @@ pub fn ConfIo(Module: type) type {
             pub fn read(self: Self, T: type, b: BusNum, d: DeviceNum, f: FunctionNum) T {
                 // Set target configuration address.
                 AddrReg.write(
-                    self.config_base,
+                    self.address_base,
                     bits.concatMany(u32, .{ @as(u4, 0), b, d, f, @as(u12, 0) }),
                 );
 
