@@ -1,7 +1,6 @@
 pub const exception = @import("kernel/exception.zig");
 pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
-pub const rtt = @import("kernel/rtt.zig");
 
 pub const LogFn = klog.LogFn;
 pub const SpinLock = @import("kernel/SpinLock.zig");

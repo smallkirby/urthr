@@ -30,7 +30,7 @@ const writer = Writer{ .context = {} };
 
 pub fn expect(condition: bool) void {
     @branchHint(.cold);
-    if (!urd.enable_rtt) return;
+    if (!options.enable_rtt) return;
 
     if (!condition) {
         log.err("RTT expectation failed at 0x{X:0>16}", .{callerInfo()});
@@ -40,7 +40,7 @@ pub fn expect(condition: bool) void {
 
 pub fn expectEqual(expected: anytype, actual: anytype) void {
     @branchHint(.cold);
-    if (!urd.enable_rtt) return;
+    if (!options.enable_rtt) return;
 
     inner.expectEqual(expected, actual) catch {
         log.err("RTT expectation failed at 0x{X:0>16}", .{callerInfo()});
@@ -49,7 +49,7 @@ pub fn expectEqual(expected: anytype, actual: anytype) void {
 }
 
 fn write(_: void, bytes: []const u8) WriterError!usize {
-    urd.serial.writeString(bytes);
+    log.err(bytes, .{});
     return bytes.len;
 }
 
@@ -378,7 +378,7 @@ inline fn callerInfo() usize {
 ///
 /// When it can be called when runtime tests are disabled, it will raise a compile error.
 inline fn onlyForTest() void {
-    if (!urd.enable_rtt) {
+    if (!options.enable_rtt) {
         @compileError("This function is available only for runtime tests.");
     }
 }
@@ -387,7 +387,7 @@ fn failure() noreturn {
     @branchHint(.cold);
 
     // Otherwise, halt the CPU.
-    urd.eol(1);
+    @panic("Test Failed");
 }
 
 // =============================================================
@@ -396,4 +396,4 @@ fn failure() noreturn {
 
 const std = @import("std");
 const log = std.log.scoped(.rtt);
-const urd = @import("urthr");
+const options = @import("common").options;

@@ -477,7 +477,7 @@ fn debugPrintStatistics(self: *Self, log_fn: urd.LogFn) void {
 // =============================================================
 
 const testing = std.testing;
-const rtt = urd.rtt;
+const rtt = common.rtt;
 
 const TestingAllocatedList = DoublyLinkedList;
 const TestingAllocatedNode = TestingAllocatedList.Node;

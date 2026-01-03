@@ -3,6 +3,7 @@
 pub const bits = @import("common/bits.zig");
 pub const mem = @import("common/mem.zig");
 pub const mmio = @import("common/mmio.zig");
+pub const rtt = @import("common/rtt.zig");
 pub const typing = @import("common/typing.zig");
 pub const util = @import("common/util.zig");
 

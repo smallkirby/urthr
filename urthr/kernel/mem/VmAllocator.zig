@@ -107,7 +107,7 @@ const VmArea = struct {
         align_size: usize,
         guard: GuardPagePosition,
     ) Error!*VmArea {
-        urd.rtt.expectEqual(0, size % mem.size_4kib);
+        rtt.expectEqual(0, size % mem.size_4kib);
 
         const size_aligned = util.roundup(size, align_size);
         const start = if (vmallocator._area_list.max()) |max| max.container().end else vmallocator._vstart;
@@ -135,7 +135,7 @@ const VmArea = struct {
 
     /// Free the given virtual memory area.
     pub fn freeVrange(self: *VmAllocator, area: *VmArea) void {
-        urd.rtt.expect(self._area_list.contains(area.start));
+        rtt.expect(self._area_list.contains(area.start));
 
         self._area_list.delete(area);
         gallocator().destroy(area);
@@ -147,7 +147,7 @@ const VmArea = struct {
     ///     When the guard page is .before, a first page is not mapped.
     ///     When the guard page is .after, a last page is not mapped.
     pub fn allocateMapPhysicalPages(self: *VmArea) Error!void {
-        urd.rtt.expectEqual(.not_mapped, self._status);
+        rtt.expectEqual(.not_mapped, self._status);
 
         const num_pages = (self.end - self.start) / mem.size_4kib - switch (self.guard_position) {
             .before, .after => @as(usize, 1),
@@ -382,12 +382,12 @@ const Allocator = std.mem.Allocator;
 
 const urd = @import("urthr");
 const mem = urd.mem;
-const rtt = urd.rtt;
 const Virt = mem.Virt;
 const Phys = mem.Phys;
 const common = @import("common");
 const IoAllocator = common.IoAllocator;
 const PageAllocator = common.PageAllocator;
+const rtt = common.rtt;
 const util = common.util;
 const RbTree = common.RbTree;
 const arch = @import("arch").impl;

@@ -171,7 +171,7 @@ const Allocator = std.mem.Allocator;
 
 const urd = @import("urthr");
 const mem = urd.mem;
-const rtt = urd.rtt;
 const common = @import("common");
+const rtt = common.rtt;
 const units = common.units;
 const InlineDoublyLinkedList = common.typing.InlineDoublyLinkedList;
