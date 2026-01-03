@@ -32,6 +32,26 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
 
+/// Initialize peripherals.
+pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
+    // PCIe.
+    log.info("Initializing PCIe controller.", .{});
+    {
+        const pci = try allocator.ioremap(
+            memmap.pci.start,
+            memmap.pci.size(),
+        );
+        rdd.pcie.setBase(pci);
+        rdd.pcie.init();
+    }
+
+    // RP1.
+    log.info("Initializing RP1.", .{});
+    {
+        rdd.rp1.init();
+    }
+}
+
 /// Get console instance.
 ///
 /// This is a zero cost operation with no runtime overhead.
@@ -78,6 +98,7 @@ const console = struct {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.rpi5);
 const arch = @import("arch");
 const common = @import("common");
 const Console = common.Console;

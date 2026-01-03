@@ -62,6 +62,10 @@ fn zmain() !void {
     try urd.mem.remapBoard();
     log.debug("Memory Map:", .{});
     urd.mem.resource.debugPrintResources(log.debug);
+
+    // Initialize peripherals.
+    log.info("Initializing peripherals.", .{});
+    try board.initPeripherals(urd.mem.getVmAllocator());
 }
 
 // =============================================================

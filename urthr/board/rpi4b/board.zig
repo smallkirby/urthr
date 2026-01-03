@@ -41,6 +41,11 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
     ));
 }
 
+/// Initialize peripherals.
+pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
+    _ = allocator;
+}
+
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
 

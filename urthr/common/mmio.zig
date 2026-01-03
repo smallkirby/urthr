@@ -106,7 +106,7 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
         }
 
         /// Get the register field information.
-        fn getRegister(T: type) struct { usize, type } {
+        pub fn getRegister(T: type) struct { usize, type } {
             inline for (fields) |field| {
                 const offset, const U = field;
                 if (U == T) {
