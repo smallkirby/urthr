@@ -34,6 +34,10 @@ _start:
   mov   x0, #(1 << 31)      // Set EL1 to use AArch64.
   msr   HCR_EL2, x0
 
+  mrs   x0, CNTHCTL_EL2
+  orr   x0, x0, #(0b11 << 0) // Enable EL1 access to timers.
+  msr   CNTHCTL_EL2, x0
+
   mov   x0, #(0b0101 << 0)  // EL1h
   msr   SPSR_EL2, x0
 

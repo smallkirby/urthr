@@ -1,5 +1,6 @@
 pub const exception = @import("isr.zig");
 pub const mmu = @import("mmu.zig");
+pub const timer = @import("timer.zig");
 
 /// Execute a single NOP instruction.
 pub fn nop() void {
