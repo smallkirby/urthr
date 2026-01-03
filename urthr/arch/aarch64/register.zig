@@ -41,6 +41,9 @@ pub const SystemReg = enum {
 
     sctlr_el1,
 
+    cntpct_el0,
+    cntfrq_el0,
+
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
         return @tagName(self);
@@ -64,6 +67,8 @@ pub const SystemReg = enum {
             .ttbr0_el1 => Ttbr0El1,
             .ttbr1_el1 => Ttbr1El1,
             .sctlr_el1 => SctlrEl1,
+            .cntpct_el0 => Cntpct,
+            .cntfrq_el0 => Cntfrq,
         };
     }
 };
@@ -746,4 +751,22 @@ pub const SctlrEl1 = packed struct(u64) {
     nmi: bool,
     spintmask: bool,
     tidcp: bool,
+};
+
+/// CNTPCT_ELx.
+///
+/// Counter-timer Physical Count Register.
+pub const Cntpct = packed struct(u64) {
+    /// Physical count value.
+    value: u64,
+};
+
+/// CNTFRQ_EL0.
+///
+/// Counter-timer Frequency Register.
+pub const Cntfrq = packed struct(u64) {
+    /// Timer frequency.
+    freq: u32,
+    /// Reserved.
+    _rsvd: u32 = 0,
 };
