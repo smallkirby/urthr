@@ -23,6 +23,8 @@ pub const UrthrHeader = extern struct {
     size: u64,
     /// Size in bytes of the encoded Urthr kernel binary.
     encoded_size: u64,
+    /// Size in bytes of the memory size including NOBITS sections.
+    mem_size: u64,
     /// Checksum of the Urthr kernel binary.
     checksum: [hash_size]u8,
     /// Virtual address to load the Urthr kernel.
@@ -31,8 +33,8 @@ pub const UrthrHeader = extern struct {
     entry: u64,
 
     comptime {
-        if (@sizeOf(UrthrHeader) != 48) {
-            @compileError("UrthrHeader size must be 48 bytes");
+        if (@sizeOf(UrthrHeader) != 56) {
+            @compileError("UrthrHeader size must be 56 bytes");
         }
     }
 

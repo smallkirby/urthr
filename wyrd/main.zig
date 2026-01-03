@@ -130,6 +130,7 @@ export fn kmain() callconv(.c) noreturn {
         log.info("Urthr Header", .{});
         log.info("  Magic    : {s}", .{header.magic});
         log.info("  Size     : 0x{X} bytes", .{header.size});
+        log.info("  Mem Size : 0x{X} bytes", .{header.mem_size});
         log.info("  Load At  : 0x{X:0>16}", .{header.load_at});
         log.info("  Entry    : 0x{X:0>16}", .{header.entry});
         log.info("  Checksum : {s}", .{std.fmt.bytesToHex(header.checksum[0..], .upper)});
@@ -157,7 +158,7 @@ fn mapKernel(header: UrthrHeader) *KernelEntry {
     const page_size = 4 * units.kib;
     const va = util.rounddown(header.load_at, page_size);
     const pa = util.rounddown(board.memmap.kernel, page_size);
-    const size = (board.memmap.kernel + header.size) - pa;
+    const size = (board.memmap.kernel + header.mem_size) - pa;
     const aligned_size = util.roundup(size, page_size);
     arch.mmu.map4kb(
         pa,

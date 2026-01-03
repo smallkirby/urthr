@@ -182,6 +182,7 @@ const MkImage = struct {
         const header = UrthrHeader{
             .size = urthr_size,
             .encoded_size = self.getEncodedSize(urthr_size),
+            .mem_size = info.mem_size,
             .load_at = info.load_addr,
             .checksum = try UrthrHeader.calcChecksum(&urthr_reader.interface),
             .entry = info.entry,
@@ -213,17 +214,23 @@ const MkImage = struct {
 
         var piter = header.iterateProgramHeaders(&urthr_elf_reader);
         var min_seg_addr: u64 = std.math.maxInt(u64);
+        var max_seg_addr: u64 = 0;
         while (try piter.next()) |ph| {
             if (ph.p_type != std.elf.PT_LOAD) continue;
 
             if (ph.p_vaddr < min_seg_addr) {
                 min_seg_addr = ph.p_vaddr;
             }
+
+            if (ph.p_vaddr + ph.p_memsz > max_seg_addr) {
+                max_seg_addr = ph.p_vaddr + ph.p_memsz;
+            }
         }
 
         return .{
             .load_addr = min_seg_addr,
             .entry = header.entry,
+            .mem_size = max_seg_addr - min_seg_addr,
         };
     }
 
@@ -238,6 +245,8 @@ const MkImage = struct {
         load_addr: u64,
         /// Entry point.
         entry: u64,
+        /// Memory size including NOBITS sections.
+        mem_size: u64,
     };
 };
 

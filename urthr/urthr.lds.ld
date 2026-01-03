@@ -30,6 +30,11 @@ SECTIONS
       *(.data .data.* .ldata)
     } :data
 
+    .got : ALIGN(8)
+    {
+      *(.got .got.*)
+    } :data
+
     .bss (NOLOAD) : ALIGN(16)
     {
       __bss_start = .;
