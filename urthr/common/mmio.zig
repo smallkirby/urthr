@@ -61,12 +61,23 @@ pub fn Register(T: type, Width: type) type {
     };
 }
 
+/// Alignment requirement for registers in a MMIO module.
 pub const Align = union(enum) {
     /// Automatic alignment based on the register width with check of maximum alignment size.
     natural: type,
     /// Mandatory alignment size in bytes.
     size: type,
 };
+
+/// Create a marker type for MMIO modules.
+///
+/// The marker does not have its own data.
+/// It just serves as an address offset identifier within a MMIO module.
+pub fn Marker(comptime name: @Type(.enum_literal)) type {
+    return enum(u32) {
+        const __ = name;
+    };
+}
 
 /// Defines a module consisting of multiple MMIO registers.
 ///
@@ -105,6 +116,17 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             };
         }
 
+        /// Get the address of the specified marker.
+        pub fn getMarkerAddress(self: Self, comptime name: @TypeOf(.enum_literal)) usize {
+            inline for (fields) |field| {
+                const offset, const U = field;
+                if (U == Marker(name)) {
+                    return self.base + offset;
+                }
+            }
+            @compileError("Marker not found in Module: " ++ @typeName(name));
+        }
+
         /// Get the register field information.
         pub fn getRegister(T: type) struct { usize, type } {
             inline for (fields) |field| {
@@ -122,6 +144,12 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             return MT.read(self.base + offset);
         }
 
+        /// Read the specified indexed field.
+        pub fn readIndexed(self: Self, T: type, index: usize, stride: usize) T {
+            const offset, const MT = getRegister(T);
+            return MT.read(self.base + offset + index * stride);
+        }
+
         /// Write to the specified field.
         pub fn write(self: Self, T: type, value: anytype) void {
             const offset, const MT = getRegister(T);
@@ -129,11 +157,25 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             MT.write(self.base + offset, value);
         }
 
+        /// Write to the specified indexed field.
+        pub fn writeIndexed(self: Self, T: type, index: usize, stride: usize, value: anytype) void {
+            const offset, const MT = getRegister(T);
+
+            MT.write(self.base + offset + index * stride, value);
+        }
+
         /// Modify the specified field.
         pub fn modify(self: Self, T: type, value: anytype) void {
             const offset, const MT = getRegister(T);
 
             MT.modify(self.base + offset, value);
+        }
+
+        /// Modify the specified indexed field.
+        pub fn modifyIndexed(self: Self, T: type, index: usize, stride: usize, value: anytype) void {
+            const offset, const MT = getRegister(T);
+
+            MT.modify(self.base + offset + index * stride, value);
         }
     };
 }
