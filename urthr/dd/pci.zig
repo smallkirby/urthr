@@ -92,9 +92,48 @@ pub fn ConfIo(Module: type) type {
 
         /// Read from the specified register type.
         pub fn read(self: Wrapper, T: type) T {
-            return switch (self.method) {
-                inline else => |m| m.read(T, self.bus, self.device, self.function),
+            const roffset, _ = Module.getRegister(T);
+            return self.readAt(roffset, T);
+        }
+
+        /// Read a field at the given offset as type T.
+        pub fn readAt(self: Wrapper, offset: usize, T: type) T {
+            _, const register = Module.getRegister(T);
+
+            const target = switch (self.method) {
+                inline else => |m| m.prepareIo(offset, self.bus, self.device, self.function),
             };
+
+            return register.read(target);
+        }
+
+        /// Read raw integer at the given offset.
+        pub fn readRawAt(self: Wrapper, offset: usize, T: type) T {
+            const target = switch (self.method) {
+                inline else => |m| m.prepareIo(offset, self.bus, self.device, self.function),
+            };
+
+            return @as(*const volatile T, @ptrFromInt(target)).*;
+        }
+
+        /// Write raw integer at the given offset.
+        pub fn writeRawAt(self: Wrapper, offset: usize, value: u32) void {
+            const target = switch (self.method) {
+                inline else => |m| m.prepareIo(offset, self.bus, self.device, self.function),
+            };
+
+            @as(*volatile u32, @ptrFromInt(target)).* = value;
+        }
+
+        /// Read modify write the register at the given address.
+        pub fn modify(self: Wrapper, T: type, value: anytype) void {
+            const roffset, const register = Module.getRegister(T);
+
+            const target = switch (self.method) {
+                inline else => |m| m.prepareIo(roffset, self.bus, self.device, self.function),
+            };
+
+            register.modify(target, value);
         }
 
         /// ECAM access method.
@@ -104,12 +143,9 @@ pub fn ConfIo(Module: type) type {
             /// Base address of PCI Configuration Space.
             base: usize,
 
-            /// Read a field from the configuration space.
-            pub fn read(self: Self, T: type, b: BusNum, d: DeviceNum, f: FunctionNum) T {
-                const roffset, const register = Module.getRegister(T);
-                const offset = bits.concatMany(u28, .{ b, d, f, @as(u12, roffset) });
-
-                return register.read(self.base + offset);
+            /// Prepare to read from or write to the address at the given offset and return the effective address.
+            fn prepareIo(_: Self, roffset: usize, b: BusNum, d: DeviceNum, f: FunctionNum) usize {
+                return bits.concatMany(u28, .{ b, d, f, @as(u12, @intCast(roffset)) });
             }
         };
 
@@ -124,20 +160,147 @@ pub fn ConfIo(Module: type) type {
 
             const AddrReg = mmio.Register(u32, u32);
 
-            /// Read a field from the configuration space.
-            pub fn read(self: Self, T: type, b: BusNum, d: DeviceNum, f: FunctionNum) T {
+            /// Prepare to read from or write to the address at the given offset and return the effective address.
+            fn prepareIo(self: Self, roffset: usize, b: BusNum, d: DeviceNum, f: FunctionNum) usize {
                 // Set target configuration address.
                 AddrReg.write(
                     self.address_base,
                     bits.concatMany(u32, .{ @as(u4, 0), b, d, f, @as(u12, 0) }),
                 );
 
-                // Read data.
-                const roffset, const register = Module.getRegister(T);
-                return register.read(self.data_base + roffset);
+                return self.data_base + roffset;
             }
         };
     };
+}
+
+/// BAR information.
+pub const BarInfo = struct {
+    /// BAR index.
+    index: usize,
+    /// BAR type.
+    type: BarType,
+    /// Address.
+    address: u64,
+    /// Effective address mask.
+    address_mask: u64,
+
+    /// Get the size in bytes of the BAR.
+    pub fn size(self: BarInfo) u64 {
+        return ~self.address_mask + 1;
+    }
+
+    /// Set the address of the BAR.
+    ///
+    /// This function actually writes to the BAR register.
+    pub fn setAddress(self: BarInfo, addr: u64, confio: anytype) void {
+        rtt.expectEqual(0, addr & ~self.address_mask);
+
+        const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
+
+        switch (self.type) {
+            .io => {
+                @panic("I/O BAR setting not implemented.");
+            },
+            .mem32 => {
+                const bar_offset = bar_base + self.index * @sizeOf(HeaderBar0);
+                const value = confio.readRawAt(bar_offset, u32);
+                const new = @as(u32, @intCast(addr)) | (value & 0xF);
+                confio.writeRawAt(bar_offset, new);
+            },
+            .mem64 => {
+                @panic("64-bit BAR setting not implemented.");
+            },
+        }
+    }
+};
+
+/// Type of BAR.
+pub const BarType = enum {
+    /// I/O space BAR.
+    io,
+    /// Memory space BAR (32-bit).
+    mem32,
+    /// Memory space BAR (64-bit).
+    mem64,
+};
+
+/// Parse BARs.
+///
+/// `confio` must be configured to access the target device's configuration space beforehand.
+pub fn parseBars(confio: anytype, out: []BarInfo) []const BarInfo {
+    const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
+
+    var out_idx: usize = 0;
+    var skip: bool = false;
+    for (out, 0..) |*buf, i| {
+        if (skip) {
+            skip = false;
+            continue;
+        }
+
+        const bar_offset = bar_base + i * @sizeOf(HeaderBar0);
+        const value = confio.readRawAt(bar_offset, u32);
+
+        // Test if BAR is implemented.
+        confio.writeRawAt(bar_offset, 0xFFFF_FFFF);
+        if (confio.readRawAt(bar_offset, u32) == 0) {
+            // Unimplemented BAR.
+            continue;
+        }
+        confio.writeRawAt(bar_offset, value);
+
+        if (bits.isset(value, 0)) {
+            // I/O space BAR.
+            buf.* = .{
+                .index = i,
+                .type = .io,
+                .address = value & 0xFFFF_FFFC,
+                .address_mask = 0,
+            };
+            out_idx += 1;
+        } else if (bits.extract(u2, value, 1) == 0x0) {
+            // Memory space BAR (32-bit).
+            confio.writeRawAt(bar_offset, 0xFFFF_FFFF);
+            const mask = confio.readRawAt(bar_offset, u32);
+            confio.writeRawAt(bar_offset, value);
+
+            buf.* = .{
+                .index = i,
+                .type = .mem32,
+                .address = value & mask,
+                .address_mask = bits.concat(u64, @as(u32, 0xFFFF_FFFF), mask),
+            };
+            out_idx += 1;
+        } else if (bits.extract(u2, value, 1) == 0x2) {
+            // Memory space BAR (64-bit).
+            const next_value = confio.readRawAt(bar_offset + 4, u32);
+            confio.writeRawAt(bar_offset, 0xFFFF_FFFF);
+            confio.writeRawAt(bar_offset + 4, 0xFFFF_FFFF);
+            const mask = confio.readRawAt(bar_offset, u32);
+            const next_mask = confio.readRawAt(bar_offset + 4, u32);
+            confio.writeRawAt(bar_offset, value);
+            confio.writeRawAt(bar_offset + 4, next_value);
+
+            const mask64 = bits.concat(u64, next_mask, mask);
+            const addr64 = bits.concat(u64, next_value, value) & mask64;
+
+            buf.* = .{
+                .index = i,
+                .type = .mem64,
+                .address = addr64,
+                .address_mask = mask64,
+            };
+
+            out_idx += 1;
+            skip = true;
+        } else {
+            // Unrecognized BAR type.
+            break;
+        }
+    }
+
+    return out[0..out_idx];
 }
 
 // =============================================================
@@ -490,3 +653,4 @@ const log = std.log.scoped(.pci);
 const common = @import("common");
 const bits = common.bits;
 const mmio = common.mmio;
+const rtt = common.rtt;
