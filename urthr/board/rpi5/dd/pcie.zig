@@ -7,9 +7,11 @@
 // Module Definition
 // =============================================================
 
+/// STB module.
 var pcie = mmio.Module(.{ .size = u32 }, &.{
     // =========================================================
     // Root Complex Configuration Space
+    .{ 0x00AC, mmio.Marker(.cap_regs) },
     .{ 0x0A0C, RcTlVdmCtrl1 },
     .{ 0x0A20, RcTlVdmCtrl0 },
     .{ 0x0188, RcConfigVendorSpecific1 },
@@ -24,9 +26,14 @@ var pcie = mmio.Module(.{ .size = u32 }, &.{
 
     // =========================================================
     // Misc Registers
+    .{ 0x400C, MemWin0Low },
+    .{ 0x4010, MemWin0High },
     .{ 0x405C, RcConfigRetryTimeout },
     .{ 0x4064, Control },
     .{ 0x4068, MiscStatus },
+    .{ 0x4070, MemWin0BaseLimit },
+    .{ 0x4080, MemWin0BaseHi },
+    .{ 0x4084, MemWin0LimitHi },
     .{ 0x40A0, MiscCtrl },
     .{ 0x40A4, MiscUbusCtrl },
     .{ 0x40A8, MiscUbusTimeout },
@@ -35,8 +42,14 @@ var pcie = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x4168, MiscVdmPriorityToQosMapLo },
     .{ 0x4170, PcieMiscAxiReadErrorData },
     .{ 0x4304, HardDebug },
+
+    // =========================================================
+    // Configuration Space
+    .{ 0x8000, mmio.Marker(.config_data) },
+    .{ 0x9000, mmio.Marker(.config_address) },
 }){};
 
+/// Capability Structure module.
 var capm = dd.pci.PcieCap{};
 
 // =============================================================
@@ -51,8 +64,7 @@ pub fn setBase(base: usize) void {
 /// Initialize the PCIe controller.
 pub fn init() void {
     // Set base address of PCIe Capability Structure.
-    const cap_regs_offset = 0x00AC;
-    capm.setBase(pcie.base + cap_regs_offset);
+    capm.setBase(pcie.getMarkerAddress(.cap_regs));
 
     // Reset controller.
     reset();
@@ -61,19 +73,51 @@ pub fn init() void {
     initBridge();
 }
 
+/// Setup outbound address translation.
+pub fn setOutTranslation(axi: usize, pci: usize, size: usize, win: usize) void {
+    rtt.expectEqual(0, axi % units.mib);
+    rtt.expectEqual(0, pci % units.mib);
+    rtt.expectEqual(0, size % units.mib);
+
+    const axi_base_mb = axi / units.mib;
+    const axi_limit_mb = (axi + size - 1) / units.mib;
+
+    // Set PCIe window.
+    pcie.modifyIndexed(MemWin0Low, win, 8, .{
+        .mem_win0_low = bits.extract(u32, pci, 0),
+    });
+    pcie.modifyIndexed(MemWin0High, win, 8, .{
+        .mem_win0_high = bits.extract(u32, pci, 32),
+    });
+
+    // Set AXI window lower bits.
+    pcie.modifyIndexed(MemWin0BaseLimit, win, 4, .{
+        .mem_win0_base = bits.extract(u12, axi_base_mb, 0),
+        .mem_win0_limit = bits.extract(u12, axi_limit_mb, 0),
+    });
+
+    // Set AXI window upper bits.
+    pcie.modifyIndexed(MemWin0BaseHi, win, 8, .{
+        .mem_win0_base_hi = bits.extract(u8, axi_base_mb, 12),
+    });
+    pcie.modifyIndexed(MemWin0LimitHi, win, 8, .{
+        .mem_win0_limit_hi = bits.extract(u8, axi_limit_mb, 12),
+    });
+}
+
 /// Get the configuration space I/O interface for Type 0 headers.
 pub fn getConfIoType0() dd.pci.ConfIo(dd.pci.HeaderType0) {
     return dd.pci.ConfIo(dd.pci.HeaderType0){ .method = .{ .brcm = .{
-        .data_base = pcie.base + 0x8000,
-        .address_base = pcie.base + 0x9000,
+        .data_base = pcie.getMarkerAddress(.config_data),
+        .address_base = pcie.getMarkerAddress(.config_address),
     } } };
 }
 
 /// Get the configuration space I/O interface for Type 1 headers.
 pub fn getConfIoType1() dd.pci.ConfIo(dd.pci.HeaderType1) {
     return dd.pci.ConfIo(dd.pci.HeaderType1){ .method = .{ .brcm = .{
-        .data_base = pcie.base + 0x8000,
-        .address_base = pcie.base + 0x9000,
+        .data_base = pcie.getMarkerAddress(.config_data),
+        .address_base = pcie.getMarkerAddress(.config_address),
     } } };
 }
 
@@ -198,7 +242,7 @@ fn initBridge() void {
     });
     header.modify(dd.pci.HeaderMemBaseLimit, .{
         .mem_base = 0x0000_0000,
-        .mem_limit = 0x0000_8FFF, // value chosen arbitrarily
+        .mem_limit = 0x0000_8FFF, // TODO: value chosen arbitrarily
     });
     header.modify(dd.pci.HeaderPrefMemBaseLimit, .{
         .pref_mem_base = 0x0000_0000,
@@ -302,6 +346,14 @@ const RcPlPhyCtrl15 = packed struct(u32) {
 // =============================================================
 // Misc Registers
 
+const MemWin0Low = packed struct(u32) {
+    mem_win0_low: u32,
+};
+
+const MemWin0High = packed struct(u32) {
+    mem_win0_high: u32,
+};
+
 const RcConfigRetryTimeout = packed struct(u32) {
     value: u32,
 };
@@ -311,6 +363,23 @@ const Control = packed struct(u32) {
     _0: u1,
     perstb: u1,
     _1: u29,
+};
+
+const MemWin0BaseLimit = packed struct(u32) {
+    _0: u4,
+    mem_win0_base: u12,
+    _1: u4,
+    mem_win0_limit: u12,
+};
+
+const MemWin0BaseHi = packed struct(u32) {
+    mem_win0_base_hi: u8,
+    _0: u24,
+};
+
+const MemWin0LimitHi = packed struct(u32) {
+    mem_win0_limit_hi: u8,
+    _0: u24,
 };
 
 const MiscStatus = packed struct(u32) {
@@ -391,6 +460,7 @@ const common = @import("common");
 const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
+const units = common.units;
 const Console = common.Console;
 const IoAllocator = common.IoAllocator;
 const dd = @import("dd");

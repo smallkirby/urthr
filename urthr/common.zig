@@ -39,6 +39,17 @@ pub const Range = struct {
     }
 };
 
+/// Compile-time assertion.
+pub fn comptimeAssert(comptime condition: bool, comptime message: ?[]const u8) void {
+    if (!condition) {
+        if (message) |msg| {
+            @compileError(msg);
+        } else {
+            @compileError("comptime assertion failed");
+        }
+    }
+}
+
 // =============================================================
 // Tests
 // =============================================================

@@ -48,7 +48,7 @@ pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
     // RP1.
     log.info("Initializing RP1.", .{});
     {
-        rdd.rp1.init();
+        try rdd.rp1.init(allocator);
     }
 }
 
