@@ -22,8 +22,17 @@ var rp1 = mmio.Module(.{ .size = void }, &.{
     .{ 0x0004_4000, mmio.Marker(.uart5) },
 }){};
 
+const pcie0_range = common.Range{
+    .start = 0x001C_0000_0000,
+    .end = 0x001F_0000_0000,
+};
+const pcie1_range = common.Range{
+    .start = 0x001F_0000_0000,
+    .end = 0x0020_0000_0000,
+};
+
 /// Physical address mapped to RP1 peripherals (BAR1).
-const axi_peri_base: usize = 0x1F_0000_0000;
+const axi_peri_base: usize = pcie1_range.start;
 /// Size in bytes of peripheral region's translation window.
 const axi_peri_window_size: usize = 0x20_0000;
 
