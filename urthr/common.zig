@@ -11,6 +11,7 @@ pub const Console = @import("common/Console.zig");
 pub const IoAllocator = @import("common/IoAllocator.zig");
 pub const PageAllocator = @import("common/PageAllocator.zig");
 pub const RbTree = @import("common/RbTree.zig").RbTree;
+pub const Timer = @import("common/Timer.zig");
 
 pub const options = @import("options");
 
