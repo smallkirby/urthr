@@ -182,6 +182,50 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
 
             MT.modify(self.base + offset + index * stride, value);
         }
+
+        /// Wait for the specified register to match the given value.
+        pub fn waitFor(self: Self, T: type, value: anytype) void {
+            const offset, const MT = getRegister(T);
+
+            while (true) {
+                const v = MT.read(self.base + offset);
+
+                var matched = true;
+                inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
+                    if (@field(v, field.name) != @field(value, field.name)) {
+                        matched = false;
+                        break;
+                    }
+                }
+
+                if (matched) break;
+
+                std.atomic.spinLoopHint();
+            }
+        }
+
+        /// Wait for the specified register to match the given value until the given timer expires.
+        ///
+        /// If the timer expires before the condition is met, this function panics.
+        pub fn waitForUntil(self: Self, T: type, value: anytype, timer: *Timer) void {
+            const offset, const MT = getRegister(T);
+
+            while (!timer.expired()) {
+                const v = MT.read(self.base + offset);
+
+                var matched = true;
+                inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
+                    if (@field(v, field.name) != @field(value, field.name)) {
+                        matched = false;
+                        break;
+                    }
+                }
+
+                if (matched) break;
+
+                std.atomic.spinLoopHint();
+            } else @panic("waitForUntil: timeout");
+        }
     };
 }
 
@@ -331,3 +375,4 @@ test Module {
 
 const std = @import("std");
 const fmt = std.fmt;
+const Timer = @import("Timer.zig");

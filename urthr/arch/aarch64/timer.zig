@@ -37,9 +37,32 @@ fn spinWait(ns: u64) void {
 }
 
 // =============================================================
+// Timer interface.
+// =============================================================
+
+const timer_vtable = Timer.Vtable{
+    .getCurrent = timerGetCurrent,
+};
+
+/// Create a timer instance.
+pub fn createTimer() Timer {
+    return .{
+        ._ctx = &.{},
+        .vtable = timer_vtable,
+    };
+}
+
+/// Get the current tick and convert it to microseconds.
+fn timerGetCurrent(_: *anyopaque) u64 {
+    return (getCount() * 1_000_000) / getFreq();
+}
+
+// =============================================================
 // Imports
 // =============================================================
 
+const common = @import("common");
+const Timer = common.Timer;
 const std = @import("std");
 const am = @import("asm.zig");
 const regs = @import("register.zig");
