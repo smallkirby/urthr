@@ -20,6 +20,14 @@ var rp1 = mmio.Module(.{ .size = void }, &.{
     .{ 0x0003_C000, mmio.Marker(.uart3) },
     .{ 0x0004_0000, mmio.Marker(.uart4) },
     .{ 0x0004_4000, mmio.Marker(.uart5) },
+
+    .{ 0x000B_0000, mmio.Marker(.sdio0_cfg) },
+    .{ 0x000B_4000, mmio.Marker(.sdio1_cfg) },
+
+    .{ 0x0018_0000, mmio.Marker(.sdio0) },
+    .{ 0x0018_4000, mmio.Marker(.sdio1) },
+
+    .{ 0x0040_0000, mmio.Marker(.end) },
 }){};
 
 const pcie0_range = common.Range{
@@ -34,7 +42,7 @@ const pcie1_range = common.Range{
 /// Physical address mapped to RP1 peripherals (BAR1).
 const axi_peri_base: usize = pcie1_range.start;
 /// Size in bytes of peripheral region's translation window.
-const axi_peri_window_size: usize = 0x20_0000;
+const axi_peri_window_size: usize = 0x0040_0000;
 
 comptime {
     common.comptimeAssert(axi_peri_base % units.mib == 0, null);
@@ -98,15 +106,63 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     });
 
     // Map peripheral region.
-    const vperi = try allocator.reserveAndRemap(
+    const resource = try allocator.reserve(
         "RP1 PCIe Peripherals",
         axi_peri_base,
         axi_peri_window_size,
         null,
     );
+    const vperi = try allocator.ioremap(
+        resource.phys,
+        resource.size,
+    );
 
     // Set RP1 module base.
     rp1.setBase(vperi);
+
+    // Map modules.
+    _ = try allocator.reserve(
+        "sysinfo",
+        resource.phys + rp1.getMarkerOffset(.sysinfo),
+        0x0000_4000,
+        resource,
+    );
+    _ = try allocator.reserve(
+        "syscfg",
+        resource.phys + rp1.getMarkerOffset(.syscfg),
+        0x0000_4000,
+        resource,
+    );
+    _ = try allocator.reserve(
+        "uart0",
+        resource.phys + rp1.getMarkerOffset(.uart0),
+        0x0000_4000,
+        resource,
+    );
+    _ = try allocator.reserve(
+        "sdio0_cfg",
+        resource.phys + rp1.getMarkerOffset(.sdio0_cfg),
+        0x0000_4000,
+        resource,
+    );
+    _ = try allocator.reserve(
+        "sdio1_cfg",
+        resource.phys + rp1.getMarkerOffset(.sdio1_cfg),
+        0x0000_4000,
+        resource,
+    );
+    _ = try allocator.reserve(
+        "sdio0",
+        resource.phys + rp1.getMarkerOffset(.sdio0),
+        0x0000_4000,
+        resource,
+    );
+    _ = try allocator.reserve(
+        "sdio1",
+        resource.phys + rp1.getMarkerOffset(.sdio1),
+        0x0000_4000,
+        resource,
+    );
 
     // Get Chip ID.
     const chipid: *const volatile u32 = @ptrFromInt(rp1.getMarkerAddress(.sysinfo));
