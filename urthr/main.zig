@@ -60,12 +60,13 @@ fn zmain() !void {
     // Remap board I/O memory.
     log.info("Remapping board I/O memory.", .{});
     try urd.mem.remapBoard();
-    log.debug("Memory Map:", .{});
-    urd.mem.debugPrintResources(log.debug);
 
     // Initialize peripherals.
     log.info("Initializing peripherals.", .{});
     try board.initPeripherals(urd.mem.getIoAllocator());
+
+    log.debug("Memory Map:", .{});
+    urd.mem.debugPrintResources(log.debug);
 }
 
 // =============================================================

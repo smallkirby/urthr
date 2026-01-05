@@ -118,10 +118,15 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
 
         /// Get the address of the specified marker.
         pub fn getMarkerAddress(self: Self, comptime name: @TypeOf(.enum_literal)) usize {
+            return self.base + self.getMarkerOffset(name);
+        }
+
+        /// Get the offset of the specified marker.
+        pub fn getMarkerOffset(_: Self, comptime name: @TypeOf(.enum_literal)) usize {
             inline for (fields) |field| {
                 const offset, const U = field;
                 if (U == Marker(name)) {
-                    return self.base + offset;
+                    return offset;
                 }
             }
             @compileError("Marker not found in Module: " ++ @typeName(name));
