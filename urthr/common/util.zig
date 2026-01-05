@@ -14,6 +14,11 @@ pub inline fn rounddown(value: anytype, alignment: @TypeOf(value)) @TypeOf(value
     return value & ~@as(T, alignment - 1);
 }
 
+/// Check if the given value is aligned to the given alignment.
+pub fn isAligned(value: usize, alignment: usize) bool {
+    return (value % alignment) == 0;
+}
+
 /// Print a hex dump of the given memory region.
 pub fn hexdump(addr: usize, len: usize, logger: anytype) void {
     const bytes: [*]const u8 = @ptrFromInt(addr);

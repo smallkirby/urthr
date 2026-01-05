@@ -24,6 +24,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         "GPIO",
         map.gpio.start,
         map.gpio.size(),
+        null,
     ));
 
     // PL011 UART.
@@ -31,6 +32,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         "PL011",
         map.pl011.start,
         map.pl011.size(),
+        null,
     ));
 
     // PM.
@@ -38,6 +40,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         "PM",
         memmap.pm.start,
         memmap.pm.size(),
+        null,
     ));
 }
 

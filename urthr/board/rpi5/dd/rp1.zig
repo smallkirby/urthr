@@ -102,6 +102,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         "RP1 PCIe Peripherals",
         axi_peri_base,
         axi_peri_window_size,
+        null,
     );
 
     // Set RP1 module base.
