@@ -1,6 +1,6 @@
 pub const Error = common.mem.Error;
 
-pub const resource = @import("mem/resource.zig");
+pub const vallocator = @import("mem/vallocator.zig");
 
 /// Size in bytes of 4KiB.
 pub const size_4kib = 4 * units.kib;
@@ -19,7 +19,7 @@ var buddy_allocator: BuddyAllocator = undefined;
 /// Bin allocator instance.
 var bin_allocator: BinAllocator = undefined;
 /// VM allocator instance.
-var vm_allocator: VmAllocator = undefined;
+var phys_allocator: PhysAllocator = undefined;
 
 /// Initialize memory management.
 ///
@@ -98,29 +98,29 @@ pub fn initAllocators() void {
     // Bin allocator.
     bin_allocator.init(getPageAllocator());
 
-    // VM allocator.
-    vm_allocator.init(vmap.vmem.start, vmap.vmem.end);
+    // I/O allocator.
+    phys_allocator.init();
 }
 
 /// Initialize memory resources.
 pub fn initResources() Error!void {
-    const allocator = getGeneralAllocator();
+    const allocator = getIoAllocator();
 
     // DRAM
     for (pmap.drams, 0..) |dram, i| {
-        const res = try resource.requestResource(
+        const res = try allocator.reserve(
             "System RAM",
             dram.start,
             dram.size(),
-            allocator,
+            null,
         );
 
         if (i == 0) {
-            _ = try res.appendChild(
+            _ = try allocator.reserve(
                 "Kernel Image",
                 pmap.kernel,
                 kernelSize(),
-                allocator,
+                res,
             );
         }
     }
@@ -128,7 +128,7 @@ pub fn initResources() Error!void {
 
 /// Remap the I/O memory regions of the board.
 pub fn remapBoard() Error!void {
-    try board.remap(vm_allocator.interface());
+    try board.remap(getIoAllocator());
 }
 
 /// Get the page allocator.
@@ -142,8 +142,8 @@ pub fn getGeneralAllocator() Allocator {
 }
 
 /// Get the VM allocator.
-pub fn getVmAllocator() IoAllocator {
-    return vm_allocator.interface();
+pub fn getIoAllocator() IoAllocator {
+    return phys_allocator.interface();
 }
 
 /// End virtual address of kernel image.
@@ -152,6 +152,15 @@ extern const __end: *void;
 /// Get the size in bytes of the kernel image.
 fn kernelSize() usize {
     return @intFromPtr(&__end) - urd.mem.vmap.kernel.start;
+}
+
+// =============================================================
+// Debug
+// =============================================================
+
+/// Print all resources to the given logger for debug.
+pub fn debugPrintResources(logger: anytype) void {
+    phys_allocator.debugPrintResources(logger);
 }
 
 // =============================================================
@@ -184,4 +193,4 @@ const pmap = board.memmap;
 const vmap = @import("mem/vmemmap.zig");
 const BinAllocator = @import("mem/BinAllocator.zig");
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
-const VmAllocator = @import("mem/VmAllocator.zig");
+const PhysAllocator = @import("mem/PhysAllocator.zig");

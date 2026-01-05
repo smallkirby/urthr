@@ -19,6 +19,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         "PL011",
         memmap.pl011.start,
         memmap.pl011.size(),
+        null,
     ));
 
     // PM.
@@ -26,6 +27,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         "PM",
         memmap.pm.start,
         memmap.pm.size(),
+        null,
     ));
 }
 
