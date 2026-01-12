@@ -2,13 +2,37 @@
 pub fn fromBigEndian(value: anytype) @TypeOf(value) {
     if (builtin.cpu.arch.endian() == .big) {
         return value;
-    } else {
-        return @byteSwap(value);
+    } else switch (@typeInfo(@TypeOf(value))) {
+        .@"struct" => {
+            const size = @sizeOf(@TypeOf(value));
+            const T = std.meta.Int(.unsigned, size * 8);
+            return @bitCast(@byteSwap(@as(T, @bitCast(value))));
+        },
+        else => return @byteSwap(value),
     }
 }
 /// Convert from native-endian to big-endian
 pub fn toBigEndian(value: anytype) @TypeOf(value) {
     return fromBigEndian(value);
+}
+
+/// Convert from little-endian to native-endian
+pub fn fromLittleEndian(value: anytype) @TypeOf(value) {
+    if (builtin.cpu.arch.endian() == .little) {
+        return value;
+    } else switch (@typeInfo(@TypeOf(value))) {
+        .@"struct" => {
+            const size = @sizeOf(@TypeOf(value));
+            const T = std.meta.Int(.unsigned, size * 8);
+            return @bitCast(@byteSwap(@as(T, @bitCast(value))));
+        },
+        else => return @byteSwap(value),
+    }
+}
+
+/// Convert from native-endian to little-endian
+pub fn toLittleEndian(value: anytype) @TypeOf(value) {
+    return fromLittleEndian(value);
 }
 
 /// Extract a value of type `T`  from `value` at the specified `offset`.

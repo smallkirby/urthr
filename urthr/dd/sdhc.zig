@@ -389,6 +389,9 @@ fn initCard() CardInfo {
         declareAcmd(rca);
         _ = issueCmd(51, true, 0, std.mem.asBytes(&scr)).unwrap();
 
+        // SCR is returned in big-endian.
+        scr = bits.fromBigEndian(scr);
+
         break :blk scr;
     };
 
@@ -453,6 +456,18 @@ fn setupTransaction(base_freq: ?u64) void {
             @panic("Card not in TRANSFER state after setup.");
         }
     }
+}
+
+// =============================================================
+// I/O
+// =============================================================
+
+/// Read a single 512-byte block from the SD card using PIO.
+fn readBlock(lba: u32, buf: []u8) void {
+    rtt.expectEqual(buf.len, 512);
+
+    const addr = if (card.spec == .sdhc_sdxc) lba else lba * 512;
+    _ = issueCmd(17, false, addr, buf).unwrap();
 }
 
 // =============================================================
@@ -553,7 +568,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         const buf_len = buf.len / @sizeOf(u32);
         const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
         for (0..buf_len) |i| {
-            p[buf_len - i - 1] = bits.fromBigEndian((sdhc.read(BufferDataPort).value));
+            p[i] = bits.fromLittleEndian((sdhc.read(BufferDataPort).value));
         }
 
         // Wait until data transfer is complete.
@@ -703,7 +718,7 @@ const ResponseType = enum(u3) {
         return if (!acmd) switch (cmd_idx) {
             // CMD
             0 => .r0,
-            6, 13, 16, 55 => .r1,
+            6, 13, 16, 17, 55 => .r1,
             7 => .r1b,
             2, 9 => .r2,
             3 => .r6,
