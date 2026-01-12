@@ -102,10 +102,19 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
 
         /// Base address of this register.
         base: usize = 0,
+        /// Timer implementation for wait operations.
+        _timer: ?Timer = null,
 
         /// Set the base address of this register.
         pub fn setBase(self: *Self, base: usize) void {
             self.base = base;
+        }
+
+        /// Set the timer implementation for wait operations.
+        ///
+        /// You MUST call this function before using wait operations.
+        pub fn provideTimer(self: *Self, timer: Timer) void {
+            self._timer = timer;
         }
 
         /// Get the required alignment for the register.
@@ -200,47 +209,82 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
         }
 
         /// Wait for the specified register to match the given value.
-        pub fn waitFor(self: Self, T: type, value: anytype) void {
-            const offset, const MT = getRegister(T);
+        ///
+        /// You can specify the duration to wait.
+        /// If the duration is not specified, this function waits indefinitely.
+        /// When the duration expires while the condition is not met, this function returns `false`.
+        /// Otherwise, it returns `true`.
+        ///
+        /// Caller MUST ensure that a timer implementation is provided via `provideTimer()` beforehand.
+        pub fn tryWaitFor(self: *Self, T: type, value: anytype, duration: ?TimeSlice) bool {
+            const use_timer = duration != null;
+            if (duration) |d| {
+                if (self._timer) |timer|
+                    timer.start(d)
+                else
+                    @panic("tryWaitFor: timer is not provided");
+            }
 
             while (true) {
-                const v = MT.read(self.base + offset);
-
-                var matched = true;
-                inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
-                    if (@field(v, field.name) != @field(value, field.name)) {
-                        matched = false;
-                        break;
-                    }
+                // Check condition.
+                if (self.matches(T, value)) {
+                    return true;
                 }
 
-                if (matched) break;
+                // Check timeout.
+                if (use_timer and self._timer.?.expired()) {
+                    return false;
+                }
 
                 std.atomic.spinLoopHint();
             }
         }
 
-        /// Wait for the specified register to match the given value until the given timer expires.
+        /// Wait for the specified register to match the given value.
         ///
-        /// If the timer expires before the condition is met, this function panics.
-        pub fn waitForUntil(self: Self, T: type, value: anytype, timer: *Timer) void {
-            const offset, const MT = getRegister(T);
+        /// You can specify the duration to wait.
+        /// If the duration is not specified, this function waits indefinitely.
+        /// When the duration expires while the condition is not met, this function panics.
+        ///
+        /// Caller MUST ensure that a timer implementation is provided via `provideTimer()` beforehand.
+        pub fn waitFor(self: *Self, T: type, value: anytype, duration: ?TimeSlice) void {
+            const use_timer = duration != null;
+            if (duration) |d| {
+                if (self._timer) |*timer|
+                    timer.start(d)
+                else
+                    @panic("tryWaitFor: timer is not provided");
+            }
 
-            while (!timer.expired()) {
-                const v = MT.read(self.base + offset);
-
-                var matched = true;
-                inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
-                    if (@field(v, field.name) != @field(value, field.name)) {
-                        matched = false;
-                        break;
-                    }
+            while (true) {
+                // Check condition.
+                if (self.matches(T, value)) {
+                    return;
                 }
 
-                if (matched) break;
+                // Check timeout.
+                if (use_timer and self._timer.?.expired()) {
+                    @panic("waitFor: timeout expired");
+                }
 
                 std.atomic.spinLoopHint();
-            } else @panic("waitForUntil: timeout");
+            }
+        }
+
+        /// Check if the specified fields of the register match the given value.
+        fn matches(self: Self, T: type, value: anytype) bool {
+            const offset, const MT = getRegister(T);
+            const v = MT.read(self.base + offset);
+
+            var matched = true;
+            inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
+                if (@field(v, field.name) != @field(value, field.name)) {
+                    matched = false;
+                    break;
+                }
+            }
+
+            return matched;
         }
     };
 }
@@ -392,3 +436,4 @@ test Module {
 const std = @import("std");
 const fmt = std.fmt;
 const Timer = @import("Timer.zig");
+const TimeSlice = Timer.TimeSlice;
