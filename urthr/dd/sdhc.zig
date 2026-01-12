@@ -47,6 +47,11 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
     .{ 0xFE, Version },
 }){};
 
+/// Inserted card information.
+///
+/// Currently, this driver supports only one card.
+var card: CardInfo = undefined;
+
 // =============================================================
 // API
 // =============================================================
@@ -114,10 +119,13 @@ pub fn init(base_freq: ?u64) void {
     initBus();
 
     // Initialize card.
-    const card_info = initCard();
-    log.info("SD card detected: Spec={t}, RCA={X:0>4}", .{ card_info.spec, card_info.rca });
-    log.info("SD capacity: {d} MiB", .{units.toMb(card_info.csd.getCapacity())});
-    log.debug("Physical Layer Spec Version: {t}", .{card_info.scr.getPhysVersion()});
+    card = initCard();
+    log.info("SD card detected: Spec={t}, RCA={X:0>4}", .{ card.spec, card.rca });
+    log.info("SD capacity: {d} MiB", .{units.toMb(card.csd.getCapacity())});
+    log.debug("Physical Layer Spec Version: {t}", .{card.scr.getPhysVersion()});
+
+    // Setup transaction.
+    setupTransaction(base_freq);
 }
 
 /// Reset entire Host Controller.
@@ -175,17 +183,12 @@ fn initClock(base_freq: ?u64) void {
     });
 
     // Wait until internal clock is stable.
-    sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, .ms(1));
+    sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, .ms(150));
 
-    // Enable PLL if version >= 4.10.
-    if (sdhc.read(Version).spec.gte(.v4_10)) {
-        sdhc.modify(ClockControl, .{
-            .pll_clk_en = true,
-        });
-
-        // Wait until internal clock is stable again.
-        sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, .ms(1));
-    }
+    // Enable PLL (if not supported, nop)
+    sdhc.modify(ClockControl, .{
+        .pll_clk_en = true,
+    });
 
     // Enable SD clock.
     sdhc.modify(ClockControl, .{
@@ -194,6 +197,56 @@ fn initClock(base_freq: ?u64) void {
 
     // Supply 74+ clock cycles after enabling clock.
     arch.timer.spinWaitMilli(10); // 10ms to be safe
+
+    // Setup DAT timeout.
+    sdhc.modify(TimeoutControl, .{
+        .data_timeout_counter = 0b1110,
+    });
+}
+
+/// Update clock frequency.
+fn updateClock(base_freq: ?u64, freq: u64) void {
+    // Select base clock frequency.
+    const cap1 = sdhc.read(Capability1);
+    const base: u64 = if (cap1.base_freq == 0) cap1.base_freq else blk: {
+        if (base_freq) |f| break :blk f;
+        @panic("Base frequency not provided both in argument and Capability register.");
+    };
+
+    // Stop SD clock.
+    sdhc.modify(ClockControl, .{
+        .sd_clk_en = false,
+    });
+
+    // Clear PLL enable.
+    sdhc.modify(ClockControl, .{
+        .pll_clk_en = false,
+    });
+
+    // Calculate divisor for ~50 MHz.
+    const sdclk = freq;
+    const divisor = base / (sdclk * 2) + 1;
+    rtt.expect(base / (divisor * 2) <= sdclk);
+
+    // Set Divided Clock Mode with divisor.
+    sdhc.modify(ClockControl, .{
+        .clk_gen_sel = .div,
+        .sdclk_freq_sel_low = @as(u8, @intCast(divisor)),
+        .sdclk_freq_sel_high = @as(u2, @intCast(divisor >> 8)),
+    });
+
+    // Enable PLL.
+    sdhc.modify(ClockControl, .{
+        .pll_clk_en = true,
+    });
+
+    // Wait until internal clock is stable.
+    sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, .ms(150));
+
+    // Enable SD clock.
+    sdhc.modify(ClockControl, .{
+        .sd_clk_en = true,
+    });
 
     // Setup DAT timeout.
     sdhc.modify(TimeoutControl, .{
@@ -348,6 +401,60 @@ fn initCard() CardInfo {
     };
 }
 
+/// Setup data transaction.
+///
+/// After this function, the card's FSM will be in TRANSFER state.
+fn setupTransaction(base_freq: ?u64) void {
+    // Specify block size to 512 bytes.
+    log.debug("CMD16 : SET_BLOCKLEN", .{});
+    {
+        _ = issueCmd(16, false, 512, null).unwrap();
+    }
+
+    // Setup bus width to 4-bit for Card.
+    log.debug("ACMD6 : SET_BUS_WIDTH", .{});
+    {
+        declareAcmd(card.rca);
+        _ = issueCmd(6, true, 2, null).unwrap();
+    }
+
+    // Switch to High Speed Mode.
+    if (card.spec == .sdhc_sdxc) {
+        log.debug("CMD6  : SWITCH_FUNC", .{});
+
+        const arg = Cmd6{
+            .group1 = 1, // High Speed
+            .mode = .change,
+        };
+        _ = issueCmd(6, false, arg, null).unwrap().as(Cmd6);
+
+        // TODO: should check the result data.
+    }
+
+    // Setup bus width to 4-bit for Host Controller.
+    sdhc.modify(HostControl1, .{
+        .data_width = .b4,
+    });
+
+    // Set clock frequency to maximum supported frequency.
+    const clock: u64 = switch (card.spec) {
+        .sdsc1, .sdsc2 => 25 * 1000 * 1000, // 25MHz
+        .sdhc_sdxc => 50 * 1000 * 1000, // 50MHz
+    };
+    updateClock(base_freq, clock);
+
+    // Check status.
+    log.debug("CMD13 : SEND_STATUS", .{});
+    {
+        const arg = @as(u32, card.rca) << 16;
+        const res = issueCmd(13, false, arg, null).unwrap().as(CardStatus);
+
+        if (res.current_state != .tran) {
+            @panic("Card not in TRANSFER state after setup.");
+        }
+    }
+}
+
 // =============================================================
 // Commands
 // =============================================================
@@ -477,6 +584,31 @@ fn checkSanityCmd() void {
     rtt.expect(sdhc.read(ClockControl).sd_clk_en);
 }
 
+/// Argument of CMD6.
+const Cmd6 = packed struct(u32) {
+    /// Function Group 1 for Access Mode.
+    group1: u4 = 0xF,
+    /// Function Group 2 for Command System.
+    group2: u4 = 0xF,
+    /// Function Group 3 for Drive Strength.
+    group3: u4 = 0xF,
+    /// Function Group 4 for Power Limit.
+    group4: u4 = 0xF,
+    /// Reserved for Group5.
+    _rsvd0: u4 = 0xF,
+    /// Reserved for Group6.
+    _rsvd1: u4 = 0xF,
+    /// Reserved.
+    _rsvd2: u7 = 0,
+    /// Mode.
+    mode: enum(u1) {
+        /// Check function.
+        check = 0,
+        /// Switch function.
+        change = 1,
+    },
+};
+
 /// Argument of ACMD41.
 const Acmd41 = packed struct(u32) {
     /// Voltage Window.
@@ -571,17 +703,17 @@ const ResponseType = enum(u3) {
         return if (!acmd) switch (cmd_idx) {
             // CMD
             0 => .r0,
-            55 => .r1,
+            6, 13, 16, 55 => .r1,
             7 => .r1b,
             2, 9 => .r2,
             3 => .r6,
             8 => .r7,
-            else => unreachable,
+            else => @panic("Unsupported CMD command index."),
         } else switch (cmd_idx) {
             // ACMD
-            51 => .r1,
+            6, 51 => .r1,
             41 => .r3,
-            else => unreachable,
+            else => @panic("Unsupported ACMD command index."),
         };
     }
 
