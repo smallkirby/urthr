@@ -133,9 +133,7 @@ fn reset() void {
     });
 
     // Wait for reset to complete.
-    while (sdhc.read(SwReset).all) {
-        std.atomic.spinLoopHint();
-    }
+    sdhc.waitFor(SwReset, .{ .all = false }, null);
 
     // Enable all interrupts.
     sdhc.write(NormalIntStatusEn, 0xFFFF);
@@ -177,7 +175,7 @@ fn initClock(base_freq: ?u64) void {
     });
 
     // Wait until internal clock is stable.
-    sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, TimeSlice.ms(1));
+    sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, .ms(1));
 
     // Enable PLL if version >= 4.10.
     if (sdhc.read(Version).spec.gte(.v4_10)) {
@@ -186,7 +184,7 @@ fn initClock(base_freq: ?u64) void {
         });
 
         // Wait until internal clock is stable again.
-        sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, TimeSlice.ms(1));
+        sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, .ms(1));
     }
 
     // Enable SD clock.
@@ -372,7 +370,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     checkSanityCmd();
 
     // Wait until command and data lines are free.
-    sdhc.waitFor(PresentState, .{ .cmd = false, .dat = false }, TimeSlice.ms(1));
+    sdhc.waitFor(PresentState, .{ .cmd = false, .dat = false }, .ms(1));
 
     // Clear interrupt status.
     sdhc.write(NormalIntStatus, 0xFFFF);
@@ -425,7 +423,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     sdhc.write(Command, cmd_reg);
 
     // Wait for command complete.
-    sdhc.waitFor(NormalIntStatus, .{ .cmd_complete = true }, TimeSlice.ms(1));
+    sdhc.waitFor(NormalIntStatus, .{ .cmd_complete = true }, .ms(1));
 
     // Read response registers.
     const res0 = sdhc.read(Response0).value;
@@ -438,12 +436,12 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
 
     // Wait until data line is free.
     if (res_type.busy()) {
-        sdhc.waitFor(PresentState, .{ .dat = false }, TimeSlice.ms(1));
+        sdhc.waitFor(PresentState, .{ .dat = false }, .ms(1));
     }
 
     // Read data if needed.
     if (data) |buf| {
-        sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, TimeSlice.ms(1));
+        sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, .ms(1));
 
         const buf_len = buf.len / @sizeOf(u32);
         const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
@@ -452,7 +450,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         }
 
         // Wait until data transfer is complete.
-        sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, TimeSlice.ms(1));
+        sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
     }
 
     return CommandResponse{
@@ -464,15 +462,18 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
 
 /// Do sanity check before issuing command.
 fn checkSanityCmd() void {
+    // All necessary clocks are running.
     const clk = sdhc.read(ClockControl);
     rtt.expectEqual(true, clk.sd_clk_en);
     rtt.expectEqual(true, clk.int_clk_en);
     rtt.expectEqual(true, clk.int_clk_stable);
 
+    // CMD and DAT lines are pulled up.
     const ps = sdhc.read(PresentState);
     rtt.expectEqual(true, ps.cmd_level);
     rtt.expectEqual(0b1111, ps.dat_level);
 
+    // SD bus power is on.
     rtt.expect(sdhc.read(ClockControl).sd_clk_en);
 }
 
@@ -1787,5 +1788,4 @@ const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
-const TimeSlice = common.Timer.TimeSlice;
 const arch = @import("arch").impl;
