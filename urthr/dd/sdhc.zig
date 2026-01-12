@@ -1,12 +1,14 @@
 //! SD Host Controller.
 //!
-//! ref. SD Specifications Part A2 SD Host Controller Simplified Specification Version 4.20
+//! - ref. SD Specifications Part 1 Physical Layer Simplified Specification Version 9.10
+//! - ref. SD Specifications Part A2 SD Host Controller Simplified Specification Version 4.20
 
 // =============================================================
 // Module Definition
 // =============================================================
 
 /// The Host Controller shall support byte, word, and double word accesses.
+///
 /// Should align register access on address boundaries matching the number of bytes in the access:
 /// e.g. word accesses should be aligned on 2-byte boundaries.
 var sdhc = mmio.Module(.{ .natural = u32 }, &.{
@@ -27,11 +29,15 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
     .{ 0x28, HostControl1 },
     .{ 0x29, PowerControl },
     .{ 0x2C, ClockControl },
+    .{ 0x2E, TimeoutControl },
     .{ 0x2F, SwReset },
-    .{ 0x30, NormalInterruptStatus },
-    .{ 0x32, ErrorInterruptStatus },
-    .{ 0x34, NormalInterruptStatusEnable },
-    .{ 0x36, ErrorInterruptStatusEnable },
+    .{ 0x30, NormalIntStatus },
+    .{ 0x32, ErrorIntStatus },
+    .{ 0x34, NormalIntStatusEn },
+    .{ 0x36, ErrorIntStatusEn },
+    .{ 0x38, NormalIntSignalEn },
+    .{ 0x3A, ErrorIntSignalEn },
+    .{ 0x3E, HostControl2 },
     .{ 0x40, Capability1 },
     .{ 0x44, Capability2 },
 
@@ -62,7 +68,7 @@ const CardInfo = struct {
         /// SD Standard Capacity v2.00 or v3.00.
         sdsc2,
         /// SD High Capacity or SD Extended Capacity.
-        sdhc,
+        sdhc_sdxc,
     };
 };
 
@@ -74,41 +80,53 @@ pub fn setBase(base: usize) void {
 /// Initialize the SD Host Controller.
 ///
 /// This function requires that the SD card is already inserted.
-pub fn init() void {
+///
+/// Clocks are initialized using the given base frequency in Hz.
+/// If the base frequencty is provided in the Capability register, it is used instead.
+pub fn init(base_freq: ?u64) void {
     // Reset entire HC and wait until it completes.
     reset();
 
     // Check version.
-    if (sdhc.read(Version).spec != .v3_00) {
-        @panic("SDHC driver supports only Version 3.00.");
+    log.info("Host Controller Version: {t}", .{sdhc.read(Version).spec});
+    if (sdhc.read(Version).spec.lt(.v3_00)) {
+        @panic("SDHC driver supports only HC Version 3.00 or above.");
     }
 
     // Detect card.
     if (!sdhc.read(PresentState).card_inserted) {
         @panic("No SD card inserted.");
     }
-
-    // Setup clock.
-    initClock();
+    sdhc.modify(NormalIntStatus, .{
+        .card_insertion = true,
+    });
 
     // Setup power control.
     initPower();
+
+    // Setup clock.
+    initClock(base_freq);
 
     // Setup bus.
     initBus();
 
     // Initialize card.
     const card_info = initCard();
-    log.debug("SD card detected: {t}, RCA={X:0>4}", .{ card_info.spec, card_info.rca });
+    log.info("SD card detected: Spec={t}, RCA={X:0>4}", .{ card_info.spec, card_info.rca });
+    log.info("SD capacity: {d} MiB", .{units.toMb(card_info.csd.getCapacity())});
     log.debug("Physical Layer Spec Version: {t}", .{card_info.scr.getPhysVersion()});
 }
 
 /// Reset entire Host Controller.
-pub fn reset() void {
-    sdhc.write(SwReset, SwReset{
+fn reset() void {
+    // Stop clock.
+    sdhc.modify(ClockControl, .{
+        .sd_clk_en = false,
+    });
+
+    // Software reset.
+    sdhc.modify(SwReset, .{
         .all = true,
-        .cmd = false,
-        .data = false,
     });
 
     // Wait for reset to complete.
@@ -116,14 +134,11 @@ pub fn reset() void {
         std.atomic.spinLoopHint();
     }
 
-    // Enable all interrupt status.
-    sdhc.write(NormalInterruptStatusEnable, 0xFFFF);
-    sdhc.write(ErrorInterruptStatusEnable, 0xFFFF);
-}
-
-/// Get the SD Host Controller version.
-pub fn version() u8 {
-    return @intFromEnum(sdhc.read(Version).spec);
+    // Enable all interrupts.
+    sdhc.write(NormalIntStatusEn, 0xFFFF);
+    sdhc.write(ErrorIntStatusEn, 0xFFFF);
+    sdhc.write(NormalIntSignalEn, 0xFFFF);
+    sdhc.write(ErrorIntSignalEn, 0xFFFF);
 }
 
 // =============================================================
@@ -131,24 +146,28 @@ pub fn version() u8 {
 // =============================================================
 
 /// Setup SD card clock.
-fn initClock() void {
+///
+/// This function uses Divided Clock Mode to set the clock frequency.
+fn initClock(base_freq: ?u64) void {
+    var timer = arch.timer.createTimer();
+
+    // Select base clock frequency.
     const cap1 = sdhc.read(Capability1);
-    const cap2 = sdhc.read(Capability2);
+    const base: u64 = if (cap1.base_freq == 0) cap1.base_freq else blk: {
+        if (base_freq) |freq| break :blk freq;
+        @panic("Base frequency not provided both in argument and Capability register.");
+    };
 
-    if (cap1.base_freq == 0) {
-        @panic("SDHC base clock frequency is 0.");
-    }
-    if (cap2.clock_mult != 0) {
-        @panic("SDHC clock multiplier is not supported.");
-    }
+    // Calculate divisor for ~400 KHz for initialization.
+    const sdclk = 400 * 1000; // 400 KHz
+    const divisor = base / (sdclk * 2) + 1;
+    rtt.expect(base / (divisor * 2) <= sdclk);
 
-    // Set Divided Clock Mode.
-    const sdclk = 400 * 1000; // ~ 400 KHz
-    const base = @as(u64, cap1.base_freq) * 1_000_000;
-    const divisor = base / (sdclk * 2);
+    // Set Divided Clock Mode with divisor.
     sdhc.modify(ClockControl, .{
         .clk_gen_sel = .div,
-        .sdclk_freq_sel = @as(u10, @intCast(divisor)),
+        .sdclk_freq_sel_low = @as(u8, @intCast(divisor)),
+        .sdclk_freq_sel_high = @as(u2, @intCast(divisor >> 8)),
     });
 
     // Enable internal clock.
@@ -157,51 +176,74 @@ fn initClock() void {
     });
 
     // Wait until internal clock is stable.
-    while (!sdhc.read(ClockControl).int_clk_stable) {
-        std.atomic.spinLoopHint();
-    }
+    timer.start(1_000); // 1 ms timeout
+    sdhc.waitForUntil(ClockControl, .{ .int_clk_stable = true }, &timer);
 
-    // Enable PLL.
-    sdhc.modify(ClockControl, .{
-        .pll_clk_en = true,
-    });
+    // Enable PLL if version >= 4.10.
+    if (sdhc.read(Version).spec.gte(.v4_10)) {
+        sdhc.modify(ClockControl, .{
+            .pll_clk_en = true,
+        });
+
+        // Wait until internal clock is stable again.
+        timer.start(1_000); // 1 ms timeout
+        sdhc.waitForUntil(ClockControl, .{ .int_clk_stable = true }, &timer);
+    }
 
     // Enable SD clock.
     sdhc.modify(ClockControl, .{
         .sd_clk_en = true,
     });
+
+    // Supply 74+ clock cycles after enabling clock.
+    arch.timer.spinWaitMilli(10); // 10ms to be safe
+
+    // Setup DAT timeout.
+    sdhc.modify(TimeoutControl, .{
+        .data_timeout_counter = 0b1110,
+    });
 }
 
 /// Initialize power control.
 fn initPower() void {
+    // Select voltage.
     const cap1 = sdhc.read(Capability1);
-    const voltage: @FieldType(PowerControl, "sd_voltage") = if (cap1.v1_8)
-        .v1_8
-    else if (cap1.v3_0)
-        .v3_0
-    else if (cap1.v3_3)
-        .v3_3
-    else
-        @panic("No supported voltage found in SDHC.");
+    const voltage: SdVoltage =
+        if (cap1.v1_8)
+            .v1_8
+        else if (cap1.v3_0)
+            .v3_0
+        else if (cap1.v3_3)
+            .v3_3
+        else
+            @panic("No supported voltage found for SD bus.");
+
+    // Clear power.
+    sdhc.write(PowerControl, 0);
+    arch.timer.spinWaitMilli(1);
 
     // Select voltage.
     sdhc.modify(PowerControl, .{
         .sd_voltage = voltage,
     });
+    arch.timer.spinWaitMilli(1);
 
     // Enable power.
     sdhc.modify(PowerControl, .{
         .sd_power = .on,
     });
+
+    // Wait for voltage to stabilize.
+    arch.timer.spinWaitMilli(1);
 }
 
 /// Initialize bus settings.
 fn initBus() void {
-    sdhc.modify(HostControl1, .{
+    sdhc.write(HostControl1, std.mem.zeroInit(HostControl1, .{
         .data_width = .b1,
         .highspeed = false,
         .dma_select = .none,
-    });
+    }));
 }
 
 /// Initialize, identify, and select the SD card.
@@ -210,20 +252,28 @@ fn initCard() CardInfo {
     var ccs = false;
 
     // CMD0: GO_IDLE_STATE
+    log.debug("CMD0: GO_IDLE_STATE", .{});
     {
         _ = issueCmd(0, false, 0, null).unwrap();
+        arch.timer.spinWaitMilli(1);
     }
 
     // CMD8: SEND_IF_COND
+    log.debug("CMD8: SEND_IF_COND", .{});
     {
         const res = issueCmd(8, false, 0x1AA, null);
 
         if (res.err.cmd_timeout) {
             f8 = false;
-        } else _ = res.unwrap();
+        } else if (!res.err.isNoError()) {
+            @panic("CMD8 failed. Possibly unusable card inserted.");
+        } else {
+            f8 = true;
+        }
     }
 
     // ACMD41: SEND_OP_COND
+    log.debug("ACMD41: SEND_OP_COND", .{});
     {
         const Acmd41 = packed struct(u32) {
             /// Voltage Window.
@@ -242,21 +292,31 @@ fn initCard() CardInfo {
             busy: bool = false,
         };
 
+        // With voltage = 0.
+        declareAcmd(null);
+        const ocr = issueCmd(41, true, Acmd41{
+            .volt_window = 0,
+            .ccs = true,
+        }, null).unwrap();
+
+        // with setting voltage.
         ccs = while (true) {
             declareAcmd(null);
-
-            const ocr = issueCmd(41, true, @bitCast(Acmd41{
-                .volt_window = 0x00FF80,
+            const res = issueCmd(41, true, Acmd41{
+                .volt_window = @truncate(ocr.raw()),
                 .ccs = true,
-            }), null).unwrap().as(Ocr);
+            }, null).unwrap().as(Ocr);
 
-            if (ocr.not_busy) {
-                break ocr.ccs;
+            if (res.not_busy) {
+                break res.ccs;
             }
+
+            arch.timer.spinWaitMicro(10);
         };
     }
 
     // CMD2: ALL_SEND_CID
+    log.debug("CMD2: ALL_SEND_CID", .{});
     {
         const cid = issueCmd(2, false, 0, null).unwrap().as(Cid);
 
@@ -267,12 +327,14 @@ fn initCard() CardInfo {
     }
 
     // CMD3: SEND_RELATIVE_ADDR
+    log.debug("CMD3: SEND_RELATIVE_ADDR", .{});
     const rca = blk: {
         const res = issueCmd(3, false, 0, null).unwrap().as(u32);
         break :blk @as(u16, @truncate(res >> 16));
     };
 
     // CMD9: SEND_CSD
+    log.debug("CMD9: SEND_CSD", .{});
     const csd = blk: {
         const res = issueCmd(9, false, @as(u32, rca) << 16, null).unwrap().as(u128);
         break :blk Csd.from(res);
@@ -285,22 +347,25 @@ fn initCard() CardInfo {
     }
 
     // CMD7: SELECT_CARD
+    log.debug("CMD7: SELECT_CARD", .{});
     {
         _ = issueCmd(7, false, @as(u32, rca) << 16, null).unwrap();
     }
 
     // ACMD51: SEND_SCR
+    log.debug("ACMD51: SEND_SCR", .{});
     const scr: Scr = blk: {
         var scr: Scr = undefined;
 
-        _ = declareAcmd(rca);
+        // Send CMD55 with retry logic
+        declareAcmd(rca);
         _ = issueCmd(51, true, 0, std.mem.asBytes(&scr)).unwrap();
 
         break :blk scr;
     };
 
     return CardInfo{
-        .spec = if (!f8) .sdsc1 else if (!ccs) .sdsc2 else .sdhc,
+        .spec = if (!f8) .sdsc1 else if (!ccs) .sdsc2 else .sdhc_sdxc,
         .rca = rca,
         .csd = csd,
         .scr = scr,
@@ -314,26 +379,49 @@ fn initCard() CardInfo {
 /// Send CMD55 to declare next command as application-specific.
 fn declareAcmd(rca: ?u16) void {
     const arg = if (rca) |v| @as(u32, v) << 16 else 0;
-    const status = issueCmd(55, false, arg, null).unwrap().as(CardStatus);
+    const res = issueCmd(55, false, arg, null).unwrap();
 
-    if (!status.app_cmd) {
-        @panic("CMD55 has succeeded but ACMD not supported.");
+    if (!res.as(CardStatus).app_cmd) {
+        @panic("ACMD not supported.");
     }
+
+    return;
 }
 
 /// Issue a command to the SD card.
-fn issueCmd(idx: u6, acmd: bool, arg: u32, data: ?[]u8) CommandResponse {
-    // Wait until command and data lines are free.
-    while (sdhc.read(PresentState).cmd or sdhc.read(PresentState).dat) {
-        std.atomic.spinLoopHint();
+fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
+    var timer = arch.timer.createTimer();
+
+    // Sanity check.
+    {
+        const clk = sdhc.read(ClockControl);
+        rtt.expectEqual(true, clk.sd_clk_en);
+        rtt.expectEqual(true, clk.int_clk_en);
+        rtt.expectEqual(true, clk.int_clk_stable);
+
+        const ps = sdhc.read(PresentState);
+        rtt.expectEqual(true, ps.cmd_level);
+        rtt.expectEqual(0b1111, ps.dat_level);
+
+        rtt.expect(sdhc.read(ClockControl).sd_clk_en);
     }
 
+    // Wait until command and data lines are free.
+    timer.start(10000); // 1 ms timeout
+    sdhc.waitForUntil(PresentState, .{ .cmd = false, .dat = false }, &timer);
+
     // Clear interrupt status.
-    sdhc.write(NormalInterruptStatus, 0xFFFF);
+    sdhc.write(NormalIntStatus, 0xFFFF);
+    sdhc.write(ErrorIntStatus, 0xFFFF);
 
     // Set argument.
-    sdhc.write(Argument, Argument{ .value = arg });
+    const argval: u32 = switch (@typeInfo(@TypeOf(arg))) {
+        .comptime_int => @as(u32, arg),
+        else => @bitCast(arg),
+    };
+    sdhc.write(Argument, Argument{ .value = argval });
 
+    // Set data if present.
     if (data) |buf| {
         if (buf.len % 4 != 0) {
             @panic("SDHC data buffer length must be multiple of 4 bytes.");
@@ -361,7 +449,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32, data: ?[]u8) CommandResponse {
 
     // Set command.
     const res_type = ResponseType.of(idx, acmd);
-    sdhc.write(Command, Command{
+    const cmd_reg = Command{
         .response = res_type.length(),
         .sub = false,
         .crc = res_type.crccheck(),
@@ -369,23 +457,32 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32, data: ?[]u8) CommandResponse {
         .data = data != null,
         .ctype = .normal,
         .command = idx,
-    });
+    };
+    sdhc.write(Command, cmd_reg);
 
     // Wait for command complete.
-    while (!sdhc.read(NormalInterruptStatus).cmd_complete) {
-        std.atomic.spinLoopHint();
-    }
+    timer.start(1_000); // 1 ms timeout
+    sdhc.waitForUntil(NormalIntStatus, .{ .cmd_complete = true }, &timer);
+
+    // Read response registers.
+    const res0 = sdhc.read(Response0).value;
+    const res1 = sdhc.read(Response1).value;
+    const res2 = sdhc.read(Response2).value;
+    const res3 = sdhc.read(Response3).value;
+
+    // Check error status immediately after command complete.
+    const err_status = sdhc.read(ErrorIntStatus);
 
     // Wait until data line is free.
-    if (res_type.busy()) while (sdhc.read(PresentState).dat) {
-        std.atomic.spinLoopHint();
-    };
+    timer.start(1_000); // 1 ms timeout
+    if (res_type.busy()) {
+        sdhc.waitForUntil(PresentState, .{ .dat = false }, &timer);
+    }
 
     // Read data if needed.
     if (data) |buf| {
-        while (!sdhc.read(NormalInterruptStatus).buf_read_ready) {
-            std.atomic.spinLoopHint();
-        }
+        timer.start(1_000); // 1 ms timeout
+        sdhc.waitForUntil(NormalIntStatus, .{ .buf_read_ready = true }, &timer);
 
         const buf_len = buf.len / @sizeOf(u32);
         const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
@@ -394,19 +491,9 @@ fn issueCmd(idx: u6, acmd: bool, arg: u32, data: ?[]u8) CommandResponse {
         }
 
         // Wait until data transfer is complete.
-        while (!sdhc.read(NormalInterruptStatus).transfer_complete) {
-            std.atomic.spinLoopHint();
-        }
+        timer.start(1_000); // 1 ms timeout
+        sdhc.waitForUntil(NormalIntStatus, .{ .transfer_complete = true }, &timer);
     }
-
-    // Check error status.
-    const err_status = sdhc.read(ErrorInterruptStatus);
-
-    // Read response if needed.
-    const res0 = sdhc.read(Response0).value;
-    const res1 = sdhc.read(Response1).value;
-    const res2 = sdhc.read(Response2).value;
-    const res3 = sdhc.read(Response3).value;
 
     return CommandResponse{
         .cmd = .{ .idx = idx, .acmd = acmd },
@@ -427,7 +514,7 @@ const CommandResponse = struct {
     /// Command response value.
     value: Value,
     /// Error value.
-    err: ErrorInterruptStatus,
+    err: ErrorIntStatus,
 
     const Value = struct {
         /// 128-bit full response data.
@@ -673,13 +760,23 @@ const Csd = union(CsdStructure) {
     v1: CsdV1,
     v2: CsdV2,
 
+    /// Construct CSD from raw 128-bit response value.
     pub fn from(value: u128) Csd {
-        const typ: CsdStructure = @enumFromInt(bits.extract(u2, value, 126));
+        const typ: CsdStructure = @enumFromInt(
+            bits.extract(u2, value, @bitOffsetOf(CsdV1, "csd_structure")),
+        );
         const raw: u120 = @truncate(value);
         return switch (typ) {
             .v1 => .{ .v1 = @bitCast(raw) },
             .v2 => .{ .v2 = @bitCast(raw) },
             _ => @panic("Unrecognized CSD structure."),
+        };
+    }
+
+    /// Get the capacity of the SD card in bytes.
+    pub fn getCapacity(self: Csd) u64 {
+        return switch (self) {
+            inline else => |s| s.getCapacity(),
         };
     }
 
@@ -689,6 +786,7 @@ const Csd = union(CsdStructure) {
         v1 = 0,
         /// Version 2.0 (SDHC/SDXC)
         v2 = 1,
+
         _,
     };
 
@@ -762,6 +860,14 @@ const Csd = union(CsdStructure) {
         _rsvd5: u6 = 0,
         /// CSD structure.
         csd_structure: Csd.CsdStructure,
+
+        pub fn getCapacity(self: CsdV1) u64 {
+            const block_len = @as(u64, 1) << self.read_bl_len;
+            const mult = @as(u64, 1) << (@as(u4, self.c_size_mult) + 2);
+            const block_nr = @as(u64, self.c_size + 1) * mult;
+
+            return block_nr * block_len;
+        }
     };
 
     /// CSD Version 2.0
@@ -824,6 +930,11 @@ const Csd = union(CsdStructure) {
         _rsvd5: u6 = 0,
         /// CSD structure.
         csd_structure: Csd.CsdStructure,
+
+        pub fn getCapacity(self: CsdV2) u64 {
+            // Capacity = (C_SIZE + 1) * 512K bytes
+            return @as(u64, (self.c_size + 1)) * 512 * 1024;
+        }
     };
 };
 
@@ -866,18 +977,44 @@ const Scr = packed struct(u64) {
         v2,
         /// Version 3.0
         v3,
-        /// Version 4.0
+        /// Version 4.XX
         v4,
+        /// Version 5.XX
+        v5,
+        /// Version 6.XX
+        v6,
+        /// Version 7.XX
+        v7,
+        /// Version 8.XX
+        v8,
+        /// Version 9.XX
+        v9,
     };
 
     pub fn getPhysVersion(self: Scr) PhysVersion {
-        if (self.sd_specx != 0) @panic("Unsupported SCR specx value.");
-
-        return switch (self.sd_spec) {
-            0 => .v1_0,
-            1 => .v1_1,
-            2 => if (!self.sd_spec3) .v2 else if (!self.sd_spec4) .v3 else .v4,
-            else => @panic("Unsupported SCR spec value."),
+        return switch (self.sd_specx) {
+            0 => switch (self.sd_spec) {
+                0 => .v1_0,
+                1 => .v1_1,
+                2 => if (!self.sd_spec3) .v2 else if (!self.sd_spec4) .v3 else .v4,
+                else => @panic("Unsupported SCR spec value."),
+            },
+            1 => if (!(self.sd_spec == 2 and self.sd_spec3 == true)) {
+                @panic("Invalid SCR spec for version 5.XX");
+            } else .v5,
+            2 => if (!(self.sd_spec == 2 and self.sd_spec3 == true)) {
+                @panic("Invalid SCR spec for version 6.XX");
+            } else .v6,
+            3 => if (!(self.sd_spec == 2 and self.sd_spec3 == true)) {
+                @panic("Invalid SCR spec for version 7.XX");
+            } else .v7,
+            4 => if (!(self.sd_spec == 2 and self.sd_spec3 == true)) {
+                @panic("Invalid SCR spec for version 8.XX");
+            } else .v8,
+            5 => if (!(self.sd_spec == 2 and self.sd_spec3 == true)) {
+                @panic("Invalid SCR spec for version 9.XX");
+            } else .v9,
+            else => @panic("Unsupported SCR specx value."),
         };
     }
 };
@@ -1087,7 +1224,7 @@ const PresentState = packed struct(u32) {
     /// Write Protect Switch Pin Level.
     wp_switch_pin: bool,
     /// DAT[3:0] Line Signal Level.
-    dat_level_low: u4,
+    dat_level: u4,
 
     /// CMD Line Signal Level.
     cmd_level: bool,
@@ -1159,15 +1296,7 @@ const PowerControl = packed struct(u8) {
         on = 1,
     },
     /// SD Bus Voltage Select for VDD1.
-    sd_voltage: enum(u3) {
-        /// 1.8V.
-        v1_8 = 0b101,
-        /// 3.0V.
-        v3_0 = 0b110,
-        /// 3.3V.
-        v3_3 = 0b111,
-        _,
-    },
+    sd_voltage: SdVoltage,
     /// SD Bus Power for VDD2.
     sd_power_vdd2: enum(u1) {
         /// Power Off.
@@ -1185,6 +1314,18 @@ const PowerControl = packed struct(u8) {
     },
 };
 
+/// SD bus voltage.
+const SdVoltage = enum(u3) {
+    /// 1.8V.
+    v1_8 = 0b101,
+    /// 3.0V.
+    v3_0 = 0b110,
+    /// 3.3V.
+    v3_3 = 0b111,
+
+    _,
+};
+
 /// Clock Control Register.
 const ClockControl = packed struct(u16) {
     /// Internal Clock Enable.
@@ -1200,12 +1341,25 @@ const ClockControl = packed struct(u16) {
     /// Clock Generator Select.
     clk_gen_sel: enum(u1) {
         /// Programmable Clock Mode.
-        prog = 0,
+        prog = 1,
         /// Divided Clock Mode.
-        div = 1,
+        div = 0,
     },
     /// SDCLK / RCLK Frequency Select.
-    sdclk_freq_sel: u10,
+    sdclk_freq_sel_high: u2,
+    /// SDCLK / RCLK Frequency Select.
+    sdclk_freq_sel_low: u8,
+};
+
+/// Timeout Control Register.
+const TimeoutControl = packed struct(u8) {
+    /// Data Timeout Counter Value.
+    ///
+    /// Timeout clock frequency will be generated by dividing the base Clock TMCLK value by this value.
+    /// The value N is calculated as TMCLK * 2^(N+13), while 0b1111 is reserved.
+    data_timeout_counter: u4,
+    /// Reserved.
+    _rsvd: u4 = 0,
 };
 
 /// Software Reset Register.
@@ -1223,7 +1377,7 @@ const SwReset = packed struct(u8) {
 };
 
 /// Error Interrupt Status Register.
-const ErrorInterruptStatus = packed struct(u16) {
+const ErrorIntStatus = packed struct(u16) {
     /// Command Timeout Error.
     cmd_timeout: bool,
     /// Command CRC Error.
@@ -1253,13 +1407,13 @@ const ErrorInterruptStatus = packed struct(u16) {
     _rsvd: u4 = 0,
 
     /// No errors.
-    pub fn isNoError(self: ErrorInterruptStatus) bool {
-        return std.mem.zeroInit(ErrorInterruptStatus, .{}) == self;
+    pub fn isNoError(self: ErrorIntStatus) bool {
+        return std.mem.zeroInit(ErrorIntStatus, .{}) == self;
     }
 };
 
 /// Normal Interrupt Status Enable Register.
-const NormalInterruptStatusEnable = packed struct(u16) {
+const NormalIntStatusEn = packed struct(u16) {
     /// Command Complete Enable.
     cmd_complete: bool,
     /// Transfer Complete Enable.
@@ -1296,7 +1450,7 @@ const NormalInterruptStatusEnable = packed struct(u16) {
 };
 
 /// Normal Interrupt Status Register.
-const NormalInterruptStatus = packed struct(u16) {
+const NormalIntStatus = packed struct(u16) {
     /// Command Complete.
     cmd_complete: bool,
     /// Transfer Complete.
@@ -1333,7 +1487,7 @@ const NormalInterruptStatus = packed struct(u16) {
 };
 
 /// Error Interrupt Status Enable Register.
-const ErrorInterruptStatusEnable = packed struct(u16) {
+const ErrorIntStatusEn = packed struct(u16) {
     /// Command Timeout Error Enable.
     cmd_timeout: bool,
     /// Command CRC Error Enable.
@@ -1361,6 +1515,116 @@ const ErrorInterruptStatusEnable = packed struct(u16) {
     response: bool,
     /// Reserved.
     _rsvd: u4 = 0,
+};
+
+const NormalIntSignalEn = packed struct(u16) {
+    /// Command Complete Enable.
+    cmd_complete: bool,
+    /// Transfer Complete Enable.
+    transfer_complete: bool,
+    /// Block Gap Event Enable.
+    block_gap_event: bool,
+    /// DMA Interrupt Enable.
+    dma_interrupt: bool,
+    /// Buffer Write Ready Enable.
+    buf_write_ready: bool,
+    /// Buffer Read Ready Enable.
+    buf_read_ready: bool,
+    /// Card Insertion Enable.
+    card_insertion: bool,
+    /// Card Removal Enable.
+    card_removal: bool,
+
+    /// Card Interrupt Enable.
+    card_interrupt: bool,
+    /// INT_A Enable.
+    int_a: bool,
+    /// INT_B Enable.
+    int_b: bool,
+    /// INT_C Enable.
+    int_c: bool,
+    /// Re-Tuning Event Enable.
+    retune_event: bool,
+    /// FX Event Enable.
+    fx_event: bool,
+    /// Reserved.
+    _rsvd: u1 = 0,
+    /// Error Interrupt Enable.
+    error_interrupt: bool,
+};
+
+/// Error Interrupt Signal Enable Register.
+const ErrorIntSignalEn = packed struct(u16) {
+    /// Command Timeout Error Enable.
+    cmd_timeout: bool,
+    /// Command CRC Error Enable.
+    cmd_crc: bool,
+    /// Command End Bit Error Enable.
+    cmd_endbit: bool,
+    /// Command Index Error Enable.
+    cmd_index: bool,
+    /// Data Timeout Error Enable.
+    data_timeout: bool,
+    /// Data CRC Error Enable.
+    data_crc: bool,
+    /// Data End Bit Error Enable.
+    data_endbit: bool,
+    /// Current Limit Error Enable.
+    curr_limit: bool,
+
+    /// Auto CMD Error Enable.
+    auto_cmd: bool,
+    /// ADMA Error Enable.
+    adma: bool,
+    /// Tuning Error Enable.
+    tuning: bool,
+    /// Response Error Enable.
+    response: bool,
+    /// Reserved.
+    _rsvd: u4 = 0,
+};
+
+const HostControl2 = packed struct(u16) {
+    /// UHS Mode Select.
+    uhs_mode: u3,
+    /// 1.8V Signaling Enable.
+    signal_1_8v: bool,
+    /// Driver Strength Select.
+    driver_strength: enum(u2) {
+        /// Type B.
+        type_b = 0b00,
+        /// Type A.
+        type_a = 0b01,
+        /// Type C.
+        type_c = 0b10,
+        /// Type D.
+        type_d = 0b11,
+    },
+    /// Execute Tuning.
+    execute_tuning: bool,
+    /// Sampling Clock Select.
+    sampling_clk_sel: bool,
+    /// UHS-II Enable.
+    uhs2_enable: bool,
+    /// Reserved.
+    _rsvd0: u1 = 0,
+    /// ADMA2 Length Mode.
+    adma2length: enum(u1) {
+        /// 16-bit length field.
+        b16 = 0,
+        /// 26-bit length field.
+        b26 = 1,
+    },
+    /// CMD23 Enable.
+    cmd23: bool,
+    /// Host Version 4 Enable.
+    hostv4: bool,
+    /// 64-bit Addressing.
+    addr64bit: bool,
+    /// Asynchronous Interrupt Enable.
+    async_int: bool,
+    /// Preset Value Enable.
+    preset: bool,
 };
 
 /// Capabilities Register 1.
@@ -1480,17 +1744,34 @@ const InterruptStatus = packed struct(u16) {
 /// Host Controller Version Register.
 const Version = packed struct(u16) {
     /// Specification Version Number.
-    spec: enum(u8) {
+    spec: Spec,
+    /// Vendor Version Number.
+    vendor: u8,
+
+    const Spec = enum(u8) {
         v1_00 = 0x00,
         v2_00 = 0x01,
         v3_00 = 0x02,
         v4_00 = 0x03,
         v4_10 = 0x04,
         v4_20 = 0x05,
-        _,
-    },
-    /// Vendor Version Number.
-    vendor: u8,
+
+        pub fn lt(self: Spec, rhs: Spec) bool {
+            return @intFromEnum(self) < @intFromEnum(rhs);
+        }
+
+        pub fn gt(self: Spec, rhs: Spec) bool {
+            return @intFromEnum(self) > @intFromEnum(rhs);
+        }
+
+        pub fn lte(self: Spec, rhs: Spec) bool {
+            return @intFromEnum(self) <= @intFromEnum(rhs);
+        }
+
+        pub fn gte(self: Spec, rhs: Spec) bool {
+            return @intFromEnum(self) >= @intFromEnum(rhs);
+        }
+    };
 };
 
 // =============================================================
@@ -1502,3 +1783,6 @@ const log = std.log.scoped(.sdhc);
 const common = @import("common");
 const bits = common.bits;
 const mmio = common.mmio;
+const rtt = common.rtt;
+const units = common.units;
+const arch = @import("arch").impl;

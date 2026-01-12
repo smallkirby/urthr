@@ -52,6 +52,30 @@ pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
     {
         try rdd.rp1.init(allocator);
     }
+
+    // GPIO.
+    log.info("Initializing GPIO.", .{});
+    {
+        rdd.gpio.setBase(
+            rdd.rp1.getIoBankBase(),
+            rdd.rp1.getRioBase(),
+            rdd.rp1.getPadsBase(),
+        );
+    }
+
+    // SDHC.
+    log.info("Initializing SDHC.", .{});
+    {
+        const sdbase = try allocator.reserveAndRemap(
+            "SDHC",
+            memmap.sd.start,
+            memmap.sd.size(),
+            null,
+        );
+
+        dd.sdhc.setBase(sdbase);
+        dd.sdhc.init(50_000_000); // 50 MHz PLL base clock
+    }
 }
 
 /// Get console instance.

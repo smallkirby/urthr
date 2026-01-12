@@ -20,6 +20,36 @@ pub const units = struct {
     pub const kib = 1024;
     pub const mib = kib * 1024;
     pub const gib = mib * 1024;
+
+    /// Convert bytes to KiB.
+    pub fn toKib(bytes: usize) usize {
+        return bytes / kib;
+    }
+
+    /// Convert bytes to MiB.
+    pub fn toMib(bytes: usize) usize {
+        return bytes / mib;
+    }
+
+    /// Convert bytes to GiB.
+    pub fn toGib(bytes: usize) usize {
+        return bytes / gib;
+    }
+
+    /// Convert bytes to KB.
+    pub fn toKb(bytes: usize) usize {
+        return bytes / 1000;
+    }
+
+    /// Convert bytes to MB.
+    pub fn toMb(bytes: usize) usize {
+        return bytes / 1_000_000;
+    }
+
+    /// Convert bytes to GB.
+    pub fn toGb(bytes: usize) usize {
+        return bytes / 1_000_000_000;
+    }
 };
 
 /// Range structure.

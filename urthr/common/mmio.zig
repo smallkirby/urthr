@@ -143,6 +143,22 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             @compileError("Register not found in Module: " ++ @typeName(T));
         }
 
+        /// Get the address of the specified register.
+        pub fn getRegisterAddress(self: Self, T: type) usize {
+            return self.base + self.getRegisterOffset(T);
+        }
+
+        /// Get the offset of the specified register.
+        pub fn getRegisterOffset(_: Self, T: type) usize {
+            inline for (fields) |field| {
+                const offset, const U = field;
+                if (U == T) {
+                    return offset;
+                }
+            }
+            @compileError("Register not found in Module: " ++ @typeName(T));
+        }
+
         /// Read the specified field.
         pub fn read(self: Self, T: type) T {
             const offset, const MT = getRegister(T);
