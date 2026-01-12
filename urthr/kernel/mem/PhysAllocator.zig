@@ -215,7 +215,7 @@ fn pallocator() PageAllocator {
 pub fn debugPrintResources(self: *const Self, logger: anytype) void {
     var current = self._resources.first;
     while (current) |res| : (current = res.list_head.next) {
-        logger("{X:0>12}-{X:0>12} : {s}", .{
+        logger("{X:0>12}-{X:0>12}    : {s}", .{
             res.phys,
             res.phys + res.size,
             res.name,
@@ -223,7 +223,7 @@ pub fn debugPrintResources(self: *const Self, logger: anytype) void {
 
         var child_current = res.children.first;
         while (child_current) |child| : (child_current = child.list_head.next) {
-            logger("\t{X:0>12}-{X:0>12} : {s}", .{
+            logger("   {X:0>12}-{X:0>12} :  {s}", .{
                 child.phys,
                 child.phys + child.size,
                 child.name,
