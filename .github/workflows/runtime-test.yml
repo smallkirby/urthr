@@ -50,13 +50,15 @@ jobs:
 
       - name: Runtime Tests (Raspberry Pi 4)
         run: |
+          dd if=/dev/zero of=sdcard.img bs=1M count=64
           zig build run --summary all \
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
             -Dboard=rpi4b \
             -Dqemu=$QEMU_DIR/bin \
             -Drtt \
-            -Drestart
+            -Drestart \
+            -Dsdin=sdcard.img
 
       - name: Runtime Tests (virt)
         run: |
