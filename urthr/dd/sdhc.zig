@@ -75,6 +75,7 @@ const CardInfo = struct {
 /// Set the base address of the SD Host Controller.
 pub fn setBase(base: usize) void {
     sdhc.setBase(base);
+    sdhc.provideTimer(arch.timer.createTimer());
 }
 
 /// Initialize the SD Host Controller.
@@ -149,8 +150,6 @@ fn reset() void {
 ///
 /// This function uses Divided Clock Mode to set the clock frequency.
 fn initClock(base_freq: ?u64) void {
-    var timer = arch.timer.createTimer();
-
     // Select base clock frequency.
     const cap1 = sdhc.read(Capability1);
     const base: u64 = if (cap1.base_freq == 0) cap1.base_freq else blk: {
@@ -176,8 +175,7 @@ fn initClock(base_freq: ?u64) void {
     });
 
     // Wait until internal clock is stable.
-    timer.start(1_000); // 1 ms timeout
-    sdhc.waitForUntil(ClockControl, .{ .int_clk_stable = true }, &timer);
+    sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, TimeSlice.ms(1));
 
     // Enable PLL if version >= 4.10.
     if (sdhc.read(Version).spec.gte(.v4_10)) {
@@ -186,8 +184,7 @@ fn initClock(base_freq: ?u64) void {
         });
 
         // Wait until internal clock is stable again.
-        timer.start(1_000); // 1 ms timeout
-        sdhc.waitForUntil(ClockControl, .{ .int_clk_stable = true }, &timer);
+        sdhc.waitFor(ClockControl, .{ .int_clk_stable = true }, TimeSlice.ms(1));
     }
 
     // Enable SD clock.
@@ -390,8 +387,6 @@ fn declareAcmd(rca: ?u16) void {
 
 /// Issue a command to the SD card.
 fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
-    var timer = arch.timer.createTimer();
-
     // Sanity check.
     {
         const clk = sdhc.read(ClockControl);
@@ -407,8 +402,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     }
 
     // Wait until command and data lines are free.
-    timer.start(10000); // 1 ms timeout
-    sdhc.waitForUntil(PresentState, .{ .cmd = false, .dat = false }, &timer);
+    sdhc.waitFor(PresentState, .{ .cmd = false, .dat = false }, TimeSlice.ms(1));
 
     // Clear interrupt status.
     sdhc.write(NormalIntStatus, 0xFFFF);
@@ -461,8 +455,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     sdhc.write(Command, cmd_reg);
 
     // Wait for command complete.
-    timer.start(1_000); // 1 ms timeout
-    sdhc.waitForUntil(NormalIntStatus, .{ .cmd_complete = true }, &timer);
+    sdhc.waitFor(NormalIntStatus, .{ .cmd_complete = true }, TimeSlice.ms(1));
 
     // Read response registers.
     const res0 = sdhc.read(Response0).value;
@@ -474,15 +467,13 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     const err_status = sdhc.read(ErrorIntStatus);
 
     // Wait until data line is free.
-    timer.start(1_000); // 1 ms timeout
     if (res_type.busy()) {
-        sdhc.waitForUntil(PresentState, .{ .dat = false }, &timer);
+        sdhc.waitFor(PresentState, .{ .dat = false }, TimeSlice.ms(1));
     }
 
     // Read data if needed.
     if (data) |buf| {
-        timer.start(1_000); // 1 ms timeout
-        sdhc.waitForUntil(NormalIntStatus, .{ .buf_read_ready = true }, &timer);
+        sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, TimeSlice.ms(1));
 
         const buf_len = buf.len / @sizeOf(u32);
         const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
@@ -491,8 +482,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         }
 
         // Wait until data transfer is complete.
-        timer.start(1_000); // 1 ms timeout
-        sdhc.waitForUntil(NormalIntStatus, .{ .transfer_complete = true }, &timer);
+        sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, TimeSlice.ms(1));
     }
 
     return CommandResponse{
@@ -1785,4 +1775,5 @@ const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
+const TimeSlice = common.Timer.TimeSlice;
 const arch = @import("arch").impl;
