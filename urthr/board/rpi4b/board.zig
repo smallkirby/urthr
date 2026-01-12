@@ -46,7 +46,17 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 
 /// Initialize peripherals.
 pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
-    _ = allocator;
+    // SDHC
+    {
+        const base = try allocator.reserveAndRemap(
+            "SDHC",
+            memmap.sdhost.start,
+            memmap.sdhost.size(),
+            null,
+        );
+        dd.sdhc.setBase(base);
+        dd.sdhc.init(50_000_000); // 50 MHz
+    }
 }
 
 /// De-initialize loader resources.

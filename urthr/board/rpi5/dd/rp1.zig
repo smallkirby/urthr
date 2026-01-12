@@ -20,13 +20,13 @@ var rp1 = mmio.Module(.{ .size = void }, &.{
     .{ 0x0003_C000, mmio.Marker(.uart3) },
     .{ 0x0004_0000, mmio.Marker(.uart4) },
     .{ 0x0004_4000, mmio.Marker(.uart5) },
-
     .{ 0x000B_0000, mmio.Marker(.sdio0_cfg) },
     .{ 0x000B_4000, mmio.Marker(.sdio1_cfg) },
-
+    .{ 0x000D_0000, mmio.Marker(.io_bank0) },
+    .{ 0x000E_0000, mmio.Marker(.rio_bank0) },
+    .{ 0x000F_0000, mmio.Marker(.pad_bank0) },
     .{ 0x0018_0000, mmio.Marker(.sdio0) },
     .{ 0x0018_4000, mmio.Marker(.sdio1) },
-
     .{ 0x0040_0000, mmio.Marker(.end) },
 }){};
 
@@ -121,53 +121,102 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     rp1.setBase(vperi);
 
     // Map modules.
-    _ = try allocator.reserve(
-        "sysinfo",
-        resource.phys + rp1.getMarkerOffset(.sysinfo),
-        0x0000_4000,
-        resource,
-    );
-    _ = try allocator.reserve(
-        "syscfg",
-        resource.phys + rp1.getMarkerOffset(.syscfg),
-        0x0000_4000,
-        resource,
-    );
-    _ = try allocator.reserve(
-        "uart0",
-        resource.phys + rp1.getMarkerOffset(.uart0),
-        0x0000_4000,
-        resource,
-    );
-    _ = try allocator.reserve(
-        "sdio0_cfg",
-        resource.phys + rp1.getMarkerOffset(.sdio0_cfg),
-        0x0000_4000,
-        resource,
-    );
-    _ = try allocator.reserve(
-        "sdio1_cfg",
-        resource.phys + rp1.getMarkerOffset(.sdio1_cfg),
-        0x0000_4000,
-        resource,
-    );
-    _ = try allocator.reserve(
-        "sdio0",
-        resource.phys + rp1.getMarkerOffset(.sdio0),
-        0x0000_4000,
-        resource,
-    );
-    _ = try allocator.reserve(
-        "sdio1",
-        resource.phys + rp1.getMarkerOffset(.sdio1),
-        0x0000_4000,
-        resource,
-    );
+    try mapPeris(allocator, resource);
 
     // Get Chip ID.
     const chipid: *const volatile u32 = @ptrFromInt(rp1.getMarkerAddress(.sysinfo));
     log.info("Chip ID: 0x{X:0>8}", .{chipid.*});
     rtt.expectEqual(0x2000_1927, chipid.*);
+}
+
+/// Get the base address of I/O Bank registers.
+pub fn getIoBankBase() usize {
+    return rp1.getMarkerAddress(.io_bank0);
+}
+
+/// Get the base address of RIO Bank registers.
+pub fn getRioBase() usize {
+    return rp1.getMarkerAddress(.rio_bank0);
+}
+
+/// Get the base address of Pad Bank registers.
+pub fn getPadsBase() usize {
+    return rp1.getMarkerAddress(.pad_bank0);
+}
+
+/// Get the base address of Main Clocks registers.
+pub fn getClocksMain() usize {
+    return rp1.getMarkerAddress(.clocks_main);
+}
+
+/// Map peripherals of RP1.
+fn mapPeris(allocator: IoAllocator, root: *IoAllocator.Resource) IoAllocator.Error!void {
+    _ = try allocator.reserve(
+        "sysinfo",
+        root.phys + rp1.getMarkerOffset(.sysinfo),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "syscfg",
+        root.phys + rp1.getMarkerOffset(.syscfg),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "clocks_main",
+        root.phys + rp1.getMarkerOffset(.clocks_main),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "uart0",
+        root.phys + rp1.getMarkerOffset(.uart0),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "sdio0_cfg",
+        root.phys + rp1.getMarkerOffset(.sdio0_cfg),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "sdio1_cfg",
+        root.phys + rp1.getMarkerOffset(.sdio1_cfg),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "io_bank",
+        root.phys + rp1.getMarkerOffset(.io_bank0),
+        0x0000_C000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "rio_bank",
+        root.phys + rp1.getMarkerOffset(.rio_bank0),
+        0x0000_C000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "pad_bank",
+        root.phys + rp1.getMarkerOffset(.pad_bank0),
+        0x0000_C000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "sdio0",
+        root.phys + rp1.getMarkerOffset(.sdio0),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "sdio1",
+        root.phys + rp1.getMarkerOffset(.sdio1),
+        0x0000_4000,
+        root,
+    );
 }
 
 // =============================================================

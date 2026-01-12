@@ -24,9 +24,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
-    _ = allocator;
-}
+pub fn initPeripherals(_: IoAllocator) IoAllocator.Error!void {}
 
 /// Get console instance.
 ///
