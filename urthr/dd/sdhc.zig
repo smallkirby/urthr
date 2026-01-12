@@ -61,6 +61,8 @@ const CardInfo = struct {
     csd: Csd,
     /// SD Configuration Register.
     scr: Scr,
+    /// Card Identification Register.
+    cid: Cid,
 
     const Spec = enum {
         /// SD Standard Capacity v1.01 or v1.10.
@@ -249,14 +251,14 @@ fn initCard() CardInfo {
     var ccs = false;
 
     // CMD0: GO_IDLE_STATE
-    log.debug("CMD0: GO_IDLE_STATE", .{});
+    log.debug("CMD0  : GO_IDLE_STATE", .{});
     {
         _ = issueCmd(0, false, 0, null).unwrap();
         arch.timer.spinWaitMilli(1);
     }
 
     // CMD8: SEND_IF_COND
-    log.debug("CMD8: SEND_IF_COND", .{});
+    log.debug("CMD8  : SEND_IF_COND", .{});
     {
         const res = issueCmd(8, false, 0x1AA, null);
 
@@ -272,28 +274,11 @@ fn initCard() CardInfo {
     // ACMD41: SEND_OP_COND
     log.debug("ACMD41: SEND_OP_COND", .{});
     {
-        const Acmd41 = packed struct(u32) {
-            /// Voltage Window.
-            volt_window: u24,
-            /// S18R.
-            s18r: bool = false,
-            /// Reserved.
-            _rsvd0: u3 = 0,
-            /// XPC.
-            xpc: bool = false,
-            /// Reserved.
-            _rsvd1: u1 = 0,
-            /// Card Capacity Status.
-            ccs: bool,
-            /// Busy.
-            busy: bool = false,
-        };
-
         // With voltage = 0.
         declareAcmd(null);
         const ocr = issueCmd(41, true, Acmd41{
             .volt_window = 0,
-            .ccs = true,
+            .hcs = .sdhc_sdxc,
         }, null).unwrap();
 
         // with setting voltage.
@@ -301,7 +286,7 @@ fn initCard() CardInfo {
             declareAcmd(null);
             const res = issueCmd(41, true, Acmd41{
                 .volt_window = @truncate(ocr.raw()),
-                .ccs = true,
+                .hcs = .sdhc_sdxc,
             }, null).unwrap().as(Ocr);
 
             if (res.not_busy) {
@@ -313,25 +298,20 @@ fn initCard() CardInfo {
     }
 
     // CMD2: ALL_SEND_CID
-    log.debug("CMD2: ALL_SEND_CID", .{});
-    {
-        const cid = issueCmd(2, false, 0, null).unwrap().as(Cid);
-
-        log.debug(
-            "CID: PSN={X:0>8}, REV={d}, NAME={s}, MID={d}",
-            .{ cid.psn, cid.rev, cid.name, cid.mid },
-        );
-    }
+    log.debug("CMD2  : ALL_SEND_CID", .{});
+    const cid = blk: {
+        break :blk issueCmd(2, false, 0, null).unwrap().as(Cid);
+    };
 
     // CMD3: SEND_RELATIVE_ADDR
-    log.debug("CMD3: SEND_RELATIVE_ADDR", .{});
+    log.debug("CMD3  : SEND_RELATIVE_ADDR", .{});
     const rca = blk: {
         const res = issueCmd(3, false, 0, null).unwrap().as(u32);
         break :blk @as(u16, @truncate(res >> 16));
     };
 
     // CMD9: SEND_CSD
-    log.debug("CMD9: SEND_CSD", .{});
+    log.debug("CMD9  : SEND_CSD", .{});
     const csd = blk: {
         const res = issueCmd(9, false, @as(u32, rca) << 16, null).unwrap().as(u128);
         break :blk Csd.from(res);
@@ -344,7 +324,7 @@ fn initCard() CardInfo {
     }
 
     // CMD7: SELECT_CARD
-    log.debug("CMD7: SELECT_CARD", .{});
+    log.debug("CMD7  : SELECT_CARD", .{});
     {
         _ = issueCmd(7, false, @as(u32, rca) << 16, null).unwrap();
     }
@@ -366,6 +346,7 @@ fn initCard() CardInfo {
         .rca = rca,
         .csd = csd,
         .scr = scr,
+        .cid = cid,
     };
 }
 
@@ -388,18 +369,7 @@ fn declareAcmd(rca: ?u16) void {
 /// Issue a command to the SD card.
 fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     // Sanity check.
-    {
-        const clk = sdhc.read(ClockControl);
-        rtt.expectEqual(true, clk.sd_clk_en);
-        rtt.expectEqual(true, clk.int_clk_en);
-        rtt.expectEqual(true, clk.int_clk_stable);
-
-        const ps = sdhc.read(PresentState);
-        rtt.expectEqual(true, ps.cmd_level);
-        rtt.expectEqual(0b1111, ps.dat_level);
-
-        rtt.expect(sdhc.read(ClockControl).sd_clk_en);
-    }
+    checkSanityCmd();
 
     // Wait until command and data lines are free.
     sdhc.waitFor(PresentState, .{ .cmd = false, .dat = false }, TimeSlice.ms(1));
@@ -491,6 +461,48 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         .err = err_status,
     };
 }
+
+/// Do sanity check before issuing command.
+fn checkSanityCmd() void {
+    const clk = sdhc.read(ClockControl);
+    rtt.expectEqual(true, clk.sd_clk_en);
+    rtt.expectEqual(true, clk.int_clk_en);
+    rtt.expectEqual(true, clk.int_clk_stable);
+
+    const ps = sdhc.read(PresentState);
+    rtt.expectEqual(true, ps.cmd_level);
+    rtt.expectEqual(0b1111, ps.dat_level);
+
+    rtt.expect(sdhc.read(ClockControl).sd_clk_en);
+}
+
+/// Argument of ACMD41.
+const Acmd41 = packed struct(u32) {
+    /// Voltage Window.
+    volt_window: u24,
+    /// S18R.
+    s18r: bool = false,
+    /// Reserved.
+    _rsvd0: u3 = 0,
+    /// SDXC Power Control.
+    xpc: enum(u1) {
+        /// Power Saving.
+        saving = 0,
+        //// Maximum Performance.
+        maximum = 1,
+    } = .saving,
+    /// Reserved.
+    _rsvd1: u1 = 0,
+    /// Host capacity support.
+    hcs: enum(u1) {
+        /// SDSC Only Host.
+        sdsc = 0,
+        /// SDHC or SDXC Supported.
+        sdhc_sdxc = 1,
+    },
+    /// Busy.
+    busy: bool = false,
+};
 
 /// Response and error value for SDHC command.
 const CommandResponse = struct {
