@@ -43,6 +43,10 @@ const pcie1_range = common.Range{
 const axi_peri_base: usize = pcie1_range.start;
 /// Size in bytes of peripheral region's translation window.
 const axi_peri_window_size: usize = 0x0040_0000;
+/// Physical address mapped to RP1 Shared SRAM (BAR2).
+const axi_sram_base: usize = axi_peri_base + axi_peri_window_size;
+/// Size in bytes of Shared SRAM's translation window.
+const axi_sram_window_size: usize = 0x0040_0000;
 
 comptime {
     common.comptimeAssert(axi_peri_base % units.mib == 0, null);
@@ -83,6 +87,11 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
                 rtt.expectEqual(.mem32, bar.type);
                 bar.setAddress(0, confio);
             },
+            2 => {
+                // Shared SRAM
+                rtt.expectEqual(.mem32, bar.type);
+                bar.setAddress(axi_peri_window_size, confio);
+            },
             else => {},
         }
     }
@@ -97,7 +106,12 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     }
 
     // Setup translation windows.
-    pcie.setOutTranslation(axi_peri_base, 0, axi_peri_window_size, 0);
+    pcie.setOutTranslation(
+        axi_peri_base,
+        0,
+        axi_peri_window_size + axi_sram_window_size,
+        0,
+    );
 
     // Set configuration header.
     confio.modify(dd.pci.HeaderCommandStatus, .{
@@ -105,27 +119,51 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         .bus_master_enable = true,
     });
 
-    // Map peripheral region.
-    const resource = try allocator.reserve(
+    // Map peripheral and shared SRAM region.
+    const res_peri = try allocator.reserve(
         "RP1 PCIe Peripherals",
         axi_peri_base,
         axi_peri_window_size,
         null,
     );
+    const res_sram = try allocator.reserve(
+        "RP1 PCIe Shared SRAM",
+        axi_sram_base,
+        axi_sram_window_size,
+        null,
+    );
     const vperi = try allocator.ioremap(
-        resource.phys,
-        resource.size,
+        res_peri.phys,
+        res_peri.size,
+    );
+    const vsram = try allocator.ioremap(
+        res_sram.phys,
+        res_sram.size,
     );
 
     // Set RP1 module base.
     rp1.setBase(vperi);
 
     // Map modules.
-    try mapPeris(allocator, resource);
+    try mapPeris(allocator, res_peri);
+
+    // Init RP1 Shared SRAM.
+    rp1fw.setBase(vsram);
+
+    // Init mailbox.
+    const vmb = try allocator.ioremap(
+        res_peri.phys + rp1.getMarkerOffset(.syscfg),
+        0x0000_4000,
+    );
+    rp1mb.init(vmb);
+
+    // Get FW version.
+    const rp1version = rp1fw.getVersion();
+    log.info("RP1 Firmware Version: {X:0>40}", .{rp1version});
 
     // Get Chip ID.
     const chipid: *const volatile u32 = @ptrFromInt(rp1.getMarkerAddress(.sysinfo));
-    log.info("Chip ID: 0x{X:0>8}", .{chipid.*});
+    log.info("RP1 Chip ID: 0x{X:0>8}", .{chipid.*});
     rtt.expectEqual(0x2000_1927, chipid.*);
 }
 
@@ -233,3 +271,5 @@ const IoAllocator = common.IoAllocator;
 const dd = @import("dd");
 
 const pcie = @import("pcie.zig");
+const rp1fw = @import("rp1fw.zig");
+const rp1mb = @import("rp1mb.zig");
