@@ -151,6 +151,49 @@ fn reset() void {
 }
 
 // =============================================================
+// Block Device Interface
+// =============================================================
+
+const vtable = block.Device.Vtable{
+    .blockSize = &ifGetBlockSize,
+    .blockCount = &ifGetBlockCount,
+    .read = &ifRead,
+};
+
+fn ifGetBlockSize(_: *const anyopaque) usize {
+    return 512;
+}
+
+fn ifGetBlockCount(ctx: *const anyopaque) u64 {
+    const self: *const CardInfo = @ptrCast(@alignCast(ctx));
+
+    return self.csd.getCapacity() / 512;
+}
+
+fn ifRead(ctx: *anyopaque, lba: block.Lba, buffer: []u8) block.Error!usize {
+    const self: *CardInfo = @ptrCast(@alignCast(ctx));
+
+    if (buffer.len % 512 != 0) {
+        return block.Error.InvalidArgument;
+    }
+    if (lba > std.math.maxInt(u32)) {
+        return block.Error.InvalidArgument;
+    }
+
+    readBlock(self, @intCast(lba), buffer);
+
+    return buffer.len;
+}
+
+/// Get the block device interface for the SD card.
+pub fn getDevice() block.Device {
+    return .{
+        .ptr = @ptrCast(&card),
+        .vtable = &vtable,
+    };
+}
+
+// =============================================================
 // Internals
 // =============================================================
 
@@ -463,10 +506,10 @@ fn setupTransaction(base_freq: ?u64) void {
 // =============================================================
 
 /// Read a single 512-byte block from the SD card using PIO.
-fn readBlock(lba: u32, buf: []u8) void {
+fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
     rtt.expectEqual(buf.len, 512);
 
-    const addr = if (card.spec == .sdhc_sdxc) lba else lba * 512;
+    const addr = if (ci.spec == .sdhc_sdxc) lba else lba * 512;
     _ = issueCmd(17, false, addr, buf).unwrap();
 }
 
@@ -1932,6 +1975,7 @@ const std = @import("std");
 const log = std.log.scoped(.sdhc);
 const common = @import("common");
 const bits = common.bits;
+const block = common.block;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
