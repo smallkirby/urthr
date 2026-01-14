@@ -36,15 +36,6 @@ const ChunkMetaNode = packed struct {
 };
 const ChunkMetaPointer = ?*ChunkMetaNode;
 
-/// Get a instance of BinAllocator without initialization.
-pub fn newUninit() Self {
-    return Self{
-        .page_allocator = undefined,
-        .list_heads = undefined,
-        .lock = SpinLock{},
-    };
-}
-
 /// Initialize the BinAllocator.
 pub fn init(self: *Self, page_allocator: PageAllocator) void {
     self.* = .{
@@ -161,16 +152,9 @@ fn resize(_: *anyopaque, _: []u8, _: Alignment, _: usize, _: usize) bool {
     @panic("BinAllocator does not support resizing");
 }
 
-fn remap(ctx: *anyopaque, slice: []u8, alignment: Alignment, new_len: usize, _: usize) ?[*]u8 {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-
-    if (slice.len == new_len) return slice.ptr;
-
-    const new_region = allocate(self, new_len, alignment, 0) orelse return null;
-    @memcpy(new_region[0..slice.len], slice);
-    free(self, slice, alignment, 0);
-
-    return new_region;
+/// Always force reallocating a new memory region.
+fn remap(_: *anyopaque, _: []u8, _: Alignment, _: usize, _: usize) ?[*]u8 {
+    return null;
 }
 
 // =============================================================
