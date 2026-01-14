@@ -1,4 +1,5 @@
 pub const exception = @import("kernel/exception.zig");
+pub const fs = @import("kernel/fs.zig");
 pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
 
@@ -38,6 +39,13 @@ pub fn unimplemented(comptime msg: []const u8) noreturn {
     eol(4);
 }
 
+/// Assert at compile time.
+pub fn comptimeAssert(cond: bool, comptime msg: []const u8, args: anytype) void {
+    if (!cond) {
+        @compileError(std.fmt.comptimePrint(msg, args));
+    }
+}
+
 /// APIs for early boot stage.
 pub const boot = struct {
     const BootAllocator = @import("kernel/mem/BootAllocator.zig");
@@ -73,6 +81,7 @@ test {
 // Imports
 // =============================================================
 
+const std = @import("std");
 const arch = @import("arch").impl;
 const options = @import("common").options;
 const board = @import("board").impl;
