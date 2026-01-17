@@ -56,6 +56,14 @@ pub const pl011 = Range{
     .end = 0x0900_1000,
 };
 
+/// Virtio MMIO devices.
+///
+/// QEMU virt machine has 32 virtio-mmio devices.
+pub const virtio = Range{
+    .start = 0x0A00_0000,
+    .end = 0x0A00_4000,
+};
+
 /// PCIe
 pub const pci = Range{
     .start = 0x0040_1000_0000,

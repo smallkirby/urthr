@@ -1,5 +1,8 @@
 pub const memmap = @import("memmap.zig");
 
+/// Virtio block device instance.
+var virtio_blk_dev: ?dd.VirtioBlk = null;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -24,7 +27,37 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals(_: IoAllocator) IoAllocator.Error!void {}
+pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
+    const virtio_size = dd.virtio.mmio_space_size;
+
+    // Scan for virtio-blk device.
+    const virtio_base = try mm.io.reserveAndRemap(
+        "virtio",
+        memmap.virtio.start,
+        util.roundup(memmap.virtio.size(), common.mem.size_4kib),
+        null,
+    );
+
+    for (0..(memmap.virtio.size() / virtio_size)) |i| {
+        const base = virtio_base + i * virtio_size;
+
+        // Try to initialize as virtio-blk.
+        virtio_blk_dev = dd.VirtioBlk.init(base, mm.page, mm.general) catch {
+            continue;
+        };
+
+        log.info("Found virtio-blk device#{d}", .{i});
+        break;
+    }
+}
+
+/// Get the block device interface.
+pub fn getBlockDevice() ?common.block.Device {
+    return if (virtio_blk_dev) |*dev|
+        dev.interface()
+    else
+        null;
+}
 
 /// Get console instance.
 ///
@@ -87,8 +120,13 @@ const console = struct {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.virt);
 const arch = @import("arch").impl;
 const common = @import("common");
+const mem = common.mem;
+const util = common.util;
 const Console = common.Console;
+const MemoryManager = common.mem.MemoryManager;
 const IoAllocator = common.IoAllocator;
+const PageAllocator = common.PageAllocator;
 const dd = @import("dd");

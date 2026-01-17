@@ -45,10 +45,10 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 }
 
 /// Initialize peripherals.
-pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
+pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
     // SDHC
     {
-        const base = try allocator.reserveAndRemap(
+        const base = try mm.io.reserveAndRemap(
             "SDHC",
             memmap.sdhost.start,
             memmap.sdhost.size(),
@@ -61,6 +61,11 @@ pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
+
+/// Get the block device interface.
+pub fn getBlockDevice() ?common.block.Device {
+    return dd.sdhc.getDevice();
+}
 
 /// Get console instance.
 ///
@@ -128,9 +133,11 @@ const console = struct {
 const std = @import("std");
 const arch = @import("arch");
 const common = @import("common");
+const mem = common.mem;
+const options = common.options;
 const Console = common.Console;
 const IoAllocator = common.IoAllocator;
-const options = common.options;
+const MemoryManager = common.mem.MemoryManager;
 const dd = @import("dd");
 const map = @import("memmap.zig");
 const rdd = @import("dd.zig");
