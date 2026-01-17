@@ -184,10 +184,10 @@ const TestPageAllocator = struct {
         };
     }
 
-    pub fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(mem.size_4kib) u8 {
+    pub fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(common.mem.size_4kib) u8 {
         const ret = try std.heap.page_allocator.alloc(
             u8,
-            mem.size_4kib * num_pages,
+            common.mem.size_4kib * num_pages,
         );
         return @alignCast(ret);
     }
@@ -234,7 +234,7 @@ test "allocation order" {
     const sizes = bin_sizes;
     for (sizes) |size| {
         var prev = try ba.alloc(u8, size);
-        for (0..mem.size_4kib / size - 1) |_| {
+        for (0..common.mem.size_4kib / size - 1) |_| {
             const ptr = try ba.alloc(u8, size);
             try testing.expectEqual(size, @intFromPtr(ptr.ptr) - @intFromPtr(prev.ptr));
             prev = ptr;
@@ -262,7 +262,7 @@ test "allocation size" {
 test "allocation exceeds page size" {
     const ba = getTestingAllocator();
 
-    for (0..mem.size_4kib / 0x20 + 8) |_| {
+    for (0..common.mem.size_4kib / 0x20 + 8) |_| {
         const ptr = try ba.alloc(u8, 0x20);
         try testing.expectEqual(0x20, ptr.len);
     }
