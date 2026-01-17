@@ -13,6 +13,13 @@ pub const Error = error{
     NotAvailable,
 };
 
+/// Size in bytes of 4KiB.
+pub const size_4kib = 4 * units.kib;
+/// Size in bytes of 2MiB.
+pub const size_2mib = 2 * units.mib;
+/// Size in bytes of 1GiB.
+pub const size_1gib = 1 * units.gib;
+
 /// Memory permission.
 pub const Permission = struct {
     /// User readable.
@@ -58,3 +65,13 @@ pub const Attribute = enum {
     /// The memory is cacheable.
     normal,
 };
+
+// =============================================================
+// Imports
+// =============================================================
+
+const std = @import("std");
+const common = @import("common");
+const units = common.units;
+const PageAllocator = @import("PageAllocator.zig");
+const IoAllocator = @import("IoAllocator.zig");

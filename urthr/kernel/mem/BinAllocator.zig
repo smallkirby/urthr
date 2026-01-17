@@ -23,7 +23,7 @@ comptime {
     if (bin_sizes[0] < @sizeOf(ChunkMetaNode)) {
         @compileError("The smallest bin size is smaller than the size of ChunkMetaNode");
     }
-    if (bin_sizes[bin_sizes.len - 1] > mem.size_4kib) {
+    if (bin_sizes[bin_sizes.len - 1] > common.mem.size_4kib) {
         @compileError("The largest bin size exceeds a 4KiB page size");
     }
 }
@@ -87,7 +87,7 @@ fn initBinPage(self: *Self, bin_index: usize) ?void {
     const new_page = self.page_allocator.allocPagesV(1) catch return null;
     const bin_size = bin_sizes[bin_index];
 
-    var i: usize = mem.size_4kib / bin_size - 1;
+    var i: usize = common.mem.size_4kib / bin_size - 1;
     while (true) : (i -= 1) {
         const chunk: *ChunkMetaNode = @ptrFromInt(@intFromPtr(new_page.ptr) + i * bin_size);
         push(&self.list_heads[bin_index], chunk);
@@ -127,7 +127,7 @@ fn allocate(ctx: *anyopaque, n: usize, log2_align: std.mem.Alignment, _: usize) 
         // Requested size including alignment exceeds a 4KiB page size.
         // Zig's Allocator does not assume an align larger than a page size.
         // So we can safely ignore the alignment, ang just return for requested size.
-        const num_pages = std.math.divCeil(usize, n, mem.size_4kib) catch {
+        const num_pages = std.math.divCeil(usize, n, common.mem.size_4kib) catch {
             @panic("BinAllocator: Unexpected division.");
         };
         const ret = self.page_allocator.allocPagesV(num_pages) catch return null;

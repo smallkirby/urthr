@@ -2,13 +2,6 @@ pub const Error = common.mem.Error;
 
 pub const vallocator = @import("mem/vallocator.zig");
 
-/// Size in bytes of 4KiB.
-pub const size_4kib = 4 * units.kib;
-/// Size in bytes of 2MiB.
-pub const size_2mib = 2 * units.mib;
-/// Size in bytes of 1GiB.
-pub const size_1gib = 1 * units.gib;
-
 /// Virtual address type.
 pub const Virt = usize;
 /// Physical address type.
@@ -194,3 +187,7 @@ const vmap = @import("mem/vmemmap.zig");
 const BinAllocator = @import("mem/BinAllocator.zig");
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
 const PhysAllocator = @import("mem/PhysAllocator.zig");
+
+const size_4kib = common.mem.size_4kib;
+const size_2mib = common.mem.size_2mib;
+const size_1gib = common.mem.size_1gib;
