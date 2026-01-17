@@ -12,6 +12,33 @@ pub fn halt() void {
     asm volatile ("wfi");
 }
 
+/// Memory barrier domain.
+pub const BarrierDomain = enum {
+    /// Full system.
+    full,
+    /// Inner shareable.
+    inner,
+};
+
+/// Memory barrier type.
+pub const BarrierType = enum {
+    // Release
+    release,
+    // Acquire
+    acquire,
+};
+
+/// Issue a memory barrier.
+pub fn barrier(domain: BarrierDomain, typ: BarrierType) void {
+    switch (domain) {
+        .full => asm volatile ("dmb sy"),
+        .inner => switch (typ) {
+            .release => asm volatile ("dmb ishst"),
+            .acquire => asm volatile ("dmb ishld"),
+        },
+    }
+}
+
 /// Translate the given virtual address to physical address.
 pub fn translate(virt: usize) usize {
     // TODO: should check the fault status
