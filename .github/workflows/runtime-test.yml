@@ -40,7 +40,10 @@ jobs:
             qemu-system-arm \
             qemu-utils \
             cpp \
-            libcapstone-dev
+            libcapstone-dev \
+            fdisk \
+            dosfstools \
+            mtools
 
       - name: Create SD card image
         run: |
