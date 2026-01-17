@@ -139,6 +139,15 @@ pub fn getIoAllocator() IoAllocator {
     return phys_allocator.interface();
 }
 
+/// Get the set of memory allocators.
+pub fn getAllocators() MemoryManager {
+    return MemoryManager{
+        .general = getGeneralAllocator(),
+        .io = getIoAllocator(),
+        .page = getPageAllocator(),
+    };
+}
+
 /// End virtual address of kernel image.
 extern const __end: *void;
 
@@ -178,6 +187,7 @@ const common = @import("common");
 const rtt = common.rtt;
 const units = common.units;
 const util = common.util;
+const MemoryManager = common.mem.MemoryManager;
 const PageAllocator = common.PageAllocator;
 const IoAllocator = common.IoAllocator;
 const Range = common.Range;

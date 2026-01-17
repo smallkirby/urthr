@@ -9,6 +9,8 @@ pub const Error = error{
     OutOfMemory,
     /// Partition type is unsupported.
     UnsupportedPartition,
+    /// Error happened while I/O operation.
+    IoError,
 };
 
 /// Logical Block Addressing (LBA) type.

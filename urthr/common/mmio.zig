@@ -32,7 +32,10 @@ pub fn Register(T: type, Width: type) type {
         pub fn read(addr: usize) T {
             const ptr: *const volatile Width = @ptrFromInt(addr);
             const value: Width = ptr.*;
-            return @bitCast(@as(IntT, @truncate(value)));
+            return switch (@typeInfo(T)) {
+                .@"enum" => @enumFromInt(value),
+                else => @bitCast(@as(IntT, @truncate(value))),
+            };
         }
 
         /// Write to the MMIO register at the given address.
