@@ -112,7 +112,7 @@ const VmArea = struct {
 
 /// Allocate a virtual memory area with the given size.
 pub fn allocate(size: usize) Error!*VmArea {
-    rtt.expectEqual(0, size % mem.size_4kib);
+    rtt.expectEqual(0, size % common.mem.size_4kib);
 
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);

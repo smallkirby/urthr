@@ -40,8 +40,8 @@ pub fn interface(self: *Self) IoAllocator {
 ///
 /// Caller must ensure that the given physical address range is reserved before calling this function.
 fn ioremap(ctx: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
-    rtt.expect(util.isAligned(size, mem.size_4kib));
-    rtt.expect(util.isAligned(phys, mem.size_4kib));
+    rtt.expect(util.isAligned(size, common.mem.size_4kib));
+    rtt.expect(util.isAligned(phys, common.mem.size_4kib));
 
     const self: *Self = @ptrCast(@alignCast(ctx));
     const ie = self._lock.lockDisableIrq();
@@ -72,10 +72,10 @@ fn reserve(ctx: *anyopaque, name: []const u8, start: usize, size: usize, parent:
     const self: *Self = @ptrCast(@alignCast(ctx));
     const end = start + size;
 
-    if (!util.isAligned(start, mem.size_4kib)) {
+    if (!util.isAligned(start, common.mem.size_4kib)) {
         return Error.InvalidArgument;
     }
-    if (!util.isAligned(size, mem.size_4kib)) {
+    if (!util.isAligned(size, common.mem.size_4kib)) {
         return Error.InvalidArgument;
     }
 
@@ -142,8 +142,8 @@ fn compareResources(a: *Resource, b: *Resource) std.math.Order {
 /// Returns the size of mapped range in bytes.
 fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
     // Map using 1GiB pages if possible.
-    if (isMappableAs(virt, phys, max, mem.size_1gib)) {
-        const map_size = util.rounddown(max, mem.size_1gib);
+    if (isMappableAs(virt, phys, max, common.mem.size_1gib)) {
+        const map_size = util.rounddown(max, common.mem.size_1gib);
         try arch.mmu.map1gb(
             phys,
             virt,
@@ -156,10 +156,10 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
     }
 
     // Map using 2MiB pages, until next 1GiB boundary.
-    if (isMappableAs(virt, phys, max, mem.size_2mib)) {
+    if (isMappableAs(virt, phys, max, common.mem.size_2mib)) {
         const map_size = @min(
-            util.rounddown(max, mem.size_2mib),
-            mem.size_1gib - (virt % mem.size_1gib),
+            util.rounddown(max, common.mem.size_2mib),
+            common.mem.size_1gib - (virt % common.mem.size_1gib),
         );
         try arch.mmu.map2mb(
             phys,
@@ -176,7 +176,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
     {
         const map_size = @min(
             max,
-            mem.size_2mib - (virt % mem.size_2mib),
+            common.mem.size_2mib - (virt % common.mem.size_2mib),
         );
         try arch.mmu.map4kb(
             phys,
