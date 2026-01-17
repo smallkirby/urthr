@@ -157,42 +157,53 @@ fn reset() void {
 /// Block size in bytes.
 const block_size = 512;
 
-const vtable = block.Device.Vtable{
-    .blockSize = &ifGetBlockSize,
-    .blockCount = &ifGetBlockCount,
-    .read = &ifRead,
+const vtable_impl = struct {
+    const vtable = block.Device.Vtable{
+        .blockSize = &getBlockSize,
+        .blockCount = &getBlockCount,
+        .read = &read,
+    };
+
+    /// Get the block size in bytes.
+    fn getBlockSize(_: *const anyopaque) usize {
+        return block_size;
+    }
+
+    /// Get the total number of blocks.
+    fn getBlockCount(ctx: *const anyopaque) u64 {
+        const self: *const CardInfo = @ptrCast(@alignCast(ctx));
+
+        return self.csd.getCapacity() / block_size;
+    }
+
+    /// Read blocks from the device into the given buffer.
+    fn read(ctx: *anyopaque, lba: block.Lba, buffer: []u8) block.Error!usize {
+        const self: *CardInfo = @ptrCast(@alignCast(ctx));
+
+        if (buffer.len % block_size != 0) {
+            return block.Error.InvalidArgument;
+        }
+        if (lba > std.math.maxInt(u32)) {
+            return block.Error.InvalidArgument;
+        }
+
+        for (0..(buffer.len / block_size)) |i| {
+            readBlock(
+                self,
+                @intCast(lba + i),
+                buffer[i * block_size .. (i + 1) * block_size],
+            );
+        }
+
+        return buffer.len;
+    }
 };
 
-fn ifGetBlockSize(_: *const anyopaque) usize {
-    return block_size;
-}
-
-fn ifGetBlockCount(ctx: *const anyopaque) u64 {
-    const self: *const CardInfo = @ptrCast(@alignCast(ctx));
-
-    return self.csd.getCapacity() / block_size;
-}
-
-fn ifRead(ctx: *anyopaque, lba: block.Lba, buffer: []u8) block.Error!usize {
-    const self: *CardInfo = @ptrCast(@alignCast(ctx));
-
-    if (buffer.len % block_size != 0) {
-        return block.Error.InvalidArgument;
-    }
-    if (lba > std.math.maxInt(u32)) {
-        return block.Error.InvalidArgument;
-    }
-
-    readBlock(self, @intCast(lba), buffer);
-
-    return buffer.len;
-}
-
 /// Get the block device interface for the SD card.
-pub fn getDevice() block.Device {
+pub fn interface() block.Device {
     return .{
         .ptr = @ptrCast(&card),
-        .vtable = &vtable,
+        .vtable = &vtable_impl.vtable,
     };
 }
 

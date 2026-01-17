@@ -82,7 +82,7 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
-    return dd.sdhc.getDevice();
+    return dd.sdhc.interface();
 }
 
 /// Get console instance.
