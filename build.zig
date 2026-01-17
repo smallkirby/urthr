@@ -654,10 +654,18 @@ const Qemu = struct {
             }),
         }
         if (self.sd) |sd_path| {
-            try args.appendSlice(allocator, &.{
-                "-sd",
-                sd_path,
-            });
+            switch (self.machine) {
+                .rpi4b, .rpi5 => try args.appendSlice(allocator, &.{
+                    "-sd",
+                    sd_path,
+                }),
+                .virt => try args.appendSlice(allocator, &.{
+                    "-device",
+                    "virtio-blk-device,drive=disk",
+                    "-drive",
+                    try std.fmt.allocPrint(allocator, "file={s},format=raw,if=none,media=disk,id=disk", .{sd_path}),
+                }),
+            }
         }
         switch (self.machine) {
             .rpi4b, .virt => try args.appendSlice(allocator, &.{

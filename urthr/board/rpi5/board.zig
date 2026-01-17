@@ -35,13 +35,15 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
+pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
     // PCIe.
     log.info("Initializing PCIe controller.", .{});
     {
-        const pci = try allocator.ioremap(
+        const pci = try mm.io.reserveAndRemap(
+            "PCIe",
             memmap.pci.start,
             memmap.pci.size(),
+            null,
         );
         rdd.pcie.setBase(pci);
         rdd.pcie.init();
@@ -50,7 +52,7 @@ pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
     // RP1.
     log.info("Initializing RP1.", .{});
     {
-        try rdd.rp1.init(allocator);
+        try rdd.rp1.init(mm.io);
     }
 
     // GPIO.
@@ -66,7 +68,7 @@ pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
     // SDHC.
     log.info("Initializing SDHC.", .{});
     {
-        const sdbase = try allocator.reserveAndRemap(
+        const sdbase = try mm.io.reserveAndRemap(
             "SDHC",
             memmap.sd.start,
             memmap.sd.size(),
@@ -76,6 +78,11 @@ pub fn initPeripherals(allocator: IoAllocator) IoAllocator.Error!void {
         dd.sdhc.setBase(sdbase);
         dd.sdhc.init(50_000_000); // 50 MHz PLL base clock
     }
+}
+
+/// Get the block device interface.
+pub fn getBlockDevice() ?common.block.Device {
+    return dd.sdhc.getDevice();
 }
 
 /// Get console instance.
@@ -127,7 +134,9 @@ const std = @import("std");
 const log = std.log.scoped(.rpi5);
 const arch = @import("arch");
 const common = @import("common");
+const mem = common.mem;
 const Console = common.Console;
+const MemoryManager = mem.MemoryManager;
 const IoAllocator = common.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");
