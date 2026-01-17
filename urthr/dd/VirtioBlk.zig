@@ -105,7 +105,7 @@ const vtable_impl = struct {
             return block.Error.InvalidArgument;
         }
 
-        self.readSectors(lba, buffer[0..], num_sectors) catch {
+        self.readSectors(lba, buffer, num_sectors) catch {
             return block.Error.IoError;
         };
 
@@ -162,8 +162,9 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
     // Notify the device.
     self.dev.notifyQueue(queue_index);
 
-    // Wait for completion (polling).
-    var timeout: u32 = 100;
+    // Wait for completion.
+    // TODO: should use interrupt.
+    var timeout: u32 = 1_000_000; // 1 sec
     while (vq.getUsed() == null) {
         timeout -= 1;
         if (timeout == 0) {

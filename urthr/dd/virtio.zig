@@ -207,7 +207,7 @@ pub fn init(base: usize, expected: DeviceId, page_allocator: PageAllocator, allo
     // Check device type.
     const device_id = mod.read(DeviceId);
     if (device_id != expected) {
-        return Error.InvalidDevice;
+        return null;
     }
 
     // Allocate device state.
@@ -275,6 +275,9 @@ pub fn setupQueue(self: *Self, index: u32) Error!void {
     self.module.write(QueueSel, index);
 
     // Check if queue is already in use.
+    if (self.queues.contains(index)) {
+        return Error.QueueNotAvail;
+    }
     if (self.version == .modern) {
         if (self.module.read(QueueReady).value != 0) {
             return Error.QueueNotAvail;
@@ -519,8 +522,8 @@ pub const Virtqueue = struct {
         const avail_idx = avail_idx_ptr.*;
 
         avail_ring_ptr[avail_idx % self.size] = head;
-        arch.barrier(.full, .release);
         avail_idx_ptr.* = avail_idx +% 1;
+        arch.barrier(.full, .release);
     }
 
     /// Get a completed buffer from the used ring.
