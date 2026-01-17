@@ -1057,7 +1057,7 @@ const Csd = union(CsdStructure) {
         pub fn getCapacity(self: CsdV1) u64 {
             const block_len = @as(u64, 1) << self.read_bl_len;
             const mult = @as(u64, 1) << (@as(u4, self.c_size_mult) + 2);
-            const block_nr = @as(u64, self.c_size + 1) * mult;
+            const block_nr = (@as(u64, self.c_size) + 1) * mult;
 
             return block_nr * block_len;
         }
