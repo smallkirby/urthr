@@ -32,7 +32,7 @@ pub const Vtable = struct {
     phys2virt: *const fn (ctx: *const anyopaque, paddr: usize) usize,
 };
 
-/// Allocate the given number of pages from the given memory zone.
+/// Allocate the given number of pages.
 ///
 /// Returns a slice representing the allocated memory region.
 /// The slice points to a physical address.
@@ -40,7 +40,7 @@ pub fn allocPagesP(self: Self, num_pages: usize) Error![]align(page_size) u8 {
     return self.vtable.allocPages(self.ptr, num_pages);
 }
 
-/// Allocate the given number of pages from the given memory zone.
+/// Allocate the given number of pages.
 ///
 /// Returns a slice representing the allocated memory region.
 /// The slice points to a virtual address.
@@ -52,6 +52,42 @@ pub fn allocPagesV(self: Self, num_pages: usize) Error![]align(page_size) u8 {
     ));
 
     return @alignCast(ptr[0..slice.len]);
+}
+
+/// Allocate the given size in bytes of memory.
+///
+/// Returns a slice representing the allocated memory region.
+/// The slice points to a virtual address.
+///
+/// The size is rounded up to the nearest page size.
+/// The size of returned slice is equal to or greater than the requested size.
+pub fn allocBytesV(self: Self, size: usize) Error![]u8 {
+    const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
+    return self.allocPagesV(aligned_size / common.mem.size_4kib);
+}
+
+/// Allocate the given size in bytes of memory.
+///
+/// Returns a slice representing the allocated memory region.
+/// The slice points to a physical address.
+///
+/// The size is rounded up to the nearest page size.
+/// The size of returned slice is equal to or greater than the requested size.
+pub fn allocBytesP(self: Self, size: usize) Error![]u8 {
+    const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
+    return self.allocPagesP(aligned_size / common.mem.size_4kib);
+}
+
+/// Allocate and construct an instance of the given type.
+///
+/// The object is ensured to be page-aligned.
+///
+/// The size of the object must be less than or equal to the page size.
+pub fn create(self: Self, T: type) Error!*T {
+    rtt.expect(@sizeOf(T) < common.mem.size_4kib);
+
+    const page = try self.allocPagesV(1);
+    return @ptrCast(@alignCast(page.ptr));
 }
 
 /// Free the given pages.
@@ -77,12 +113,32 @@ pub fn freePagesV(self: Self, slice: []u8) void {
     return self.vtable.freePages(self.ptr, pslice[0..slice.len]);
 }
 
+/// Free the given bytes allocated by `allocBytesP()`.
+pub fn freeBytesP(self: Self, slice: []u8) void {
+    return self.freePagesP(slice);
+}
+
+/// Free the given bytes allocated by `allocBytesV()`.
+pub fn freeBytesV(self: Self, slice: []u8) void {
+    return self.freePagesV(slice);
+}
+
+/// Destroy the given object allocated by `create()`.
+pub fn destroy(self: Self, ptr: anytype) void {
+    const info = @typeInfo(@TypeOf(ptr)).pointer;
+    if (info.size != .one) @compileError("ptr must be a single item pointer");
+    const T = info.child;
+    if (@sizeOf(T) == 0) return;
+    const non_const_ptr = @as([*]u8, @ptrCast(@constCast(ptr)));
+    self.freePagesV(non_const_ptr[0..common.mem.size_4kib]);
+}
+
 /// Convert the given virtual pointer to physical pointer.
 pub fn translateP(self: Self, vobj: anytype) @TypeOf(vobj) {
     return switch (@typeInfo(@TypeOf(vobj))) {
         .pointer => |p| switch (p.size) {
             .one, .many, .c => {
-                const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(vobj.ptr));
+                const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(vobj));
                 return @ptrFromInt(paddr);
             },
             .slice => {
@@ -101,7 +157,7 @@ pub fn translateV(self: Self, pobj: anytype) @TypeOf(pobj) {
     return switch (@typeInfo(@TypeOf(pobj))) {
         .pointer => |p| switch (p.size) {
             .one, .many, .c => {
-                const vaddr = self.vtable.phys2virt(self.ptr, @intFromPtr(pobj.ptr));
+                const vaddr = self.vtable.phys2virt(self.ptr, @intFromPtr(pobj));
                 return @ptrFromInt(vaddr);
             },
             .slice => {
@@ -121,6 +177,6 @@ pub fn translateV(self: Self, pobj: anytype) @TypeOf(pobj) {
 
 const std = @import("std");
 const meta = std.meta;
-
 const common = @import("common");
+const rtt = common.rtt;
 const units = common.units;
