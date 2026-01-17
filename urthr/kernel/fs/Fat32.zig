@@ -126,6 +126,32 @@ const DirIteratorState = struct {
     buffer: [sector_size]u8,
     /// Whether the buffer contains a valid sector.
     buffer_valid: bool,
+    /// Long file name info.
+    lfn: LfnInfo = .{},
+
+    const LfnInfo = struct {
+        /// Buffer for collecting long file name characters.
+        buf: [LongNameEntry.max_name_len]u8 = undefined,
+        /// Current length of LFN in the buffer.
+        len: usize = 0,
+        /// Expected next LFN sequence number.
+        next_ord: u8 = 0,
+        /// Checksum for LFN validation.
+        checksum: u8 = 0,
+
+        /// Check if the LFN info is valid for the given short file name.
+        pub fn isValid(self: *const LfnInfo, sfn: *const [DirEntry.sfn_len]u8) bool {
+            return self.len > 0 and self.next_ord == 0 and
+                self.checksum == computeSfnChecksum(sfn);
+        }
+
+        /// Clear the stored LFN information.
+        pub fn clear(self: *LfnInfo) void {
+            self.len = 0;
+            self.next_ord = 0;
+            self.checksum = 0;
+        }
+    };
 
     /// Get the next directory entry.
     ///
@@ -177,8 +203,26 @@ const DirIteratorState = struct {
                 continue;
             }
 
-            // Skip long file name entries.
+            // Collect long file name entries.
             if (entry.isLongName()) {
+                const lfn: *const LongNameEntry = @ptrCast(entry);
+                const ord = lfn.getOrder();
+
+                // Start of a new LFN sequence.
+                if (lfn.isLast()) {
+                    self.lfn.next_ord = ord;
+                    self.lfn.checksum = lfn.chksum;
+                    self.lfn.len = 0;
+                }
+
+                if (ord == self.lfn.next_ord and lfn.chksum == self.lfn.checksum) {
+                    const start_pos = (ord - 1) * LongNameEntry.chars_per_entry;
+                    const nw = lfn.extractChars(self.lfn.buf[start_pos..]);
+                    self.lfn.len = @max(self.lfn.len, start_pos + nw);
+                    self.lfn.next_ord = ord - 1;
+                } else {
+                    self.lfn.clear(); // sequence broken
+                }
                 continue;
             }
 
@@ -190,8 +234,17 @@ const DirIteratorState = struct {
             const res = try allocator.create(fs.Entry);
             errdefer allocator.destroy(res);
 
+            // Use LFN if valid, otherwise fall back to short name.
+            const name = if (self.lfn.isValid(&entry.name))
+                try allocator.dupe(u8, self.lfn.buf[0..self.lfn.len])
+            else
+                try parseName(entry, allocator);
+
+            // Reset LFN state for next entry.
+            self.lfn.clear();
+
             res.* = .{
-                .name = try parseName(entry, allocator),
+                .name = name,
                 .kind = if (entry.attr.directory) .directory else .file,
                 .size = entry.file_size,
                 .handle = entry.clusterNumber(),
@@ -207,19 +260,19 @@ const DirIteratorState = struct {
         var buf: [14]u8 = undefined;
 
         // Copy name part (8 bytes).
-        for (entry.name[0..8]) |c| {
+        for (entry.name[0 .. DirEntry.sfn_len - 3]) |c| {
             if (c == ' ') break;
             buf[len] = c;
             len += 1;
         }
 
         // Check if extension exists.
-        if (entry.name[8] != ' ') {
+        if (entry.name[DirEntry.sfn_len - 3] != ' ') {
             buf[len] = '.';
             len += 1;
 
             // Copy extension part (3 bytes).
-            for (entry.name[8..11]) |c| {
+            for (entry.name[DirEntry.sfn_len - 3 .. DirEntry.sfn_len]) |c| {
                 if (c == ' ') break;
                 buf[len] = c;
                 len += 1;
@@ -227,6 +280,15 @@ const DirIteratorState = struct {
         }
 
         return allocator.dupe(u8, buf[0..len]);
+    }
+
+    /// Compute checksum of the short name.
+    fn computeSfnChecksum(name: *const [DirEntry.sfn_len]u8) u8 {
+        var sum: u8 = 0;
+        for (name) |c| {
+            sum = ((sum >> 1) | ((sum & 1) << 7)) +% c;
+        }
+        return sum;
     }
 };
 
@@ -409,10 +471,87 @@ const Bpb = extern struct {
     }
 };
 
+/// FAT32 Long File Name Entry.
+const LongNameEntry = extern struct {
+    /// Sequence number.
+    order: u8,
+    /// Characters 1-5 (UCS-2).
+    name1: [5]u16 align(1),
+    /// Attributes (always 0x0F for LFN).
+    attr: DirEntry.Attributes,
+    /// Entry type (always 0 for LFN).
+    entry_type: u8,
+    /// Checksum of short name.
+    chksum: u8,
+    /// Characters 6-11 (UCS-2).
+    name2: [6]u16 align(1),
+    /// First cluster (always 0).
+    first_clus_lo: u16 align(1),
+    /// Characters 12-13 (UCS-2).
+    name3: [2]u16 align(1),
+
+    /// Mask for sequence number.
+    const order_mask = 0x1F;
+    /// Flag indicating last LFN entry.
+    const last_entry_flag = 0x40;
+    /// Maximum number of LFN entries.
+    const max_entries = 20;
+    /// Characters per LFN entry.
+    const chars_per_entry = 13;
+    /// Maximum long file name length.
+    const max_name_len = max_entries * chars_per_entry;
+
+    /// Get the sequence number (1-based index).
+    fn getOrder(self: LongNameEntry) u8 {
+        return self.order & order_mask;
+    }
+
+    /// Check if this is the last LFN entry.
+    fn isLast(self: LongNameEntry) bool {
+        return (self.order & last_entry_flag) != 0;
+    }
+
+    /// Extract characters from this entry to the buffer.
+    ///
+    /// Returns the number of characters written.
+    fn extractChars(self: *const LongNameEntry, buf: []u8) usize {
+        var pos: usize = 0;
+
+        const targets = [_]struct {
+            chars: [*]align(1) const u16,
+            len: usize,
+        }{
+            .{ .chars = &self.name1, .len = 5 },
+            .{ .chars = &self.name2, .len = 6 },
+            .{ .chars = &self.name3, .len = 2 },
+        };
+
+        for (targets) |target| {
+            for (target.chars[0..target.len]) |c| {
+                if (c == 0 or c == 0xFFFF) return pos;
+
+                if (pos < buf.len) {
+                    buf[pos] = if (c < 128) @intCast(c) else '?';
+                    pos += 1;
+                }
+            }
+        }
+
+        return pos;
+    }
+
+    comptime {
+        urd.comptimeAssert(32 * 8 == @bitSizeOf(LongNameEntry), "Invalid size of LongNameEntry", .{});
+    }
+};
+
 /// FAT32 Directory Entry.
 const DirEntry = extern struct {
+    /// Length of short file name.
+    pub const sfn_len = 11;
+
     /// Short name (8.3 format).
-    name: [11]u8,
+    name: [sfn_len]u8,
     /// File attributes.
     attr: Attributes,
     /// Reserved for Windows NT.
