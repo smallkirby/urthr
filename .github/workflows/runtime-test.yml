@@ -42,6 +42,10 @@ jobs:
             cpp \
             libcapstone-dev
 
+      - name: Create SD card image
+        run: |
+          bash ./scripts/create_disk.bash ./scripts ./sdcard.img
+
       - name: Install zig
         run: |
           curl https://ziglang.org/download/${{env.ZIG_VERSION}}/zig-x86_64-linux-${{env.ZIG_VERSION}}.tar.xz -L -o zig.tar.xz
@@ -50,7 +54,6 @@ jobs:
 
       - name: Runtime Tests (Raspberry Pi 4)
         run: |
-          dd if=/dev/zero of=sdcard.img bs=1M count=64
           zig build run --summary all \
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
@@ -68,4 +71,5 @@ jobs:
             -Dboard=virt \
             -Dqemu=$QEMU_DIR/bin \
             -Drtt \
-            -Drestart
+            -Drestart \
+            -Dsdin=sdcard.img
