@@ -154,6 +154,9 @@ fn reset() void {
 // Block Device Interface
 // =============================================================
 
+/// Block size in bytes.
+const block_size = 512;
+
 const vtable = block.Device.Vtable{
     .blockSize = &ifGetBlockSize,
     .blockCount = &ifGetBlockCount,
@@ -161,19 +164,19 @@ const vtable = block.Device.Vtable{
 };
 
 fn ifGetBlockSize(_: *const anyopaque) usize {
-    return 512;
+    return block_size;
 }
 
 fn ifGetBlockCount(ctx: *const anyopaque) u64 {
     const self: *const CardInfo = @ptrCast(@alignCast(ctx));
 
-    return self.csd.getCapacity() / 512;
+    return self.csd.getCapacity() / block_size;
 }
 
 fn ifRead(ctx: *anyopaque, lba: block.Lba, buffer: []u8) block.Error!usize {
     const self: *CardInfo = @ptrCast(@alignCast(ctx));
 
-    if (buffer.len % 512 != 0) {
+    if (buffer.len % block_size != 0) {
         return block.Error.InvalidArgument;
     }
     if (lba > std.math.maxInt(u32)) {
@@ -203,7 +206,7 @@ pub fn getDevice() block.Device {
 fn initClock(base_freq: ?u64) void {
     // Select base clock frequency.
     const cap1 = sdhc.read(Capability1);
-    const base: u64 = if (cap1.base_freq == 0) cap1.base_freq else blk: {
+    const base: u64 = if (cap1.base_freq != 0) cap1.base_freq else blk: {
         if (base_freq) |freq| break :blk freq;
         @panic("Base frequency not provided both in argument and Capability register.");
     };
@@ -251,7 +254,7 @@ fn initClock(base_freq: ?u64) void {
 fn updateClock(base_freq: ?u64, freq: u64) void {
     // Select base clock frequency.
     const cap1 = sdhc.read(Capability1);
-    const base: u64 = if (cap1.base_freq == 0) cap1.base_freq else blk: {
+    const base: u64 = if (cap1.base_freq != 0) cap1.base_freq else blk: {
         if (base_freq) |f| break :blk f;
         @panic("Base frequency not provided both in argument and Capability register.");
     };
@@ -454,7 +457,7 @@ fn setupTransaction(base_freq: ?u64) void {
     // Specify block size to 512 bytes.
     log.debug("CMD16 : SET_BLOCKLEN", .{});
     {
-        _ = issueCmd(16, false, 512, null).unwrap();
+        _ = issueCmd(16, false, block_size, null).unwrap();
     }
 
     // Setup bus width to 4-bit for Card.
@@ -507,9 +510,9 @@ fn setupTransaction(base_freq: ?u64) void {
 
 /// Read a single 512-byte block from the SD card using PIO.
 fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
-    rtt.expectEqual(buf.len, 512);
+    rtt.expectEqual(buf.len, block_size);
 
-    const addr = if (ci.spec == .sdhc_sdxc) lba else lba * 512;
+    const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
     _ = issueCmd(17, false, addr, buf).unwrap();
 }
 
@@ -560,7 +563,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
             .block_count_enable = true,
             .auto_cmd_enable = .disabled,
             .data_direction = .read,
-            .multi_block = if (buf.len > 1) .multiple else .single,
+            .multi_block = if (buf.len > block_size) .multiple else .single,
             .response_type = .r1,
             .response_err_check = false,
             .response_int_disable = false,
@@ -1126,7 +1129,7 @@ const Csd = union(CsdStructure) {
 
         pub fn getCapacity(self: CsdV2) u64 {
             // Capacity = (C_SIZE + 1) * 512K bytes
-            return @as(u64, (self.c_size + 1)) * 512 * 1024;
+            return @as(u64, (self.c_size + 1)) * block_size * 1024;
         }
     };
 };
