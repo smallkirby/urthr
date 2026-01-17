@@ -63,10 +63,28 @@ fn zmain() !void {
 
     // Initialize peripherals.
     log.info("Initializing peripherals.", .{});
-    try board.initPeripherals(urd.mem.getIoAllocator());
+    try board.initPeripherals(urd.mem.getAllocators());
 
     log.debug("Memory Map:", .{});
     urd.mem.debugPrintResources(log.debug);
+
+    // List partitions on the block device.
+    if (board.getBlockDevice()) |dev| {
+        const partitions = try common.block.partitions.listPartitions(dev, urd.mem.getGeneralAllocator());
+        log.info("Found {d} partitions:", .{partitions.len});
+
+        for (partitions, 0..) |part, i| {
+            const bytes_per_sector = 512;
+            log.info("  Partition#{d}: LBA {d}, Size {d} sectors ({d} MiB)", .{
+                i,
+                part.lba,
+                part.nsecs,
+                (part.nsecs * bytes_per_sector) / units.mib,
+            });
+        }
+    } else {
+        log.warn("No block device found", .{});
+    }
 }
 
 // =============================================================
@@ -79,7 +97,6 @@ const arch = @import("arch").impl;
 const board = @import("board").impl;
 const common = @import("common");
 const units = common.units;
-const dd = @import("dd");
 const urd = @import("urthr");
 
 // Force evaluate symbols exported but not referenced in Zig.
