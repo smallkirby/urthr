@@ -25,6 +25,8 @@ var rp1 = mmio.Module(.{ .size = void }, &.{
     .{ 0x000D_0000, mmio.Marker(.io_bank0) },
     .{ 0x000E_0000, mmio.Marker(.rio_bank0) },
     .{ 0x000F_0000, mmio.Marker(.pad_bank0) },
+    .{ 0x0010_0000, mmio.Marker(.eth) },
+    .{ 0x0010_4000, mmio.Marker(.eth_cfg) },
     .{ 0x0018_0000, mmio.Marker(.sdio0) },
     .{ 0x0018_4000, mmio.Marker(.sdio1) },
     .{ 0x0040_0000, mmio.Marker(.end) },
@@ -187,6 +189,16 @@ pub fn getClocksMain() usize {
     return rp1.getMarkerAddress(.clocks_main);
 }
 
+/// Get the base address of Ethernet registers.
+pub fn getEthrBase() usize {
+    return rp1.getMarkerAddress(.eth);
+}
+
+/// Get the base address of Ethernet configuration registers.
+pub fn getEthrCfgBase() usize {
+    return rp1.getMarkerAddress(.eth_cfg);
+}
+
 /// Map peripherals of RP1.
 fn mapPeris(allocator: IoAllocator, root: *IoAllocator.Resource) IoAllocator.Error!void {
     _ = try allocator.reserve(
@@ -241,6 +253,18 @@ fn mapPeris(allocator: IoAllocator, root: *IoAllocator.Resource) IoAllocator.Err
         "pad_bank",
         root.phys + rp1.getMarkerOffset(.pad_bank0),
         0x0000_C000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "eth",
+        root.phys + rp1.getMarkerOffset(.eth),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "eth_cfg",
+        root.phys + rp1.getMarkerOffset(.eth_cfg),
+        0x0000_4000,
         root,
     );
     _ = try allocator.reserve(

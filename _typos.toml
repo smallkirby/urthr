@@ -18,3 +18,5 @@ Pn = "Pn"
 ake = "ake"
 # Synopsys
 Synopsys = "Synopsys"
+# Copy all frames.
+caf = "caf"
