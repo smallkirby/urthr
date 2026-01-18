@@ -15,7 +15,14 @@ const Gpio = mmio.Module(.{ .size = u32 }, &.{
 
 /// RIO (Registered I/O) module.
 const Rio = mmio.Module(.{ .size = u32 }, &.{
-    // TODO
+    .{ 0x00, RioOut },
+    .{ 0x04, RioOe },
+
+    .{ 0x00 + rio_set_offset, RioOutSet },
+    .{ 0x04 + rio_set_offset, RioOeSet },
+
+    .{ 0x00 + rio_clr_offset, RioOutClr },
+    .{ 0x04 + rio_clr_offset, RioOeClr },
 });
 
 /// PADs module.
@@ -165,6 +172,22 @@ pub fn getPull(pin: u8) PullType {
     return if (pad.pue) .up else if (pad.pde) .down else .off;
 }
 
+/// Set output value for the given pin.
+pub fn setOutput(pin: Pin, high: bool) void {
+    const info = getPinInfo(pin);
+    const mask = bits.set(@as(u32, 0), info.pin_offset);
+
+    // Set direction to output.
+    info.rio.write(RioOeSet, mask);
+
+    // Set output value
+    if (high) {
+        info.rio.write(RioOutSet, mask);
+    } else {
+        info.rio.write(RioOutClr, mask);
+    }
+}
+
 /// Pin information.
 const PinInfo = struct {
     /// Bank number.
@@ -253,6 +276,9 @@ fn getFunctionNumber(comptime pin: Pin, func: FselId) u5 {
 // =============================================================
 // I/O Registers
 // =============================================================
+
+// =============================================================
+// GPIO
 
 /// GPIO<n>_STATUS register.
 const Status = packed struct(u32) {
@@ -365,6 +391,9 @@ const VoltageSelect = packed struct(u32) {
     _rsvd: u31 = 0,
 };
 
+// =============================================================
+// PADs
+
 /// PADS GPIO<n> register.
 const Pad = packed struct(u32) {
     /// Slew rate control.
@@ -398,9 +427,40 @@ const Pad = packed struct(u32) {
 };
 
 // =============================================================
+// RIO
+
+/// Offset to RIO_SET register from RIO register.
+const rio_set_offset = 0x2000;
+/// Offset to RIO_CLR register from RIO register.
+const rio_clr_offset = 0x3000;
+
+/// Controls the GPIO output drive.
+const RioOut = packed struct(u32) {
+    value: u32,
+};
+const RioOutSet = packed struct(u32) {
+    value: u32,
+};
+const RioOutClr = packed struct(u32) {
+    value: u32,
+};
+
+/// Controls the GPIO output drive enable.
+const RioOe = packed struct(u32) {
+    value: u32,
+};
+const RioOeSet = packed struct(u32) {
+    value: u32,
+};
+const RioOeClr = packed struct(u32) {
+    value: u32,
+};
+
+// =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const common = @import("common");
+const bits = common.bits;
 const mmio = common.mmio;

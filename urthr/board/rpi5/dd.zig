@@ -1,3 +1,5 @@
+pub const clk = @import("dd/clk.zig");
+pub const ether = @import("dd/ether.zig");
 pub const gpio = @import("dd/gpio.zig");
 pub const pcie = @import("dd/pcie.zig");
 pub const pm = @import("dd/pm.zig");

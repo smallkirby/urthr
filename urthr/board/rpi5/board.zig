@@ -65,6 +65,13 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         );
     }
 
+    // Clock.
+    log.info("Initializing Clocks.", .{});
+    {
+        rdd.clk.setBase(rdd.rp1.getClocksMain());
+        rdd.clk.init();
+    }
+
     // SDHC.
     log.info("Initializing SDHC.", .{});
     {
@@ -77,6 +84,16 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
 
         dd.sdhc.setBase(sdbase);
         dd.sdhc.init(50_000_000); // 50 MHz PLL base clock
+    }
+
+    // Ethernet.
+    log.info("Initializing Ethernet.", .{});
+    {
+        rdd.ether.setBase(rdd.rp1.getEthrBase(), rdd.rp1.getEthrCfgBase());
+        rdd.ether.resetPhy();
+
+        var gem = dd.net.Gem.new(rdd.rp1.getEthrBase());
+        gem.init();
     }
 }
 
