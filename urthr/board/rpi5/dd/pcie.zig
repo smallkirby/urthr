@@ -26,17 +26,26 @@ var pcie = mmio.Module(.{ .size = u32 }, &.{
 
     // =========================================================
     // Misc Registers
+    .{ 0x4008, MiscMiscCtrl },
     .{ 0x400C, MemWin0Low },
     .{ 0x4010, MemWin0High },
+    .{ 0x402C, RcBar1ConfigLo },
+    .{ 0x4030, RcBar1ConfigHi },
+    .{ 0x40D4, RcBar4ConfigLo },
+    .{ 0x40D8, RcBar4ConfigHi },
     .{ 0x405C, RcConfigRetryTimeout },
     .{ 0x4064, Control },
     .{ 0x4068, MiscStatus },
     .{ 0x4070, MemWin0BaseLimit },
     .{ 0x4080, MemWin0BaseHi },
     .{ 0x4084, MemWin0LimitHi },
-    .{ 0x40A0, MiscCtrl },
+    .{ 0x40A0, PcieCtrl },
     .{ 0x40A4, MiscUbusCtrl },
     .{ 0x40A8, MiscUbusTimeout },
+    .{ 0x40AC, UbusBar1ConfigRemap },
+    .{ 0x40B0, UbusBar1ConfigRemapHi },
+    .{ 0x410C, UbusBar4ConfigRemap },
+    .{ 0x4110, UbusBar4ConfigRemapHi },
     .{ 0x415C, MiscAxiIntfCtrl },
     .{ 0x4164, MiscVdmPriorityToQosMapHi },
     .{ 0x4168, MiscVdmPriorityToQosMapLo },
@@ -74,7 +83,7 @@ pub fn init() void {
 }
 
 /// Setup outbound address translation.
-pub fn setOutTranslation(axi: usize, pci: usize, size: usize, win: usize) void {
+pub fn setOutTranslation(axi: usize, pci: usize, size: usize, comptime win: usize) void {
     rtt.expectEqual(0, axi % units.mib);
     rtt.expectEqual(0, pci % units.mib);
     rtt.expectEqual(0, size % units.mib);
@@ -103,6 +112,63 @@ pub fn setOutTranslation(axi: usize, pci: usize, size: usize, win: usize) void {
     pcie.modifyIndexed(MemWin0LimitHi, win, 8, .{
         .mem_win0_limit_hi = bits.extract(u8, axi_limit_mb, 12),
     });
+}
+
+/// Setup inbound address translation.
+pub fn setInTranslation(pci_addr: u64, cpu_addr: u64, size: u64, comptime bar: usize) void {
+    const size_encoded = encodeIbarSize(size);
+
+    // Configure RC BAR1
+    {
+        const BarLow, const BarHigh, const idx = if (bar <= 3)
+            .{ RcBar1ConfigLo, RcBar1ConfigHi, bar - 1 }
+        else
+            .{ RcBar4ConfigLo, RcBar4ConfigHi, bar - 4 };
+
+        pcie.writeIndexed(BarLow, idx, 8, BarLow{
+            .size = size_encoded,
+            .pci_offset_lo = @intCast((pci_addr >> 12) & 0xFFFFF),
+        });
+        pcie.writeIndexed(BarHigh, idx, 8, BarHigh{
+            .pci_offset_hi = @intCast(pci_addr >> 32),
+        });
+    }
+
+    // Configure UBUS
+    {
+        const UbusLow, const UbusHigh, const idx = if (bar <= 3)
+            .{ UbusBar1ConfigRemap, UbusBar1ConfigRemapHi, bar - 1 }
+        else
+            .{ UbusBar4ConfigRemap, UbusBar4ConfigRemapHi, bar - 4 };
+
+        pcie.writeIndexed(UbusLow, idx, 8, UbusLow{
+            .access_en = true,
+            .cpu_addr_lo = @intCast((cpu_addr >> 12) & 0xFFFFF),
+        });
+        pcie.writeIndexed(UbusHigh, idx, 8, UbusHigh{
+            .cpu_addr_hi = @intCast(cpu_addr >> 32),
+        });
+    }
+
+    // Configure DMA
+    pcie.modify(MiscMiscCtrl, .{
+        .scb0_size = @as(u5, @intCast(size_encoded)),
+    });
+}
+
+/// Convert the size of the inbound BAR region to the non-linear values.
+fn encodeIbarSize(size: u64) u5 {
+    const log2_size = std.math.log2(size);
+
+    if (log2_size >= 12 and log2_size <= 15) {
+        // Covers 4KB to 32KB
+        return @intCast((log2_size - 12) + 0x1C);
+    } else if (log2_size >= 16 and log2_size <= 36) {
+        // Covers 64KB to 64GB
+        return @intCast(log2_size - 15);
+    }
+
+    @panic("Invalid inbound BAR size");
 }
 
 /// Get the configuration space I/O interface for Type 0 headers.
@@ -176,7 +242,7 @@ fn reset() void {
     }
 
     // Setup QoS.
-    pcie.modify(MiscCtrl, .{
+    pcie.modify(PcieCtrl, .{
         .en_vdm_qos_control = true,
     });
     pcie.write(MiscVdmPriorityToQosMapHi, 0xBBAA9888);
@@ -200,6 +266,13 @@ fn reset() void {
     pcie.modify(RcConfigVendorSpecific1, .{
         .endian = .little,
     });
+
+    // Configure DMA.
+    pcie.write(MiscMiscCtrl, std.mem.zeroInit(MiscMiscCtrl, .{
+        .scb_access_en = true,
+        .cfg_read_ur_mode = true,
+        .max_burst_size = .b128,
+    }));
 
     // Set link speed.
     pcie.modify(dd.pci.LinkCap1, .{
@@ -346,12 +419,71 @@ const RcPlPhyCtrl15 = packed struct(u32) {
 // =============================================================
 // Misc Registers
 
+const MiscMiscCtrl = packed struct(u32) {
+    scb2_size: u5,
+    _0: u2,
+    pcie_rcb_64b_mode: bool,
+    _1: u2,
+    pcie_rcb_mps_mode: bool,
+    _2: u1,
+    scb_access_en: bool,
+    cfg_read_ur_mode: bool,
+    _3: u6,
+    max_burst_size: enum(u2) {
+        b128 = 1,
+        b256 = 2,
+        b512 = 3,
+    },
+    scb1_size: u5,
+    scb0_size: u5,
+};
+
 const MemWin0Low = packed struct(u32) {
     mem_win0_low: u32,
 };
 
 const MemWin0High = packed struct(u32) {
     mem_win0_high: u32,
+};
+
+const RcBar1ConfigLo = packed struct(u32) {
+    size: u5,
+    _rsvd: u7 = 0,
+    pci_offset_lo: u20,
+};
+
+const RcBar1ConfigHi = packed struct(u32) {
+    pci_offset_hi: u32,
+};
+
+const RcBar4ConfigLo = packed struct(u32) {
+    size: u5,
+    _rsvd: u7 = 0,
+    pci_offset_lo: u20,
+};
+
+const RcBar4ConfigHi = packed struct(u32) {
+    pci_offset_hi: u32,
+};
+
+const UbusBar1ConfigRemap = packed struct(u32) {
+    access_en: bool,
+    _rsvd: u11 = 0,
+    cpu_addr_lo: u20,
+};
+
+const UbusBar1ConfigRemapHi = packed struct(u32) {
+    cpu_addr_hi: u32,
+};
+
+const UbusBar4ConfigRemap = packed struct(u32) {
+    access_en: bool,
+    _rsvd: u11 = 0,
+    cpu_addr_lo: u20,
+};
+
+const UbusBar4ConfigRemapHi = packed struct(u32) {
+    cpu_addr_hi: u32,
 };
 
 const RcConfigRetryTimeout = packed struct(u32) {
@@ -391,7 +523,7 @@ const MiscStatus = packed struct(u32) {
     _1: u24,
 };
 
-const MiscCtrl = packed struct(u32) {
+const PcieCtrl = packed struct(u32) {
     _0: u3,
     outbound_no_snoop: bool,
     outbound_ro: bool,
