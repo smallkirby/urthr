@@ -114,6 +114,12 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         axi_peri_window_size + axi_sram_window_size,
         0,
     );
+    pcie.setInTranslation(
+        0,
+        0,
+        64 * units.gib,
+        2,
+    );
 
     // Set configuration header.
     confio.modify(dd.pci.HeaderCommandStatus, .{
