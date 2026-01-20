@@ -38,6 +38,24 @@ pub fn barrier(domain: BarrierDomain, typ: BarrierType) void {
         },
     }
 }
+/// Write back data cache range described by the given virtual address.
+///
+/// This function ensures that any modified data in the specified range is written back to main memory.
+/// Those data still remain in the cache in CPU view.
+///
+/// TODO: calculate cache line size on startup and use it here.
+pub fn cleanDcacheRange(addr: usize, size: usize) void {
+    var current = addr & ~@as(usize, 0x3F);
+    const end = addr + size;
+    while (current < end) : (current += 64) {
+        asm volatile ("dc cvac, %[addr]"
+            :
+            : [addr] "r" (current),
+            : .{ .memory = true });
+    }
+
+    asm volatile ("dsb sy");
+}
 
 /// Translate the given virtual address to physical address.
 pub fn translate(virt: usize) usize {
