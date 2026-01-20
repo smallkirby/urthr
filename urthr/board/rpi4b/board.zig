@@ -55,7 +55,10 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
             null,
         );
         dd.sdhc.setBase(base);
-        dd.sdhc.init(50_000_000); // 50 MHz
+        dd.sdhc.init(
+            50_000_000, // 50 MHz
+            mm.page,
+        );
     }
 }
 

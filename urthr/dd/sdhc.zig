@@ -40,6 +40,7 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
     .{ 0x3E, HostControl2 },
     .{ 0x40, Capability1 },
     .{ 0x44, Capability2 },
+    .{ 0x58, AdmaSystemAddress },
 
     // =========================================================
     // Common Area Registers
@@ -51,6 +52,12 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
 ///
 /// Currently, this driver supports only one card.
 var card: CardInfo = undefined;
+
+/// Page allocator.
+var page_allocator: PageAllocator = undefined;
+
+/// The device supports ADMA2.
+var adma2_avail = false;
 
 // =============================================================
 // API
@@ -91,7 +98,9 @@ pub fn setBase(base: usize) void {
 ///
 /// Clocks are initialized using the given base frequency in Hz.
 /// If the base frequencty is provided in the Capability register, it is used instead.
-pub fn init(base_freq: ?u64) void {
+pub fn init(base_freq: ?u64, allocator: PageAllocator) void {
+    page_allocator = allocator;
+
     // Reset entire HC and wait until it completes.
     reset();
 
@@ -99,6 +108,12 @@ pub fn init(base_freq: ?u64) void {
     log.info("Host Controller Version: {t}", .{sdhc.read(Version).spec});
     if (sdhc.read(Version).spec.lt(.v3_00)) {
         @panic("SDHC driver supports only HC Version 3.00 or above.");
+    }
+
+    // Record ADMA2 support.
+    const cap1 = sdhc.read(Capability1);
+    if (cap1.adma2) {
+        adma2_avail = cap1.adma2;
     }
 
     // Detect card.
@@ -349,8 +364,11 @@ fn initBus() void {
     sdhc.write(HostControl1, std.mem.zeroInit(HostControl1, .{
         .data_width = .b1,
         .highspeed = false,
-        .dma_select = .none,
+        .dma_select = @as(DmaSelect, if (adma2_avail) .adma2b32 else .none),
     }));
+    sdhc.modify(HostControl2, .{
+        .adma2length = .b16,
+    });
 }
 
 /// Initialize, identify, and select the SD card.
@@ -519,12 +537,54 @@ fn setupTransaction(base_freq: ?u64) void {
 // I/O
 // =============================================================
 
-/// Read a single 512-byte block from the SD card using PIO.
+/// Read a single 512-byte block from the SD card.
+///
+/// Uses ADMA2 if supported, otherwise falls back to PIO.
 fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
     rtt.expectEqual(buf.len, block_size);
 
     const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
+
+    if (adma2_avail) {
+        readBlockAdma2(addr, buf);
+    } else {
+        readBlockPio(addr, buf);
+    }
+}
+
+/// Read a single block using PIO mode.
+fn readBlockPio(addr: u32, buf: []u8) void {
     _ = issueCmd(17, false, addr, buf).unwrap();
+}
+
+/// Read a single block using ADMA2.
+fn readBlockAdma2(addr: u32, buf: []u8) void {
+    const data = page_allocator.allocBytesV(buf.len) catch unreachable;
+    defer page_allocator.freeBytesV(data);
+
+    const desc = page_allocator.create(Adma2Desc) catch unreachable;
+    defer page_allocator.destroy(desc);
+
+    // Prepare ADMA2 descriptor
+    desc.* = .{
+        .valid = true,
+        .end = true,
+        .int = false,
+        .op = .tran,
+        .length = @intCast(buf.len),
+        .addr = @intCast(@intFromPtr(page_allocator.translateP(data).ptr)),
+    };
+    arch.cleanDcacheRange(@intFromPtr(desc), @sizeOf(Adma2Desc));
+
+    // Set ADMA2 system address
+    sdhc.write(AdmaSystemAddress, AdmaSystemAddress{
+        .addr = @intCast(@intFromPtr(page_allocator.translateP(desc))),
+    });
+
+    // Issue read command.
+    _ = issueCmd(17, false, addr, data[0..buf.len]).unwrap();
+
+    @memcpy(buf, data[0..buf.len]);
 }
 
 // =============================================================
@@ -544,6 +604,10 @@ fn declareAcmd(rca: ?u16) void {
 }
 
 /// Issue a command to the SD card.
+///
+/// If `data` is provided, the data transfer is performed using DMA if supported,
+/// In that case, `data` musb be DMA-capable buffer (alignment and cache management).
+/// Caller is responsible for preparing the DMA descriptor table.
 fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     // Sanity check.
     checkSanityCmd();
@@ -563,6 +627,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     sdhc.write(Argument, Argument{ .value = argval });
 
     // Set data if present.
+    const use_adma2 = adma2_avail and if (data) |d| d.len >= block_size else false;
     if (data) |buf| {
         if (buf.len % 4 != 0) {
             @panic("SDHC data buffer length must be multiple of 4 bytes.");
@@ -570,11 +635,11 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
 
         // Set transfer mode if data is present.
         sdhc.write(TransferMode, TransferMode{
-            .dma_enable = false,
+            .dma_enable = use_adma2,
             .block_count_enable = true,
             .auto_cmd_enable = .disabled,
             .data_direction = .read,
-            .multi_block = if (buf.len > block_size) .multiple else .single,
+            .multi_block = if (use_adma2 or buf.len > block_size) .multiple else .single,
             .response_type = .r1,
             .response_err_check = false,
             .response_int_disable = false,
@@ -582,7 +647,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
 
         // Set block size and count.
         sdhc.write(Bsize, Bsize{
-            .bsize = @intCast(buf.len * @sizeOf(u8)),
+            .bsize = @intCast(buf.len),
             .boundary = .k4,
         });
         sdhc.write(Bcount16, 1);
@@ -610,7 +675,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     const res2 = sdhc.read(Response2).value;
     const res3 = sdhc.read(Response3).value;
 
-    // Check error status immediately after command complete.
+    // Check error status.
     const err_status = sdhc.read(ErrorIntStatus);
 
     // Wait until data line is free.
@@ -620,16 +685,21 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
 
     // Read data if needed.
     if (data) |buf| {
-        sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, .ms(1));
+        if (use_adma2) {
+            // Wait for DMA transfer complete.
+            sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
+        } else {
+            sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, .ms(1));
 
-        const buf_len = buf.len / @sizeOf(u32);
-        const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
-        for (0..buf_len) |i| {
-            p[i] = bits.fromLittleEndian((sdhc.read(BufferDataPort).value));
+            const buf_len = buf.len / @sizeOf(u32);
+            const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
+            for (0..buf_len) |i| {
+                p[i] = bits.fromLittleEndian((sdhc.read(BufferDataPort).value));
+            }
+
+            // Wait until data transfer is complete.
+            sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
         }
-
-        // Wait until data transfer is complete.
-        sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
     }
 
     return CommandResponse{
@@ -835,6 +905,37 @@ const ResponseType = enum(u3) {
             .r7 => true,
         };
     }
+};
+
+// =============================================================
+// DMA
+// =============================================================
+
+/// 64-bit ADMA2 Descriptor Line (32-bit Addressing Mode)
+const Adma2Desc = packed struct(u64) {
+    /// Indicates Validity of a Descriptor Line.
+    valid: bool,
+    /// End of Descriptor.
+    end: bool,
+    /// Force to generate ADMA interrupt.
+    int: bool,
+    /// Act.
+    op: enum(u3) {
+        /// Do not execute current line and go to next line.
+        nop = 0b000,
+        /// Reserved.
+        rsv = 0b010,
+        /// Transfer data of one descriptor line.
+        tran = 0b100,
+        /// Link to another descriptor.
+        link = 0b110,
+    },
+    /// Reserved.
+    _rsvd: u10 = 0,
+    /// 16-bit length.
+    length: u16,
+    /// 32-bit address.
+    addr: u32,
 };
 
 // =============================================================
@@ -1465,16 +1566,7 @@ const HostControl1 = packed struct(u8) {
     /// High Speed Enable.
     highspeed: bool,
     /// DMA Select.
-    dma_select: enum(u2) {
-        /// SDMA.
-        none = 0b00,
-        /// 32-bit Address ADMA2.
-        adma2b32 = 0b10,
-        /// 64-bit Address ADMA2.
-        adma2b64 = 0b11,
-
-        _,
-    },
+    dma_select: DmaSelect,
     /// Extended Data Transfer Width.
     ext_width: enum(u1) {
         /// Selected by Data Transfer Width.
@@ -1491,6 +1583,18 @@ const HostControl1 = packed struct(u8) {
         /// The Card Detect Test Level is selected.
         test_level = 1,
     },
+};
+
+/// DMA mode select.
+const DmaSelect = enum(u2) {
+    /// SDMA.
+    none = 0b00,
+    /// 32-bit Address ADMA2.
+    adma2b32 = 0b10,
+    /// 64-bit Address ADMA2.
+    adma2b64 = 0b11,
+
+    _,
 };
 
 /// Power Control Register.
@@ -1937,6 +2041,12 @@ const Capability2 = packed struct(u32) {
     _rsvd5: u3 = 0,
 };
 
+/// ADMA System Address Register (32-bit).
+const AdmaSystemAddress = packed struct(u32) {
+    /// 32-bit ADMA System Address.
+    addr: u32,
+};
+
 // =============================================================
 // Common Area Registers
 
@@ -1993,4 +2103,5 @@ const block = common.block;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
+const PageAllocator = common.PageAllocator;
 const arch = @import("arch").impl;

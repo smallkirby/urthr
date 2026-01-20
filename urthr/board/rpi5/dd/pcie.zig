@@ -315,11 +315,11 @@ fn initBridge() void {
     });
     header.modify(dd.pci.HeaderMemBaseLimit, .{
         .mem_base = 0x0000_0000,
-        .mem_limit = 0x0000_8FFF, // TODO: value chosen arbitrarily
+        .mem_limit = 0x0000_FFFF, // TODO: value chosen arbitrarily
     });
     header.modify(dd.pci.HeaderPrefMemBaseLimit, .{
         .pref_mem_base = 0x0000_0000,
-        .pref_mem_limit = 0x0000_8FFF, // TODO: value chosen arbitrarily
+        .pref_mem_limit = 0x0000_FFFF, // TODO: value chosen arbitrarily
     });
 }
 
