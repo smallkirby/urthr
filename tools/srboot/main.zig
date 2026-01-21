@@ -177,6 +177,9 @@ fn printUartThread(sr: *fs.File, stdout: *std.Io.Writer) void {
         // Read until no more data is available.
         while (true) {
             _ = reader.readSliceShort(&buf) catch break;
+
+            if (!std.ascii.isAscii(buf[0])) continue;
+
             stdout.writeByte(buf[0]) catch {
                 @panic("Failed to write to stdout.");
             };
