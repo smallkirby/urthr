@@ -31,30 +31,49 @@ pub const BarrierType = enum {
 /// Issue a memory barrier.
 pub fn barrier(domain: BarrierDomain, typ: BarrierType) void {
     switch (domain) {
-        .full => asm volatile ("dmb sy"),
+        .full => asm volatile ("dsb sy"),
         .inner => switch (typ) {
-            .release => asm volatile ("dmb ishst"),
-            .acquire => asm volatile ("dmb ishld"),
+            .release => asm volatile ("dsb ishst"),
+            .acquire => asm volatile ("dsb ishld"),
         },
     }
 }
-/// Write back data cache range described by the given virtual address.
-///
-/// This function ensures that any modified data in the specified range is written back to main memory.
-/// Those data still remain in the cache in CPU view.
-///
-/// TODO: calculate cache line size on startup and use it here.
-pub fn cleanDcacheRange(addr: usize, size: usize) void {
-    var current = addr & ~@as(usize, 0x3F);
-    const end = addr + size;
-    while (current < end) : (current += 64) {
-        asm volatile ("dc cvac, %[addr]"
-            :
-            : [addr] "r" (current),
-            : .{ .memory = true });
+
+/// Cache operation type.
+const CacheOp = enum {
+    /// Invalidate cache lines.
+    ///
+    /// The data in the cache lines are discarded.
+    invalidate,
+    /// Clean cache lines.
+    ///
+    /// The data in the cache lines are written back to main memory.
+    clean,
+};
+
+/// Size in bytes of cache line.
+const cacheline_size = 64;
+/// Mask for cache line alignment.
+const cacheline_mask = cacheline_size - 1;
+
+/// Do cache operation on the specified range.
+pub fn cache(op: CacheOp, addr: anytype, size: usize) void {
+    var current = util.anyaddr(addr) & ~@as(usize, cacheline_mask);
+    const end = util.anyaddr(addr) + size;
+    while (current < end) : (current += cacheline_size) {
+        switch (op) {
+            .invalidate => asm volatile ("dc ivac, %[addr]"
+                :
+                : [addr] "r" (current),
+                : .{ .memory = true }),
+            .clean => asm volatile ("dc cvac, %[addr]"
+                :
+                : [addr] "r" (current),
+                : .{ .memory = true }),
+        }
     }
 
-    asm volatile ("dsb sy");
+    asm volatile ("dsb ish");
 }
 
 /// Translate the given virtual address to physical address.
@@ -102,3 +121,4 @@ comptime {
 }
 
 const am = @import("asm.zig");
+const util = @import("common").util;

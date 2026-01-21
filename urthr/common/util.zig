@@ -19,6 +19,18 @@ pub fn isAligned(value: usize, alignment: usize) bool {
     return (value % alignment) == 0;
 }
 
+/// Convert the given pointer to usize value.
+pub fn anyaddr(ptr: anytype) usize {
+    switch (@typeInfo(@TypeOf(ptr))) {
+        .pointer => |p| switch (p.size) {
+            .one, .many, .c => return @intFromPtr(ptr),
+            .slice => return @intFromPtr(ptr.ptr),
+        },
+        .int, .comptime_int => return @as(usize, ptr),
+        else => @compileError("anyaddr: invalid type"),
+    }
+}
+
 /// Print a hex dump of the given memory region.
 pub fn hexdump(addr: usize, len: usize, logger: anytype) void {
     const bytes: [*]const u8 = @ptrFromInt(addr);

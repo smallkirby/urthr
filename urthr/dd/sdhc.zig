@@ -561,6 +561,7 @@ fn readBlockPio(addr: u32, buf: []u8) void {
 fn readBlockAdma2(addr: u32, buf: []u8) void {
     const data = page_allocator.allocBytesV(buf.len) catch unreachable;
     defer page_allocator.freeBytesV(data);
+    arch.cache(.invalidate, data, buf.len);
 
     const desc = page_allocator.create(Adma2Desc) catch unreachable;
     defer page_allocator.destroy(desc);
@@ -574,7 +575,7 @@ fn readBlockAdma2(addr: u32, buf: []u8) void {
         .length = @intCast(buf.len),
         .addr = @intCast(@intFromPtr(page_allocator.translateP(data).ptr)),
     };
-    arch.cleanDcacheRange(@intFromPtr(desc), @sizeOf(Adma2Desc));
+    arch.cache(.clean, desc, @sizeOf(Adma2Desc));
 
     // Set ADMA2 system address
     sdhc.write(AdmaSystemAddress, AdmaSystemAddress{
@@ -608,6 +609,8 @@ fn declareAcmd(rca: ?u16) void {
 /// If `data` is provided, the data transfer is performed using DMA if supported,
 /// In that case, `data` musb be DMA-capable buffer (alignment and cache management).
 /// Caller is responsible for preparing the DMA descriptor table.
+///
+/// This function blocks until the command and data transfer (if any) complete.
 fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     // Sanity check.
     checkSanityCmd();
@@ -688,6 +691,9 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         if (use_adma2) {
             // Wait for DMA transfer complete.
             sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
+
+            // Invalidate cache.
+            arch.cache(.invalidate, buf, buf.len);
         } else {
             sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, .ms(1));
 
