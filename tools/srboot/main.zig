@@ -2,6 +2,11 @@
 
 var terminate_thread: std.atomic.Value(bool) = .init(false);
 
+var opts: struct {
+    // Abort when the first sync request does not succeed in 5 seconds.
+    quick: bool = false,
+} = .{};
+
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer _ = gpa.deinit();
@@ -11,13 +16,24 @@ pub fn main() !void {
     var stdin_buf: [4096]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
 
-    if (os.argv.len != 2 + 1) {
-        log.err("Usage: {s} <urthr.elf> <serial device>", .{os.argv[0]});
+    if (os.argv.len < 2 + 1) {
+        log.err("Usage: {s} <urthr.elf> <serial device> <?options>", .{os.argv[0]});
         return error.InvalidArgs;
     }
 
     const binary_path = std.mem.span(os.argv[1]);
     const serial_path = std.mem.span(os.argv[2]);
+
+    // Parse options.
+    for (0..os.argv.len - 3) |i| {
+        const option = std.mem.span(os.argv[3 + i]);
+        if (std.mem.eql(u8, option, "--quick")) {
+            opts.quick = true;
+        } else {
+            log.err("Unknown option: {s}", .{option});
+            return error.InvalidArgs;
+        }
+    }
 
     // Open Urthr kernel.
     var urthr = try fs.cwd().openFile(binary_path, .{});
@@ -88,6 +104,52 @@ fn waitEnterWhileUart(sr: *fs.File, stdin: *std.Io.Reader, stdout: *std.Io.Write
     terminate_thread.store(true, .release);
     thread.join();
 }
+
+const TimeoutKiller = struct {
+    /// Timeout in nanoseconds.
+    timeout: u64,
+    /// Thread instance.
+    _thread: std.Thread = undefined,
+    /// Stop flag.
+    _stop: std.atomic.Value(bool) = .init(false),
+
+    const f = struct {
+        fn f(timeout_ns: ?u64, flag: *const std.atomic.Value(bool)) void {
+            if (timeout_ns) |ns| {
+                var timer = std.time.Timer.start() catch {
+                    @panic("Failed to start killer timer.");
+                };
+                while (!flag.load(.acquire) and timer.read() < ns) {
+                    std.atomic.spinLoopHint();
+                }
+
+                if (!flag.load(.acquire)) {
+                    log.err("Operation timed out. Exiting.", .{});
+                    std.posix.exit(1);
+                }
+            } else {
+                std.atomic.spinLoopHint();
+            }
+        }
+    }.f;
+
+    pub fn new(timeout: u64) TimeoutKiller {
+        return .{ .timeout = timeout };
+    }
+
+    pub fn start(self: *TimeoutKiller) !void {
+        self._thread = try std.Thread.spawn(
+            .{},
+            f,
+            .{ self.timeout, &self._stop },
+        );
+    }
+
+    pub fn stop(self: *TimeoutKiller) void {
+        self._stop.store(true, .release);
+        self._thread.join();
+    }
+};
 
 /// Thread function to print UART output.
 fn printUartThread(sr: *fs.File, stdout: *std.Io.Writer) void {
@@ -162,7 +224,16 @@ const SrBoot = struct {
 
     fn sync(self: *Self) !void {
         try self.sr.writeAll("SYNC");
-        try self.waitAck();
+
+        if (opts.quick) {
+            var killer = TimeoutKiller.new(5 * std.time.ns_per_s);
+            try killer.start();
+            defer killer.stop();
+
+            try self.waitAck();
+        } else {
+            try self.waitAck();
+        }
     }
 
     fn sendHeader(self: *Self) !void {
