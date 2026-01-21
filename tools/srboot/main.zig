@@ -104,7 +104,9 @@ fn waitEnterWhileUart(sr: *fs.File, stdin: *std.Io.Reader, stdout: *std.Io.Write
     );
 
     while (true) {
-        if (try stdin.takeByte() == '\n') break;
+        if (!opts.quick) {
+            if (try stdin.takeByte() == '\n') break;
+        }
     }
 
     terminate_thread.store(true, .release);
