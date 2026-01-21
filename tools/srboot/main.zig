@@ -5,6 +5,8 @@ var terminate_thread: std.atomic.Value(bool) = .init(false);
 var opts: struct {
     // Abort when the first sync request does not succeed in 5 seconds.
     quick: bool = false,
+    // Do not wait for user input to start booting.
+    nowait: bool = false,
 } = .{};
 
 pub fn main() !void {
@@ -29,6 +31,8 @@ pub fn main() !void {
         const option = std.mem.span(os.argv[3 + i]);
         if (std.mem.eql(u8, option, "--quick")) {
             opts.quick = true;
+        } else if (std.mem.eql(u8, option, "--nowait")) {
+            opts.nowait = true;
         } else {
             log.err("Unknown option: {s}", .{option});
             return error.InvalidArgs;
@@ -49,12 +53,14 @@ pub fn main() !void {
     try setBaudrate(&sr, 921600);
 
     // Print UART log until Enter is pressed.
-    log.info("Press <Enter> to start booting Urthr kernel.", .{});
-    try waitEnterWhileUart(
-        &sr,
-        &stdin_reader.interface,
-        &stdout_writer.interface,
-    );
+    if (!opts.nowait) {
+        log.info("Press <Enter> to start booting Urthr kernel.", .{});
+        try waitEnterWhileUart(
+            &sr,
+            &stdin_reader.interface,
+            &stdout_writer.interface,
+        );
+    }
 
     // Send Urthr kernel over serial.
     var srboot = SrBoot{
