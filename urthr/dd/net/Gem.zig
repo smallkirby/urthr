@@ -8,35 +8,67 @@ const gem = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Ncr },
     .{ 0x0004, Ncfgr },
     .{ 0x0008, Nsr },
+    .{ 0x0010, Dmacfg },
+    .{ 0x0018, Rxbqb },
+    .{ 0x001C, Txbqb },
+    .{ 0x0020, Rsr },
     .{ 0x0034, Man },
+    .{ 0x0088, Sa1b },
+    .{ 0x008C, Sa1t },
+    .{ 0x00C0, Usrio },
+    .{ 0x00FC, Mid },
+    .{ 0x0158, Rxcnt },
+    .{ 0x0280, Dconfig1 },
+    .{ 0x04C8, Txbqbh },
+    .{ 0x04D4, Rxbqbh },
 });
 
 const Self = @This();
 
 /// MMIO register module.
 module: gem,
+/// Memory manager.
+mm: MemoryManager,
+/// RX queue.
+rxq: RxQueue = undefined,
+
+/// MAC address type.
+const MacAddr = [6]u8;
+
+/// Default MAC address value.
+const default_mac: MacAddr = [_]u8{ 0xB8, 0x27, 0xEB, 0x00, 0x00, 0x00 };
 
 /// Create a new GEM instance.
-pub fn new(base: usize) Self {
+///
+/// Memory allocated for this driver will be managed by the given memory manager.
+pub fn new(base: usize, mm: MemoryManager) Self {
     var module = gem{};
     module.setBase(base);
 
     return .{
         .module = module,
+        .mm = mm,
     };
 }
 
 /// Initialize PHY and GEM controller.
 pub fn init(self: *Self) void {
+    if (self.module.read(Mid).idnum < 2) {
+        @panic("The macb device is not GEM.");
+    }
+
+    // Select RGMII mode.
+    self.module.write(Usrio, Usrio{
+        .rgmii = true,
+        .clken = true,
+    });
+
     // Enable MDIO.
     self.module.write(Ncr, std.mem.zeroInit(Ncr, .{
         .mpe = true,
     }));
     self.module.modify(Ncfgr, .{
         .clk = 6, // div by 128
-    });
-    self.module.modify(Nsr, .{
-        .idle = true,
     });
 
     // Check PHY ID.
@@ -60,6 +92,294 @@ pub fn init(self: *Self) void {
         }
         std.atomic.spinLoopHint();
     }
+
+    // Initialize MAC address.
+    var mac = self.getMacAddr();
+    log.debug("Initial MAC address: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}", .{
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+    });
+    self.setMacAddr(default_mac);
+    mac = self.getMacAddr();
+    log.info("MAC address set to: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}", .{
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+    });
+
+    // Auto negotiation and wait for link up.
+    self.mdioWrite(4, 0x01E1);
+    self.mdioWrite(0, 0x1200);
+    timer.start(.sec(5));
+    while (true) {
+        const bmsr: Bmsr = @bitCast(self.mdioRead(1));
+        if (bmsr.auto_nego_complete and bmsr.link_status) {
+            break;
+        }
+
+        if (timer.expired()) {
+            @panic("PHY link up timed out.");
+        }
+
+        arch.timer.spinWaitMicro(100);
+    }
+    const lpa: Stat1000 = @bitCast(self.mdioRead(0xA));
+    log.info("Link is up - 1Gbps / {s} duplex", .{if (lpa.fd) "Full" else "Half"});
+
+    // Configure NCFGR.
+    rtt.expectEqual(4, self.module.read(Dconfig1).dbwdef);
+    self.module.modify(Ncfgr, .{
+        .spd = false,
+        .gbe = true,
+        .fd = lpa.fd,
+        .caf = true, // TODO: Promiscuous for now
+        .dbw = 2,
+    });
+
+    // Configure DMA.
+    self.configureDma() catch |err| {
+        log.err("Failed to configure GEM DMA: {}", .{err});
+        return;
+    };
+
+    // Enable RX.
+    self.module.modify(Ncr, .{
+        .re = true,
+    });
+
+    // DEBUG: check RX
+    log.debug("Waiting packets...", .{});
+    arch.timer.spinWaitMilli(5000);
+    {
+        arch.cache(.invalidate, self.rxq.memory, self.rxq.memory.len);
+        //const descs: *const volatile [RxQueue.num_desc]RxQueue.Desc = @ptrCast(@alignCast(self.rxq.memory.ptr));
+        for (0..RxQueue.num_desc) |i| {
+            if (self.rxq.tryAcquireBuffer(i)) |buf| {
+                log.debug("desc#{d} owned by SW", .{i});
+                arch.cache(.invalidate, buf, buf.len);
+                common.util.hexdump(
+                    @intFromPtr(buf.ptr),
+                    common.util.roundup(buf.len, 16),
+                    log.debug,
+                );
+            }
+        }
+    }
+}
+
+/// Read the MAC address from the GEM controller.
+fn getMacAddr(self: *const Self) MacAddr {
+    const sa1b = self.module.read(Sa1b);
+    const sa1t = self.module.read(Sa1t);
+
+    return [_]u8{
+        sa1b.mac0,
+        sa1b.mac1,
+        sa1b.mac2,
+        sa1b.mac3,
+        sa1t.mac4,
+        sa1t.mac5,
+    };
+}
+
+/// Set the MAC address in the GEM controller.
+fn setMacAddr(self: *const Self, mac: MacAddr) void {
+    self.module.write(Sa1b, Sa1b{
+        .mac0 = mac[0],
+        .mac1 = mac[1],
+        .mac2 = mac[2],
+        .mac3 = mac[3],
+    });
+    self.module.write(Sa1t, Sa1t{
+        .mac4 = mac[4],
+        .mac5 = mac[5],
+    });
+}
+
+// =============================================================
+// DMA
+// =============================================================
+
+/// RX Queue structure.
+const RxQueue = struct {
+    /// DMA-capable memory for RX descriptor queue.
+    memory: []u8,
+    /// List of physical address of RX buffer.
+    buffers: [num_desc]u64,
+
+    /// Page allocator that manages the memory.
+    allocator: PageAllocator,
+
+    /// Number of descriptors.
+    const num_desc = buffer_size / @sizeOf(Desc);
+    /// RX buffer size
+    const buffer_size = 2048;
+
+    /// Offset added to DMA addresses for RP1.
+    /// TODO: delete this and use more generic way to handle DMA addresses.
+    const rp1_dma_offset = 0x10_0000_0000;
+
+    /// RX descriptor for 64-bit addressing.
+    const Desc = packed struct(u128) {
+        /// Buffer address (lower 32 bits).
+        addr_lo: u32,
+        /// Control and status.
+        ctrl_stat: Control,
+        /// Buffer address (upper 32 bits).
+        addr_hi: u32,
+        /// Reserved.
+        _rsvd: u32 = 0,
+
+        /// Check if the descriptor is owned by software.
+        pub fn swOwns(self: *const volatile Desc) bool {
+            return bits.isset(self.addr_lo, 0);
+        }
+
+        /// Check if this is the last descriptor in the ring.
+        pub fn isLast(self: *const volatile Desc) bool {
+            return bits.isset(self.addr_lo, 1);
+        }
+
+        /// Set the buffer address (64-bit).
+        fn setAddr(self: *volatile Desc, addr: u64) void {
+            self.addr_lo = @truncate(addr);
+            self.addr_hi = @truncate(addr >> 32);
+        }
+
+        /// Mark the descriptor as owned by software.
+        fn setSwOwn(self: *volatile Desc) void {
+            self.addr_lo = bits.set(self.addr_lo, 0);
+        }
+
+        /// Mark the descriptor as owned by hardware.
+        fn setHwOwn(self: *volatile Desc) void {
+            self.addr_lo = bits.unset(self.addr_lo, 0);
+        }
+
+        /// Mark this descriptor as the last in the ring.
+        fn setWrap(self: *volatile Desc) void {
+            self.addr_lo = bits.set(self.addr_lo, 1);
+        }
+    };
+
+    /// RX control and status register.
+    const Control = packed struct(u32) {
+        /// Frame length.
+        frmlen: u12,
+        offset: u2,
+        /// Start of frame.
+        sof: bool,
+        /// End of frame.
+        eof: bool,
+        cfi: bool,
+        vlan_pri: u3,
+        pri_tag: bool,
+        vlan_tag: bool,
+        typeid_match: bool,
+        sa4_match: bool,
+        sa3_match: bool,
+        sa2_match: bool,
+        sa1_match: bool,
+        _rsvd0: u1 = 0,
+        ext_match: bool,
+        uhash_match: bool,
+        mhash_match: bool,
+        broadcast_match: bool,
+    };
+
+    /// Create a new RX queue.
+    pub fn create(allocator: PageAllocator) PageAllocator.Error!RxQueue {
+        const memory = try allocator.allocBytesV(@sizeOf(Desc) * num_desc);
+        errdefer allocator.freeBytesV(memory);
+
+        return .{
+            .memory = memory,
+            .buffers = undefined,
+            .allocator = allocator,
+        };
+    }
+
+    /// Initialize the RX queue.
+    pub fn init(self: *RxQueue) PageAllocator.Error!void {
+        const descs = self.getDescs();
+        for (descs[0..], 0..) |*desc, i| {
+            const buffer = try self.createBuffer();
+            self.buffers[i] = buffer;
+
+            desc._rsvd = 0;
+            desc.setAddr(self.translateD(buffer));
+            desc.setHwOwn();
+            if (i == num_desc - 1) {
+                desc.setWrap();
+            }
+
+            desc.ctrl_stat = std.mem.zeroInit(Control, .{});
+        }
+
+        arch.cache(.clean, self.memory, self.memory.len);
+    }
+
+    /// Get a RX buffer if it has been consumed by MAC.
+    ///
+    /// Returns null if the buffer is still owned by MAC.
+    pub fn tryAcquireBuffer(self: *const RxQueue, index: usize) ?[]const u8 {
+        const desc = &self.getDescs()[index];
+
+        if (desc.swOwns()) {
+            const ptr: [*]const u8 = @ptrFromInt(self.allocator.translateV(self.buffers[index]));
+            const len = desc.ctrl_stat.frmlen;
+            arch.cache(.invalidate, ptr, len);
+            return ptr[0..len];
+        } else {
+            return null;
+        }
+    }
+
+    /// Get the DMA address of the RX queue.
+    pub fn addrDma(self: *const RxQueue) usize {
+        return @intFromPtr(self.allocator.translateP(self.memory).ptr) + rp1_dma_offset;
+    }
+
+    /// Create a buffer for receiving packets.
+    ///
+    /// Returns the physical address of the buffer.
+    fn createBuffer(self: *const RxQueue) PageAllocator.Error!u64 {
+        const page = try self.allocator.allocBytesP(buffer_size);
+        arch.cache(.invalidate, self.allocator.translateV(page), page.len);
+        return @intFromPtr(page.ptr);
+    }
+
+    /// Convert the given physical address to DMA address.
+    fn translateD(_: *const RxQueue, addr: u64) u64 {
+        return addr + rp1_dma_offset;
+    }
+
+    /// Get the pointer to the RX descriptors.
+    fn getDescs(self: *const RxQueue) *volatile [num_desc]Desc {
+        return @ptrCast(@alignCast(self.memory.ptr));
+    }
+};
+
+/// Configure DMA settings.
+fn configureDma(self: *Self) PageAllocator.Error!void {
+    // Configure DMA settings.
+    self.module.write(Dmacfg, std.mem.zeroInit(Dmacfg, .{
+        .fbldo = 16, // 16 beats
+        .endia_desc = builtin.cpu.arch.endian() == .big,
+        .endia_pkt = builtin.cpu.arch.endian() == .big,
+        .rxbms = 3, // Full RX packet buffer
+        .txpbms = true, // Full TX packet buffer
+        .rxbs = 32, // 2048 bytes
+        .addr64 = true, // Enable 64-bit DMA addressing
+    }));
+
+    // Allocate and configure RX queue.
+    self.rxq = try RxQueue.create(self.mm.page);
+    try self.rxq.init();
+
+    // Set RX queue address.
+    const rxq_dma = self.rxq.addrDma();
+    self.module.write(Rxbqbh, @as(u32, @truncate(rxq_dma >> 32)));
+    self.module.write(Rxbqb, @as(u32, @truncate(rxq_dma)));
+
+    arch.barrier(.full, .release);
 }
 
 // =============================================================
@@ -121,6 +441,83 @@ fn mdioWaitForIdle(self: *Self) void {
         std.atomic.spinLoopHint();
     }
 }
+
+/// 0x00: Basic Mode Control Register.
+const Bmcr = packed struct(u16) {
+    /// Reserved.
+    _rsvd: u7 = 0,
+    /// Collision test enable.
+    collision_test: bool,
+    /// Full duplex.
+    full_duplex: bool,
+    /// Restart auto-negotiation.
+    restart_auto_nego: bool,
+    /// Isolate.
+    isolate: bool,
+    /// Power Down.
+    power_down: bool,
+    /// Auto-Negotiation enable.
+    auto_nego_enable: bool,
+    /// Speed select.
+    speed_select: enum(u1) {
+        /// 10 Mb.
+        mb10 = 0,
+        /// 100 Mb.
+        mb100 = 1,
+    },
+    /// Loopback.
+    loopback: bool,
+    /// Reset.
+    reset: bool,
+};
+
+/// 0x01: Basic Mode Status Register.
+const Bmsr = packed struct(u16) {
+    /// Extended capability.
+    ext_cap: bool,
+    /// Jabber detected.
+    jabber_det: bool,
+    /// Link status.
+    link_status: bool,
+    /// Auto-Negotiation ability.
+    auto_nego_ability: bool,
+    /// Remote fault indication.
+    remote_fault: bool,
+    /// Auto-Negotiation complete.
+    auto_nego_complete: bool,
+    /// Preamble suppression Capable.
+    mf_preamble_supp: bool,
+    /// Reserved.
+    _rsvd0: u4 = 0,
+    /// 10BASE-T HALF DUPLEX.
+    spd10baset_hd: bool,
+    /// 10BASE-T FULL DUPLEX.
+    spd10baset_fd: bool,
+    /// 100BASE-TX HALF DUPLEX.
+    spd100baset_hd: bool,
+    /// 100BASE-TX FULL DUPLEX.
+    spd100baset_fd: bool,
+    /// 100BASE-T4.
+    spd100baset4: bool,
+};
+
+/// 0x0A: 1000BASE-T Status Register.
+const Stat1000 = packed struct(u16) {
+    /// Reserved.
+    _rsvd: u10,
+    /// Half duplex.
+    hd: bool,
+    /// Full duplex.
+    fd: bool,
+    /// Remote receiver status.
+    remrxok: bool,
+    /// Local receiver status.
+    locrxok: bool,
+    /// Master / Slave resolution status.
+    msres: bool,
+    /// Master / Slave resolution failure.
+    msfail: bool,
+};
 
 // =============================================================
 // Registers
@@ -198,8 +595,10 @@ const Ncfgr = packed struct(u32) {
     big: bool,
     /// External address match enable.
     eae: bool,
+    /// Gigabit mode enable.
+    gbe: bool,
     ///
-    _0: u2 = 0,
+    pcssel: bool,
     /// Retry test.
     rty: bool,
     /// Pause enable.
@@ -212,8 +611,10 @@ const Ncfgr = packed struct(u32) {
     drfcs: bool,
     /// MDC clock division.
     clk: u3,
+    /// Data bus width.
+    dbw: u3,
     ///
-    _1: u11 = 0,
+    _1: u8 = 0,
 };
 
 /// Network Status Register.
@@ -226,6 +627,79 @@ const Nsr = packed struct(u32) {
     idle: bool,
     /// Reserved.
     _0: u29 = 0,
+};
+
+/// User I/O Register.
+const Usrio = packed struct(u32) {
+    rgmii: bool,
+    clken: bool,
+    _rsvd: u30 = 0,
+};
+
+/// DMA Configuration Register.
+const Dmacfg = packed struct(u32) {
+    /// Fixed burst length for DMA data operations.
+    fbldo: u5,
+    /// Reserved.
+    _rsvd0: u1 = 0,
+    /// Endian swap mode for management descriptor access.
+    endia_desc: bool,
+    /// Endian swap mode for packet data access.
+    endia_pkt: bool,
+    /// RX packet buffer memory size select.
+    rxbms: u2,
+    /// TX packet buffer memory size select.
+    txpbms: bool,
+    /// TX IP/TCP/UDP checksum gen offload.
+    txcoen: bool,
+    /// Reserved.
+    _rsvd1: u4 = 0,
+    /// DMA receive buffer size.
+    rxbs: u8,
+    /// disc_when_no_ahb
+    ddrp: bool,
+    /// Reserved.
+    _rsvd2: u3 = 0,
+    /// RX extended Buffer Descriptor mode.
+    rxext: bool,
+    /// TX extended Buffer Descriptor mode.
+    txext: bool,
+    /// Address bus 64 bits.
+    addr64: bool,
+    /// Reserved.
+    _rsvd3: u1 = 0,
+};
+
+/// Receive Buffer Queue Base Address Register.
+const Rxbqb = packed struct(u32) {
+    addr: u32,
+};
+
+/// Transmit Buffer Queue Base Address Register.
+const Txbqb = packed struct(u32) {
+    addr: u32,
+};
+
+/// Transmit Buffer Queue Base Address High Register.
+const Txbqbh = packed struct(u32) {
+    addr: u32,
+};
+
+/// Receive Buffer Queue Base Address High Register.
+const Rxbqbh = packed struct(u32) {
+    addr: u32,
+};
+
+/// RX Status Register.
+const Rsr = packed struct(u32) {
+    /// Buffer not available.
+    bna: bool,
+    /// Frame received.
+    received: bool,
+    /// Overrun.
+    overrun: bool,
+    /// Reserved.
+    _rsvd: u29 = 0,
 };
 
 /// PHY Maintenance Register.
@@ -249,13 +723,53 @@ const Man = packed struct(u32) {
     sof: u2,
 };
 
+/// Specific Address 1 Bottom Register.
+const Sa1b = packed struct(u32) {
+    mac0: u8,
+    mac1: u8,
+    mac2: u8,
+    mac3: u8,
+};
+
+/// Specific Address 1 Top Register.
+const Sa1t = packed struct(u32) {
+    mac4: u8,
+    mac5: u8,
+    _rsvd: u16 = 0,
+};
+
+/// Identification Register.
+const Mid = packed struct(u32) {
+    rev: u16,
+    idnum: u12,
+    _0: u4,
+};
+
+/// Receive Count Register.
+const Rxcnt = packed struct(u32) { value: u32 };
+
+/// Design Configuration 1 Register.
+const Dconfig1 = packed struct(u32) {
+    no_pcs: bool,
+    _0: u22 = 0,
+    irqcor: bool,
+    _1: u1 = 0,
+    dbwdef: u3,
+    _2: u4 = 0,
+};
+
 // =============================================================
 // Imports
 // =============================================================
 
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.gem);
 const common = @import("common");
+const bits = common.bits;
 const mmio = common.mmio;
+const rtt = common.rtt;
 const Timer = common.Timer;
+const PageAllocator = common.PageAllocator;
+const MemoryManager = common.mem.MemoryManager;
 const arch = @import("arch").impl;
