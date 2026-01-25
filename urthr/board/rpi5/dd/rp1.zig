@@ -41,6 +41,22 @@ const pcie1_range = common.Range{
     .end = 0x0020_0000_0000,
 };
 
+const DmaRange = struct {
+    /// Inbound PCIe address.
+    pci: u64,
+    /// AXI address.
+    axi: usize,
+    /// Size in bytes.
+    size: usize,
+};
+// RP1 translates 0x10_0000_0000 to PCIe 0x10_0000_0000.
+const dma_range = DmaRange{
+    .pci = 0x10_0000_0000,
+    .axi = 0x10_0000_0000,
+    .size = 0x10_0000_0000,
+};
+const dma_offset = dma_range.axi;
+
 /// Physical address mapped to RP1 peripherals (BAR1).
 const axi_peri_base: usize = pcie1_range.start;
 /// Size in bytes of peripheral region's translation window.
@@ -114,10 +130,11 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         axi_peri_window_size + axi_sram_window_size,
         0,
     );
+    // Setup inbound translation.
     pcie.setInTranslation(
+        dma_range.pci,
         0,
-        0,
-        64 * units.gib,
+        dma_range.size,
         2,
     );
 
@@ -125,6 +142,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     confio.modify(dd.pci.HeaderCommandStatus, .{
         .memory_space_enable = true,
         .bus_master_enable = true,
+        .interrupt_disable = true,
     });
 
     // Map peripheral and shared SRAM region.

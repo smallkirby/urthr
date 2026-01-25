@@ -80,6 +80,15 @@ pub fn init() void {
 
     // Initialize bridge settings.
     initBridge();
+
+    // Disable PCIe -> GISB memory window.
+    pcie.modifyIndexed(RcBar1ConfigLo, 0, 8, .{
+        .size = 0,
+    });
+    // Disable PCIe -> SCB memory window.
+    pcie.modifyIndexed(RcBar1ConfigLo, 2, 8, .{
+        .size = 0,
+    });
 }
 
 /// Setup outbound address translation.
@@ -118,7 +127,7 @@ pub fn setOutTranslation(axi: usize, pci: usize, size: usize, comptime win: usiz
 pub fn setInTranslation(pci_addr: u64, cpu_addr: u64, size: u64, comptime bar: usize) void {
     const size_encoded = encodeIbarSize(size);
 
-    // Configure RC BAR1
+    // Configure RC BAR
     {
         const BarLow, const BarHigh, const idx = if (bar <= 3)
             .{ RcBar1ConfigLo, RcBar1ConfigHi, bar - 1 }
@@ -163,7 +172,7 @@ fn encodeIbarSize(size: u64) u5 {
     if (log2_size >= 12 and log2_size <= 15) {
         // Covers 4KB to 32KB
         return @intCast((log2_size - 12) + 0x1C);
-    } else if (log2_size >= 16 and log2_size <= 36) {
+    } else if (log2_size >= 16 and log2_size <= 37) {
         // Covers 64KB to 64GB
         return @intCast(log2_size - 15);
     }
@@ -271,7 +280,7 @@ fn reset() void {
     pcie.write(MiscMiscCtrl, std.mem.zeroInit(MiscMiscCtrl, .{
         .scb_access_en = true,
         .cfg_read_ur_mode = true,
-        .max_burst_size = .b128,
+        .max_burst_size = .b256,
     }));
 
     // Set link speed.
