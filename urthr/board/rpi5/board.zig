@@ -95,7 +95,7 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         rdd.ether.setBase(rdd.rp1.getEthrBase(), rdd.rp1.getEthrCfgBase());
         rdd.ether.resetPhy();
 
-        var gem = dd.net.Gem.new(rdd.rp1.getEthrBase());
+        var gem = dd.net.Gem.new(rdd.rp1.getEthrBase(), mm);
         gem.init();
     }
 }
