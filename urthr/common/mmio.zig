@@ -289,6 +289,28 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
 
             return matched;
         }
+
+        /// Dump the register contents in hexdump format.
+        pub fn hexdump(self: Self, offset: usize, length: usize, logger: anytype) void {
+            const width = switch (Width) {
+                .natural => |max| @as(usize, @min(@bitSizeOf(max), @bitSizeOf(u8))) / 8,
+                .size => |size| @bitSizeOf(size) / 8,
+            };
+            if (offset % width != 0) {
+                @panic("Module.hexdump: offset is not aligned");
+            }
+            if (length % width != 0) {
+                @panic("Module.hexdump: length is not aligned");
+            }
+
+            const T = std.meta.Int(.unsigned, width * 8);
+            const p: [*]const volatile T = @ptrFromInt(self.base + offset);
+            var printed: usize = 0;
+
+            while (printed < length) : (printed += width) {
+                logger("{X} : {X}", .{ offset + printed, p[printed / width] });
+            }
+        }
     };
 }
 
