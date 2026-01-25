@@ -330,6 +330,58 @@ fn initBridge() void {
         .pref_mem_base = 0x0000_0000,
         .pref_mem_limit = 0x0000_FFFF, // TODO: value chosen arbitrarily
     });
+
+    // Init AER.
+    initAer();
+}
+
+/// Initialize Advanced Error Reporting (AER).
+fn initAer() void {
+    var conf = dd.pci.HeaderType1{};
+    conf.setBase(pcie.base);
+
+    // Search for AER capability.
+    const header = conf.read(dd.pci.ExtCapHeader);
+    if (header.id != extcap_id_aer) {
+        // TODO: iterate through extended capabilities.
+        @panic("AER capability not found.");
+    }
+
+    var aer = Aer{};
+    aer.setBase(conf.getRegisterAddress(dd.pci.ExtCapHeader));
+
+    // Unmask all error reporting.
+    aer.write(AerUncorrectableMask, 0);
+    aer.write(AerCorrectableMask, 0);
+}
+
+/// AER status.
+const AerStatus = struct {
+    /// Correctable error status.
+    correctable: AerCorrectableErr,
+    /// Uncorrectable error status.
+    uncorrectable: AerUncorrectableErr,
+    /// Header logs.
+    logs: [4]u32,
+};
+
+/// Get the PCIe uncorrectable and correctable error status.
+pub fn getErrors() AerStatus {
+    var conf = dd.pci.HeaderType1{};
+    conf.setBase(pcie.base);
+
+    var aer = Aer{};
+    aer.setBase(conf.getRegisterAddress(dd.pci.ExtCapHeader));
+
+    var ret: AerStatus = undefined;
+    ret.correctable = aer.read(AerCorrectableErr);
+    ret.uncorrectable = aer.read(AerUncorrectableErr);
+    const logs: [*]const volatile u32 = @ptrFromInt(aer.getMarkerAddress(.log0));
+    for (0..4) |i| {
+        ret.logs[i] = logs[i];
+    }
+
+    return ret;
 }
 
 // =============================================================
@@ -589,6 +641,109 @@ const HardDebug = packed struct(u32) {
     serdes_iddq: u1,
     _6: u4,
 };
+
+// =============================================================
+// AER: Advanced Error Reporting
+
+/// Extended capability ID for AER.
+const extcap_id_aer = 1;
+
+/// AER register set starting from the extended capability header.
+const Aer = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x00, dd.pci.ExtCapHeader },
+    .{ 0x04, AerUncorrectableErr },
+    .{ 0x08, AerUncorrectableMask },
+    .{ 0x0C, AerUncorrectableSeverity },
+    .{ 0x10, AerCorrectableErr },
+    .{ 0x14, AerCorrectableMask },
+    .{ 0x18, AerCorrectableSeverity },
+    .{ 0x1C, mmio.Marker(.log0) },
+    .{ 0x20, mmio.Marker(.log1) },
+    .{ 0x24, mmio.Marker(.log2) },
+    .{ 0x28, mmio.Marker(.log3) },
+});
+
+/// Uncorrectable errors.
+const AerUncorrectableErr = packed struct(u32) {
+    /// Undefined.
+    und: bool,
+    /// Reserved.
+    _0: u3 = 0,
+    /// Data Link Protocol.
+    data_link: bool,
+    /// Surprise Down.
+    surprise_down: bool,
+    /// Reserved.
+    _1: u6 = 0,
+    /// Poisoned TLP.
+    poisoned_tlp: bool,
+    /// Flow Control Protocol.
+    flow_control: bool,
+    /// Completion timeout.
+    comp_timeout: bool,
+    /// Completer Abort.
+    completer_abort: bool,
+
+    /// Unexpected Completion.
+    unexpected_completion: bool,
+    /// Receiver Overflow.
+    receiver_overflow: bool,
+    /// Malformed TLP.
+    malformed_tlp: bool,
+    /// ECRC Error.
+    ecrc_error: bool,
+    /// Unsupported Request.
+    unsupported_request: bool,
+    /// ACS Violation.
+    acs_violation: bool,
+    /// Uncorrectable Internal Error.
+    internal_error: bool,
+    /// MC Blocked TLP.
+    mc_blocked_tlp: bool,
+    /// Atomic egress blocked.
+    atomic_egress: bool,
+    /// TLP prefix blocked.
+    tlp_prefix: bool,
+    /// Reserved.
+    _2: u6 = 0,
+};
+
+/// Uncorrectable Error Mask.
+const AerUncorrectableMask = packed struct(u32) { value: u32 };
+
+/// Uncorrectable Error Severity.
+const AerUncorrectableSeverity = packed struct(u32) { value: u32 };
+
+/// Correctable Error Status.
+const AerCorrectableErr = packed struct(u32) {
+    /// Receiver Error.
+    receiver_error: bool,
+    /// Reserved.
+    _0: u5 = 0,
+    /// Bad TLP.
+    bad_tlp: bool,
+    /// Bad DLLP.
+    bad_dllp: bool,
+
+    /// REPLAY_NUM Rollover.
+    rollover: bool,
+    /// Reserved.
+    _1: u3 = 0,
+    /// Replay Timer Timeout.
+    replay_timer_timeout: bool,
+    /// Advisory Non-Fatal Error.
+    advisory_non_fatal: bool,
+    /// Corrected Internal Error.
+    corrected_internal_error: bool,
+    /// Reserved.
+    _2: u17 = 0,
+};
+
+/// Correctable Error Mask.
+const AerCorrectableMask = packed struct(u32) { value: u32 };
+
+/// Correctable Error Severity.
+const AerCorrectableSeverity = packed struct(u32) { value: u32 };
 
 // =============================================================
 // Imports
