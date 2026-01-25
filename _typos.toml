@@ -20,3 +20,5 @@ ake = "ake"
 Synopsys = "Synopsys"
 # Copy all frames.
 caf = "caf"
+# Advanced Error Reporting
+aer = "aer"

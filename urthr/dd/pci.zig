@@ -21,6 +21,7 @@ pub const HeaderType1 = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x34, HeaderCapPtr },
     .{ 0x38, HeaderExpansionRom },
     .{ 0x3C, HeaderInt },
+    .{ 0x100, ExtCapHeader },
 });
 
 /// PCI Header Type 0.
@@ -41,6 +42,7 @@ pub const HeaderType0 = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x30, HeaderExpansionRom },
     .{ 0x34, HeaderCapPtr },
     .{ 0x3C, HeaderInt },
+    .{ 0x100, ExtCapHeader },
 });
 
 /// PCIe Capability Structure.
@@ -508,6 +510,15 @@ pub const HeaderSubsys = packed struct(u32) {
     subsys_vendor_id: u16,
     /// Subsystem ID.
     subsys_id: u16,
+};
+
+pub const ExtCapHeader = packed struct(u32) {
+    /// Capability ID.
+    id: u16,
+    /// Version.
+    version: u4,
+    /// Next Capability Pointer.
+    next: u12,
 };
 
 // =============================================================
