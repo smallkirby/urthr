@@ -19,6 +19,11 @@ const Self = @This();
 
 pub const page_size = 4 * units.kib;
 
+/// Address in bus address space.
+pub const BusAddress = packed struct {
+    addr: usize,
+};
+
 pub const Vtable = struct {
     /// Allocate a given number of physically contiguous pages.
     ///
@@ -69,7 +74,7 @@ pub fn allocBytesV(self: Self, size: usize) Error![]u8 {
 ///
 /// Returns a slice representing the allocated memory region.
 /// The slice points to a bus address.
-pub fn allocPagesB(self: Self, num_pages: usize) Error![]align(page_size) u8 {
+pub fn allocPagesB(self: Self, num_pages: usize) Error!BusAddress {
     const ptr = try self.allocPagesV(num_pages);
     return self.translateB(ptr);
 }
@@ -81,7 +86,7 @@ pub fn allocPagesB(self: Self, num_pages: usize) Error![]align(page_size) u8 {
 ///
 /// The size is rounded up to the nearest page size.
 /// The size of returned slice is equal to or greater than the requested size.
-pub fn allocBytesB(self: Self, size: usize) Error![]u8 {
+pub fn allocBytesB(self: Self, size: usize) Error!BusAddress {
     const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
     return self.allocPagesB(aligned_size / common.mem.size_4kib);
 }
@@ -92,42 +97,32 @@ pub fn freeBytesV(self: Self, slice: []u8) void {
 }
 
 /// Convert the given virtual pointer to pointer in bus address space.
-pub fn translateB(self: Self, vobj: anytype) @TypeOf(vobj) {
+pub fn translateB(self: Self, vobj: anytype) BusAddress {
     return switch (@typeInfo(@TypeOf(vobj))) {
         .pointer => |p| switch (p.size) {
             .one, .many, .c => {
                 const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(vobj));
-                return @ptrFromInt(paddr);
+                return BusAddress{ .addr = paddr + self.offset };
             },
             .slice => {
-                const C = p.child;
                 const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(vobj.ptr));
-                return @as([*]align(p.alignment) C, @ptrFromInt(paddr + self.offset))[0..vobj.len];
+                return BusAddress{ .addr = paddr + self.offset };
             },
         },
-        .int => return self.vtable.virt2phys(self.ptr, vobj),
+        .int => return self.vtable.virt2phys(self.ptr, vobj) + self.offset,
         else => @compileError("Unsupported type."),
     };
 }
 
 /// Convert the given bus address pointer to pointer in virtual address space.
-pub fn translateV(self: Self, bobj: anytype) @TypeOf(bobj) {
-    return switch (@typeInfo(@TypeOf(bobj))) {
-        .pointer => |p| switch (p.size) {
-            .one, .many, .c => {
-                const paddr = @intFromPtr(bobj) - self.offset;
-                const vaddr = self.vtable.phys2virt(self.ptr, paddr);
-                return @ptrFromInt(vaddr);
-            },
-            .slice => {
-                const C = p.child;
-                const paddr = @intFromPtr(bobj.ptr) - self.offset;
-                const vaddr = self.vtable.phys2virt(self.ptr, paddr);
-                return @as([*]C, @ptrFromInt(vaddr))[0..bobj.len];
-            },
+pub fn translateV(self: Self, bobj: BusAddress, T: type) T {
+    return switch (@typeInfo(T)) {
+        .pointer => {
+            const paddr = bobj.addr - self.offset;
+            return @ptrFromInt(self.vtable.phys2virt(self.ptr, paddr));
         },
         .int => {
-            const paddr = bobj - self.offset;
+            const paddr = bobj.addr - self.offset;
             return self.vtable.phys2virt(self.ptr, paddr);
         },
         else => @compileError("Unsupported type."),

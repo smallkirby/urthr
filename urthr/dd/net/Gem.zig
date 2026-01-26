@@ -202,7 +202,7 @@ const RxQueue = struct {
     /// DMA-capable memory for RX descriptor queue.
     memory: []u8,
     /// List of bus address of RX buffer.
-    buffers: [num_desc]u64,
+    buffers: [num_desc]DmaAllocator.BusAddress,
 
     /// DMA allocator that manages the memory.
     allocator: DmaAllocator,
@@ -300,7 +300,7 @@ const RxQueue = struct {
             self.buffers[i] = buffer;
 
             desc._rsvd = 0;
-            desc.setAddr(buffer);
+            desc.setAddr(buffer.addr);
             desc.setHwOwn();
             if (i == num_desc - 1) {
                 desc.setWrap();
@@ -319,7 +319,7 @@ const RxQueue = struct {
         const desc = &self.getDescs()[index];
 
         if (desc.swOwns()) {
-            const ptr: [*]const u8 = @ptrFromInt(self.allocator.translateV(self.buffers[index]));
+            const ptr = self.allocator.translateV(self.buffers[index], [*]const u8);
             const len = desc.ctrl_stat.frmlen;
             arch.cache(.invalidate, ptr, len);
             return ptr[0..len];
@@ -330,16 +330,20 @@ const RxQueue = struct {
 
     /// Get the DMA address of the RX queue.
     pub fn addrDma(self: *const RxQueue) usize {
-        return @intFromPtr(self.allocator.translateB(self.memory).ptr);
+        return self.allocator.translateB(self.memory).addr;
     }
 
     /// Create a buffer for receiving packets.
     ///
     /// Returns the bus address of the buffer.
-    fn createBuffer(self: *const RxQueue) DmaAllocator.Error!u64 {
+    fn createBuffer(self: *const RxQueue) DmaAllocator.Error!DmaAllocator.BusAddress {
         const page = try self.allocator.allocBytesB(buffer_size);
-        arch.cache(.invalidate, self.allocator.translateV(page), page.len);
-        return @intFromPtr(page.ptr);
+        arch.cache(
+            .invalidate,
+            self.allocator.translateV(page, usize),
+            buffer_size,
+        );
+        return page;
     }
 
     /// Get the pointer to the RX descriptors.
