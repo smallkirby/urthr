@@ -27,8 +27,8 @@ const Self = @This();
 
 /// MMIO register module.
 module: gem,
-/// Memory manager.
-mm: MemoryManager,
+/// DMA allocator for managing DMA-capable memory.
+dma_allocator: DmaAllocator,
 /// RX queue.
 rxq: RxQueue = undefined,
 
@@ -41,13 +41,13 @@ const default_mac: MacAddr = [_]u8{ 0xB8, 0x27, 0xEB, 0x00, 0x00, 0x00 };
 /// Create a new GEM instance.
 ///
 /// Memory allocated for this driver will be managed by the given memory manager.
-pub fn new(base: usize, mm: MemoryManager) Self {
+pub fn new(base: usize, dma_allocator: DmaAllocator) Self {
     var module = gem{};
     module.setBase(base);
 
     return .{
         .module = module,
-        .mm = mm,
+        .dma_allocator = dma_allocator,
     };
 }
 
@@ -201,20 +201,16 @@ fn setMacAddr(self: *const Self, mac: MacAddr) void {
 const RxQueue = struct {
     /// DMA-capable memory for RX descriptor queue.
     memory: []u8,
-    /// List of physical address of RX buffer.
+    /// List of bus address of RX buffer.
     buffers: [num_desc]u64,
 
-    /// Page allocator that manages the memory.
-    allocator: PageAllocator,
+    /// DMA allocator that manages the memory.
+    allocator: DmaAllocator,
 
     /// Number of descriptors.
     const num_desc = buffer_size / @sizeOf(Desc);
     /// RX buffer size
     const buffer_size = 2048;
-
-    /// Offset added to DMA addresses for RP1.
-    /// TODO: delete this and use more generic way to handle DMA addresses.
-    const rp1_dma_offset = 0x10_0000_0000;
 
     /// RX descriptor for 64-bit addressing.
     const Desc = packed struct(u128) {
@@ -285,7 +281,7 @@ const RxQueue = struct {
     };
 
     /// Create a new RX queue.
-    pub fn create(allocator: PageAllocator) PageAllocator.Error!RxQueue {
+    pub fn create(allocator: DmaAllocator) DmaAllocator.Error!RxQueue {
         const memory = try allocator.allocBytesV(@sizeOf(Desc) * num_desc);
         errdefer allocator.freeBytesV(memory);
 
@@ -297,14 +293,14 @@ const RxQueue = struct {
     }
 
     /// Initialize the RX queue.
-    pub fn init(self: *RxQueue) PageAllocator.Error!void {
+    pub fn init(self: *RxQueue) DmaAllocator.Error!void {
         const descs = self.getDescs();
         for (descs[0..], 0..) |*desc, i| {
             const buffer = try self.createBuffer();
             self.buffers[i] = buffer;
 
             desc._rsvd = 0;
-            desc.setAddr(self.translateD(buffer));
+            desc.setAddr(buffer);
             desc.setHwOwn();
             if (i == num_desc - 1) {
                 desc.setWrap();
@@ -334,21 +330,16 @@ const RxQueue = struct {
 
     /// Get the DMA address of the RX queue.
     pub fn addrDma(self: *const RxQueue) usize {
-        return @intFromPtr(self.allocator.translateP(self.memory).ptr) + rp1_dma_offset;
+        return @intFromPtr(self.allocator.translateB(self.memory).ptr);
     }
 
     /// Create a buffer for receiving packets.
     ///
-    /// Returns the physical address of the buffer.
-    fn createBuffer(self: *const RxQueue) PageAllocator.Error!u64 {
-        const page = try self.allocator.allocBytesP(buffer_size);
+    /// Returns the bus address of the buffer.
+    fn createBuffer(self: *const RxQueue) DmaAllocator.Error!u64 {
+        const page = try self.allocator.allocBytesB(buffer_size);
         arch.cache(.invalidate, self.allocator.translateV(page), page.len);
         return @intFromPtr(page.ptr);
-    }
-
-    /// Convert the given physical address to DMA address.
-    fn translateD(_: *const RxQueue, addr: u64) u64 {
-        return addr + rp1_dma_offset;
     }
 
     /// Get the pointer to the RX descriptors.
@@ -358,7 +349,7 @@ const RxQueue = struct {
 };
 
 /// Configure DMA settings.
-fn configureDma(self: *Self) PageAllocator.Error!void {
+fn configureDma(self: *Self) DmaAllocator.Error!void {
     // Configure DMA settings.
     self.module.write(Dmacfg, std.mem.zeroInit(Dmacfg, .{
         .fbldo = 16, // 16 beats
@@ -371,7 +362,7 @@ fn configureDma(self: *Self) PageAllocator.Error!void {
     }));
 
     // Allocate and configure RX queue.
-    self.rxq = try RxQueue.create(self.mm.page);
+    self.rxq = try RxQueue.create(self.dma_allocator);
     try self.rxq.init();
 
     // Set RX queue address.
@@ -770,6 +761,6 @@ const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const Timer = common.Timer;
-const PageAllocator = common.PageAllocator;
+const DmaAllocator = common.DmaAllocator;
 const MemoryManager = common.mem.MemoryManager;
 const arch = @import("arch").impl;

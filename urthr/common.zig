@@ -9,6 +9,7 @@ pub const typing = @import("common/typing.zig");
 pub const util = @import("common/util.zig");
 
 pub const Console = @import("common/Console.zig");
+pub const DmaAllocator = @import("common/DmaAllocator.zig");
 pub const IoAllocator = @import("common/IoAllocator.zig");
 pub const PageAllocator = @import("common/PageAllocator.zig");
 pub const RbTree = @import("common/RbTree.zig").RbTree;
