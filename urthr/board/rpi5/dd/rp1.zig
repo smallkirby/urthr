@@ -315,7 +315,7 @@ const common = @import("common");
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
-const IoAllocator = common.IoAllocator;
+const IoAllocator = common.mem.IoAllocator;
 const dd = @import("dd");
 
 const pcie = @import("pcie.zig");

@@ -160,6 +160,6 @@ const common = @import("common");
 const mem = common.mem;
 const Console = common.Console;
 const MemoryManager = mem.MemoryManager;
-const IoAllocator = common.IoAllocator;
+const IoAllocator = mem.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");

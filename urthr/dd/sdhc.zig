@@ -2109,5 +2109,5 @@ const block = common.block;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
-const PageAllocator = common.PageAllocator;
+const PageAllocator = common.mem.PageAllocator;
 const arch = @import("arch").impl;

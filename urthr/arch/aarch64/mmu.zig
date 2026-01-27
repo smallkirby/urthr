@@ -484,7 +484,7 @@ const units = common.units;
 const util = common.util;
 const Attribute = common.mem.Attribute;
 const Permission = common.mem.Permission;
-const PageAllocator = common.PageAllocator;
+const PageAllocator = common.mem.PageAllocator;
 
 const am = @import("asm.zig");
 const regs = @import("register.zig");

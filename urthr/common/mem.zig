@@ -13,6 +13,10 @@ pub const Error = error{
     NotAvailable,
 };
 
+pub const DmaAllocator = @import("mem/DmaAllocator.zig");
+pub const IoAllocator = @import("mem/IoAllocator.zig");
+pub const PageAllocator = @import("mem/PageAllocator.zig");
+
 /// Size in bytes of 4KiB.
 pub const size_4kib = 4 * units.kib;
 /// Size in bytes of 2MiB.
@@ -83,5 +87,3 @@ pub const MemoryManager = struct {
 const std = @import("std");
 const common = @import("common");
 const units = common.units;
-const PageAllocator = @import("PageAllocator.zig");
-const IoAllocator = @import("IoAllocator.zig");

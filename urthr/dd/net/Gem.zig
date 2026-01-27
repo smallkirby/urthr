@@ -765,6 +765,6 @@ const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const Timer = common.Timer;
-const DmaAllocator = common.DmaAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
 const MemoryManager = common.mem.MemoryManager;
 const arch = @import("arch").impl;

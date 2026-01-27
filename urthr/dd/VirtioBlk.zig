@@ -254,5 +254,5 @@ const rtt = common.rtt;
 const block = common.block;
 const mmio = common.mmio;
 const units = common.units;
-const PageAllocator = common.PageAllocator;
+const PageAllocator = common.mem.PageAllocator;
 const virtio = @import("virtio.zig");
