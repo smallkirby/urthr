@@ -721,4 +721,4 @@ const arch = @import("arch").impl;
 const common = @import("common");
 const bits = common.bits;
 const mmio = common.mmio;
-const PageAllocator = common.PageAllocator;
+const PageAllocator = common.mem.PageAllocator;

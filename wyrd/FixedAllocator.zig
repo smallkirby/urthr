@@ -74,6 +74,6 @@ fn phys2virt(_: *const anyopaque, paddr: usize) usize {
 
 const std = @import("std");
 const common = @import("common");
-const PageAllocator = common.PageAllocator;
+const PageAllocator = common.mem.PageAllocator;
 const Error = PageAllocator.Error;
 const page_size = PageAllocator.page_size;

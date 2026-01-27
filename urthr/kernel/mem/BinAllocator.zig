@@ -286,4 +286,4 @@ const urd = @import("urthr");
 const mem = urd.mem;
 const SpinLock = urd.SpinLock;
 const common = @import("common");
-const PageAllocator = common.PageAllocator;
+const PageAllocator = common.mem.PageAllocator;
