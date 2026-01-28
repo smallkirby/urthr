@@ -32,20 +32,30 @@ pub fn anyaddr(ptr: anytype) usize {
 }
 
 /// Print a hex dump of the given memory region.
-pub fn hexdump(addr: usize, len: usize, logger: anytype) void {
-    const bytes: [*]const u8 = @ptrFromInt(addr);
+///
+/// Buffer is accessed per-byte.
+pub fn hexdump(addr: anytype, len: usize, logger: anytype) void {
+    if (len == 0) return;
+
+    const start_addr = anyaddr(addr);
+    const bytes: [*]const u8 = @ptrFromInt(start_addr);
     const per_line = 16;
 
-    if (len % per_line != 0) {
-        @panic("hexdump: length must be multiple of 16");
-    }
-
     var i: usize = 0;
-    while (i < len) : (i += 16) {
-        logger(
-            "{X} | {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2}",
-            .{ addr + i, bytes[i + 0], bytes[i + 1], bytes[i + 2], bytes[i + 3], bytes[i + 4], bytes[i + 5], bytes[i + 6], bytes[i + 7], bytes[i + 8], bytes[i + 9], bytes[i + 10], bytes[i + 11], bytes[i + 12], bytes[i + 13], bytes[i + 14], bytes[i + 15] },
-        );
+    while (i < len) : (i += per_line) {
+        var hex_buf: [per_line * 3]u8 = undefined;
+        var hex_pos: usize = 0;
+
+        for (0..per_line) |j| {
+            if (i + j < len) {
+                _ = std.fmt.bufPrint(hex_buf[hex_pos..][0..3], "{X:0>2} ", .{bytes[i + j]}) catch unreachable;
+            } else {
+                @memset(hex_buf[hex_pos..][0..3], ' ');
+            }
+            hex_pos += 3;
+        }
+
+        logger("{X} | {s}", .{ start_addr + i, hex_buf[0..hex_buf.len] });
     }
 }
 
