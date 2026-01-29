@@ -11,7 +11,7 @@ const vtable = Device.Vtable{
 };
 
 /// Create a new loopback device.
-pub fn new(allocator: Allocator) Error!*Device {
+pub fn new(allocator: Allocator) net.Error!*Device {
     const device = try allocator.create(Device);
     errdefer allocator.destroy(device);
 
@@ -33,8 +33,9 @@ pub fn new(allocator: Allocator) Error!*Device {
 /// Output the given data to the device.
 ///
 /// TODO: just printing the data for now.
-fn outputImpl(_: *anyopaque, data: []const u8) Error!void {
-    util.hexdump(data, data.len, log.debug);
+fn outputImpl(_: *anyopaque, prot: Protocol, data: []const u8) net.Error!void {
+    log.debug("Output to loopback: prot={}", .{prot});
+    try net.handleInput(prot, data);
 }
 
 // =============================================================
@@ -46,5 +47,7 @@ const log = std.log.scoped(.loopback);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const util = common.util;
+const urd = @import("urthr");
+const net = urd.net;
+const Protocol = net.Protocol;
 const Device = @import("Device.zig");
-const Error = Device.Error;

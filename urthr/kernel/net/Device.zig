@@ -16,12 +16,6 @@ dev_type: Type,
 /// List head for linking network devices.
 list_head: DeviceList.Head = .{},
 
-/// Device error.
-pub const Error = error{
-    /// Memory allocation failed.
-    OutOfMemory,
-};
-
 /// List type of network devices.
 pub const DeviceList = common.typing.InlineDoublyLinkedList(Self, "list_head");
 
@@ -42,13 +36,13 @@ pub const Vtable = struct {
     /// Link up the device.
     ///
     /// If the device is already up, this is a no-op.
-    open: ?*const fn (device: *anyopaque) Error!void = null,
+    open: ?*const fn (device: *anyopaque) net.Error!void = null,
     /// Output the given data to the device.
-    output: *const fn (device: *anyopaque, data: []const u8) Error!void,
+    output: *const fn (device: *anyopaque, prot: Protocol, data: []const u8) net.Error!void,
 };
 
 /// Link up the device.
-pub fn open(self: *Self) Error!void {
+pub fn open(self: *Self) net.Error!void {
     if (self.vtable.open) |f| {
         try f(self.ctx);
     }
@@ -57,8 +51,8 @@ pub fn open(self: *Self) Error!void {
 }
 
 /// Output the given data to the device.
-pub fn output(self: *Self, data: []const u8) Error!void {
-    return self.vtable.output(self.ctx, data);
+pub fn output(self: *Self, prot: Protocol, data: []const u8) net.Error!void {
+    return self.vtable.output(self.ctx, prot, data);
 }
 
 // =============================================================
@@ -66,3 +60,6 @@ pub fn output(self: *Self, data: []const u8) Error!void {
 // =============================================================
 
 const common = @import("common");
+const urd = @import("urthr");
+const net = urd.net;
+const Protocol = net.Protocol;
