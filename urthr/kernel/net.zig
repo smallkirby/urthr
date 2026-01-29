@@ -8,6 +8,8 @@ var device_list: Device.DeviceList = .{};
 pub const Error = error{
     /// Memory allocation failed.
     OutOfMemory,
+    /// Invalid packet data.
+    InvalidPacket,
 };
 
 /// Network protocols.
