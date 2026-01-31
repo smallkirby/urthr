@@ -1,4 +1,7 @@
+pub const ip = @import("net/ip.zig");
+
 pub const Device = @import("net/Device.zig");
+pub const Interface = @import("net/Interface.zig");
 pub const Loopback = @import("net/Loopback.zig");
 
 /// Registered network device list.
@@ -6,10 +9,16 @@ var device_list: Device.DeviceList = .{};
 
 /// Network error.
 pub const Error = error{
+    /// Given operation would cause duplication.
+    Duplicated,
     /// Memory allocation failed.
     OutOfMemory,
+    /// Invalid address.
+    InvalidAddress,
     /// Invalid packet data.
     InvalidPacket,
+    /// Given data, protocol, or operation is not supported.
+    Unsupported,
 };
 
 /// Network protocols.
@@ -23,7 +32,7 @@ pub const Protocol = enum(u16) {
     /// Functions to handle the protocol data.
     pub const Vtable = struct {
         /// Process the incoming data.
-        input: *const fn (data: []const u8) Error!void,
+        input: *const fn (dev: *const Device, data: []const u8) Error!void,
     };
 
     /// Get the handler for the given protocol.
@@ -43,11 +52,11 @@ pub fn registerDevice(device: *Device) void {
     device_list.append(device);
 }
 
-/// Handle incoming data
-pub fn handleInput(prot: Protocol, data: []const u8) Error!void {
+/// Handle incoming data to dispatch to the appropriate protocol handler.
+pub fn handleInput(dev: *const Device, prot: Protocol, data: []const u8) Error!void {
     if (prot.getHandler()) |handler| {
         // Delegate to the protocol handler
-        return handler.input(data);
+        return handler.input(dev, data);
     } else {
         // Ignore unrecognized protocol
         return;

@@ -31,11 +31,9 @@ pub fn new(allocator: Allocator) net.Error!*Device {
 }
 
 /// Output the given data to the device.
-///
-/// TODO: just printing the data for now.
-fn outputImpl(_: *anyopaque, prot: Protocol, data: []const u8) net.Error!void {
+fn outputImpl(dev: *Device, prot: Protocol, data: []const u8) net.Error!void {
     log.debug("Output to loopback: prot={}", .{prot});
-    try net.handleInput(prot, data);
+    try net.handleInput(dev, prot, data);
 }
 
 // =============================================================
