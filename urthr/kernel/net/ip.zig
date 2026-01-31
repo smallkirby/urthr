@@ -194,12 +194,12 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    if (header.version != 4) {
+    if (header.get(.version) != 4) {
         log.warn("Unsupported IP version: {d}", .{header.version});
         return net.Error.InvalidPacket;
     }
 
-    const hlen = @as(usize, header.ihl) * 4;
+    const hlen = @as(usize, header.get(.ihl)) * 4;
     if (data.len < hlen) {
         log.warn("Invalid IP header length: {d}", .{hlen});
         return net.Error.InvalidPacket;
