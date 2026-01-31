@@ -8,9 +8,11 @@ pub const vtable = net.Protocol.Vtable{
 const min_packet_size = @sizeOf(Header);
 /// Maximum length of string representation of IP address.
 const ip_addr_str_maxlen = 15;
+/// Broadcast IP address.
+const ip_broadcast_addr = IpAddr{ .value = 0xFFFFFFFF };
 
 /// IP address type.
-const IpAddr = packed struct(u32) {
+pub const IpAddr = packed struct(u32) {
     /// Integer representation of the IP address in network byte order.
     value: u32,
 
@@ -23,6 +25,46 @@ const IpAddr = packed struct(u32) {
             "{d}.{d}.{d}.{d}",
             .{ bytes[0], bytes[1], bytes[2], bytes[3] },
         );
+    }
+
+    /// Parse the IP address from the given string.
+    pub fn from(s: []const u8) error{InvalidFormat}!IpAddr {
+        var count: usize = 0;
+        var value: u32 = 0;
+
+        var iter = std.mem.splitScalar(u8, s, '.');
+        while (iter.next()) |part| : (count += 1) {
+            if (count >= 4) {
+                return error.InvalidFormat;
+            }
+
+            const num = std.fmt.parseInt(u8, part, 10) catch {
+                return error.InvalidFormat;
+            };
+
+            value = (value << 8) + num;
+        }
+
+        return .{ .value = toNetEndian(value) };
+    }
+};
+
+/// IP specific interface information.
+const IpInterface = struct {
+    /// Unicast IP address.
+    unicast: IpAddr,
+    /// Broadcast IP address.
+    broadcast: IpAddr,
+    /// Subnet mask.
+    netmask: IpAddr,
+
+    /// Check if the given address is destined to this interface.
+    pub fn isDestinedToMe(self: *const IpInterface, addr: IpAddr) bool {
+        const unicast = self.unicast == addr;
+        const broadcast = ip_broadcast_addr == addr;
+        const subnet_broadcast = self.broadcast == addr;
+
+        return unicast or broadcast or subnet_broadcast;
     }
 };
 
@@ -119,10 +161,34 @@ const Protocol = enum(u8) {
     _,
 };
 
+/// Create a logical interface for IP.
+pub fn createInterface(unicast: IpAddr, netmask: IpAddr, allocator: Allocator) net.Error!*net.Interface {
+    const interface = try allocator.create(net.Interface);
+    errdefer allocator.destroy(interface);
+
+    const ipif = try allocator.create(IpInterface);
+    errdefer allocator.destroy(ipif);
+
+    ipif.* = .{
+        .unicast = unicast,
+        .netmask = netmask,
+        .broadcast = .{
+            .value = (unicast.value & netmask.value) | ~netmask.value,
+        },
+    };
+    interface.* = .{
+        .ctx = @ptrCast(ipif),
+        .family = .ipv4,
+    };
+
+    return interface;
+}
+
 /// Handle incoming IP packet.
-fn inputImpl(data: []const u8) net.Error!void {
+fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     const header: *const Header = @ptrCast(@alignCast(data.ptr));
 
+    // Check validity of the packet.
     if (data.len < min_packet_size) {
         log.warn("Too short IP packet size: {d}", .{data.len});
         return net.Error.InvalidPacket;
@@ -142,6 +208,16 @@ fn inputImpl(data: []const u8) net.Error!void {
     if (calcChecksum(data[0..hlen]) != 0) {
         log.warn("Invalid IP header checksum", .{});
         return net.Error.InvalidPacket;
+    }
+
+    // Filter out packets not destined to us.
+    const iface = dev.findInterface(.ipv4) orelse {
+        log.warn("No IPv4 interface found on the device", .{});
+        return net.Error.Unsupported;
+    };
+    const ip_iface: *const IpInterface = @ptrCast(@alignCast(iface.ctx));
+    if (!ip_iface.isDestinedToMe(header.dest_addr)) {
+        return;
     }
 
     // TODO: just printing the packet for now.
@@ -208,8 +284,10 @@ fn printPacket(header: *const Header, logger: anytype) void {
 
 const std = @import("std");
 const log = std.log.scoped(.ip);
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
 const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;
+const Interface = net.Interface;
