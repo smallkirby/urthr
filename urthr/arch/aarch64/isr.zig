@@ -8,6 +8,14 @@ var in_handling: bool = false;
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
 
+/// Exception handler function signature.
+///
+/// Returns null if the exception cannot be handled.
+pub const HandlerSignature = *const fn () ?void;
+
+/// Function pointer to the registered exception handler.
+var handler: ?HandlerSignature = null;
+
 /// Initialize exception handling for this CPU.
 pub fn initLocal() void {
     am.msr(.vbar_el1, .{ .addr = @intFromPtr(&exception_table) });
@@ -23,6 +31,11 @@ pub fn setConsole(c: Console) void {
 /// Set the terminator function called at the end of exception handlers.
 pub fn setTerminator(f: @TypeOf(terminator)) void {
     terminator = f;
+}
+
+/// Set the exception handler function.
+pub fn setHandler(h: HandlerSignature) void {
+    handler = h;
 }
 
 // =============================================================
@@ -171,6 +184,11 @@ export fn syncCurElSpx(ctx: *Context) callconv(.c) void {
 }
 
 export fn irqCurElSpx(ctx: *Context) callconv(.c) void {
+    if (handler) |f| {
+        if (f()) |_| {
+            return;
+        }
+    }
     return defaultHandler(ctx, "IRQ, Current EL, SP_ELx");
 }
 

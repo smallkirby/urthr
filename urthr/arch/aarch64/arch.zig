@@ -1,4 +1,5 @@
 pub const exception = @import("isr.zig");
+pub const gicv2 = @import("gicv2.zig");
 pub const mmu = @import("mmu.zig");
 pub const timer = @import("timer.zig");
 
@@ -108,6 +109,11 @@ pub const intr = struct {
     /// Set exception mask.
     pub fn setMask(daif: u64) void {
         am.msr(.daif, @bitCast(daif));
+    }
+
+    /// Set the exception handler function.
+    pub fn setHandler(handler: exception.HandlerSignature) void {
+        exception.setHandler(handler);
     }
 };
 

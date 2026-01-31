@@ -1,5 +1,13 @@
 pub const memmap = @import("memmap.zig");
 
+/// Function signature of exception handler.
+///
+/// Returns null if the exception cannot be handled.
+pub const ExceptionHandler = *const fn (u64) ?void;
+
+/// Exception handler called when an IRQ occurs.
+var exception_handler: ?ExceptionHandler = null;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like GPIO and UART.
@@ -46,6 +54,17 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 
 /// Initialize peripherals.
 pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
+    // Interrupt controller.
+    {
+        arch.gicv2.setBase(try mm.io.reserveAndRemap(
+            "GIC",
+            map.gic.start,
+            map.gic.size(),
+            null,
+        ));
+        arch.gicv2.initGlobal();
+    }
+
     // SDHC
     {
         const base = try mm.io.reserveAndRemap(
@@ -64,6 +83,40 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
+
+/// Initialize GICC for the calling AP.
+pub fn initIrqLocal() void {
+    // Set exception handler.
+    arch.intr.setHandler(handleIrq);
+
+    // Initialize CPU interface.
+    arch.gicv2.initLocal();
+}
+
+/// Set the exception handler for IRQs.
+pub fn setIrqHandler(f: ExceptionHandler) void {
+    exception_handler = f;
+}
+
+/// IRQ handler function.
+fn handleIrq() ?void {
+    const iar = arch.gicv2.readIar();
+    const intid = iar.interrupt_id;
+
+    if (exception_handler) |handler| {
+        if (handler(intid)) |_| {
+            // Handled successfully.
+            arch.gicv2.eoi(iar);
+            return;
+        } else {
+            // Handler for this interrupt not registered.
+            return null;
+        }
+    } else {
+        // Root handler registered.
+        return null;
+    }
+}
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
@@ -134,7 +187,7 @@ const console = struct {
 // =============================================================
 
 const std = @import("std");
-const arch = @import("arch");
+const arch = @import("arch").impl;
 const common = @import("common");
 const mem = common.mem;
 const options = common.options;

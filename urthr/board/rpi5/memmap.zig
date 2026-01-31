@@ -67,6 +67,12 @@ pub const pm = Range{
     .end = 0x0010_7D20_1000,
 };
 
+/// GICv2 base.
+pub const gic = Range{
+    .start = 0x0010_7FFF_8000,
+    .end = 0x0010_7FFF_C000,
+};
+
 /// PCIe
 pub const pci = Range{
     .start = 0x0010_0012_0000,

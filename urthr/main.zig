@@ -17,7 +17,7 @@ export fn kmain() callconv(.c) noreturn {
     urd.klog.set(board.getConsole());
 
     // Initialize exception handling.
-    urd.exception.initLocal();
+    urd.exception.boot();
 
     // Print a boot message.
     log.info("", .{});
@@ -67,6 +67,10 @@ fn zmain() !void {
 
     log.debug("Memory Map:", .{});
     urd.mem.debugPrintResources(log.debug);
+
+    // Setup IRQ.
+    log.debug("Setting up IRQ.", .{});
+    urd.exception.initLocal();
 
     // List partitions on the block device.
     if (board.getBlockDevice()) |dev| {
