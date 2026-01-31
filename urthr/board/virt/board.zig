@@ -1,5 +1,13 @@
 pub const memmap = @import("memmap.zig");
 
+/// Function signature of exception handler.
+///
+/// Returns null if the exception cannot be handled.
+pub const ExceptionHandler = *const fn (u64) ?void;
+
+/// Exception handler called when an IRQ occurs.
+var exception_handler: ?ExceptionHandler = null;
+
 /// Virtio block device instance.
 var virtio_blk_dev: ?dd.VirtioBlk = null;
 
@@ -28,27 +36,54 @@ pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
 pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
-    const virtio_size = dd.virtio.mmio_space_size;
-
-    // Scan for virtio-blk device.
-    const virtio_base = try mm.io.reserveAndRemap(
-        "virtio",
-        memmap.virtio.start,
-        util.roundup(memmap.virtio.size(), common.mem.size_4kib),
-        null,
-    );
-
-    for (0..(memmap.virtio.size() / virtio_size)) |i| {
-        const base = virtio_base + i * virtio_size;
-
-        // Try to initialize as virtio-blk.
-        virtio_blk_dev = dd.VirtioBlk.init(base, mm.page, mm.general) catch {
-            continue;
-        };
-
-        log.info("Found virtio-blk device#{d}", .{i});
-        break;
+    // Interrupt controller.
+    {
+        @panic("GIC not implemented");
     }
+
+    // virtio
+    {
+        const virtio_size = dd.virtio.mmio_space_size;
+
+        // Scan for virtio-blk device.
+        const virtio_base = try mm.io.reserveAndRemap(
+            "virtio",
+            memmap.virtio.start,
+            util.roundup(memmap.virtio.size(), common.mem.size_4kib),
+            null,
+        );
+
+        for (0..(memmap.virtio.size() / virtio_size)) |i| {
+            const base = virtio_base + i * virtio_size;
+
+            // Try to initialize as virtio-blk.
+            virtio_blk_dev = dd.VirtioBlk.init(base, mm.page, mm.general) catch {
+                continue;
+            };
+
+            log.info("Found virtio-blk device#{d}", .{i});
+            break;
+        }
+    }
+}
+
+/// Initialize GICC for the calling AP.
+pub fn initIrqLocal() void {
+    // Set exception handler.
+    arch.intr.setHandler(handleIrq);
+
+    // Initialize CPU interface.
+    @panic("unimplemented");
+}
+
+/// Set the exception handler for IRQs.
+pub fn setIrqHandler(f: ExceptionHandler) void {
+    exception_handler = f;
+}
+
+/// IRQ handler function.
+fn handleIrq() ?void {
+    @panic("unimplemented");
 }
 
 /// Get the block device interface.
