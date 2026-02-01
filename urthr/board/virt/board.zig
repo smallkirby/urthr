@@ -38,7 +38,20 @@ pub fn deinitLoader() void {}
 pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
     // Interrupt controller.
     {
-        @panic("GIC not implemented");
+        const gicd = try mm.io.reserveAndRemap(
+            "GICD",
+            memmap.gicd.start,
+            memmap.gicd.size(),
+            null,
+        );
+        const gicr = try mm.io.reserveAndRemap(
+            "GICR",
+            memmap.gicr.start,
+            memmap.gicr.size(),
+            null,
+        );
+        arch.gicv3.setBase(gicd, gicr);
+        arch.gicv3.initGlobal();
     }
 
     // virtio
@@ -73,7 +86,7 @@ pub fn initIrqLocal() void {
     arch.intr.setHandler(handleIrq);
 
     // Initialize CPU interface.
-    @panic("unimplemented");
+    arch.gicv3.initLocal();
 }
 
 /// Set the exception handler for IRQs.
@@ -83,7 +96,21 @@ pub fn setIrqHandler(f: ExceptionHandler) void {
 
 /// IRQ handler function.
 fn handleIrq() ?void {
-    @panic("unimplemented");
+    const intid = arch.gicv3.readIar();
+
+    if (exception_handler) |handler| {
+        if (handler(intid)) |_| {
+            // Handled successfully.
+            arch.gicv3.eoi(intid);
+            return;
+        } else {
+            // Handler for this interrupt not registered.
+            return null;
+        }
+    } else {
+        // Root handler registered.
+        return null;
+    }
 }
 
 /// Get the block device interface.
