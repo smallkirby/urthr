@@ -50,6 +50,18 @@ comptime {
 // Peripherals
 // =============================================================
 
+/// GICv3 distributor
+pub const gicd = Range{
+    .start = 0x0800_0000,
+    .end = 0x0801_0000,
+};
+
+/// GICv3 redistributor
+pub const gicr = Range{
+    .start = 0x080A_0000,
+    .end = 0x0900_0000,
+};
+
 /// PL011 UART (debug port)
 pub const pl011 = Range{
     .start = 0x0900_0000,

@@ -44,6 +44,21 @@ pub const SystemReg = enum {
     cntpct_el0,
     cntfrq_el0,
 
+    mpidr_el1,
+
+    icc_ctlr_el1,
+    icc_sre_el1,
+    icc_sre_el2,
+    icc_sre_el3,
+    icc_pmr_el1,
+    icc_bpr0_el1,
+    icc_bpr1_el1,
+    icc_igrpen1_el1,
+    icc_iar1_el1,
+    icc_dir_el1,
+    icc_eoir1_el1,
+    icc_sgi1r_el1,
+
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
         return @tagName(self);
@@ -69,6 +84,16 @@ pub const SystemReg = enum {
             .sctlr_el1 => SctlrEl1,
             .cntpct_el0 => Cntpct,
             .cntfrq_el0 => Cntfrq,
+            .mpidr_el1 => Mpidr,
+            .icc_ctlr_el1 => IccCtlr,
+            .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
+            .icc_pmr_el1 => IccPmr,
+            .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
+            .icc_igrpen1_el1 => IccIgrpen1El1,
+            .icc_iar1_el1 => IccIar1El1,
+            .icc_dir_el1 => IccDirEl1,
+            .icc_eoir1_el1 => IccEoir1El1,
+            .icc_sgi1r_el1 => IccSgi1r,
         };
     }
 };
@@ -769,4 +794,195 @@ pub const Cntfrq = packed struct(u64) {
     freq: u32,
     /// Reserved.
     _rsvd: u32 = 0,
+};
+
+/// MPIDR_EL1.
+///
+/// Multiprocessor Affinity Register.
+pub const Mpidr = packed struct(u64) {
+    /// Affinity level 0.
+    aff0: u8,
+    /// Affinity level 1.
+    aff1: u8,
+    /// Affinity level 2.
+    aff2: u8,
+    /// Whether the lowest level of affinity consists of logical PEs.
+    mt: bool,
+    /// Reserved.
+    _rsvd0: u5 = 0,
+    /// Uniprocessor system.
+    u: bool,
+    /// Reserved.
+    _rsvd1: u1 = 1,
+    /// Affinity level 3.
+    aff3: u8,
+    /// Reserved.
+    _rsvd2: u24 = 0,
+};
+
+/// ICC_CTLR_EL1.
+///
+/// Interrupt Controller Control Register.
+pub const IccCtlr = packed struct(u64) {
+    /// Common Binary Point Register.
+    cbpr: u1,
+    /// EOI mode for the current Security state.
+    ///
+    /// Controls whether a write to an EOI register also deactivates the interrupt.
+    eoimode: EoiMode,
+    /// Reserved.
+    _reserved0: u4 = 0,
+    /// Priority Mask Hint Enable.
+    pmhe: bool,
+    /// Reserved.
+    _reserved1: u1 = 0,
+    /// Priority bits.
+    pribits: u3,
+    /// Identifier bits.
+    idbits: u3,
+    /// SEI Support.
+    seis: bool,
+    /// Affinity 3 Valid.
+    a3v: bool,
+    /// Reserved.
+    _reserved2: u2 = 0,
+    /// Range Selector Support.
+    rss: u1,
+    /// Extended INTID range.
+    extrange: u1,
+    /// Reserved.
+    _reserved3: u44 = 0,
+
+    const EoiMode = enum(u1) {
+        /// Write to an EOI register both drop priority and deactivate the interrupt.
+        deactivates = 0,
+        /// Write to an EOI register only drops priority. ICC_DIR_EL1 provides a way to deactivate the interrupt.
+        no_deactivate = 1,
+    };
+};
+
+/// ICC_SRE_ELx.
+///
+/// Interrupt Controller System Register Enable Register.
+pub const IccSre = packed struct(u64) {
+    /// System Register Enable.
+    sre: bool,
+    /// Disable FIQ bypass.
+    dfb: bool,
+    /// Disable IRQ bypass.
+    dib: bool,
+    /// Enables lower Exception level access to ICC_SRE_ELx.
+    enable: bool,
+    /// Reserved.
+    _reserved: u60 = 0,
+};
+
+/// ICC_PMR_EL1.
+///
+/// Interrupt Controller Interrupt Priority Mask Register.
+pub const IccPmr = packed struct(u64) {
+    /// Priority mask.
+    priority: u8,
+    /// Reserved.
+    _reserved: u56 = 0,
+};
+
+/// ICC_BPRn_EL1. (n = 0,1)
+///
+/// Interrupt Controller Binary Point Register n.
+pub const IccBpr = packed struct(u64) {
+    /// Binary point.
+    bpr: u3,
+    /// Reserved.
+    _reserved: u61 = 0,
+};
+
+/// ICC_IGRPEN1_EL1.
+///
+/// Interrupt Controller Interrupt Group 1 Enable Register.
+pub const IccIgrpen1El1 = packed struct(u64) {
+    /// Enable Group 0 interrupts.
+    enable: bool,
+    /// Reserved.
+    _reserved: u63 = 0,
+};
+
+/// ICC_IAR1_EL1
+///
+/// The PE reads this register to obtain the INTID of the signaled Group 1 interrupt.
+/// This read acts as an acknowledge for the interrupt.
+pub const IccIar1El1 = packed struct(u64) {
+    /// The INTID of the signaled interrupt.
+    intid: u24,
+    /// Reserved.
+    _reserved: u40 = 0,
+};
+
+/// ICC_DIR1_EL1.
+///
+/// Interrupt Controller Deactivate Interrupt Register.
+///
+/// When interrupt priority drop is separated from interrupt deactivation,
+/// a write to this register deactivates the specified interrupt.
+pub const IccDirEl1 = packed struct(u64) {
+    /// The INTID of the interrupt to deactivate.
+    intid: u24,
+    /// Reserved.
+    _reserved: u40 = 0,
+};
+
+/// ICC_EOIR1_EL1.
+///
+/// A PE writes to this register to inform the CPU interface that it has completed the processing of the interrupt.
+pub const IccEoir1El1 = packed struct(u64) {
+    /// The INTID from the corresponding IAR.
+    intid: u24,
+    /// Reserved.
+    _reserved: u40 = 0,
+};
+
+/// ICC_SGI1R_EL1.
+///
+/// Interrupt Controller Software Generated Interrupt Group 1 Register.
+pub const IccSgi1r = packed struct(u64) {
+    /// Target List. Set of PEs for which SGI interrupts will be generated.
+    ///
+    /// Each bit corresponds to the PE within a cluster with an Affinity 0 value equal to the bit number.
+    target_list: u16,
+    /// Affinity level 1.
+    aff1: u8,
+    /// Interrupt ID.
+    intid: u4,
+    /// Reserved.
+    _reserved0: u4 = 0,
+    /// Affinity level 2.
+    aff2: u8,
+    /// Interrupt Routing Mode.
+    irm: Irm,
+    /// Reserved.
+    _reserved1: u3 = 0,
+    /// Range selector.
+    rs: u4 = 0,
+    /// Affinity level 3.
+    aff3: u8,
+    /// Reserved.
+    _reserved2: u8 = 0,
+
+    const Irm = enum(u1) {
+        /// Routed to the PEs specified Aff3.Aff2.Aff1.<target_list>
+        specified = 0,
+        /// Routed to all PEs in the system excluding self.
+        all = 1,
+    };
+
+    pub fn from(affi: u32, intid: u4) IccSgi1r {
+        return .{
+            .target_list = @as(u16, 1) << @as(u4, @truncate((affi >> 0) & 0xFF)),
+            .aff1 = @truncate((affi >> 8) & 0xFF),
+            .aff2 = @truncate((affi >> 16) & 0xFF),
+            .aff3 = @truncate((affi >> 24) & 0xFF),
+            .intid = intid,
+            .irm = .specified,
+        };
+    }
 };
