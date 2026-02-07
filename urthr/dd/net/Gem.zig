@@ -12,6 +12,10 @@ const gem = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0018, Rxbqb },
     .{ 0x001C, Txbqb },
     .{ 0x0020, Rsr },
+    .{ 0x0024, Isr },
+    .{ 0x0028, Ier },
+    .{ 0x002C, Idr },
+    .{ 0x0030, Imr },
     .{ 0x0034, Man },
     .{ 0x0088, Sa1b },
     .{ 0x008C, Sa1t },
@@ -19,8 +23,12 @@ const gem = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00FC, Mid },
     .{ 0x0158, Rxcnt },
     .{ 0x0280, Dconfig1 },
+    .{ 0x0400, mmio.Marker(.isr) },
     .{ 0x04C8, Txbqbh },
     .{ 0x04D4, Rxbqbh },
+    .{ 0x0600, mmio.Marker(.ier) },
+    .{ 0x0620, mmio.Marker(.idr) },
+    .{ 0x0640, mmio.Marker(.imr) },
 });
 
 const Self = @This();
@@ -31,6 +39,11 @@ module: gem,
 dma_allocator: DmaAllocator,
 /// RX queue.
 rxq: RxQueue = undefined,
+
+/// Queue index for RX.
+const rxq_idx = 0;
+/// Queue index for TX.
+const txq_idx = 1;
 
 /// MAC address type.
 const MacAddr = [6]u8;
@@ -139,29 +152,19 @@ pub fn init(self: *Self) void {
         return;
     };
 
+    // Disable all interrupts first.
+    self.setEnableIrq(rxq_idx, false);
+
+    // Clear any pending interrupt status.
+    _ = self.readClearIrq(rxq_idx);
+
+    // Enable required interrupts.
+    self.setEnableIrq(rxq_idx, true);
+
     // Enable RX.
     self.module.modify(Ncr, .{
         .re = true,
     });
-
-    // DEBUG: check RX
-    log.debug("Waiting packets...", .{});
-    arch.timer.spinWaitMilli(5000);
-    {
-        arch.cache(.invalidate, self.rxq.memory, self.rxq.memory.len);
-        //const descs: *const volatile [RxQueue.num_desc]RxQueue.Desc = @ptrCast(@alignCast(self.rxq.memory.ptr));
-        for (0..RxQueue.num_desc) |i| {
-            if (self.rxq.tryAcquireBuffer(i)) |buf| {
-                log.debug("desc#{d} owned by SW", .{i});
-                arch.cache(.invalidate, buf, buf.len);
-                common.util.hexdump(
-                    @intFromPtr(buf.ptr),
-                    common.util.roundup(buf.len, 16),
-                    log.debug,
-                );
-            }
-        }
-    }
 }
 
 /// Read the MAC address from the GEM controller.
@@ -191,6 +194,27 @@ fn setMacAddr(self: *const Self, mac: MacAddr) void {
         .mac4 = mac[4],
         .mac5 = mac[5],
     });
+}
+
+/// Enable or disable IRQ for a specific queue.
+fn setEnableIrq(self: *const Self, qidx: usize, enable: bool) void {
+    rtt.expect(qidx == 0); // Only one queue supported.
+
+    if (enable) {
+        self.module.write(Ier, std.mem.zeroInit(InterruptBf, .{
+            .rcomp = true,
+            .rxubr = true,
+        }));
+    } else {
+        self.module.write(Idr, 0xFFFF_FFFF);
+    }
+}
+
+/// Read to clear interrupt status register.
+fn readClearIrq(self: *const Self, qidx: usize) InterruptBf {
+    rtt.expect(qidx == 0); // Only one queue supported.
+
+    return self.module.read(Isr).value;
 }
 
 // =============================================================
@@ -695,6 +719,91 @@ const Rsr = packed struct(u32) {
     overrun: bool,
     /// Reserved.
     _rsvd: u29 = 0,
+};
+
+/// Bitfields for ISR, IER, IDR, and IMR registers.
+const InterruptBf = packed struct(u32) {
+    /// Management frame sent.
+    mfs: bool,
+    /// Receive complete.
+    rcomp: bool,
+    /// RX used bit read.
+    rxubr: bool,
+    /// TX used bit read.
+    txubr: bool,
+    /// TX buffer underrun.
+    tund: bool,
+    /// Retry limit exceeded.
+    rlex: bool,
+    /// TX frame corruption (AHB/AXI error).
+    txerr: bool,
+    /// Transmit complete.
+    tcomp: bool,
+
+    /// Reserved.
+    _rsvd0: u1 = 0,
+    /// Link change.
+    link: bool,
+    /// Receive overrun.
+    rovr: bool,
+    /// HRESP not OK.
+    hresp: bool,
+    /// Pause frame without quantum.
+    pfr: bool,
+    /// Pause time has reached zero.
+    ptz: bool,
+    /// Wake-on-LAN frame received.
+    wol: bool,
+    /// Reserved.
+    _rsvd1: u1 = 0,
+
+    /// Reserved.
+    _rsvd2: u2 = 0,
+    /// PTP Delay request frame received.
+    drqfr: bool,
+    /// PTP Sync frame received.
+    sfr: bool,
+    /// PTP Delay request frame transmitted.
+    drqft: bool,
+    /// PTP Sync frame transmitted.
+    sft: bool,
+    /// PDelay Request frame received.
+    pdrqfr: bool,
+    /// PDelay Response frame received.
+    pdrsfr: bool,
+
+    /// PDelay Request frame transmitted.
+    pdrqft: bool,
+    /// PDelay Response frame transmitted.
+    pdrsft: bool,
+    /// TSU seconds register increment.
+    sri: bool,
+    /// Reserved.
+    _rsvd3: u1 = 0,
+    /// Wake-on-LAN frame received.
+    wol2: bool,
+    /// Reserved.
+    _rsvd4: u3 = 0,
+};
+
+/// Interrupt status register.
+const Isr = packed struct {
+    value: InterruptBf,
+};
+
+/// Interrupt enable register.
+const Ier = packed struct {
+    value: InterruptBf,
+};
+
+/// Interrupt disable register.
+const Idr = packed struct {
+    value: InterruptBf,
+};
+
+/// Interrupt mask register.
+const Imr = packed struct {
+    value: InterruptBf,
 };
 
 /// PHY Maintenance Register.
