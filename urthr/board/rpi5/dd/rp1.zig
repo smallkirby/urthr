@@ -27,6 +27,7 @@ var rp1 = mmio.Module(.{ .size = void }, &.{
     .{ 0x000F_0000, mmio.Marker(.pad_bank0) },
     .{ 0x0010_0000, mmio.Marker(.eth) },
     .{ 0x0010_4000, mmio.Marker(.eth_cfg) },
+    .{ 0x0010_8000, mmio.Marker(.pcie) },
     .{ 0x0018_0000, mmio.Marker(.sdio0) },
     .{ 0x0018_4000, mmio.Marker(.sdio1) },
     .{ 0x0040_0000, mmio.Marker(.end) },
@@ -57,19 +58,43 @@ const dma_range = DmaRange{
 };
 const dma_offset = dma_range.axi;
 
-/// Physical address mapped to RP1 peripherals (BAR1).
-const axi_peri_base: usize = pcie1_range.start;
-/// Size in bytes of peripheral region's translation window.
-const axi_peri_window_size: usize = 0x0040_0000;
-/// Physical address mapped to RP1 Shared SRAM (BAR2).
-const axi_sram_base: usize = axi_peri_base + axi_peri_window_size;
-/// Size in bytes of Shared SRAM's translation window.
-const axi_sram_window_size: usize = 0x0040_0000;
+/// RP1 peripherals (BAR1).
+const peri_range = DmaRange{
+    .pci = 0,
+    .axi = pcie1_range.start,
+    .size = 0x0040_0000,
+};
+/// RP1 Shared SRAM (BAR2).
+const sram_range = DmaRange{
+    .pci = peri_range.pci + peri_range.size,
+    .axi = peri_range.axi + peri_range.size,
+    .size = 0x0040_0000,
+};
+/// RP1 MSI-X table (BAR0).
+const msix_range = DmaRange{
+    .pci = sram_range.pci + sram_range.size,
+    .axi = sram_range.axi + sram_range.size,
+    .size = 0x0001_0000,
+};
+/// MIPS0 interrupt controller.
+const mips0_range = DmaRange{
+    .pci = 0xFF_FFFF_F000,
+    .axi = 0x10_0013_0000,
+    .size = 0x0000_1000,
+};
 
-comptime {
-    common.comptimeAssert(axi_peri_base % units.mib == 0, null);
-    common.comptimeAssert((axi_peri_base / units.mib) >> 20 == 0, null);
-}
+/// RP1 IRQ number.
+const MsiIrq = enum(u8) {
+    /// Ethernet.
+    eth = 6,
+};
+
+/// Virtual address base of RP1 peripherals.
+var vperi: usize = undefined;
+/// Virtual address base of RP1 Shared SRAM.
+var vsram: usize = undefined;
+/// Virtual address of MSI-X table.
+var vmsix: usize = undefined;
 
 // =============================================================
 // API
@@ -100,15 +125,20 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     var bars = dd.pci.parseBars(confio, &bars_buffer);
     for (bars) |bar| {
         switch (bar.index) {
+            0 => {
+                // MSI-X table and PBA
+                rtt.expectEqual(.mem32, bar.type);
+                bar.setAddress(msix_range.pci, confio);
+            },
             1 => {
                 // Peripherals
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(0, confio);
+                bar.setAddress(peri_range.pci, confio);
             },
             2 => {
                 // Shared SRAM
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(axi_peri_window_size, confio);
+                bar.setAddress(sram_range.pci, confio);
             },
             else => {},
         }
@@ -123,13 +153,14 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         );
     }
 
-    // Setup translation windows.
+    // Setup translation windows (BAR1 + BAR2 + BAR0).
     pcie.setOutTranslation(
-        axi_peri_base,
+        peri_range.axi,
         0,
-        axi_peri_window_size + axi_sram_window_size,
+        common.util.roundup(peri_range.size + sram_range.size + msix_range.size, units.mib),
         0,
     );
+
     // Setup inbound translation.
     pcie.setInTranslation(
         dma_range.pci,
@@ -137,38 +168,57 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         dma_range.size,
         2,
     );
+    pcie.setInTranslation(
+        mips0_range.pci,
+        mips0_range.axi,
+        mips0_range.size,
+        1,
+    );
 
     // Set configuration header.
     confio.modify(dd.pci.HeaderCommandStatus, .{
         .memory_space_enable = true,
         .bus_master_enable = true,
-        .interrupt_disable = true,
+        .interrupt_disable = false,
     });
 
-    // Map peripheral and shared SRAM region.
+    // Map peripheral, SRAM, and MSI-X table region.
     const res_peri = try allocator.reserve(
         "RP1 PCIe Peripherals",
-        axi_peri_base,
-        axi_peri_window_size,
+        peri_range.axi,
+        peri_range.size,
         null,
     );
     const res_sram = try allocator.reserve(
         "RP1 PCIe Shared SRAM",
-        axi_sram_base,
-        axi_sram_window_size,
+        sram_range.axi,
+        sram_range.size,
         null,
     );
-    const vperi = try allocator.ioremap(
+    const res_msix = try allocator.reserve(
+        "RP1 PCIe MSI-X Table",
+        msix_range.axi,
+        msix_range.size,
+        null,
+    );
+    vperi = try allocator.ioremap(
         res_peri.phys,
         res_peri.size,
     );
-    const vsram = try allocator.ioremap(
+    vsram = try allocator.ioremap(
         res_sram.phys,
         res_sram.size,
+    );
+    vmsix = try allocator.ioremap(
+        res_msix.phys,
+        res_msix.size,
     );
 
     // Set RP1 module base.
     rp1.setBase(vperi);
+
+    // Setup MSI-X.
+    try setupMsix(allocator);
 
     // Map modules.
     try mapPeris(allocator, res_peri);
@@ -303,6 +353,114 @@ fn mapPeris(allocator: IoAllocator, root: *IoAllocator.Resource) IoAllocator.Err
         0x0000_4000,
         root,
     );
+}
+
+/// MIP module definition.
+const Mip = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x020, mmio.Marker(.int_cfgl_host) },
+    .{ 0x030, mmio.Marker(.int_cfgh_host) },
+    .{ 0x040, mmio.Marker(.int_maskl_host) },
+    .{ 0x050, mmio.Marker(.int_maskh_host) },
+    .{ 0x060, mmio.Marker(.int_maskl_vcpu) },
+    .{ 0x070, mmio.Marker(.int_maskh_vcpu) },
+});
+
+/// PCIe endpoint configuration module definition.
+const PcieCfg = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x008, mmio.Marker(.msix_cfgs) },
+});
+
+/// MSI-X Configuration Register.
+const MsixCfg = packed struct(u32) {
+    /// Interrupt enable.
+    enable: bool,
+    /// ORed with interrupt source for test purposes.
+    testor: bool,
+    /// Interrupt acknowledge.
+    ///
+    /// Writing a 1 clears the interrupt mask that was automatically set when the interrupt was generated.
+    iack: bool,
+    /// Enable IACK functionality.
+    iack_en: bool,
+    /// Reserved.
+    _rsvd0: u8 = 0,
+    /// PCIe traffic class.
+    tc: u3,
+    /// Reserved.
+    _rsvd1: u1 = 0,
+    /// PCIe function.
+    func: u3,
+    /// Reserved.
+    _rsvd2: u13 = 0,
+};
+
+/// Setup MSI-X.
+fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
+    var confio = pcie.getConfIoType0();
+    confio.setAddress(1, 0, 0);
+
+    // Check for MSI-X capability.
+    const msix = dd.pci.parseMsixConfig(confio) orelse
+        @panic("RP1 does not support MSI-X");
+
+    log.debug("MSI-X table: size={d}, BAR={d}", .{
+        msix.table_size,
+        msix.table_bar,
+    });
+
+    // Unmask interrupts.
+    {
+        const mip0_base = try allocator.ioremap(
+            mips0_range.axi,
+            mips0_range.size,
+        );
+        // TODO: deallocate the I/O region.
+        // defer allocator.iounmap(mip0_base, mips0_range.size);
+
+        var mip0 = Mip.new(mip0_base);
+        // Unmask all for the host.
+        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskl_host))).* = 0;
+        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskh_host))).* = 0;
+        // Mask all for the VPU and edge-triggered.
+        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskl_vcpu))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskh_vcpu))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_cfgl_host))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_cfgh_host))).* = 0xFFFF_FFFF;
+    }
+
+    // Setup MSI-X table entries.
+    {
+        const table = dd.pci.MsixTable{
+            .base = vmsix + msix.table_offset,
+        };
+
+        // Ethernet
+        const irq_eth: u32 = @intFromEnum(MsiIrq.eth);
+        table.setEntry(irq_eth, mips0_range.pci, irq_eth);
+        table.maskEntry(irq_eth, false);
+    }
+
+    // Setup PCIe MSI-X configuration.
+    {
+        const cfg = PcieCfg.new(rp1.getMarkerAddress(.pcie));
+
+        // Ethernet
+        msixConfigSet(cfg, .eth, std.mem.zeroInit(MsixCfg, .{
+            .enable = true,
+            .iack_en = true,
+        }));
+    }
+
+    // Enable global.
+    dd.pci.enableMsix(confio, msix.cap_offset);
+}
+
+/// Set MSI-X configuration register.
+fn msixConfigSet(cfg: PcieCfg, irq: MsiIrq, value: MsixCfg) void {
+    const set_offset = 0x800;
+    const ptr: [*]volatile u32 = @ptrFromInt(cfg.getMarkerAddress(.msix_cfgs) + set_offset);
+
+    ptr[@intFromEnum(irq)] = @bitCast(value);
 }
 
 // =============================================================

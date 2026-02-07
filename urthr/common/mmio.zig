@@ -108,6 +108,13 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
         /// Timer implementation for wait operations.
         _timer: ?Timer = null,
 
+        /// Create a new module instance.
+        pub fn new(base: usize) Self {
+            return .{
+                .base = base,
+            };
+        }
+
         /// Set the base address of this register.
         pub fn setBase(self: *Self, base: usize) void {
             self.base = base;
