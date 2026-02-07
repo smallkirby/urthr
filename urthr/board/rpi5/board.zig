@@ -141,6 +141,8 @@ fn handleIrq() ?void {
     const iar = arch.gicv2.readIar();
     const intid = iar.interrupt_id;
 
+    log.debug("IRQ#{d} received", .{intid});
+
     if (exception_handler) |handler| {
         if (handler(intid)) |_| {
             // Handled successfully.
@@ -148,10 +150,12 @@ fn handleIrq() ?void {
             return;
         } else {
             // Handler for this interrupt not registered.
+            arch.gicv2.eoi(iar);
             return null;
         }
     } else {
-        // Root handler registered.
+        // No root handler registered.
+        arch.gicv2.eoi(iar);
         return null;
     }
 }

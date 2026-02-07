@@ -306,6 +306,174 @@ pub fn parseBars(confio: anytype, out: []BarInfo) []const BarInfo {
 }
 
 // =============================================================
+// Capability API
+// =============================================================
+
+// =========================================================
+// Generic
+
+/// PCI Capability IDs.
+pub const CapId = enum(u8) {
+    /// MSI-X
+    msix = 0x11,
+
+    _,
+};
+
+/// Generic capability header.
+pub const CapHeader = packed struct(u32) {
+    /// Capability ID.
+    id: CapId,
+    /// Next Capability Pointer.
+    next: u8,
+    /// Capability-specific data.
+    _rsvd: u16,
+};
+
+/// Find a capability by ID in the configuration space.
+///
+/// Returns the offset of the capability, or null if not found.
+pub fn findCapability(confio: anytype, cap_id: CapId) ?u8 {
+    const status = confio.read(HeaderCommandStatus);
+    if (!status.capabilities_list) return null;
+
+    var offset = confio.read(HeaderCapPtr).cap_ptr;
+    while (offset != 0) {
+        const header = confio.readRawAt(offset, CapHeader);
+        if (header.id == cap_id) {
+            return offset;
+        }
+        offset = header.next;
+    } else return null;
+}
+
+// =========================================================
+// MSI-X
+
+/// MSI-X Capability Structure.
+const MsixCap = packed struct(u32) {
+    /// Capability ID.
+    id: CapId = .msix,
+    /// Next Capability Pointer.
+    next: u8,
+
+    /// Table Size - 1.
+    table_size: u11,
+    /// Reserved.
+    _rsvd: u3 = 0,
+    /// Global Function Mask.
+    function_mask: bool,
+    /// MSI-X Enable.
+    enabled: bool,
+};
+
+/// MSI-X Table Offset/BIR.
+const MsixTableOffset = packed struct(u32) {
+    /// BAR Indicator Register.
+    bir: u3,
+    /// Offset within the BAR (8-byte aligned).
+    offset: u29,
+};
+
+/// MSI-X PBA BIR and Offset.
+const MsixPbaOffset = packed struct(u32) {
+    /// BAR Indicator Register.
+    bir: u3,
+    /// Offset within the BAR.
+    offset: u29,
+};
+
+/// MSI-X Table Entry.
+const MsixTableEntry = packed struct(u128) {
+    /// Message Address (lower 32 bits).
+    msg_addr_lo: u32,
+    /// Message Address (upper 32 bits).
+    msg_addr_hi: u32,
+    /// Message Data.
+    msg_data: u32,
+    /// Reserved.
+    _rsvd: u31 = 0,
+    /// Vector Control.
+    masked: bool,
+};
+
+/// MSI-X configuration.
+pub const MsixConfig = struct {
+    /// Offset of the MSI-X capability in config space.
+    cap_offset: u8,
+    /// BAR index containing the MSI-X table.
+    table_bar: u3,
+    /// Offset of the table within the BAR.
+    table_offset: usize,
+    /// Table size.
+    table_size: u12,
+    /// BAR index containing the PBA.
+    pba_bar: u3,
+    /// Offset of the PBA within the BAR.
+    pba_offset: usize,
+};
+
+/// Parse MSI-X configuration.
+///
+/// Returns null if MSI-X capability is not found.
+pub fn parseMsixConfig(confio: anytype) ?MsixConfig {
+    const offset = findCapability(confio, .msix) orelse return null;
+
+    const cap = confio.readRawAt(offset + 0, MsixCap);
+    const tbloff = confio.readRawAt(offset + 4, MsixTableOffset);
+    const pbaoff = confio.readRawAt(offset + 8, MsixPbaOffset);
+
+    return .{
+        .cap_offset = offset,
+        .table_bar = tbloff.bir,
+        .table_offset = @as(usize, tbloff.offset) << 3,
+        .table_size = cap.table_size + 1,
+        .pba_bar = pbaoff.bir,
+        .pba_offset = @as(usize, pbaoff.offset) << 3,
+    };
+}
+
+/// Enable MSI-X for the device.
+pub fn enableMsix(confio: anytype, cap_offset: u8) void {
+    const val = confio.readRawAt(cap_offset, u32);
+    // Set MSI-X Enable bit (bit 31), clear Function Mask (bit 30).
+    confio.writeRawAt(cap_offset, (val | (1 << 31)) & ~@as(u32, 1 << 30));
+}
+
+/// Disable MSI-X for the device.
+pub fn disableMsix(confio: anytype, cap_offset: u8) void {
+    const val = confio.readRawAt(cap_offset, u32);
+    // Clear MSI-X Enable bit (bit 31).
+    confio.writeRawAt(cap_offset, val & ~@as(u32, 1 << 31));
+}
+
+/// Setter for MSI-X Table entry.
+pub const MsixTable = struct {
+    /// Virtual address of MSI-X table.
+    base: usize,
+
+    /// Set MSI-X table entry at the given index.
+    pub fn setEntry(self: MsixTable, index: usize, addr: u64, data: u32) void {
+        const entry: [*]volatile u32 = @ptrFromInt(self.base);
+
+        entry[index * 4 + 0] = bits.extract(u32, addr, 0);
+        entry[index * 4 + 1] = bits.extract(u32, addr, 32);
+        entry[index * 4 + 2] = data;
+    }
+
+    /// Mask or unmask the MSI-X entry at the given index.
+    pub fn maskEntry(self: MsixTable, index: usize, mask: bool) void {
+        const entry: [*]volatile u32 = @ptrFromInt(self.base);
+        const vec_ctrl = entry[index * 4 + 3];
+
+        entry[index * 4 + 3] = if (mask)
+            bits.set(vec_ctrl, 0)
+        else
+            bits.unset(vec_ctrl, 0);
+    }
+};
+
+// =============================================================
 // PCIe Configuration Header
 // =============================================================
 

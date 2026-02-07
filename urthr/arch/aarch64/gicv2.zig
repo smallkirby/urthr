@@ -44,6 +44,21 @@ pub fn initLocal() void {
     asm volatile ("isb");
 }
 
+/// Enable the specified interrupt ID.
+pub fn enableIrq(id: usize) void {
+    gicd.setEnable(id, true);
+}
+
+/// Disable the specified interrupt ID.
+pub fn disableIrq(id: usize) void {
+    gicd.setEnable(id, false);
+}
+
+/// Set the trigger type of the specified interrupt ID.
+pub fn setTrigger(id: usize, trigger: gicd.Trigger) void {
+    gicd.setTriggerType(id, trigger);
+}
+
 /// Send a SGI to the specified interfaces.
 pub fn sendSgi(id: u4, target: []const u8) void {
     gicd.sendSgi(id, target);
