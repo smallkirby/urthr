@@ -579,6 +579,8 @@ fn processRxPackets(self: *Self) void {
             desc.setHwOwn();
         }
     }
+
+    self.rxq.flushCache();
 }
 
 // =============================================================
