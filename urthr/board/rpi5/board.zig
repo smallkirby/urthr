@@ -8,6 +8,9 @@ pub const ExceptionHandler = *const fn (u64) ?void;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
+/// GEM controller instance.
+var gem: dd.net.Gem = undefined;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -112,13 +115,22 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
     log.info("Initializing Ethernet.", .{});
     {
         rdd.ether.setBase(rdd.rp1.getEthrBase(), rdd.rp1.getEthrCfgBase());
-        rdd.ether.resetPhy();
 
-        var gem = dd.net.Gem.new(
+        // Initialize Ethernet MAC.
+        rdd.ether.resetPhy();
+        gem = dd.net.Gem.new(
             rdd.rp1.getEthrBase(),
             rdd.pcie.getDmaAllocator(),
         );
         gem.init();
+
+        // Register interrupt handler.
+        const gem_intid = rdd.rp1.getIrqNumber(.eth);
+        urd.exception.setHandler(gem_intid, handleGemIrq) catch |err| {
+            log.err("Failed to register GEM IRQ handler: {}", .{err});
+        };
+        arch.gicv2.setTrigger(gem_intid, .edge);
+        arch.gicv2.enableIrq(gem_intid);
     }
 }
 
@@ -158,6 +170,13 @@ fn handleIrq() ?void {
         arch.gicv2.eoi(iar);
         return null;
     }
+}
+
+/// Handle GEM interrupt.
+fn handleGemIrq() void {
+    gem.handleInterrupt();
+
+    rdd.rp1.ackMsix(.eth);
 }
 
 /// Get the block device interface.
@@ -220,3 +239,4 @@ const MemoryManager = mem.MemoryManager;
 const IoAllocator = mem.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");
+const urd = @import("urthr");

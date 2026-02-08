@@ -6,12 +6,8 @@ pub const Error = error{
 /// Interrupt handler function signature.
 pub const Handler = *const fn () void;
 
-/// Interrupt vector table defined by Norn.
-pub const Vector = enum(u16) {
-    hoge = 1,
-    /// Spurious interrupt.
-    spurious = num_interrupts - 1,
-};
+/// Interrupt vector number.
+pub const Vector = u16;
 
 /// Number of supported exceptions.
 const num_interrupts = 512;
@@ -56,10 +52,10 @@ fn call(vector: u64) ?void {
 ///
 /// Fails if a handler is already registered for the vector.
 pub fn setHandler(vector: Vector, handler: Handler) Error!void {
-    if (handlers[@intFromEnum(vector)] != null) {
+    if (handlers[vector] != null) {
         return Error.AlreadyRegistered;
     }
-    handlers[@intFromEnum(vector)] = handler;
+    handlers[vector] = handler;
 }
 
 // =============================================================
