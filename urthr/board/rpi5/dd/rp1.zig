@@ -76,8 +76,8 @@ const msix_range = DmaRange{
     .axi = sram_range.axi + sram_range.size,
     .size = 0x0001_0000,
 };
-/// MIPS0 interrupt controller.
-const mips0_range = DmaRange{
+/// MIP0 interrupt controller.
+const mip0_range = DmaRange{
     .pci = 0xFF_FFFF_F000,
     .axi = 0x10_0013_0000,
     .size = 0x0000_1000,
@@ -92,8 +92,8 @@ const MsiIrq = enum(u8) {
 /// SPI interrupts offset.
 const spi_offset = 32;
 
-/// Offset of MIPS0's SPI interrupts.
-const mips0_spi_offset = 128;
+/// Offset of MIP0's SPI interrupts.
+const mip0_spi_offset = 128;
 
 /// Virtual address base of RP1 peripherals.
 var vperi: usize = undefined;
@@ -175,9 +175,9 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
         2,
     );
     pcie.setInTranslation(
-        mips0_range.pci,
-        mips0_range.axi,
-        mips0_range.size,
+        mip0_range.pci,
+        mip0_range.axi,
+        mip0_range.size,
         1,
     );
 
@@ -281,7 +281,7 @@ pub fn getEthrCfgBase() usize {
 
 /// Get the IRQ number of RP1 peripherals.
 pub fn getIrqNumber(irq: MsiIrq) u16 {
-    return @intFromEnum(irq) + mips0_spi_offset + spi_offset;
+    return @intFromEnum(irq) + mip0_spi_offset + spi_offset;
 }
 
 /// Map peripherals of RP1.
@@ -422,11 +422,11 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
     // Unmask interrupts.
     {
         const mip0_base = try allocator.ioremap(
-            mips0_range.axi,
-            mips0_range.size,
+            mip0_range.axi,
+            mip0_range.size,
         );
         // TODO: deallocate the I/O region.
-        // defer allocator.iounmap(mip0_base, mips0_range.size);
+        // defer allocator.iounmap(mip0_base, mip0_range.size);
 
         var mip0 = Mip.new(mip0_base);
         // Unmask all for the host.
@@ -447,7 +447,7 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
 
         // Ethernet
         const irq_eth: u32 = @intFromEnum(MsiIrq.eth);
-        table.setEntry(irq_eth, mips0_range.pci, irq_eth);
+        table.setEntry(irq_eth, mip0_range.pci, irq_eth);
         table.maskEntry(irq_eth, false);
     }
 
