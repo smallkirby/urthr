@@ -210,11 +210,14 @@ fn setEnableIrq(self: *const Self, qidx: usize, enable: bool) void {
     }
 }
 
-/// Read to clear interrupt status register.
+/// Read and clear interrupt status register.
 fn readClearIrq(self: *const Self, qidx: usize) InterruptBf {
     rtt.expect(qidx == 0); // Only one queue supported.
 
-    return self.module.read(Isr).value;
+    const status = self.module.read(Isr);
+    self.module.write(Isr, status);
+
+    return status.value;
 }
 
 // =============================================================
@@ -232,7 +235,7 @@ const RxQueue = struct {
     allocator: DmaAllocator,
 
     /// Number of descriptors.
-    const num_desc = buffer_size / @sizeOf(Desc);
+    pub const num_desc = buffer_size / @sizeOf(Desc);
     /// RX buffer size
     const buffer_size = 2048;
 
@@ -334,6 +337,16 @@ const RxQueue = struct {
         }
 
         arch.cache(.clean, self.memory, self.memory.len);
+    }
+
+    /// Invalidate cache for RX descriptors.
+    pub fn invalidateCache(self: *const RxQueue) void {
+        arch.cache(.invalidate, self.memory.ptr, self.memory.len);
+    }
+
+    /// Flush cache for RX descriptors.
+    pub fn flushCache(self: *const RxQueue) void {
+        arch.cache(.clean, self.memory.ptr, self.memory.len);
     }
 
     /// Get a RX buffer if it has been consumed by MAC.
@@ -537,6 +550,36 @@ const Stat1000 = packed struct(u16) {
     /// Master / Slave resolution failure.
     msfail: bool,
 };
+
+// =============================================================
+// Interrupt Handling
+// =============================================================
+
+/// Handle interrupt from GEM controller.
+pub fn handleInterrupt(self: *Self) void {
+    const status = self.readClearIrq(rxq_idx);
+
+    if (status.rcomp) {
+        self.processRxPackets();
+    }
+}
+
+/// Process received RX packets and return descriptors to HW.
+fn processRxPackets(self: *Self) void {
+    self.rxq.invalidateCache();
+
+    const descs = self.rxq.getDescs();
+    for (descs, 0..) |*desc, i| {
+        if (self.rxq.tryAcquireBuffer(i)) |data| {
+            // TODO: process received packet.
+            log.debug("RXQ#{d} received packet:", .{i});
+            common.util.hexdump(data, data.len, log.debug);
+
+            // Return descriptor to HW.
+            desc.setHwOwn();
+        }
+    }
+}
 
 // =============================================================
 // Registers

@@ -89,6 +89,12 @@ const MsiIrq = enum(u8) {
     eth = 6,
 };
 
+/// SPI interrupts offset.
+const spi_offset = 32;
+
+/// Offset of MIPS0's SPI interrupts.
+const mips0_spi_offset = 128;
+
 /// Virtual address base of RP1 peripherals.
 var vperi: usize = undefined;
 /// Virtual address base of RP1 Shared SRAM.
@@ -271,6 +277,11 @@ pub fn getEthrBase() usize {
 /// Get the base address of Ethernet configuration registers.
 pub fn getEthrCfgBase() usize {
     return rp1.getMarkerAddress(.eth_cfg);
+}
+
+/// Get the IRQ number of RP1 peripherals.
+pub fn getIrqNumber(irq: MsiIrq) u16 {
+    return @intFromEnum(irq) + mips0_spi_offset + spi_offset;
 }
 
 /// Map peripherals of RP1.
@@ -461,6 +472,15 @@ fn msixConfigSet(cfg: PcieCfg, irq: MsiIrq, value: MsixCfg) void {
     const ptr: [*]volatile u32 = @ptrFromInt(cfg.getMarkerAddress(.msix_cfgs) + set_offset);
 
     ptr[@intFromEnum(irq)] = @bitCast(value);
+}
+
+/// Acknowledge MSI-X interrupt.
+pub fn ackMsix(irq: MsiIrq) void {
+    const cfg = PcieCfg.new(rp1.getMarkerAddress(.pcie));
+
+    msixConfigSet(cfg, irq, std.mem.zeroInit(MsixCfg, .{
+        .iack = true,
+    }));
 }
 
 // =============================================================
