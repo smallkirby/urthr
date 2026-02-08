@@ -214,5 +214,6 @@ const board = @import("board").impl;
 const board_name = @import("board").description();
 const map = board.memmap;
 const common = @import("common");
-const vmemmap = @import("vmemmap");
 const Range = common.Range;
+const urd = @import("urthr");
+const vmemmap = urd.mem.vmap;

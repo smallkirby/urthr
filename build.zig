@@ -173,21 +173,13 @@ pub fn build(b: *std.Build) !void {
 
         break :blk module;
     };
+    board_module.addImport("urthr", urthr_module);
 
     // =============================================================
     // Tools
     // =============================================================
 
     const tools_target = b.standardTargetOptions(.{});
-
-    const vmemmmap_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("urthr/kernel/mem/vmemmap.zig"),
-        });
-        module.addImport("common", common_module);
-
-        break :blk module;
-    };
 
     const mkimg = blk: {
         const exe = b.addExecutable(.{
@@ -212,9 +204,9 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
             }),
         });
+        exe.root_module.addImport("urthr", urthr_module);
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("common", common_module);
-        exe.root_module.addImport("vmemmap", vmemmmap_module);
 
         break :blk exe;
     };

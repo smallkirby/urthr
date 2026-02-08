@@ -1,6 +1,7 @@
 pub const Error = common.mem.Error;
 
 pub const vallocator = @import("mem/vallocator.zig");
+pub const vmap = @import("mem/vmemmap.zig");
 
 /// Virtual address type.
 pub const Virt = usize;
@@ -193,7 +194,6 @@ const IoAllocator = common.mem.IoAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
 const pmap = board.memmap;
-const vmap = @import("mem/vmemmap.zig");
 const BinAllocator = @import("mem/BinAllocator.zig");
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
 const PhysAllocator = @import("mem/PhysAllocator.zig");
