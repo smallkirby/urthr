@@ -51,6 +51,9 @@ const MacAddr = [6]u8;
 /// Default MAC address value.
 const default_mac: MacAddr = [_]u8{ 0xB8, 0x27, 0xEB, 0x00, 0x00, 0x00 };
 
+/// Maximum Transmission Unit in bytes including header.
+pub const mtu = 1500 + 14; // Ethernet MTU + Ethernet header
+
 /// Create a new GEM instance.
 ///
 /// Memory allocated for this driver will be managed by the given memory manager.
@@ -230,6 +233,8 @@ const RxQueue = struct {
     memory: []u8,
     /// List of bus address of RX buffer.
     buffers: [num_desc]DmaAllocator.BusAddress,
+    /// Next descriptor index to start searching for received packets.
+    next_idx: usize = 0,
 
     /// DMA allocator that manages the memory.
     allocator: DmaAllocator,
@@ -351,18 +356,49 @@ const RxQueue = struct {
 
     /// Get a RX buffer if it has been consumed by MAC.
     ///
+    /// The descriptor is still owned by MAC.
+    ///
     /// Returns null if the buffer is still owned by MAC.
-    pub fn tryAcquireBuffer(self: *const RxQueue, index: usize) ?[]const u8 {
+    fn tryAcquireBuffer(self: *const RxQueue, index: usize) ?[]const u8 {
         const desc = &self.getDescs()[index];
 
         if (desc.swOwns()) {
             const ptr = self.allocator.translateV(self.buffers[index], [*]const u8);
             const len = desc.ctrl_stat.frmlen;
             arch.cache(.invalidate, ptr, len);
+
             return ptr[0..len];
         } else {
             return null;
         }
+    }
+
+    /// Find and acquire the next received packet if available.
+    ///
+    /// Received packet is copied into the given buffer and its descriptor is returned to HW.
+    ///
+    /// If the buffer size is smaller than the received packet size,
+    /// only the data that fits in the buffer is copied.
+    /// Returns null if no packet is available in the queue.
+    pub fn tryAcquireRx(self: *RxQueue, buf: []u8) ?[]const u8 {
+        arch.cache(.invalidate, self.memory.ptr, self.memory.len);
+
+        for (0..num_desc) |i| {
+            const idx = (self.next_idx + i) % num_desc;
+            if (self.tryAcquireBuffer(idx)) |data| {
+                // Copy data to the given buffer.
+                const length = @min(data.len, buf.len);
+                @memcpy(buf[0..length], data[0..length]);
+
+                // Return descriptor to HW.
+                const desc = &self.getDescs()[idx];
+                desc.setHwOwn();
+                arch.cache(.clean, desc, @sizeOf(Desc));
+
+                self.next_idx = (idx + 1) % num_desc;
+                return buf[0..length];
+            }
+        } else return null;
     }
 
     /// Get the DMA address of the RX queue.
@@ -412,6 +448,16 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
     self.module.write(Rxbqb, @as(u32, @truncate(rxq_dma)));
 
     arch.barrier(.full, .release);
+}
+
+/// Get the next received packet if available.
+///
+/// Calling this function clears the IRQ status for RX.
+/// Therefore, caller must ensure until this function returns null not to miss any incoming packets.
+pub fn tryGetRx(self: *Self, buf: []u8) ?[]const u8 {
+    _ = self.readClearIrq(rxq_idx);
+
+    return self.rxq.tryAcquireRx(buf);
 }
 
 // =============================================================
@@ -550,38 +596,6 @@ const Stat1000 = packed struct(u16) {
     /// Master / Slave resolution failure.
     msfail: bool,
 };
-
-// =============================================================
-// Interrupt Handling
-// =============================================================
-
-/// Handle interrupt from GEM controller.
-pub fn handleInterrupt(self: *Self) void {
-    const status = self.readClearIrq(rxq_idx);
-
-    if (status.rcomp) {
-        self.processRxPackets();
-    }
-}
-
-/// Process received RX packets and return descriptors to HW.
-fn processRxPackets(self: *Self) void {
-    self.rxq.invalidateCache();
-
-    const descs = self.rxq.getDescs();
-    for (descs, 0..) |*desc, i| {
-        if (self.rxq.tryAcquireBuffer(i)) |data| {
-            // TODO: process received packet.
-            log.debug("RXQ#{d} received packet:", .{i});
-            common.util.hexdump(data, data.len, log.debug);
-
-            // Return descriptor to HW.
-            desc.setHwOwn();
-        }
-    }
-
-    self.rxq.flushCache();
-}
 
 // =============================================================
 // Registers
