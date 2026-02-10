@@ -233,11 +233,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     rp1fw.setBase(vsram);
 
     // Init mailbox.
-    const vmb = try allocator.ioremap(
-        res_peri.phys + rp1.getMarkerOffset(.syscfg),
-        0x0000_4000,
-    );
-    rp1mb.init(vmb);
+    rp1mb.init(rp1.getMarkerAddress(.syscfg));
 
     // Get FW version.
     const rp1version = rp1fw.getVersion();
