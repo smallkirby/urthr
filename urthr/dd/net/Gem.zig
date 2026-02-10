@@ -142,7 +142,7 @@ pub fn init(self: *Self) void {
         .spd = false,
         .gbe = true,
         .fd = lpa.fd,
-        .caf = true, // TODO: Promiscuous for now
+        .caf = false,
         .dbw = 2,
     });
 
