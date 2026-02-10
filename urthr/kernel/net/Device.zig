@@ -16,6 +16,8 @@ vtable: Vtable,
 mtu: u16,
 /// Flags of the network device.
 flags: Flag,
+/// Device-specific address.
+addr: [max_addr_len]u8,
 /// Network device type.
 dev_type: Type,
 /// Logical interfaces associated with this device.
@@ -23,6 +25,9 @@ netif: Interface.InterfaceList = .{},
 
 /// List head for linking network devices.
 list_head: DeviceList.Head = .{},
+
+/// Maximum length of the device address.
+pub const max_addr_len = 32;
 
 /// List type of network devices.
 pub const DeviceList = common.typing.InlineDoublyLinkedList(Self, "list_head");
@@ -35,6 +40,8 @@ pub const Flag = struct {
 
 /// Network device type.
 pub const Type = enum {
+    /// Ethernet device.
+    ether,
     /// Loopback device.
     loopback,
 };

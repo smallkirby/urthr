@@ -61,6 +61,10 @@ fn zmain() !void {
     log.info("Remapping board I/O memory.", .{});
     try urd.mem.remapBoard();
 
+    // Initialize networking stack.
+    log.debug("Initializing networking stack.", .{});
+    urd.net.init();
+
     // Initialize peripherals.
     log.info("Initializing peripherals.", .{});
     try board.initPeripherals(urd.mem.getAllocators());

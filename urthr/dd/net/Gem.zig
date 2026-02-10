@@ -51,8 +51,10 @@ const MacAddr = [6]u8;
 /// Default MAC address value.
 const default_mac: MacAddr = [_]u8{ 0xB8, 0x27, 0xEB, 0x00, 0x00, 0x00 };
 
+/// Maximum Transmission Unit in bytes.
+pub const mtu = 1500;
 /// Maximum Transmission Unit in bytes including header.
-pub const mtu = 1500 + 14; // Ethernet MTU + Ethernet header
+pub const mtu_all = mtu + 14; // + Ethernet header
 
 /// Create a new GEM instance.
 ///
@@ -171,7 +173,7 @@ pub fn init(self: *Self) void {
 }
 
 /// Read the MAC address from the GEM controller.
-fn getMacAddr(self: *const Self) MacAddr {
+pub fn getMacAddr(self: *const Self) MacAddr {
     const sa1b = self.module.read(Sa1b);
     const sa1t = self.module.read(Sa1t);
 

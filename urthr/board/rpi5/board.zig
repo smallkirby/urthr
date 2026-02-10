@@ -10,6 +10,8 @@ var exception_handler: ?ExceptionHandler = null;
 
 /// GEM controller instance.
 var gem: dd.net.Gem = undefined;
+/// GEM network device instance.
+var gemdev: *net.Device = undefined;
 
 /// Early board initialization.
 ///
@@ -46,7 +48,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
+pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     // Interrupt controller.
     {
         arch.gicv2.setBase(try mm.io.reserveAndRemap(
@@ -131,6 +133,21 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         };
         arch.gicv2.setTrigger(gem_intid, .edge);
         arch.gicv2.enableIrq(gem_intid);
+
+        // Register network device.
+        // TODO: should we register a device here?
+        gemdev = GemDevice.new(mm.general) catch {
+            @panic("Failed to create GEM network device");
+        };
+        urd.net.registerDevice(gemdev);
+
+        // TODO: should we create an interface here?
+        const ipif = try urd.net.ip.createInterface(
+            net.ip.IpAddr.from("127.1.2.3") catch unreachable, // TODO
+            net.ip.IpAddr.from("255.255.255.0") catch unreachable, // TODO
+            mm.general,
+        );
+        try gemdev.appendInterface(ipif);
     }
 }
 
@@ -174,10 +191,10 @@ fn handleIrq() ?void {
 
 /// Handle GEM interrupt.
 fn handleGemIrq() void {
-    var buffer: [dd.net.Gem.mtu]u8 = undefined;
+    var buffer: [dd.net.Gem.mtu_all]u8 = undefined;
 
     while (gem.tryGetRx(&buffer)) |data| {
-        common.util.hexdump(data, data.len, log.debug);
+        net.ether.inputFrame(gemdev, data);
     }
 
     rdd.rp1.ackMsix(.eth);
@@ -230,11 +247,56 @@ const console = struct {
 };
 
 // =============================================================
+// Network
+// =============================================================
+
+const GemDevice = struct {
+    const Self = @This();
+
+    const vtable = net.Device.Vtable{
+        .open = null,
+        .output = outputImpl,
+    };
+
+    /// Create a new GEM network device.
+    pub fn new(allocator: Allocator) net.Error!*net.Device {
+        const device = try allocator.create(net.Device);
+        errdefer allocator.destroy(device);
+
+        const flags = net.Device.Flag{
+            .up = true,
+        };
+
+        device.* = .{
+            .ctx = @ptrCast(&gem),
+            .vtable = vtable,
+            .mtu = dd.net.Gem.mtu,
+            .flags = flags,
+            .dev_type = .ether,
+            .addr = undefined,
+        };
+        const mac_addr = gem.getMacAddr();
+        @memcpy(device.addr[0..mac_addr.len], &mac_addr);
+
+        return device;
+    }
+
+    fn outputImpl(dev: *net.Device, prot: net.Protocol, data: []const u8) net.Error!void {
+        _ = dev;
+        _ = prot;
+        _ = data;
+
+        urd.unimplemented("gement.outputImpl");
+    }
+};
+
+// =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const log = std.log.scoped(.rpi5);
+const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
 const mem = common.mem;
@@ -244,3 +306,4 @@ const IoAllocator = mem.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");
 const urd = @import("urthr");
+const net = urd.net;
