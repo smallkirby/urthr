@@ -1,3 +1,4 @@
+pub const ether = @import("net/ether.zig");
 pub const ip = @import("net/ip.zig");
 
 pub const Device = @import("net/Device.zig");
