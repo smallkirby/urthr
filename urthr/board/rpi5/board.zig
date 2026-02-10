@@ -174,7 +174,11 @@ fn handleIrq() ?void {
 
 /// Handle GEM interrupt.
 fn handleGemIrq() void {
-    gem.handleInterrupt();
+    var buffer: [dd.net.Gem.mtu]u8 = undefined;
+
+    while (gem.tryGetRx(&buffer)) |data| {
+        common.util.hexdump(data, data.len, log.debug);
+    }
 
     rdd.rp1.ackMsix(.eth);
 }
