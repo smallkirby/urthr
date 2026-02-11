@@ -64,10 +64,56 @@ pub fn handleInput(dev: *const Device, prot: Protocol, data: []const u8) Error!v
     }
 }
 
+/// Get a reader that handles reading data represented in network byte order.
+pub fn WireReader(T: type) type {
+    return struct {
+        const Self = @This();
+
+        /// Pointer to the backing data.
+        p: *const T,
+
+        /// Fields enum type.
+        const Fields = std.meta.FieldEnum(T);
+
+        /// Create a new reader for the given object.
+        pub fn new(obj: anytype) Self {
+            const ptr: *const T = switch (@typeInfo(@TypeOf(obj))) {
+                .pointer => |pointer| switch (pointer.size) {
+                    .one, .many, .c => @ptrCast(@alignCast(obj)),
+                    .slice => @ptrCast(@alignCast(obj.ptr)),
+                },
+                else => @compileError("Invalid type for WireIo"),
+            };
+
+            return Self{
+                .p = ptr,
+            };
+        }
+
+        /// Read the value of the given field.
+        pub fn read(self: *const Self, comptime field: Fields) @FieldType(T, @tagName(field)) {
+            const name = @tagName(field);
+            const U = @FieldType(T, name);
+            const bitoffset = @bitOffsetOf(T, name);
+            const offset = @offsetOf(T, name);
+            const bitsize = @bitSizeOf(U);
+
+            if (bitsize % 8 == 0 and bitoffset % 8 == 0) {
+                const up = @intFromPtr(self.p) + offset;
+                const value: *const U = @ptrFromInt(up);
+                return bits.fromBigEndian(value.*);
+            } else {
+                @compileError("Unaligned field access is not supported");
+            }
+        }
+    };
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const common = @import("common");
+const bits = common.bits;
 const urd = @import("urthr");
