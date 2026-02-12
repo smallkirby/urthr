@@ -86,11 +86,7 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
 
 const std = @import("std");
 const log = std.log.scoped(.arp);
-const Allocator = std.mem.Allocator;
 const common = @import("common");
-const bits = common.bits;
-const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;
-const Interface = net.Interface;
 const ether = @import("ether.zig");
