@@ -67,8 +67,6 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
     }
 
     const msgp: *align(1) const AddrInfoMacIp = @ptrCast(data[@sizeOf(GenericHeader)..].ptr);
-    var buf_mac: [net.ether.MacAddr.string_length + 1]u8 = undefined;
-    var buf_ip: [net.ip.IpAddr.string_length + 1]u8 = undefined;
 
     // Debug print the ARP packet.
     log.debug("ARP packet: haddr_type={}, paddr_type={}, op={}", .{
@@ -76,14 +74,8 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
         paddr_type,
         op,
     });
-    log.debug("  Source: {s} , {s}", .{
-        try msgp.sha.print(&buf_mac),
-        try msgp.spa.print(&buf_ip),
-    });
-    log.debug("  Target: {s} , {s}", .{
-        try msgp.tha.print(&buf_mac),
-        try msgp.tpa.print(&buf_ip),
-    });
+    log.debug("  Source: {f} , {f}", .{ msgp.sha, msgp.spa });
+    log.debug("  Target: {f} , {f}", .{ msgp.tha, msgp.tpa });
 
     // TODO: implement ARP reply.
 }
