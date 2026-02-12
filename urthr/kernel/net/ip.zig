@@ -8,9 +8,11 @@ pub const vtable = net.Protocol.Vtable{
 const min_packet_size = @sizeOf(Header);
 
 /// IP address type.
-pub const IpAddr = packed struct(u32) {
+pub const IpAddr = extern struct {
     /// Integer representation of the IP address in network byte order.
-    value: u32,
+    value: Inner,
+
+    const Inner = @Vector(4, u8);
 
     /// Length in bytes of IP address.
     pub const length = 4;
@@ -18,7 +20,9 @@ pub const IpAddr = packed struct(u32) {
     pub const string_length = 15;
 
     /// Broadcast IP address.
-    pub const broadcast = IpAddr{ .value = 0xFFFFFFFF };
+    pub const broadcast = IpAddr{
+        .value = Inner{ 0xFF, 0xFF, 0xFF, 0xFF },
+    };
 
     /// Print the IP address into the given buffer.
     fn print(self: IpAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
@@ -41,7 +45,7 @@ pub const IpAddr = packed struct(u32) {
     /// Parse the IP address from the given string.
     pub fn from(s: []const u8) error{InvalidFormat}!IpAddr {
         var count: usize = 0;
-        var value: u32 = 0;
+        var value: [length]u8 = undefined;
 
         var iter = std.mem.splitScalar(u8, s, '.');
         while (iter.next()) |part| : (count += 1) {
@@ -53,10 +57,18 @@ pub const IpAddr = packed struct(u32) {
                 return error.InvalidFormat;
             };
 
-            value = (value << 8) + num;
+            value[count] = num;
+        }
+        if (count != 4) {
+            return error.InvalidFormat;
         }
 
-        return .{ .value = net.toNetEndian(value) };
+        return .{ .value = value };
+    }
+
+    /// Check equality with another IP address.
+    pub fn eql(self: IpAddr, other: IpAddr) bool {
+        return std.meta.eql(self.value, other.value);
     }
 };
 
@@ -71,9 +83,9 @@ const IpInterface = struct {
 
     /// Check if the given address is destined to this interface.
     pub fn isDestinedToMe(self: *const IpInterface, addr: IpAddr) bool {
-        const unicast = self.unicast == addr;
-        const broadcast = IpAddr.broadcast == addr;
-        const subnet_broadcast = self.broadcast == addr;
+        const unicast = addr.eql(self.unicast);
+        const broadcast = addr.eql(.broadcast);
+        const subnet_broadcast = addr.eql(self.broadcast);
 
         return unicast or broadcast or subnet_broadcast;
     }
@@ -82,21 +94,17 @@ const IpInterface = struct {
 /// IP header.
 ///
 /// This struct provides only the mandatory fields excluding options.
-const Header = packed struct {
-    /// Header Length.
-    ihl: u4,
-    /// Version.
-    version: u4,
+const Header = extern struct {
+    /// Header Length (4 bits) / Version (4 bits).
+    ihl_version: u8,
     /// Type of Service.
     tos: u8,
     /// Total Length.
     total_length: u16,
     /// Identification.
     id: u16,
-    /// Fragment Offset.
-    frag_offset: u13,
-    /// Flags.
-    flags: Flags,
+    /// Fragment Offset (13 bits) / Flags (3 bits).
+    fragoff_flags: u16,
     /// Time to Live.
     ttl: u8,
     /// Protocol.
@@ -120,7 +128,7 @@ const Header = packed struct {
     /// Get the packet data following the header.
     pub fn data(self: *const Header) []const u8 {
         const io = net.WireReader(Header).new(self);
-        const header_len = @as(usize, io.read(.ihl)) * 4;
+        const header_len = @as(usize, io.read(.ihl_version) & 0x0F) * 4;
         const total_len = @as(usize, io.read(.total_length));
         const ptr: [*]const u8 = @ptrCast(self);
 
@@ -177,12 +185,14 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    if (io.read(.version) != 4) {
-        log.warn("Unsupported IP version: {d}", .{io.read(.version)});
+    const version = io.read(.ihl_version) >> 4;
+    const ihl = io.read(.ihl_version) & 0x0F;
+    if (version != 4) {
+        log.warn("Unsupported IP version: {d}", .{version});
         return net.Error.InvalidPacket;
     }
 
-    const hlen = @as(usize, io.read(.ihl)) * 4;
+    const hlen = @as(usize, ihl) * 4;
     if (data.len < hlen) {
         log.warn("Invalid IP header length: {d}", .{hlen});
         return net.Error.InvalidPacket;
@@ -230,18 +240,21 @@ fn calcChecksum(header: []const u8) u16 {
 /// Print an IP packet data.
 fn printPacket(header: *const Header, logger: anytype) void {
     const io = net.WireReader(Header).new(header);
-    const flags = io.read(.flags);
+    const version = bits.extract(u4, io.read(.ihl_version), 4);
+    const ihl = bits.extract(u4, io.read(.ihl_version), 0);
+    const flags = bits.extract(Header.Flags, io.read(.fragoff_flags), 13);
+    const frag_off = bits.extract(u13, io.read(.fragoff_flags), 0);
     const src = header.src_addr;
     const dest = header.dest_addr;
     const data = header.data();
 
-    logger("Version     : {d}", .{io.read(.version)});
-    logger("IHL         : {d}", .{io.read(.ihl)});
+    logger("Version     : {d}", .{version});
+    logger("IHL         : {d}", .{ihl});
     logger("ToS         : {d}", .{io.read(.tos)});
     logger("Length      : {d}", .{io.read(.total_length)});
     logger("ID          : {d}", .{io.read(.id)});
     logger("Flags       : DF={}, MF={}", .{ flags.df, flags.mf });
-    logger("FragOff     : {d}", .{io.read(.frag_offset)});
+    logger("FragOff     : {d}", .{frag_off});
     logger("TTL         : {d}", .{io.read(.ttl)});
     logger("Protocol    : {d}", .{io.read(.protocol)});
     logger("Checksum    : 0x{X:0>4}", .{io.read(.checksum)});
