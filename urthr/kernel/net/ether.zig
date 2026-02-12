@@ -21,7 +21,7 @@ pub const MacAddr = extern struct {
     };
 
     /// Print the MAC address into the given buffer.
-    pub fn print(self: MacAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
+    fn print(self: MacAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
         return std.fmt.bufPrint(
             buf,
             "{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}",
@@ -34,6 +34,13 @@ pub const MacAddr = extern struct {
                 self.value[5],
             },
         );
+    }
+
+    /// Custom formatter.
+    pub fn format(self: MacAddr, writer: *std.Io.Writer) !void {
+        var buf: [MacAddr.string_length + 1]u8 = undefined;
+        const s = self.print(&buf) catch "<invalid>";
+        try writer.writeAll(s);
     }
 };
 

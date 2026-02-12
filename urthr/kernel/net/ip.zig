@@ -21,7 +21,7 @@ pub const IpAddr = packed struct(u32) {
     pub const broadcast = IpAddr{ .value = 0xFFFFFFFF };
 
     /// Print the IP address into the given buffer.
-    pub fn print(self: IpAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
+    fn print(self: IpAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
         const bytes = std.mem.asBytes(&self.value);
 
         return std.fmt.bufPrint(
@@ -29,6 +29,13 @@ pub const IpAddr = packed struct(u32) {
             "{d}.{d}.{d}.{d}",
             .{ bytes[0], bytes[1], bytes[2], bytes[3] },
         );
+    }
+
+    /// Custom formatter.
+    pub fn format(self: IpAddr, writer: *std.Io.Writer) !void {
+        var buf: [IpAddr.string_length + 1]u8 = undefined;
+        const s = self.print(&buf) catch "<invalid>";
+        try writer.writeAll(s);
     }
 
     /// Parse the IP address from the given string.
@@ -222,7 +229,6 @@ fn calcChecksum(header: []const u8) u16 {
 
 /// Print an IP packet data.
 fn printPacket(header: *const Header, logger: anytype) void {
-    var buf: [IpAddr.string_length + 1]u8 = undefined;
     const io = net.WireReader(Header).new(header);
     const flags = io.read(.flags);
     const src = header.src_addr;
@@ -239,8 +245,8 @@ fn printPacket(header: *const Header, logger: anytype) void {
     logger("TTL         : {d}", .{io.read(.ttl)});
     logger("Protocol    : {d}", .{io.read(.protocol)});
     logger("Checksum    : 0x{X:0>4}", .{io.read(.checksum)});
-    logger("Source      : {s}", .{src.print(&buf) catch unreachable});
-    logger("Dest        : {s}", .{dest.print(&buf) catch unreachable});
+    logger("Source      : {f}", .{src});
+    logger("Dest        : {f}", .{dest});
     logger("Data        :", .{});
     util.hexdump(data, data.len, logger);
 }

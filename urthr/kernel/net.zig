@@ -21,7 +21,7 @@ pub const Error = error{
     InvalidPacket,
     /// Given data, protocol, or operation is not supported.
     Unsupported,
-} || std.fmt.BufPrintError;
+};
 
 /// Network protocols.
 pub const Protocol = enum(u16) {
