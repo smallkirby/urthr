@@ -180,17 +180,7 @@ pub fn isset(val: anytype, nth: anytype) bool {
 fn RepInt(T: type) type {
     return switch (@typeInfo(T)) {
         .int, .comptime_int => T,
-        else => switch (@sizeOf(T)) {
-            1 => u8,
-            2 => u16,
-            4 => u32,
-            8 => u64,
-            16 => u128,
-            else => @compileError(std.fmt.comptimePrint(
-                "Invalid argument to RepInt: {s}",
-                .{@typeName(T)},
-            )),
-        },
+        else => std.meta.Int(.unsigned, @bitSizeOf(T)),
     };
 }
 
