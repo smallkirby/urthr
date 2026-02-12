@@ -22,3 +22,5 @@ Synopsys = "Synopsys"
 caf = "caf"
 # Advanced Error Reporting
 aer = "aer"
+# Target Heartbeat Address
+tha = "tha"
