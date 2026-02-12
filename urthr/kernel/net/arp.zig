@@ -66,6 +66,9 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
         return;
     }
 
+    if (data.len < @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp)) {
+        return net.Error.InvalidPacket;
+    }
     const msgp: *align(1) const AddrInfoMacIp = @ptrCast(data[@sizeOf(GenericHeader)..].ptr);
 
     // Debug print the ARP packet.
