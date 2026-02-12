@@ -6,15 +6,19 @@ pub const vtable = net.Protocol.Vtable{
 
 /// Minimum packet size.
 const min_packet_size = @sizeOf(Header);
-/// Maximum length of string representation of IP address.
-pub const ip_addr_str_maxlen = 15;
-/// Broadcast IP address.
-const ip_broadcast_addr = IpAddr{ .value = 0xFFFFFFFF };
 
 /// IP address type.
 pub const IpAddr = packed struct(u32) {
     /// Integer representation of the IP address in network byte order.
     value: u32,
+
+    /// Length in bytes of IP address.
+    pub const length = 4;
+    /// Maximum length of string representation of IP address.
+    pub const string_length = 15;
+
+    /// Broadcast IP address.
+    pub const broadcast = IpAddr{ .value = 0xFFFFFFFF };
 
     /// Print the IP address into the given buffer.
     pub fn print(self: IpAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
@@ -45,7 +49,7 @@ pub const IpAddr = packed struct(u32) {
             value = (value << 8) + num;
         }
 
-        return .{ .value = toNetEndian(value) };
+        return .{ .value = net.toNetEndian(value) };
     }
 };
 
@@ -61,7 +65,7 @@ const IpInterface = struct {
     /// Check if the given address is destined to this interface.
     pub fn isDestinedToMe(self: *const IpInterface, addr: IpAddr) bool {
         const unicast = self.unicast == addr;
-        const broadcast = ip_broadcast_addr == addr;
+        const broadcast = IpAddr.broadcast == addr;
         const subnet_broadcast = self.broadcast == addr;
 
         return unicast or broadcast or subnet_broadcast;
@@ -71,9 +75,6 @@ const IpInterface = struct {
 /// IP header.
 ///
 /// This struct provides only the mandatory fields excluding options.
-///
-/// All the fields are in network byte order. You must not rely on the field layout.
-/// All fields must be accessd via `get()` method to handle byte order correctly.
 const Header = packed struct {
     /// Header Length.
     ihl: u4,
@@ -109,40 +110,14 @@ const Header = packed struct {
         mf: bool,
     };
 
-    const FieldEnum = std.meta.FieldEnum(Header);
-
-    /// Get the given field value with natural byte order.
-    ///
-    /// This function is safe to get the field value even if it crosses byte boundaries.
-    pub fn get(self: *const Header, comptime field: FieldEnum) @FieldType(Header, @tagName(field)) {
-        const name = @tagName(field);
-        const size = @bitSizeOf(@FieldType(Header, name));
-        const value = @field(self, name);
-
-        return switch (field) {
-            .frag_offset => @truncate(self.rawget(.frag_offset, u16) >> 0),
-            .flags => @bitCast(@as(u3, @truncate(self.rawget(.frag_offset, u16) >> 13))),
-            else => if (size > @bitSizeOf(u8)) fromNetEndian(value) else value,
-        };
-    }
-
     /// Get the packet data following the header.
     pub fn data(self: *const Header) []const u8 {
-        const header_len = @as(usize, self.get(.ihl)) * 4;
-        const total_len = @as(usize, self.get(.total_length));
+        const io = net.WireReader(Header).new(self);
+        const header_len = @as(usize, io.read(.ihl)) * 4;
+        const total_len = @as(usize, io.read(.total_length));
         const ptr: [*]const u8 = @ptrCast(self);
 
         return ptr[header_len..total_len];
-    }
-
-    /// Get the raw value starting from the given field in natural byte order.
-    fn rawget(self: *const Header, comptime field: FieldEnum, T: type) T {
-        const name = @tagName(field);
-        const offset = @offsetOf(Header, name);
-        const size = @sizeOf(T);
-
-        const ptr: [*]const u8 = @ptrCast(self);
-        return fromNetEndian(std.mem.bytesToValue(T, ptr[offset .. offset + size]));
     }
 };
 
@@ -187,6 +162,7 @@ pub fn createInterface(unicast: IpAddr, netmask: IpAddr, allocator: Allocator) n
 /// Handle incoming IP packet.
 fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     const header: *const Header = @ptrCast(@alignCast(data.ptr));
+    const io = net.WireReader(Header).new(data);
 
     // Check validity of the packet.
     if (data.len < min_packet_size) {
@@ -194,12 +170,12 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    if (header.get(.version) != 4) {
-        log.warn("Unsupported IP version: {d}", .{header.version});
+    if (io.read(.version) != 4) {
+        log.warn("Unsupported IP version: {d}", .{io.read(.version)});
         return net.Error.InvalidPacket;
     }
 
-    const hlen = @as(usize, header.get(.ihl)) * 4;
+    const hlen = @as(usize, io.read(.ihl)) * 4;
     if (data.len < hlen) {
         log.warn("Invalid IP header length: {d}", .{hlen});
         return net.Error.InvalidPacket;
@@ -244,34 +220,25 @@ fn calcChecksum(header: []const u8) u16 {
     return ~@as(u16, @intCast(sum));
 }
 
-/// Convert the given value to network endian.
-fn toNetEndian(value: anytype) @TypeOf(value) {
-    return bits.toBigEndian(value);
-}
-
-/// Convert the given value from network endian.
-fn fromNetEndian(value: anytype) @TypeOf(value) {
-    return bits.fromBigEndian(value);
-}
-
 /// Print an IP packet data.
 fn printPacket(header: *const Header, logger: anytype) void {
-    var buf: [ip_addr_str_maxlen + 1]u8 = undefined;
-    const flags = header.get(.flags);
-    const src = header.get(.src_addr);
-    const dest = header.get(.dest_addr);
+    var buf: [IpAddr.string_length + 1]u8 = undefined;
+    const io = net.WireReader(Header).new(header);
+    const flags = io.read(.flags);
+    const src = header.src_addr;
+    const dest = header.dest_addr;
     const data = header.data();
 
-    logger("Version     : {d}", .{header.get(.version)});
-    logger("IHL         : {d}", .{header.get(.ihl)});
-    logger("ToS         : {d}", .{header.get(.tos)});
-    logger("Length      : {d}", .{header.get(.total_length)});
-    logger("ID          : {d}", .{header.get(.id)});
+    logger("Version     : {d}", .{io.read(.version)});
+    logger("IHL         : {d}", .{io.read(.ihl)});
+    logger("ToS         : {d}", .{io.read(.tos)});
+    logger("Length      : {d}", .{io.read(.total_length)});
+    logger("ID          : {d}", .{io.read(.id)});
     logger("Flags       : DF={}, MF={}", .{ flags.df, flags.mf });
-    logger("FragOff     : {d}", .{header.get(.frag_offset)});
-    logger("TTL         : {d}", .{header.get(.ttl)});
-    logger("Protocol    : {d}", .{header.get(.protocol)});
-    logger("Checksum    : 0x{X:0>4}", .{header.get(.checksum)});
+    logger("FragOff     : {d}", .{io.read(.frag_offset)});
+    logger("TTL         : {d}", .{io.read(.ttl)});
+    logger("Protocol    : {d}", .{io.read(.protocol)});
+    logger("Checksum    : 0x{X:0>4}", .{io.read(.checksum)});
     logger("Source      : {s}", .{src.print(&buf) catch unreachable});
     logger("Dest        : {s}", .{dest.print(&buf) catch unreachable});
     logger("Data        :", .{});

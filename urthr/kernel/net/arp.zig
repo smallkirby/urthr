@@ -68,7 +68,7 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
 
     const msgp: *align(1) const AddrInfoMacIp = @ptrCast(data[@sizeOf(GenericHeader)..].ptr);
     var buf_mac: [net.ether.MacAddr.string_length + 1]u8 = undefined;
-    var buf_ip: [net.ip.ip_addr_str_maxlen + 1]u8 = undefined;
+    var buf_ip: [net.ip.IpAddr.string_length + 1]u8 = undefined;
 
     // Debug print the ARP packet.
     log.debug("ARP packet: haddr_type={}, paddr_type={}, op={}", .{

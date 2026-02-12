@@ -103,14 +103,34 @@ pub fn WireReader(T: type) type {
             const bitsize = @bitSizeOf(U);
 
             if (bitsize % 8 == 0 and bitoffset % 8 == 0) {
+                // Aligned byte-sized field
                 const up = @intFromPtr(self.p) + offset;
                 const value: *const U = @ptrFromInt(up);
                 return bits.fromBigEndian(value.*);
             } else {
-                @compileError("Unaligned field access is not supported");
+                // Unaligned or bit-sized field
+                const repr_bitoffset = util.rounddown(bitoffset, 8);
+                const repr_offset = repr_bitoffset / 8;
+                const repr_bitsize = util.roundup(bitsize + (bitoffset - repr_bitoffset), 8);
+                const R = std.meta.Int(.unsigned, repr_bitsize);
+
+                const up = @intFromPtr(self.p) + repr_offset;
+                const repr_ptr: *const R = @ptrFromInt(up);
+                const repr = bits.fromBigEndian(repr_ptr.*);
+                return bits.extract(U, repr, bitoffset - repr_bitoffset);
             }
         }
     };
+}
+
+/// Convert the given value in network endian to native endian.
+pub fn fromNetEndian(value: anytype) @TypeOf(value) {
+    return bits.fromBigEndian(value);
+}
+
+/// Convert the given value from native endian to network endian.
+pub fn toNetEndian(value: anytype) @TypeOf(value) {
+    return bits.toBigEndian(value);
 }
 
 // =============================================================
@@ -120,4 +140,5 @@ pub fn WireReader(T: type) type {
 const std = @import("std");
 const common = @import("common");
 const bits = common.bits;
+const util = common.util;
 const urd = @import("urthr");
