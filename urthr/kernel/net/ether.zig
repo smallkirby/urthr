@@ -53,15 +53,7 @@ const EtherHeader = extern struct {
     /// Source MAC address.
     src: MacAddr,
     /// EtherType.
-    type: EtherType,
-};
-
-/// Ethernet frame EtherType.
-const EtherType = enum(u16) {
-    /// IPv4
-    ip = 0x0800,
-    /// ARP
-    arp = 0x0806,
+    type: net.Protocol,
 };
 
 /// Input Ethernet frame data.
@@ -76,7 +68,7 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
 
     net.handleInput(
         dev,
-        @enumFromInt(@intFromEnum(io.read(.type))),
+        io.read(.type),
         data[@sizeOf(EtherHeader)..],
     ) catch {};
 }
