@@ -8,6 +8,10 @@ pub fn fromBigEndian(value: anytype) @TypeOf(value) {
             const T = std.meta.Int(.unsigned, size * 8);
             return @bitCast(@byteSwap(@as(T, @bitCast(value))));
         },
+        .@"enum" => {
+            const repr = @intFromEnum(value);
+            return @enumFromInt(@byteSwap(repr));
+        },
         else => return @byteSwap(value),
     }
 }
