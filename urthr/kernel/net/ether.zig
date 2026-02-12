@@ -79,10 +79,6 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
 
 const std = @import("std");
 const log = std.log.scoped(.ether);
-const Allocator = std.mem.Allocator;
 const common = @import("common");
-const bits = common.bits;
-const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;
-const Interface = net.Interface;
