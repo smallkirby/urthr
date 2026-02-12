@@ -94,7 +94,6 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
 // =============================================================
 
 const std = @import("std");
-const log = std.log.scoped(.ether);
 const common = @import("common");
 const urd = @import("urthr");
 const net = urd.net;
