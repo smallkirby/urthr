@@ -1,3 +1,4 @@
+pub const arp = @import("net/arp.zig");
 pub const ether = @import("net/ether.zig");
 pub const ip = @import("net/ip.zig");
 
@@ -20,12 +21,14 @@ pub const Error = error{
     InvalidPacket,
     /// Given data, protocol, or operation is not supported.
     Unsupported,
-};
+} || std.fmt.BufPrintError;
 
 /// Network protocols.
 pub const Protocol = enum(u16) {
     /// IPv4
     ip = 0x0800,
+    /// ARP
+    arp = 0x0806,
 
     /// All other unrecognized protocols.
     _,
@@ -40,6 +43,7 @@ pub const Protocol = enum(u16) {
     fn getHandler(self: Protocol) ?Protocol.Vtable {
         return switch (self) {
             .ip => @import("net/ip.zig").vtable,
+            .arp => @import("net/arp.zig").vtable,
             else => null,
         };
     }

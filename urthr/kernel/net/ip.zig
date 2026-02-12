@@ -7,7 +7,7 @@ pub const vtable = net.Protocol.Vtable{
 /// Minimum packet size.
 const min_packet_size = @sizeOf(Header);
 /// Maximum length of string representation of IP address.
-const ip_addr_str_maxlen = 15;
+pub const ip_addr_str_maxlen = 15;
 /// Broadcast IP address.
 const ip_broadcast_addr = IpAddr{ .value = 0xFFFFFFFF };
 
@@ -18,7 +18,7 @@ pub const IpAddr = packed struct(u32) {
 
     /// Print the IP address into the given buffer.
     pub fn print(self: IpAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
-        const bytes = std.mem.asBytes(&fromNetEndian(self.value));
+        const bytes = std.mem.asBytes(&self.value);
 
         return std.fmt.bufPrint(
             buf,

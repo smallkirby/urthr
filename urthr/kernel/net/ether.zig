@@ -4,6 +4,8 @@
 pub const MacAddr = extern struct {
     /// Length in bytes of MAC address.
     pub const length = 6;
+    /// Maximum length of string representation of MAC address.
+    pub const string_length = 17;
 
     /// Internal byte array representation.
     value: [length]u8,
@@ -17,6 +19,22 @@ pub const MacAddr = extern struct {
     pub const empty = MacAddr{
         .value = [_]u8{ 0, 0, 0, 0, 0, 0 },
     };
+
+    /// Print the MAC address into the given buffer.
+    pub fn print(self: MacAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
+        return std.fmt.bufPrint(
+            buf,
+            "{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}",
+            .{
+                self.value[0],
+                self.value[1],
+                self.value[2],
+                self.value[3],
+                self.value[4],
+                self.value[5],
+            },
+        );
+    }
 };
 
 /// Ethernet frame header.
@@ -41,16 +59,19 @@ const EtherType = enum(u16) {
 
 /// Input Ethernet frame data.
 pub fn inputFrame(dev: *net.Device, data: []const u8) void {
-    const header: *align(1) const EtherHeader = @ptrCast(data.ptr);
+    const io = net.WireReader(EtherHeader).new(data);
 
-    const is_broadcast = std.mem.eql(u8, MacAddr.broadcast.value[0..], header.dest.value[0..]);
-    const is_bound_me = std.mem.eql(u8, dev.addr[0..MacAddr.length], header.dest.value[0..]);
+    const is_broadcast = std.mem.eql(u8, MacAddr.broadcast.value[0..], io.read(.dest).value[0..]);
+    const is_bound_me = std.mem.eql(u8, dev.addr[0..MacAddr.length], io.read(.dest).value[0..]);
     if (!is_broadcast and !is_bound_me) {
         return;
     }
 
-    const payload = data[@sizeOf(EtherHeader)..];
-    net.handleInput(dev, @enumFromInt(@intFromEnum(header.type)), payload) catch {};
+    net.handleInput(
+        dev,
+        @enumFromInt(@intFromEnum(io.read(.type))),
+        data[@sizeOf(EtherHeader)..],
+    ) catch {};
 }
 
 // =============================================================
