@@ -42,6 +42,18 @@ pub const MacAddr = extern struct {
         const s = self.print(&buf) catch "<invalid>";
         try writer.writeAll(s);
     }
+
+    /// Check equality with another MAC address.
+    pub fn eql(self: MacAddr, other: MacAddr) bool {
+        return std.meta.eql(self.value, other.value);
+    }
+
+    /// Create a MAC address from the given byte slice.
+    pub fn from(value: []const u8) MacAddr {
+        var bytes: [length]u8 = undefined;
+        @memcpy(&bytes, value);
+        return MacAddr{ .value = bytes };
+    }
 };
 
 /// Ethernet frame header.
@@ -59,13 +71,17 @@ const EtherHeader = extern struct {
 /// Input Ethernet frame data.
 pub fn inputFrame(dev: *net.Device, data: []const u8) void {
     const io = net.WireReader(EtherHeader).new(data);
+    const header: *align(1) const EtherHeader = @ptrCast(data.ptr);
 
-    const is_broadcast = std.mem.eql(u8, MacAddr.broadcast.value[0..], io.read(.dest).value[0..]);
-    const is_bound_me = std.mem.eql(u8, dev.addr[0..MacAddr.length], io.read(.dest).value[0..]);
+    // Check if the frame is destined to this device.
+    const addr = MacAddr.from(dev.addr[0..MacAddr.length]);
+    const is_broadcast = header.dest.eql(.broadcast);
+    const is_bound_me = header.dest.eql(addr);
     if (!is_broadcast and !is_bound_me) {
         return;
     }
 
+    // Process the input frame.
     net.handleInput(
         dev,
         io.read(.type),
