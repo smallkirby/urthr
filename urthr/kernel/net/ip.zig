@@ -95,16 +95,16 @@ const IpInterface = struct {
 ///
 /// This struct provides only the mandatory fields excluding options.
 const Header = extern struct {
-    /// Header Length (4 bits) / Version (4 bits).
-    ihl_version: u8,
+    /// Header Length / Version.
+    ihl_version: IhlVersion,
     /// Type of Service.
     tos: u8,
     /// Total Length.
     total_length: u16,
     /// Identification.
     id: u16,
-    /// Fragment Offset (13 bits) / Flags (3 bits).
-    fragoff_flags: u16,
+    /// Fragment Offset / Flags.
+    fragoff_flags: FragFlags,
     /// Time to Live.
     ttl: u8,
     /// Protocol.
@@ -116,6 +116,13 @@ const Header = extern struct {
     /// Destination IP Address.
     dest_addr: IpAddr,
 
+    const IhlVersion = packed struct(u8) {
+        /// Internet Header Length.
+        ihl: u4,
+        /// Version.
+        version: u4,
+    };
+
     const Flags = packed struct(u3) {
         /// Reserved.
         _reserved: u1 = 0,
@@ -123,6 +130,13 @@ const Header = extern struct {
         df: bool,
         /// More Fragments.
         mf: bool,
+    };
+
+    const FragFlags = packed struct(u16) {
+        /// Fragment Offset.
+        frag_off: u13,
+        /// Flags.
+        flags: Flags,
     };
 
     /// Get the packet data following the header.
@@ -176,7 +190,6 @@ pub fn createInterface(unicast: IpAddr, netmask: IpAddr, allocator: Allocator) n
 
 /// Handle incoming IP packet.
 fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
-    const header: *const Header = @ptrCast(@alignCast(data.ptr));
     const io = net.WireReader(Header).new(data);
 
     // Check validity of the packet.
@@ -185,8 +198,8 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    const version = io.read(.ihl_version) >> 4;
-    const ihl = io.read(.ihl_version) & 0x0F;
+    const version = io.read(.ihl_version).version;
+    const ihl = io.read(.ihl_version).ihl;
     if (version != 4) {
         log.warn("Unsupported IP version: {d}", .{version});
         return net.Error.InvalidPacket;
@@ -209,12 +222,12 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.Unsupported;
     };
     const ip_iface: *const IpInterface = @ptrCast(@alignCast(iface.ctx));
-    if (!ip_iface.isDestinedToMe(header.dest_addr)) {
+    if (!ip_iface.isDestinedToMe(io.read(.dest_addr))) {
         return;
     }
 
     // TODO: just printing the packet for now.
-    printPacket(header, log.debug);
+    printPacket(data, log.debug);
 }
 
 /// Calculate the one's complement checksum of the given bytes.
@@ -238,30 +251,28 @@ fn calcChecksum(header: []const u8) u16 {
 }
 
 /// Print an IP packet data.
-fn printPacket(header: *const Header, logger: anytype) void {
-    const io = net.WireReader(Header).new(header);
-    const version = bits.extract(u4, io.read(.ihl_version), 4);
-    const ihl = bits.extract(u4, io.read(.ihl_version), 0);
-    const flags = bits.extract(Header.Flags, io.read(.fragoff_flags), 13);
-    const frag_off = bits.extract(u13, io.read(.fragoff_flags), 0);
-    const src = header.src_addr;
-    const dest = header.dest_addr;
-    const data = header.data();
+fn printPacket(data: []const u8, logger: anytype) void {
+    const io = net.WireReader(Header).new(data);
+    const ihl = io.read(.ihl_version).ihl;
+    const flags = io.read(.fragoff_flags).flags;
+    const header_len = @as(usize, ihl) * 4;
+    const total_len = @as(usize, io.read(.total_length));
+    const payload = data[header_len..total_len];
 
-    logger("Version     : {d}", .{version});
-    logger("IHL         : {d}", .{ihl});
+    logger("Version     : {d}", .{io.read(.ihl_version).version});
+    logger("IHL         : {d}", .{io.read(.ihl_version).ihl});
     logger("ToS         : {d}", .{io.read(.tos)});
     logger("Length      : {d}", .{io.read(.total_length)});
     logger("ID          : {d}", .{io.read(.id)});
     logger("Flags       : DF={}, MF={}", .{ flags.df, flags.mf });
-    logger("FragOff     : {d}", .{frag_off});
+    logger("FragOff     : {d}", .{io.read(.fragoff_flags).frag_off});
     logger("TTL         : {d}", .{io.read(.ttl)});
     logger("Protocol    : {d}", .{io.read(.protocol)});
     logger("Checksum    : 0x{X:0>4}", .{io.read(.checksum)});
-    logger("Source      : {f}", .{src});
-    logger("Dest        : {f}", .{dest});
+    logger("Source      : {f}", .{io.read(.src_addr)});
+    logger("Dest        : {f}", .{io.read(.dest_addr)});
     logger("Data        :", .{});
-    util.hexdump(data, data.len, logger);
+    util.hexdump(payload, payload.len, logger);
 }
 
 // =============================================================
@@ -272,7 +283,6 @@ const std = @import("std");
 const log = std.log.scoped(.ip);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
-const bits = common.bits;
 const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;

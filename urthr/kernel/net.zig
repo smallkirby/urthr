@@ -95,6 +95,9 @@ pub fn WireReader(T: type) type {
         }
 
         /// Read the value of the given field.
+        ///
+        /// If the field is a struct, it is returned as-is.
+        /// Otherwise, it is converted from big-endian to native endian.
         pub fn read(self: *const Self, comptime field: Fields) @FieldType(T, @tagName(field)) {
             const name = @tagName(field);
             const U = @FieldType(T, name);
@@ -102,23 +105,17 @@ pub fn WireReader(T: type) type {
             const offset = @offsetOf(T, name);
             const bitsize = @bitSizeOf(U);
 
-            if (bitsize % 8 == 0 and bitoffset % 8 == 0) {
-                // Aligned byte-sized field
-                const up = @intFromPtr(self.p) + offset;
-                const value: *const U = @ptrFromInt(up);
-                return bits.fromBigEndian(value.*);
-            } else {
-                // Unaligned or bit-sized field
-                const repr_bitoffset = util.rounddown(bitoffset, 8);
-                const repr_offset = repr_bitoffset / 8;
-                const repr_bitsize = util.roundup(bitsize + (bitoffset - repr_bitoffset), 8);
-                const R = std.meta.Int(.unsigned, repr_bitsize);
-
-                const up = @intFromPtr(self.p) + repr_offset;
-                const repr_ptr: *const R = @ptrFromInt(up);
-                const repr = bits.fromBigEndian(repr_ptr.*);
-                return bits.extract(U, repr, bitoffset - repr_bitoffset);
+            if (bitsize % 8 != 0 or bitoffset % 8 != 0) {
+                @compileError("Unsupported field alignment for WireReader");
             }
+
+            const up = @intFromPtr(self.p) + offset;
+            const value: *align(1) const U = @ptrFromInt(up);
+
+            return switch (@typeInfo(U)) {
+                .@"struct" => value.*,
+                else => bits.fromBigEndian(value.*),
+            };
         }
     };
 }

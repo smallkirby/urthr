@@ -69,7 +69,7 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
     if (data.len < @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp)) {
         return net.Error.InvalidPacket;
     }
-    const msgp: *align(1) const AddrInfoMacIp = @ptrCast(data[@sizeOf(GenericHeader)..].ptr);
+    const io_addr = net.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
 
     // Debug print the ARP packet.
     log.debug("ARP packet: haddr_type={}, paddr_type={}, op={}", .{
@@ -77,8 +77,8 @@ pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
         paddr_type,
         op,
     });
-    log.debug("  Source: {f} , {f}", .{ msgp.sha, msgp.spa });
-    log.debug("  Target: {f} , {f}", .{ msgp.tha, msgp.tpa });
+    log.debug("  Source: {f} , {f}", .{ io_addr.read(.sha), io_addr.read(.spa) });
+    log.debug("  Target: {f} , {f}", .{ io_addr.read(.tha), io_addr.read(.tpa) });
 
     // TODO: implement ARP reply.
 }
