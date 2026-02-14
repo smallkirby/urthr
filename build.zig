@@ -277,6 +277,7 @@ pub fn build(b: *std.Build) !void {
         exe.linker_script = urthr_ld;
         exe.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
         exe.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
+        exe.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
