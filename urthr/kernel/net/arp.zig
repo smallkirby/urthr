@@ -47,7 +47,7 @@ const Op = enum(u16) {
     reply = 0x0002,
 };
 
-pub fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
+fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
     if (data.len < @sizeOf(GenericHeader)) {
         return net.Error.InvalidPacket;
     }

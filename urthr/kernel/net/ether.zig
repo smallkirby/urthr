@@ -70,14 +70,16 @@ const EtherHeader = extern struct {
 
 /// Input Ethernet frame data.
 pub fn inputFrame(dev: *net.Device, data: []const u8) void {
+    // Check length of the frame.
+    if (data.len < @sizeOf(EtherHeader)) {
+        return;
+    }
     const io = net.WireReader(EtherHeader).new(data);
 
     // Check if the frame is destined to this device.
     const addr = MacAddr.from(dev.addr[0..MacAddr.length]);
     const dest = io.read(.dest);
-    const is_broadcast = dest.eql(.broadcast);
-    const is_bound_me = dest.eql(addr);
-    if (!is_broadcast and !is_bound_me) {
+    if (!dest.eql(.broadcast) and !dest.eql(addr)) {
         return;
     }
 
