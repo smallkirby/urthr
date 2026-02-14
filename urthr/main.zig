@@ -93,6 +93,21 @@ fn zmain() !void {
     } else {
         log.warn("No block device found", .{});
     }
+
+    // Initialize scheduler.
+    log.info("Initializing scheduler.", .{});
+    try urd.sched.init();
+
+    // Spawn the initial kernel thread.
+    _ = try urd.sched.spawn("init", initialTask, .{});
+
+    // Start the scheduler.
+    urd.sched.yield();
+}
+
+/// Initial kernel thread task.
+fn initialTask() void {
+    log.info("Initial task started.", .{});
 }
 
 // =============================================================
