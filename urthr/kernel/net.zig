@@ -96,7 +96,7 @@ pub fn WireReader(T: type) type {
 
         /// Read the value of the given field.
         ///
-        /// If the field is a struct, it is returned as-is.
+        /// If the field is an extern struct, it is returned as-is.
         /// Otherwise, it is converted from big-endian to native endian.
         pub fn read(self: *const Self, comptime field: Fields) @FieldType(T, @tagName(field)) {
             const name = @tagName(field);
@@ -113,7 +113,10 @@ pub fn WireReader(T: type) type {
             const value: *align(1) const U = @ptrFromInt(up);
 
             return switch (@typeInfo(U)) {
-                .@"struct" => value.*,
+                .@"struct" => |s| if (s.layout == .@"extern")
+                    value.*
+                else
+                    bits.fromBigEndian(value.*),
                 else => bits.fromBigEndian(value.*),
             };
         }
