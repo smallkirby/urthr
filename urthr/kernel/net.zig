@@ -86,7 +86,7 @@ pub fn WireReader(T: type) type {
                     .one, .many, .c => @ptrCast(@alignCast(obj)),
                     .slice => @ptrCast(@alignCast(obj.ptr)),
                 },
-                else => @compileError("Invalid type for WireIo"),
+                else => @compileError("Invalid type for WireReader"),
             };
 
             return Self{
