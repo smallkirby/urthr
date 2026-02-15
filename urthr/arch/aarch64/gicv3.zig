@@ -104,6 +104,16 @@ pub fn eoi(iar: u32) void {
     });
 }
 
+/// Enable an interrupt by ID.
+pub fn enableIrq(id: usize) void {
+    if (id < spi_start) {
+        const sgi = gicr.getSgiMod(getCpuId());
+        gicr.setEnable(sgi, id, true);
+    } else {
+        gicd.setEnable(id, true);
+    }
+}
+
 /// Send a SGI to the specified interfaces.
 ///
 /// Supports only affnity level 0.

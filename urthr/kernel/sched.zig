@@ -1,5 +1,7 @@
 /// Ready queue of threads.
 var qready: ThreadList = .{};
+/// Idle thread.
+var idle: *Thread = undefined;
 /// Currently running thread.
 var current: ?*Thread = null;
 
@@ -15,6 +17,9 @@ pub const Error = error{
     OutOfMemory,
 };
 
+/// Timer tick interval in microseconds.
+const tick_interval_us: u64 = 10_000;
+
 /// Initialize the scheduler.
 ///
 /// Currently running context is set to the idle thread.
@@ -22,17 +27,32 @@ pub fn init() Allocator.Error!void {
     const allocator = urd.mem.getGeneralAllocator();
 
     // Create the idle thread.
-    const idle = try allocator.create(Thread);
-    errdefer allocator.destroy(idle);
-    idle.* = .{
+    const th = try allocator.create(Thread);
+    errdefer allocator.destroy(th);
+    th.* = .{
         .id = 0,
         .name = "idle",
         .state = .running,
         .sp = undefined,
     };
+    idle = th;
 
     // Set the idle thread as the current thread.
     current = idle;
+
+    // Set timer interrupt handler for preemptive scheduling.
+    urd.exception.setHandler(arch.timer.ppi_intid, timerHandler) catch {
+        @panic("Failed to set timer interrupt handler.");
+    };
+}
+
+/// Start the preemptive scheduling timer.
+pub fn startTimer() !void {
+    board.enableIrq(arch.timer.ppi_intid);
+
+    const ticks = (tick_interval_us * arch.timer.getFreq()) / 1_000_000;
+    arch.timer.setDeadline(@intCast(ticks));
+    arch.timer.enable();
 }
 
 /// Spawn a new thread with the given entry function and arguments.
@@ -82,23 +102,42 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     return th;
 }
 
-/// Yield the current thread.
+/// Mark the currently running thread as needing rescheduling.
+fn markNeedResched() void {
+    getCurrent().need_resched = true;
+}
+
+/// Timer interrupt handler.
 ///
-/// Moves the current thread to the end of the ready queue and switches to the next ready thread.
-pub fn yield() void {
+/// Re-arms the timer and check if the current thread needs to be rescheduled.
+fn timerHandler() void {
+    // Re-arm timer for next tick.
+    const ticks = (tick_interval_us * arch.timer.getFreq()) / 1_000_000;
+    arch.timer.setDeadline(@intCast(ticks));
+
+    // This thread needs to be rescheduled.
+    markNeedResched();
+}
+
+/// Yield the current thread to allow other threads to run.
+///
+/// If no other threads are ready, this will simply return and continue running the current thread.
+pub fn reschedule() void {
     const ie = lock.lockDisableIrq();
 
     // Get the next thread from the ready queue.
     const next = qready.popFirst() orelse {
-        lock.unlockRestoreIrq(ie);
-        return;
+        return lock.unlockRestoreIrq(ie);
     };
     next.state = .running;
 
     // Move the current thread to the ready queue.
     const cur = getCurrent();
     cur.state = .ready;
-    qready.append(cur);
+    cur.need_resched = false;
+    if (cur != idle) {
+        qready.append(cur);
+    }
 
     current = next;
 
@@ -123,23 +162,21 @@ fn exitCurrentThread() noreturn {
     cur.state = .dead;
 
     // Pop the next thread from the ready queue.
-    const next = qready.popFirst() orelse {
-        // Halt to wait for new threads.
-        while (true) {
-            arch.halt();
-        }
-    };
+    const next = qready.popFirst() orelse idle;
     next.state = .running;
     current = next;
 
-    // Switch to the next thread. The lock is released in the next thread.
+    // Release lock before switching. IRQs remain disabled.
+    lock.unlock();
+
+    // Switch to the next thread.
     arch.thread.switchContext(&cur.sp, &next.sp);
 
     unreachable;
 }
 
 /// Get the currently running thread.
-fn getCurrent() *Thread {
+pub fn getCurrent() *Thread {
     return current.?;
 }
 
@@ -199,6 +236,7 @@ const std = @import("std");
 const log = std.log.scoped(.sched);
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
+const board = @import("board").impl;
 const common = @import("common");
 const page_size = common.mem.size_4kib;
 const urd = @import("urthr");

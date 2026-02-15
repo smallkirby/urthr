@@ -101,12 +101,15 @@ fn zmain() !void {
     // Spawn the initial kernel thread.
     _ = try urd.sched.spawn("init", initialTask, .{});
 
+    // Start preemptive scheduling timer.
+    try urd.sched.startTimer();
+
     // Start the scheduler.
-    urd.sched.yield();
+    urd.sched.reschedule();
 }
 
 /// Initial kernel thread task.
-fn initialTask() void {
+fn initialTask() !void {
     log.info("Initial task started.", .{});
 }
 
