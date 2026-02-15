@@ -89,6 +89,11 @@ pub fn initIrqLocal() void {
     arch.gicv3.initLocal();
 }
 
+/// Enable an interrupt by ID.
+pub fn enableIrq(id: usize) void {
+    arch.gicv3.enableIrq(id);
+}
+
 /// Set the exception handler for IRQs.
 pub fn setIrqHandler(f: ExceptionHandler) void {
     exception_handler = f;
@@ -100,8 +105,13 @@ fn handleIrq() ?void {
 
     if (exception_handler) |handler| {
         if (handler(intid)) |_| {
-            // Handled successfully.
             arch.gicv3.eoi(intid);
+
+            // Reschedule if needed.
+            if (urd.sched.getCurrent().need_resched) {
+                urd.sched.reschedule();
+            }
+
             return;
         } else {
             // Handler for this interrupt not registered.
@@ -191,4 +201,5 @@ const Console = common.Console;
 const MemoryManager = common.mem.MemoryManager;
 const IoAllocator = mem.IoAllocator;
 const PageAllocator = mem.PageAllocator;
+const urd = @import("urthr");
 const dd = @import("dd");

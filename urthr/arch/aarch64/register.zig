@@ -43,6 +43,8 @@ pub const SystemReg = enum {
 
     cntpct_el0,
     cntfrq_el0,
+    cntp_ctl_el0,
+    cntp_tval_el0,
 
     mpidr_el1,
 
@@ -84,6 +86,8 @@ pub const SystemReg = enum {
             .sctlr_el1 => SctlrEl1,
             .cntpct_el0 => Cntpct,
             .cntfrq_el0 => Cntfrq,
+            .cntp_ctl_el0 => CntpCtl,
+            .cntp_tval_el0 => CntpTval,
             .mpidr_el1 => Mpidr,
             .icc_ctlr_el1 => IccCtlr,
             .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
@@ -792,6 +796,30 @@ pub const Cntpct = packed struct(u64) {
 pub const Cntfrq = packed struct(u64) {
     /// Timer frequency.
     freq: u32,
+    /// Reserved.
+    _rsvd: u32 = 0,
+};
+
+/// CNTP_CTL_EL0.
+///
+/// Counter-timer Physical Timer Control Register.
+pub const CntpCtl = packed struct(u64) {
+    /// Enables the timer.
+    enable: bool,
+    /// Timer interrupt mask bit.
+    imask: bool,
+    /// Timer condition met (RO).
+    istatus: bool,
+    /// Reserved.
+    _rsvd: u61 = 0,
+};
+
+/// CNTP_TVAL_EL0.
+///
+/// Counter-timer Physical Timer Value Register.
+pub const CntpTval = packed struct(u64) {
+    /// Timer value.
+    value: u32,
     /// Reserved.
     _rsvd: u32 = 0,
 };

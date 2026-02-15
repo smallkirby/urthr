@@ -6,7 +6,7 @@ exception_table:
 
 .macro CALL_EXCEPTION_HANDLER handler
   // Save registers.
-  sub  sp,  sp, #(8 * 32)
+  sub  sp,  sp, #(8 * 34)
   stp x30, xzr, [sp, #(15 * 16)]
   stp x28, x29, [sp, #(14 * 16)]
   stp x26, x27, [sp, #(13 * 16)]
@@ -23,6 +23,9 @@ exception_table:
   stp  x4,  x5, [sp, #( 2 * 16)]
   stp  x2,  x3, [sp, #( 1 * 16)]
   stp  x0,  x1, [sp, #( 0 * 16)]
+  mrs x0, elr_el1
+  mrs x1, spsr_el1
+  stp x0, x1, [sp, #(16 * 16)]
   mov  x0, sp
 
   // Call handler.
@@ -36,6 +39,9 @@ exception_table:
 .balign 0x80
 sync_curel_sp0:
   CALL_EXCEPTION_HANDLER syncCurElSp0
+  .if (. - sync_curel_sp0) > 0x80
+    .error "Exception handlers are too large."
+  .endif
 
 # IRQ and vIRQ, Current Exception level with SP_EL0.
 .balign 0x80
@@ -112,7 +118,11 @@ fiq_lowerel_a32:
 serror_lowerel_a32:
   CALL_EXCEPTION_HANDLER serrorLowerElA32
 
+.global exit_exception
 exit_exception:
+  ldp  x0, x1, [sp, #(16 * 16)]
+  msr elr_el1 , x0
+  msr spsr_el1, x1
   ldp x30, xzr, [sp, #(15 * 16)]
   ldp x28, x29, [sp, #(14 * 16)]
   ldp x26, x27, [sp, #(13 * 16)]
@@ -129,5 +139,5 @@ exit_exception:
   ldp  x4,  x5, [sp, #( 2 * 16)]
   ldp  x2,  x3, [sp, #( 1 * 16)]
   ldp  x0,  x1, [sp, #( 0 * 16)]
-  add  sp,  sp, #(8 * 32)
+  add  sp,  sp, #(8 * 34)
   eret

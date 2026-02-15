@@ -36,6 +36,34 @@ fn spinWait(ns: u64) void {
     }
 }
 
+/// Non-secure EL1 Physical Timer PPI interrupt ID.
+pub const ppi_intid: u16 = 30;
+
+/// Set the timer deadline.
+pub fn setDeadline(ticks: u32) void {
+    am.msr(.cntp_tval_el0, regs.CntpTval{
+        .value = ticks,
+    });
+}
+
+/// Enable the physical timer and unmask interrupts.
+pub fn enable() void {
+    am.msr(.cntp_ctl_el0, regs.CntpCtl{
+        .enable = true,
+        .imask = false,
+        .istatus = false,
+    });
+}
+
+/// Disable the physical timer and mask interrupts.
+pub fn disable() void {
+    am.msr(.cntp_ctl_el0, regs.CntpCtl{
+        .enable = false,
+        .imask = true,
+        .istatus = false,
+    });
+}
+
 // =============================================================
 // Timer interface.
 // =============================================================

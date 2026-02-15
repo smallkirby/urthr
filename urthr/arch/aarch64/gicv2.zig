@@ -51,6 +51,10 @@ pub fn enableIrq(id: usize) void {
 
 /// Disable the specified interrupt ID.
 pub fn disableIrq(id: usize) void {
+    if (id < ppi_start) {
+        log.warn("Disabling SGI would be ignored.");
+    }
+
     gicd.setEnable(id, false);
 }
 
@@ -87,6 +91,10 @@ pub fn eoi(iar: gicc.Iar) void {
 // Distributor
 // =============================================================
 
+/// First SGI interrupt ID.
+const sgi_start: usize = 0;
+/// First PPI interrupt ID.
+const ppi_start: usize = 16;
 /// First SPI interrupt ID.
 const spi_start: usize = 32;
 
@@ -117,7 +125,6 @@ const gicd = struct {
     /// Enable or disable an interrupt.
     pub fn setEnable(id: usize, enable: bool) void {
         rtt.expect(id < gicd.num_interrupts);
-        rtt.expect(id >= spi_start); // Writes to SGIs are ignored.
 
         const reg_index = id / 32;
         const bit_index = id % 32;
@@ -320,6 +327,7 @@ const gicc = struct {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.arch);
 const common = @import("common");
 const bits = common.bits;
 const mmio = common.mmio;

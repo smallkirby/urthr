@@ -10,6 +10,8 @@ pub const Thread = struct {
     sp: usize,
     /// Stack memory region.
     stack: ?[]u8 = null,
+    /// This thread needs to be rescheduled.
+    need_resched: bool = false,
     /// Thread list node.
     head: ThreadList.Head = .{},
 };
