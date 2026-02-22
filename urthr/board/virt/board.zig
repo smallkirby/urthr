@@ -107,8 +107,7 @@ fn handleIrq() ?void {
         if (handler(intid)) |_| {
             arch.gicv3.eoi(intid);
 
-            // Reschedule if needed.
-            if (urd.sched.getCurrent().need_resched) {
+            if (urd.sched.shouldReschedule()) {
                 urd.sched.reschedule();
             }
 

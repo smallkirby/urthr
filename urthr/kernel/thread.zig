@@ -12,6 +12,10 @@ pub const Thread = struct {
     stack: ?[]u8 = null,
     /// This thread needs to be rescheduled.
     need_resched: bool = false,
+    /// Total accumulated runtime in microseconds.
+    runtime_us: u64 = 0,
+    /// Raw timer ticks when this thread last started executing.
+    last_exec_start: u64 = 0,
     /// Thread list node.
     head: ThreadList.Head = .{},
 };
