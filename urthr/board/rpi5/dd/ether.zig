@@ -57,7 +57,7 @@ const Control = packed struct(u32) {
     /// Memory power down.
     mem_pd: bool,
     /// Reserved.
-    _rsvd: u27,
+    _5: u27,
 };
 
 /// General Ethernet Status Register.
@@ -80,7 +80,7 @@ pub const Status = packed struct(u32) {
     /// Illegal AXI write address transaction.
     awlen_illegal: bool,
     /// Reserved.
-    _rsvd: u26,
+    _6: u26,
 };
 
 // =============================================================

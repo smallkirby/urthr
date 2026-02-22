@@ -743,11 +743,11 @@ const Cmd6 = packed struct(u32) {
     /// Function Group 4 for Power Limit.
     group4: u4 = 0xF,
     /// Reserved for Group5.
-    _rsvd0: u4 = 0xF,
+    _16: u4 = 0xF,
     /// Reserved for Group6.
-    _rsvd1: u4 = 0xF,
+    _20: u4 = 0xF,
     /// Reserved.
-    _rsvd2: u7 = 0,
+    _24: u7 = 0,
     /// Mode.
     mode: enum(u1) {
         /// Check function.
@@ -764,7 +764,7 @@ const Acmd41 = packed struct(u32) {
     /// S18R.
     s18r: bool = false,
     /// Reserved.
-    _rsvd0: u3 = 0,
+    _25: u3 = 0,
     /// SDXC Power Control.
     xpc: enum(u1) {
         /// Power Saving.
@@ -773,7 +773,7 @@ const Acmd41 = packed struct(u32) {
         maximum = 1,
     } = .saving,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _29: u1 = 0,
     /// Host capacity support.
     hcs: enum(u1) {
         /// SDSC Only Host.
@@ -937,7 +937,7 @@ const Adma2Desc = packed struct(u64) {
         link = 0b110,
     },
     /// Reserved.
-    _rsvd: u10 = 0,
+    _6: u10 = 0,
     /// 16-bit length.
     length: u16,
     /// 32-bit address.
@@ -951,17 +951,17 @@ const Adma2Desc = packed struct(u64) {
 /// Card Status Register.
 const CardStatus = packed struct(u32) {
     /// Reserved.
-    _rsvd0: u3 = 0,
+    _0: u3 = 0,
     /// AKE_SEQ_ERROR.
     ake_seq_error: bool,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _4: u1 = 0,
     /// APP_CMD
     app_cmd: bool,
     /// FX_EVENT
     fx_event: bool,
     /// Reserved.
-    _rsvd2: u1 = 0,
+    _7: u1 = 0,
     /// READY_FOR_DATA
     read_for_data: bool,
     /// CURRENT_STATE
@@ -986,7 +986,7 @@ const CardStatus = packed struct(u32) {
     /// CSD_OVERWRITE
     csd_overwrite: bool,
     /// Reserved.
-    _rsvd3: u2 = 0,
+    _17: u2 = 0,
     /// ERROR
     err: bool,
     /// CC_ERROR
@@ -1018,7 +1018,7 @@ const CardStatus = packed struct(u32) {
 /// Operation Conditions Register.
 const Ocr = packed struct(u32) {
     /// Reserved.
-    _rsvd0: u15 = 0,
+    _0: u15 = 0,
     /// 2.7-2.8
     v2_7_to_v2_8: bool,
     /// 2.8-2.9
@@ -1040,11 +1040,11 @@ const Ocr = packed struct(u32) {
     /// Switching to 1.8V Accepted
     s18a: bool,
     /// Reserved.
-    _rsvd1: u2 = 0,
+    _25: u2 = 0,
     /// Over 2TB support Status
     co2t: bool,
     /// Reserved.
-    _rsvd2: u1 = 0,
+    _28: u1 = 0,
     /// UHS-II Card Status
     uhs2status: bool,
     /// Card Capacity Status
@@ -1107,7 +1107,7 @@ const Csd = union(CsdStructure) {
     /// CSD Version 1.0
     const CsdV1 = packed struct(u120) {
         /// Reserved.
-        _rsvd0: u1 = 0,
+        _0: u1 = 0,
         /// Write protection until power cycle.
         wp_upc: bool,
         /// File format.
@@ -1121,7 +1121,7 @@ const Csd = union(CsdStructure) {
         /// File format group.
         format_grp: bool,
         /// Reserved.
-        _rsvd1: u5 = 0,
+        _8: u5 = 0,
         /// Partial blocks for write allowed.
         write_bl_partial: bool,
         /// Max write data block length.
@@ -1129,7 +1129,7 @@ const Csd = union(CsdStructure) {
         /// Write speed factor.
         r2w_factor: u3,
         /// Reserved.
-        _rsvd2: u2 = 0,
+        _21: u2 = 0,
         /// Write protect group enable.
         wp_grp_enable: bool,
         /// Write protect group size.
@@ -1151,7 +1151,7 @@ const Csd = union(CsdStructure) {
         /// Device size.
         c_size: u12,
         /// Reserved.
-        _rsvd4: u2 = 0,
+        _66: u2 = 0,
         /// DSR implemented.
         dsr_imp: bool,
         /// Read block misalignment.
@@ -1171,7 +1171,7 @@ const Csd = union(CsdStructure) {
         /// Data read access time 1.
         taac: u8,
         /// Reserved.
-        _rsvd5: u6 = 0,
+        _112: u6 = 0,
         /// CSD structure.
         csd_structure: Csd.CsdStructure,
 
@@ -1187,7 +1187,7 @@ const Csd = union(CsdStructure) {
     /// CSD Version 2.0
     const CsdV2 = packed struct(u120) {
         /// Reserved.
-        _rsvd0: u2 = 0,
+        _0: u2 = 0,
         /// File format.
         format: u2,
         /// Temporary write protection.
@@ -1199,7 +1199,7 @@ const Csd = union(CsdStructure) {
         /// File format group.
         format_grp: bool,
         /// Reserved.
-        _rsvd1: u5 = 0,
+        _8: u5 = 0,
         /// Partial blocks for write allowed.
         write_bl_partial: bool,
         /// Max write data block length.
@@ -1207,7 +1207,7 @@ const Csd = union(CsdStructure) {
         /// Write speed factor.
         r2w_factor: u3,
         /// Reserved.
-        _rsvd2: u2 = 0,
+        _21: u2 = 0,
         /// Write protect group enable.
         wp_grp_enable: bool,
         /// Write protect group size.
@@ -1217,11 +1217,11 @@ const Csd = union(CsdStructure) {
         /// Erase single block enable.
         erase_blk_en: bool,
         /// Reserved.
-        _rsvd3: u1 = 0,
+        _39: u1 = 0,
         /// Device size.
         c_size: u22,
         /// Reserved.
-        _rsvd4: u6 = 0,
+        _62: u6 = 0,
         /// DSR implemented.
         dsr_imp: bool,
         /// Read block misalignment.
@@ -1241,7 +1241,7 @@ const Csd = union(CsdStructure) {
         /// Data read access time 1.
         taac: u8,
         /// Reserved.
-        _rsvd5: u6 = 0,
+        _112: u6 = 0,
         /// CSD structure.
         csd_structure: Csd.CsdStructure,
 
@@ -1257,11 +1257,11 @@ const Csd = union(CsdStructure) {
 /// Supports only SCR version 1.0.
 const Scr = packed struct(u64) {
     /// Reserved for manufacturer usage.
-    _rsvd0: u32 = 0,
+    _0: u32 = 0,
     /// Command Support bits.
     cmd_support: u5,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _37: u1 = 0,
     /// Spec. Version 5.00 or higher.
     sd_specx: u4,
     /// Spec. Version 4.00 or higher.
@@ -1371,7 +1371,7 @@ const Bsize = packed struct(u16) {
         k512 = 0b111,
     },
     /// Reserved.
-    _rsvd: u1 = 0,
+    _15: u1 = 0,
 };
 
 /// 16-bit Block Count Register.
@@ -1429,7 +1429,7 @@ const TransferMode = packed struct(u16) {
     /// Response Interrupt Disable.
     response_int_disable: bool,
     /// Reserved.
-    _rsvd: u7 = 0,
+    _9: u7 = 0,
 };
 
 /// Command Register.
@@ -1467,7 +1467,7 @@ const Command = packed struct(u16) {
     /// Command Index.
     command: u6,
     /// Reserved.
-    _rsvd: u2 = 0,
+    _14: u2 = 0,
 };
 
 /// Response Register 0.
@@ -1522,7 +1522,7 @@ const PresentState = packed struct(u32) {
     /// Buffer Read Enable.
     buf_read_en: bool,
     /// Reserved.
-    _rsvd0: u4 = 0,
+    _12: u4 = 0,
 
     /// Card Inserted.
     card_inserted: bool,
@@ -1545,7 +1545,7 @@ const PresentState = packed struct(u32) {
     /// Host Regulator Voltage Stable.
     voltage_stable: bool,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _26: u1 = 0,
     /// Command Not Issued by Error.
     nocmd_error: bool,
     /// Sub Command Status.
@@ -1654,7 +1654,7 @@ const ClockControl = packed struct(u16) {
     /// PLL Enable.
     pll_clk_en: bool,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _4: u1 = 0,
     /// Clock Generator Select.
     clk_gen_sel: enum(u1) {
         /// Programmable Clock Mode.
@@ -1676,7 +1676,7 @@ const TimeoutControl = packed struct(u8) {
     /// The value N is calculated as TMCLK * 2^(N+13), while 0b1111 is reserved.
     data_timeout_counter: u4,
     /// Reserved.
-    _rsvd: u4 = 0,
+    _4: u4 = 0,
 };
 
 /// Software Reset Register.
@@ -1690,7 +1690,7 @@ const SwReset = packed struct(u8) {
     /// Reset for DAT Line.
     data: bool,
     /// Reserved.
-    _rsvd: u5 = 0,
+    _3: u5 = 0,
 };
 
 /// Error Interrupt Status Register.
@@ -1721,7 +1721,7 @@ const ErrorIntStatus = packed struct(u16) {
     /// Response Error.
     response: bool,
     /// Reserved.
-    _rsvd: u4 = 0,
+    _12: u4 = 0,
 
     /// No errors.
     pub fn isNoError(self: ErrorIntStatus) bool {
@@ -1761,7 +1761,7 @@ const NormalIntStatusEn = packed struct(u16) {
     /// FX Event Enable.
     fx_event: bool,
     /// Reserved.
-    _rsvd: u1 = 0,
+    _14: u1 = 0,
     /// Error Interrupt Enable.
     error_interrupt: bool,
 };
@@ -1798,7 +1798,7 @@ const NormalIntStatus = packed struct(u16) {
     /// FX Event.
     fx_event: bool,
     /// Reserved.
-    _rsvd: u1 = 0,
+    _14: u1 = 0,
     /// Error Interrupt.
     error_interrupt: bool,
 };
@@ -1831,7 +1831,7 @@ const ErrorIntStatusEn = packed struct(u16) {
     /// Response Error Enable.
     response: bool,
     /// Reserved.
-    _rsvd: u4 = 0,
+    _12: u4 = 0,
 };
 
 const NormalIntSignalEn = packed struct(u16) {
@@ -1865,7 +1865,7 @@ const NormalIntSignalEn = packed struct(u16) {
     /// FX Event Enable.
     fx_event: bool,
     /// Reserved.
-    _rsvd: u1 = 0,
+    _14: u1 = 0,
     /// Error Interrupt Enable.
     error_interrupt: bool,
 };
@@ -1898,7 +1898,7 @@ const ErrorIntSignalEn = packed struct(u16) {
     /// Response Error Enable.
     response: bool,
     /// Reserved.
-    _rsvd: u4 = 0,
+    _12: u4 = 0,
 };
 
 const HostControl2 = packed struct(u16) {
@@ -1924,7 +1924,7 @@ const HostControl2 = packed struct(u16) {
     /// UHS-II Enable.
     uhs2_enable: bool,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _9: u1 = 0,
     /// ADMA2 Length Mode.
     adma2length: enum(u1) {
         /// 16-bit length field.
@@ -1949,7 +1949,7 @@ const Capability1 = packed struct(u32) {
     /// Timeout Clock Frequency.
     timeout_freq: u6,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _6: u1 = 0,
     /// Timeout Clock Unit.
     timeout_unit: enum(u1) {
         /// KHz
@@ -1975,7 +1975,7 @@ const Capability1 = packed struct(u32) {
     /// ADMA2 Support.
     adma2: bool,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _20: u1 = 0,
     /// High Speed Support.
     highspeed: bool,
     /// SDMA Support.
@@ -2024,11 +2024,11 @@ const Capability2 = packed struct(u32) {
     /// Driver Type D Support.
     driver_type_d: bool,
     /// Reserved.
-    _rsvd2: u1 = 0,
+    _7: u1 = 0,
     /// Timer Count for Re-Tuning.
     timer_retune: u4,
     /// Reserved.
-    _rsvd3: u1 = 0,
+    _12: u1 = 0,
     /// Use Tuning for SDR50.
     use_tune_sdr50: bool,
     /// Re-Tuning Modes.
@@ -2038,13 +2038,13 @@ const Capability2 = packed struct(u32) {
     /// 0 means the clock multiplier is not supported.
     clock_mult: u8,
     /// Reserved.
-    _rsvd4: u3 = 0,
+    _24: u3 = 0,
     /// ADMA3 Support.
     adma3: bool,
     /// 1.8V VDD2 Support.
     vdd2_1_8v: bool,
     /// Reserved.
-    _rsvd5: u3 = 0,
+    _29: u3 = 0,
 };
 
 /// ADMA System Address Register (32-bit).
@@ -2061,7 +2061,7 @@ const InterruptStatus = packed struct(u16) {
     /// Interrupt Signal For Each Slot.
     signals: u8,
     /// Reserved.
-    _rsvd: u8 = 0,
+    _8: u8 = 0,
 };
 
 /// Host Controller Version Register.

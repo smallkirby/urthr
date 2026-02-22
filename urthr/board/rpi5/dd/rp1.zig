@@ -390,15 +390,15 @@ const MsixCfg = packed struct(u32) {
     /// Enable IACK functionality.
     iack_en: bool,
     /// Reserved.
-    _rsvd0: u8 = 0,
+    _4: u8 = 0,
     /// PCIe traffic class.
     tc: u3,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _15: u1 = 0,
     /// PCIe function.
     func: u3,
     /// Reserved.
-    _rsvd2: u13 = 0,
+    _19: u13 = 0,
 };
 
 /// Setup MSI-X.

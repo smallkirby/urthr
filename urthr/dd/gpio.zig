@@ -63,7 +63,7 @@ const Gpfsel0 = packed struct(u32) {
     fsel7: Fsel,
     fsel8: Fsel,
     fsel9: Fsel,
-    _rsvd: u2 = 0,
+    _30: u2 = 0,
 };
 
 /// GPFSEL1
@@ -78,7 +78,7 @@ const Gpfsel1 = packed struct(u32) {
     fsel17: Fsel,
     fsel18: Fsel,
     fsel19: Fsel,
-    _rsvd: u2 = 0,
+    _30: u2 = 0,
 };
 
 /// GPFSEL2
@@ -93,7 +93,7 @@ const Gpfsel2 = packed struct(u32) {
     fsel27: Fsel,
     fsel28: Fsel,
     fsel29: Fsel,
-    _rsvd: u2 = 0,
+    _30: u2 = 0,
 };
 
 /// GPFSEL3
@@ -108,7 +108,7 @@ const Gpfsel3 = packed struct(u32) {
     fsel37: Fsel,
     fsel38: Fsel,
     fsel39: Fsel,
-    _rsvd: u2 = 0,
+    _30: u2 = 0,
 };
 
 /// GPFSEL4
@@ -123,7 +123,7 @@ const Gpfsel4 = packed struct(u32) {
     fsel47: Fsel,
     fsel48: Fsel,
     fsel49: Fsel,
-    _rsvd: u2 = 0,
+    _30: u2 = 0,
 };
 
 /// GPFSEL5
@@ -136,7 +136,7 @@ const Gpfsel5 = packed struct(u32) {
     fsel55: Fsel,
     fsel56: Fsel,
     fsel57: Fsel,
-    _rsvd: u8 = 0,
+    _24: u8 = 0,
 };
 
 // =============================================================

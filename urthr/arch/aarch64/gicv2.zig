@@ -197,7 +197,7 @@ const gicd = struct {
         /// Global enable for forwarding pending interrupts from the Distributor to the CPU interfaces.
         enable: bool,
         /// Reserved.
-        _rsvd: u31,
+        _1: u31,
     };
 
     /// Interrupt Controller Type Register.
@@ -209,14 +209,14 @@ const gicd = struct {
         /// Number of implemented CPU interfaces - 1.
         cpu_number: u3,
         /// Reserved.
-        _rsvd0: u2 = 0,
+        _8: u2 = 0,
         /// Whether the GIC implements the Security Extensions.
         security_extn: bool,
         /// If the GIC implements the Security Extensions,
         /// the maximum number of implemented lockable SPIs.
         lspi: u5,
         /// Reserved.
-        _rsvd1: u16 = 0,
+        _16: u16 = 0,
     };
 
     /// Distributor Implementer Identification Register.
@@ -228,7 +228,7 @@ const gicd = struct {
         /// Variant.
         variant: u4,
         /// Reserved.
-        _rsvd: u4 = 0,
+        _20: u4 = 0,
         /// Product identifier.
         product: u8,
     };
@@ -238,7 +238,7 @@ const gicd = struct {
         /// Software Generated Interrupt ID.
         sgi_id: u4,
         /// Reserved.
-        _rsvd0: u11 = 0,
+        _4: u11 = 0,
         /// Required security value of the SGI (implemented only if the Security Extensions are implemented).
         nsatt: u1 = 0,
         /// CPU Target List.
@@ -246,7 +246,7 @@ const gicd = struct {
         /// Filter mode.
         filter: Target = .filter,
         /// Reserved.
-        _rsvd1: u6 = 0,
+        _26: u6 = 0,
 
         const Target = enum(u2) {
             /// Forward to the CPU interfaces specified in the Target List.
@@ -279,7 +279,7 @@ const gicc = struct {
         /// Enable for the signaling of Group 1 interrupts by the CPU interface to the connected processor.
         enable: bool,
         /// Reserved.
-        _rsvd: u31 = 0,
+        _1: u31 = 0,
     };
 
     /// Interrupt Priority Mask Register.
@@ -290,7 +290,7 @@ const gicc = struct {
         /// the interrupt is signaled to the connected processor.
         priority: u8,
         /// Reserved.
-        _rsvd: u24 = 0,
+        _8: u24 = 0,
     };
 
     /// Binary Point Register.
@@ -298,7 +298,7 @@ const gicc = struct {
         /// Binary point.
         binary_point: u3,
         /// Reserved.
-        _rsvd: u29 = 0,
+        _3: u29 = 0,
     };
 
     /// Interrupt Acknowledge Register.
@@ -308,7 +308,7 @@ const gicc = struct {
         /// For SGI, the processor ID that requested the interrupt.
         cpuid: u3,
         /// Reserved.
-        _rsvd: u19 = 0,
+        _13: u19 = 0,
     };
 
     /// End of Interrupt Register.
@@ -318,7 +318,7 @@ const gicc = struct {
         /// For SGI, the processor ID that requested the interrupt.
         cpuid: u3,
         /// Reserved.
-        _rsvd: u19 = 0,
+        _13: u19 = 0,
     };
 };
 

@@ -371,7 +371,7 @@ pub const Desc = extern struct {
         /// Buffer contains a list of buffer descriptors.
         indirect: bool = false,
         /// Reserved.
-        _rsvd: u13 = 0,
+        _3: u13 = 0,
     };
 
     comptime {
@@ -666,13 +666,13 @@ pub const Status = packed struct(u32) {
     /// Driver has acknowledged all the features it understands, and feature negotiation is complete.
     features_ok: bool,
     /// Reserved.
-    _rsvd1: u2 = 0,
+    _4: u2 = 0,
     /// Device has experienced an error from which it can't recover.
     device_needs_reset: bool,
     /// Something went wrong in the guest.
     failed: bool,
     /// Reserved.
-    _rsvd2: u24 = 0,
+    _8: u24 = 0,
 };
 
 /// Queue descriptor table address (low 32 bits).

@@ -505,7 +505,7 @@ const RcTlVdmCtrl0 = packed struct(u32) {
     enabled: bool,
     ignore_tag: bool,
     ignore_vendor_id: bool,
-    _1: u13,
+    _19: u13,
 };
 
 const RcTlVdmCtrl1 = packed struct(u32) {
@@ -516,14 +516,14 @@ const RcTlVdmCtrl1 = packed struct(u32) {
 const RcConfigVendorSpecific1 = packed struct(u32) {
     _0: u2,
     endian: enum(u2) { little = 0 },
-    _1: u28,
+    _4: u28,
 };
 
 const RcConfigPriv1Id3 = packed struct(u32) {
     interface: u8,
     subclass: u8,
     class: u8,
-    _0: u8,
+    _24: u8,
 };
 
 // =============================================================
@@ -537,9 +537,9 @@ const RcDlMdioWrite = packed struct(u32) {
 
 const RcPlPhyCtrl15 = packed struct(u32) {
     pm_clk_period: u8,
-    _0: u14,
+    _8: u14,
     pll_pd_disable: bool,
-    _1: u9,
+    _23: u9,
 };
 
 // =============================================================
@@ -547,14 +547,14 @@ const RcPlPhyCtrl15 = packed struct(u32) {
 
 const MiscMiscCtrl = packed struct(u32) {
     scb2_size: u5,
-    _0: u2,
+    _5: u2,
     pcie_rcb_64b_mode: bool,
-    _1: u2,
+    _8: u2,
     pcie_rcb_mps_mode: bool,
-    _2: u1,
+    _11: u1,
     scb_access_en: bool,
     cfg_read_ur_mode: bool,
-    _3: u6,
+    _14: u6,
     max_burst_size: enum(u2) {
         b128 = 1,
         b256 = 2,
@@ -574,7 +574,7 @@ const MemWin0High = packed struct(u32) {
 
 const RcBar1ConfigLo = packed struct(u32) {
     size: u5,
-    _rsvd: u7 = 0,
+    _5: u7 = 0,
     pci_offset_lo: u20,
 };
 
@@ -584,7 +584,7 @@ const RcBar1ConfigHi = packed struct(u32) {
 
 const RcBar4ConfigLo = packed struct(u32) {
     size: u5,
-    _rsvd: u7 = 0,
+    _5: u7 = 0,
     pci_offset_lo: u20,
 };
 
@@ -594,7 +594,7 @@ const RcBar4ConfigHi = packed struct(u32) {
 
 const UbusBar1ConfigRemap = packed struct(u32) {
     access_en: bool,
-    _rsvd: u11 = 0,
+    _1: u11 = 0,
     cpu_addr_lo: u20,
 };
 
@@ -604,7 +604,7 @@ const UbusBar1ConfigRemapHi = packed struct(u32) {
 
 const UbusBar4ConfigRemap = packed struct(u32) {
     access_en: bool,
-    _rsvd: u11 = 0,
+    _1: u11 = 0,
     cpu_addr_lo: u20,
 };
 
@@ -618,26 +618,26 @@ const RcConfigRetryTimeout = packed struct(u32) {
 
 const Control = packed struct(u32) {
     l23_request: u1,
-    _0: u1,
+    _1: u1,
     perstb: u1,
-    _1: u29,
+    _3: u29,
 };
 
 const MemWin0BaseLimit = packed struct(u32) {
     _0: u4,
     mem_win0_base: u12,
-    _1: u4,
+    _16: u4,
     mem_win0_limit: u12,
 };
 
 const MemWin0BaseHi = packed struct(u32) {
     mem_win0_base_hi: u8,
-    _0: u24,
+    _8: u24,
 };
 
 const MemWin0LimitHi = packed struct(u32) {
     mem_win0_limit_hi: u8,
-    _0: u24,
+    _8: u24,
 };
 
 const MiscStatus = packed struct(u32) {
@@ -646,7 +646,7 @@ const MiscStatus = packed struct(u32) {
     dl_active: bool,
     link_in_l23: bool,
     port: bool,
-    _1: u24,
+    _8: u24,
 };
 
 const PcieCtrl = packed struct(u32) {
@@ -654,15 +654,15 @@ const PcieCtrl = packed struct(u32) {
     outbound_no_snoop: bool,
     outbound_ro: bool,
     en_vdm_qos_control: bool,
-    _1: u26,
+    _6: u26,
 };
 
 const MiscUbusCtrl = packed struct(u32) {
     _0: u13,
     reply_error_disable: bool,
-    _1: u5,
+    _14: u5,
     replay_dec_error_disable: bool,
-    _2: u12,
+    _20: u12,
 };
 
 const MiscUbusTimeout = packed struct(u32) {
@@ -673,11 +673,11 @@ const MiscAxiIntfCtrl = packed struct(u32) {
     _0: u6,
     reqfifo_en_qos_propagation: bool,
     bridge_low_latency_mode: bool,
-    _1: u3,
+    _8: u3,
     dis_qos_gating_in_master: bool,
     en_qos_update_timing_fix: bool,
     en_rclk_qos_array_fix: bool,
-    _2: u18,
+    _14: u18,
 };
 
 const MiscVdmPriorityToQosMapHi = packed struct(u32) {
@@ -695,16 +695,16 @@ const PcieMiscAxiReadErrorData = packed struct(u32) {
 const HardDebug = packed struct(u32) {
     _0: u1,
     clkreq_debug_enable: u1,
-    _1: u1,
+    _2: u1,
     perst_assert: u1,
-    _2: u12,
+    _4: u12,
     refclk_ovrd_enable: u1,
-    _3: u3,
+    _17: u3,
     refclk_ovrd_out: u1,
     l1ss_enable: u1,
-    _5: u5,
+    _22: u5,
     serdes_iddq: u1,
-    _6: u4,
+    _28: u4,
 };
 
 // =============================================================
@@ -733,13 +733,13 @@ const AerUncorrectableErr = packed struct(u32) {
     /// Undefined.
     und: bool,
     /// Reserved.
-    _0: u3 = 0,
+    _1: u3 = 0,
     /// Data Link Protocol.
     data_link: bool,
     /// Surprise Down.
     surprise_down: bool,
     /// Reserved.
-    _1: u6 = 0,
+    _6: u6 = 0,
     /// Poisoned TLP.
     poisoned_tlp: bool,
     /// Flow Control Protocol.
@@ -770,7 +770,7 @@ const AerUncorrectableErr = packed struct(u32) {
     /// TLP prefix blocked.
     tlp_prefix: bool,
     /// Reserved.
-    _2: u6 = 0,
+    _26: u6 = 0,
 };
 
 /// Uncorrectable Error Mask.
@@ -784,7 +784,7 @@ const AerCorrectableErr = packed struct(u32) {
     /// Receiver Error.
     receiver_error: bool,
     /// Reserved.
-    _0: u5 = 0,
+    _1: u5 = 0,
     /// Bad TLP.
     bad_tlp: bool,
     /// Bad DLLP.
@@ -793,7 +793,7 @@ const AerCorrectableErr = packed struct(u32) {
     /// REPLAY_NUM Rollover.
     rollover: bool,
     /// Reserved.
-    _1: u3 = 0,
+    _9: u3 = 0,
     /// Replay Timer Timeout.
     replay_timer_timeout: bool,
     /// Advisory Non-Fatal Error.
@@ -801,7 +801,7 @@ const AerCorrectableErr = packed struct(u32) {
     /// Corrected Internal Error.
     corrected_internal_error: bool,
     /// Reserved.
-    _2: u17 = 0,
+    _15: u17 = 0,
 };
 
 /// Correctable Error Mask.

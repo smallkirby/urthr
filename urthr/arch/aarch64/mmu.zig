@@ -316,7 +316,7 @@ const AnyDesc = packed struct(u64) {
     /// Valid descriptor.
     valid: bool,
     // Reserved.
-    _rsvd: u63 = 0,
+    _1: u63 = 0,
 };
 
 /// Table descriptor for Stage 1 translation.
@@ -332,25 +332,25 @@ const TableDesc = packed struct(u64) {
     /// True for lookup levels less than lookup level 3.
     table: bool = true,
     /// Ignored.
-    _rsvd0: u6 = 0,
+    _2: u6 = 0,
     /// Ignored.
-    _rsvd1: u2 = 0,
+    _8: u2 = 0,
     /// Ignored when Hardware managed Table descriptor Access flag is not enabled.
-    _rsvd2: u1 = 0,
+    _10: u1 = 0,
     /// Ignored.
-    _rsvd3: u1 = 0,
+    _11: u1 = 0,
     /// Next level table address.
     ///
     /// The valid bits depend on the OA size.
     nlta: u38,
     /// Reserved.
-    _rsvd4: u1 = 0,
+    _50: u1 = 0,
     /// Ignored.
-    _rsvd5: u1 = 0,
+    _51: u1 = 0,
     /// Ignored when PnCH is 0.
-    _rsvd6: u1 = 0,
+    _52: u1 = 0,
     /// Ignored.
-    _rsvd7: u6 = 0,
+    _53: u6 = 0,
     /// Attributes (not used).
     attributes: u5 = 0,
 
@@ -384,7 +384,7 @@ const PageDesc = packed struct(u64) {
     /// The valid bits depend on the OA size.
     oa: u38,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _50: u1 = 0,
     /// Upper attributes.
     uattr: UpperAttr,
 };
@@ -408,7 +408,7 @@ const LowerAttr = packed struct(u10) {
     /// Access flag.
     af: bool = true,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _9: u1 = 0,
 };
 
 /// Upper attributes for Stage 1 page descriptor.
@@ -426,15 +426,15 @@ const UpperAttr = packed struct(u13) {
     /// Unprivileged Execute-never.
     uxn: bool,
     /// Ignored.
-    _rsvd1: u1 = 0,
+    _4: u1 = 0,
     /// Reserved for software use.
     sw: u3 = 0,
     /// Ignored.
-    _rsvd2: u1 = 0,
+    _8: u1 = 0,
     /// Ignored.
-    _rsvd3: u3 = 0,
+    _9: u3 = 0,
     /// Ignored.
-    _rsvd4: u1 = 0,
+    _12: u1 = 0,
 };
 
 /// Stage 1 Shareability.
