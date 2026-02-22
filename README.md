@@ -30,6 +30,7 @@ zig build install --summary all \
   -Dboard=rpi5 \
   -Drestart \
   -Drtt \
+  -Didle_watchdog=5 \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
@@ -43,6 +44,7 @@ zig build install --summary all \
   -Dserial_boot \
   -Drestart \
   -Drtt \
+  -Didle_watchdog=5 \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
@@ -73,3 +75,4 @@ zig build test --summary all -Doptimize=Debug
 | `qemu` | Path | Path to QEMU (aarch64) directory. | `$HOME/qemu-aarch64/bin` |
 | `qemu_log` | String (Comma-separated): `sd` | Enable specified QEMU verbose log outputs. Comma-separated list. | - |
 | `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |
+| `idle_watchdog` | Integer | Terminate if the idle thread's execution time exceeds this threshold in seconds. | `0` (disabled) |

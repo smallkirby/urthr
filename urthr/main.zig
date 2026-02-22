@@ -102,10 +102,18 @@ fn zmain() !void {
     _ = try urd.sched.spawn("init", initialTask, .{});
 
     // Start preemptive scheduling timer.
-    try urd.sched.startTimer();
+    try urd.sched.start();
 
     // Start the scheduler.
     urd.sched.reschedule();
+
+    // If the idle watchdog is enabled, monitor the idle thread's execution time.
+    if (common.options.idle_watchdog != 0) {
+        while (true) {
+            urd.sched.reschedule();
+            arch.halt();
+        }
+    }
 }
 
 /// Initial kernel thread task.

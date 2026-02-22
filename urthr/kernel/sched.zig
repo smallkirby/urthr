@@ -17,9 +17,6 @@ pub const Error = error{
     OutOfMemory,
 };
 
-/// Timer tick interval in microseconds.
-const tick_interval_us: u64 = 10_000;
-
 /// Initialize the scheduler.
 ///
 /// Currently running context is set to the idle thread.
@@ -47,13 +44,203 @@ pub fn init() Allocator.Error!void {
 }
 
 /// Start the preemptive scheduling timer.
-pub fn startTimer() !void {
+pub fn start() !void {
+    // Enable timer IRQ.
     board.enableIrq(arch.timer.ppi_intid);
 
-    const ticks = (tick_interval_us * arch.timer.getFreq()) / 1_000_000;
-    arch.timer.setDeadline(@intCast(ticks));
+    // Start the timer.
     arch.timer.enable();
+    armTimer();
+
+    // Initialize idle thread runtime accounting.
+    idle.last_exec_start = arch.timer.getCount();
 }
+
+/// Add a thread to the ready queue.
+pub fn enqueue(th: *Thread) void {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    th.state = .ready;
+    qready.append(th);
+}
+
+/// Put the current thread to sleep and release the given lock.
+///
+/// Marks the current thread as blocked before switching.
+///
+/// The lock is released before switching.
+/// IRQs remain disabled when the thread resumes.
+pub fn blockCurrent(caller_lock: *SpinLock) void {
+    const ie = lock.lockDisableIrq();
+
+    // Update the current thread's runtime.
+    accountRuntime();
+
+    const cur = getCurrent();
+    cur.state = .blocked;
+    cur.need_resched = false;
+
+    const next = pickNext();
+    current = next;
+    next.state = .running;
+
+    lock.unlock();
+    caller_lock.unlock();
+
+    arch.thread.switchContext(&cur.sp, &next.sp);
+
+    arch.intr.setMask(ie);
+
+    updateLastExecTimestamp();
+}
+
+/// Yield the current thread to allow other threads to run.
+///
+/// If no other threads are ready, this will simply return and continue running the current thread.
+pub fn reschedule() void {
+    const ie = lock.lockDisableIrq();
+
+    // Get the next thread from the ready queue.
+    const next = qready.popFirst() orelse {
+        return lock.unlockRestoreIrq(ie);
+    };
+    next.state = .running;
+
+    // Account runtime before switching away from the current thread.
+    accountRuntime();
+
+    // Move the current thread to the ready queue.
+    const cur = getCurrent();
+    cur.state = .ready;
+    cur.need_resched = false;
+    if (cur != idle) {
+        qready.append(cur);
+    }
+
+    current = next;
+
+    // Release lock before switching. IRQs remain disabled until restored.
+    lock.unlock();
+
+    // Switch to the next thread.
+    arch.thread.switchContext(&cur.sp, &next.sp);
+
+    // Update the last switch-in timestamp.
+    updateLastExecTimestamp();
+
+    // Resume here when switched back to this thread.
+    arch.intr.setMask(ie);
+}
+
+/// Exit the current thread.
+///
+/// Marks the current thread as dead and switches to the next ready thread.
+fn exitCurrent() noreturn {
+    _ = lock.lockDisableIrq();
+
+    accountRuntime();
+
+    // Mark the current thread as dead.
+    const cur = getCurrent();
+    cur.state = .dead;
+
+    // Select and set the next thread to run.
+    const next = pickNext();
+    current = next;
+    next.state = .running;
+
+    // Release lock before switching. IRQs remain disabled.
+    lock.unlock();
+
+    // Switch to the next thread.
+    arch.thread.switchContext(&cur.sp, &next.sp);
+
+    // This thread should not be scheduled again.
+    unreachable;
+}
+
+/// Check if the current thread needs to be rescheduled and yield if possible.
+pub fn shouldReschedule() bool {
+    return getCurrent().need_resched;
+}
+
+/// Mark the currently running thread as needing rescheduling.
+pub fn markNeedResched() void {
+    getCurrent().need_resched = true;
+}
+
+/// Pick the next thread to run from the ready queue.
+///
+/// Falls back to the idle thread if the ready queue is empty.
+fn pickNext() *Thread {
+    return qready.popFirst() orelse idle;
+}
+
+/// Get the currently running thread.
+pub fn getCurrent() *Thread {
+    return current.?;
+}
+
+/// Allocate a new thread ID.
+fn allocateId() thread.Id {
+    const id = id_next;
+    id_next +%= 1;
+
+    return id;
+}
+
+// =============================================================
+// Timer
+// =============================================================
+
+/// Timer tick interval in microseconds.
+const tick_interval_us: u64 = 10 * std.time.us_per_ms;
+
+/// Timer interrupt handler.
+///
+/// Re-arms the timer and check if the current thread needs to be rescheduled.
+fn timerHandler() void {
+    armTimer();
+    markNeedResched();
+
+    accountRuntime();
+    updateLastExecTimestamp();
+}
+
+/// Re-arm the timer for the next tick.
+fn armTimer() void {
+    const ticks = (tick_interval_us * arch.timer.getFreq()) / std.time.us_per_s;
+    arch.timer.setDeadline(@intCast(ticks));
+}
+
+/// Account the runtime of the current thread since the last switch-in.
+///
+/// This function does not update the last switch-in timestamp.
+fn accountRuntime() void {
+    const cur = getCurrent();
+    const now = arch.timer.getCount();
+    const delta_ticks = now - cur.last_exec_start;
+    const freq: u64 = arch.timer.getFreq();
+
+    cur.runtime_us += (delta_ticks * std.time.us_per_s) / freq;
+
+    if (options.idle_watchdog != 0) {
+        if (idle.runtime_us >= options.idle_watchdog * std.time.us_per_s) {
+            log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
+            urd.eol(0);
+        }
+    }
+}
+
+/// Update the last execution timestamp for the current thread.
+fn updateLastExecTimestamp() void {
+    getCurrent().last_exec_start = arch.timer.getCount();
+}
+
+// =============================================================
+// Thread entry point wrapper.
+// =============================================================
 
 /// Spawn a new thread with the given entry function and arguments.
 ///
@@ -102,92 +289,6 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     return th;
 }
 
-/// Mark the currently running thread as needing rescheduling.
-fn markNeedResched() void {
-    getCurrent().need_resched = true;
-}
-
-/// Timer interrupt handler.
-///
-/// Re-arms the timer and check if the current thread needs to be rescheduled.
-fn timerHandler() void {
-    // Re-arm timer for next tick.
-    const ticks = (tick_interval_us * arch.timer.getFreq()) / 1_000_000;
-    arch.timer.setDeadline(@intCast(ticks));
-
-    // This thread needs to be rescheduled.
-    markNeedResched();
-}
-
-/// Yield the current thread to allow other threads to run.
-///
-/// If no other threads are ready, this will simply return and continue running the current thread.
-pub fn reschedule() void {
-    const ie = lock.lockDisableIrq();
-
-    // Get the next thread from the ready queue.
-    const next = qready.popFirst() orelse {
-        return lock.unlockRestoreIrq(ie);
-    };
-    next.state = .running;
-
-    // Move the current thread to the ready queue.
-    const cur = getCurrent();
-    cur.state = .ready;
-    cur.need_resched = false;
-    if (cur != idle) {
-        qready.append(cur);
-    }
-
-    current = next;
-
-    // Release lock before switching. IRQs remain disabled until restored.
-    lock.unlock();
-
-    // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp);
-
-    // Resume here when switched back to this thread.
-    arch.intr.setMask(ie);
-}
-
-/// Exit the current thread.
-///
-/// Marks the current thread as dead and switches to the next ready thread.
-fn exitCurrentThread() noreturn {
-    _ = lock.lockDisableIrq();
-
-    // Mark the current thread as dead.
-    const cur = getCurrent();
-    cur.state = .dead;
-
-    // Pop the next thread from the ready queue.
-    const next = qready.popFirst() orelse idle;
-    next.state = .running;
-    current = next;
-
-    // Release lock before switching. IRQs remain disabled.
-    lock.unlock();
-
-    // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp);
-
-    unreachable;
-}
-
-/// Get the currently running thread.
-pub fn getCurrent() *Thread {
-    return current.?;
-}
-
-/// Allocate a new thread ID.
-fn allocateId() thread.Id {
-    const id = id_next;
-    id_next +%= 1;
-
-    return id;
-}
-
 /// Create a wrapper struct that provides a thread entry point function.
 fn ThreadFuncWrapper(comptime f: anytype, ArgType: type) type {
     return struct {
@@ -199,7 +300,7 @@ fn ThreadFuncWrapper(comptime f: anytype, ArgType: type) type {
             urd.mem.getGeneralAllocator().destroy(argv);
 
             // Exit thread.
-            exitCurrentThread();
+            exitCurrent();
         }
     };
 }
@@ -238,6 +339,7 @@ const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const board = @import("board").impl;
 const common = @import("common");
+const options = common.options;
 const page_size = common.mem.size_4kib;
 const urd = @import("urthr");
 const SpinLock = urd.SpinLock;
