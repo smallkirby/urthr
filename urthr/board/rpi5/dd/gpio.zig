@@ -283,19 +283,19 @@ fn getFunctionNumber(comptime pin: Pin, func: FselId) u5 {
 /// GPIO<n>_STATUS register.
 const Status = packed struct(u32) {
     /// Reserved.
-    _rsvd0: u8 = 0,
+    _0: u8 = 0,
     /// Output signal from selected peripheral.
     outfromperi: bool,
     /// Output signal to pad after register override is applied.
     outtopad: bool,
     /// Reserved.
-    _rsvd1: u2 = 0,
+    _10: u2 = 0,
     /// Output enable from selected peripheral, before register override is applied.
     oefromperi: bool,
     /// Output enable to pad after register override is applied.
     oetopad: bool,
     /// Reserved.
-    _rsvd2: u2 = 0,
+    _14: u2 = 0,
     /// Input signal from pad, goes directly to the selected peripheral without filtering or override.
     inisdirect: bool,
     /// Input signal from pad, before filter and override are applied.
@@ -325,7 +325,7 @@ const Status = packed struct(u32) {
     /// Interrupt to processors, after mask and override is applied.
     irqtoproc: bool,
     /// Reserved.
-    _rsvd: u2 = 0,
+    _30: u2 = 0,
 };
 
 /// GPIO<n>_CTRL register.
@@ -341,7 +341,7 @@ const Ctrl = packed struct(u32) {
     /// Input signal override.
     inover: SignalOverride,
     /// Reserved.
-    _rsvd0: u2 = 0,
+    _18: u2 = 0,
     /// Masks the edge low interrupt into the interrupt output.
     irqmask_edge_low: bool,
     /// Masks the edge high interrupt into the interrupt output.
@@ -361,7 +361,7 @@ const Ctrl = packed struct(u32) {
     /// Reset the interrupt edge detector.
     irqreset: bool,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _29: u1 = 0,
     /// IRQ override.
     irqover: SignalOverride,
 };
@@ -388,7 +388,7 @@ const VoltageSelect = packed struct(u32) {
         v1_8 = 1,
     },
     /// Reserved.
-    _rsvd: u31 = 0,
+    _1: u31 = 0,
 };
 
 // =============================================================
@@ -423,7 +423,7 @@ const Pad = packed struct(u32) {
     /// Output enable.
     od: bool,
     /// reserved.
-    _rsvd: u24 = 0,
+    _8: u24 = 0,
 };
 
 // =============================================================

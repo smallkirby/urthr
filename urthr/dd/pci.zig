@@ -327,7 +327,7 @@ pub const CapHeader = packed struct(u32) {
     /// Next Capability Pointer.
     next: u8,
     /// Capability-specific data.
-    _rsvd: u16,
+    _16: u16,
 };
 
 /// Find a capability by ID in the configuration space.
@@ -360,7 +360,7 @@ const MsixCap = packed struct(u32) {
     /// Table Size - 1.
     table_size: u11,
     /// Reserved.
-    _rsvd: u3 = 0,
+    _27: u3 = 0,
     /// Global Function Mask.
     function_mask: bool,
     /// MSI-X Enable.
@@ -392,7 +392,7 @@ const MsixTableEntry = packed struct(u128) {
     /// Message Data.
     msg_data: u32,
     /// Reserved.
-    _rsvd: u31 = 0,
+    _96: u31 = 0,
     /// Vector Control.
     masked: bool,
 };
@@ -503,7 +503,7 @@ pub const HeaderCommandStatus = packed struct(u32) {
     /// Parity Error Response Enable.
     parity_error_response_enable: bool,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _7: u1 = 0,
     /// SERR# Enable.
     serr_enable: bool,
     /// Fast Back-to-Back Enable.
@@ -511,13 +511,13 @@ pub const HeaderCommandStatus = packed struct(u32) {
     /// Interrupt Disable.
     interrupt_disable: bool,
     /// Reserved.
-    _rsvd1: u5 = 0,
+    _11: u5 = 0,
 
     // =========================================================
     // Status Register
 
     /// Reserved.
-    _rsvd2: u3 = 0,
+    _16: u3 = 0,
     /// Interrupt Status.
     interrupt_status: bool,
     /// Capabilities List.
@@ -525,7 +525,7 @@ pub const HeaderCommandStatus = packed struct(u32) {
     /// 66 MHz Capable.
     _66mhz_capable: bool,
     /// Reserved.
-    _rsvd3: u1 = 0,
+    _22: u1 = 0,
     /// Fast Back-to-Back Capable.
     fast_back2back_capable: bool,
     /// Master Data Parity Error.
@@ -651,7 +651,7 @@ pub const HeaderCapPtr = packed struct(u32) {
     /// Capabilities Pointer.
     cap_ptr: u8,
     /// Reserved.
-    _rsvd: u24,
+    _8: u24,
 };
 
 pub const HeaderExpansionRom = packed struct(u32) {
@@ -717,7 +717,7 @@ pub const CapCap = packed struct(u32) {
     /// Interrupt Message Number Supported.
     interrupt_message_number: u5,
     /// Reserved.
-    _rsvd: u2,
+    _30: u2,
 };
 
 pub const LinkCap1 = packed struct(u32) {
@@ -742,7 +742,7 @@ pub const LinkCap1 = packed struct(u32) {
     /// ASPM Optionality Compliance.
     aspm_optionality_compliance: bool,
     /// Reserved.
-    _rsvd: u1,
+    _23: u1,
     /// Port Number.
     port: u8,
 
@@ -803,7 +803,7 @@ pub const LinkControlStatus2 = packed struct(u32) {
     /// Crosslink Component Presence.
     crosslink_resolution: u2,
     /// Reserved.
-    _rsvd: u2,
+    _26: u2,
     /// Downstream Component Presence.
     downstream_component_presence: u3,
     /// DRS Message Received.

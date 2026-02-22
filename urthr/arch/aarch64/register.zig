@@ -282,7 +282,7 @@ pub const HcrEl2 = packed struct(u64) {
 /// Interrupt Mask Bits.
 pub const Daif = packed struct(u64) {
     /// Reserved.
-    _reserved0: u6 = 0,
+    _0: u6 = 0,
     /// FIQ mask bit.
     f: bool,
     /// IRQ mask bit.
@@ -292,7 +292,7 @@ pub const Daif = packed struct(u64) {
     /// Watchpoint, Breakpoint, and Software Step exceptions mask bit.
     d: bool,
     /// Reserved.
-    _reserved1: u54 = 0,
+    _10: u54 = 0,
 };
 
 /// SPSR_ELx.
@@ -316,7 +316,7 @@ pub const Spsr = packed struct(u64) {
     /// Execution state.
     m_es: u1,
     /// Reserved.
-    _reserved0: u1 = 0,
+    _5: u1 = 0,
     /// FIQ interrupt mask.
     f: bool,
     /// IRQ interrupt mask.
@@ -332,7 +332,7 @@ pub const Spsr = packed struct(u64) {
     /// When FEAT_NMI is implemented, All IRQ or FIQ interrupts mask.
     allint: bool,
     /// Reserved.
-    _reserved1: u6 = 0,
+    _14: u6 = 0,
     /// Illegal Execution state.
     il: bool,
     /// Software Step.
@@ -346,7 +346,7 @@ pub const Spsr = packed struct(u64) {
     /// When FEAT_MTE is implemented, Tag Check Override.
     tco: bool,
     /// Reserved.
-    _reserved2: u2 = 0,
+    _26: u2 = 0,
     /// Overflow Condition flag.
     v: bool,
     /// Carry Condition flag.
@@ -362,7 +362,7 @@ pub const Spsr = packed struct(u64) {
     /// When FEAT_GCS is implemented, Exception return state lock.
     exlock: bool,
     /// Reserved.
-    _reserved3: u29 = 0,
+    _35: u29 = 0,
 };
 
 /// VBAR_ELx.
@@ -388,7 +388,7 @@ pub const Esr = packed struct(u64) {
     /// Instruction Specific Syndrome.
     iss2: u24,
     /// Reserved.
-    _reserved: u8 = 0,
+    _56: u8 = 0,
 
     pub const Class = enum(u6) {
         unknown = 0b000000,
@@ -528,7 +528,7 @@ pub const Tcr = packed struct(u64) {
     /// The size offset parameter of the memory region addressed by TTBR_EL1.
     t0sz: u6,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _6: u1 = 0,
     /// Translation table walk disable for translations using TTBR0_EL1.
     epd0: u1 = 0,
     /// Inner cacheability attribute for memory associated with translation table walks using TTBR0_EL1.
@@ -556,11 +556,11 @@ pub const Tcr = packed struct(u64) {
     /// Intermediate Physical Address Size.
     ips: u3,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _35: u1 = 0,
     /// ASID size.
     as: u1 = 0,
     /// Reserved.
-    _rsvd2: u27 = 0,
+    _37: u27 = 0,
 
     const Tg0 = enum(u2) {
         /// 4KiB
@@ -633,7 +633,7 @@ pub const IdAa64Mmfr0 = packed struct(u64) {
     /// ExS.
     exs: u4,
     /// Reserved.
-    _reserved0: u8 = 0,
+    _48: u8 = 0,
     /// FGT.
     fgt: u4,
     /// ECV.
@@ -733,7 +733,7 @@ pub const SctlrEl1 = packed struct(u64) {
     uct: bool,
 
     ntwi: bool,
-    _rsvd0: u1 = 0,
+    _17: u1 = 0,
     ntwe: bool,
     wxn: bool,
     tscxt: bool,
@@ -752,7 +752,7 @@ pub const SctlrEl1 = packed struct(u64) {
 
     cmow: bool,
     mscen: bool,
-    _rsvd1: u1 = 0,
+    _34: u1 = 0,
     bt0: bool,
     bt1: bool,
     itfsb: bool,
@@ -797,7 +797,7 @@ pub const Cntfrq = packed struct(u64) {
     /// Timer frequency.
     freq: u32,
     /// Reserved.
-    _rsvd: u32 = 0,
+    _32: u32 = 0,
 };
 
 /// CNTP_CTL_EL0.
@@ -811,7 +811,7 @@ pub const CntpCtl = packed struct(u64) {
     /// Timer condition met (RO).
     istatus: bool,
     /// Reserved.
-    _rsvd: u61 = 0,
+    _3: u61 = 0,
 };
 
 /// CNTP_TVAL_EL0.
@@ -821,7 +821,7 @@ pub const CntpTval = packed struct(u64) {
     /// Timer value.
     value: u32,
     /// Reserved.
-    _rsvd: u32 = 0,
+    _32: u32 = 0,
 };
 
 /// MPIDR_EL1.
@@ -837,15 +837,15 @@ pub const Mpidr = packed struct(u64) {
     /// Whether the lowest level of affinity consists of logical PEs.
     mt: bool,
     /// Reserved.
-    _rsvd0: u5 = 0,
+    _25: u5 = 0,
     /// Uniprocessor system.
     u: bool,
     /// Reserved.
-    _rsvd1: u1 = 1,
+    _31: u1 = 1,
     /// Affinity level 3.
     aff3: u8,
     /// Reserved.
-    _rsvd2: u24 = 0,
+    _40: u24 = 0,
 };
 
 /// ICC_CTLR_EL1.
@@ -859,11 +859,11 @@ pub const IccCtlr = packed struct(u64) {
     /// Controls whether a write to an EOI register also deactivates the interrupt.
     eoimode: EoiMode,
     /// Reserved.
-    _reserved0: u4 = 0,
+    _2: u4 = 0,
     /// Priority Mask Hint Enable.
     pmhe: bool,
     /// Reserved.
-    _reserved1: u1 = 0,
+    _7: u1 = 0,
     /// Priority bits.
     pribits: u3,
     /// Identifier bits.
@@ -873,13 +873,13 @@ pub const IccCtlr = packed struct(u64) {
     /// Affinity 3 Valid.
     a3v: bool,
     /// Reserved.
-    _reserved2: u2 = 0,
+    _16: u2 = 0,
     /// Range Selector Support.
     rss: u1,
     /// Extended INTID range.
     extrange: u1,
     /// Reserved.
-    _reserved3: u44 = 0,
+    _20: u44 = 0,
 
     const EoiMode = enum(u1) {
         /// Write to an EOI register both drop priority and deactivate the interrupt.
@@ -902,7 +902,7 @@ pub const IccSre = packed struct(u64) {
     /// Enables lower Exception level access to ICC_SRE_ELx.
     enable: bool,
     /// Reserved.
-    _reserved: u60 = 0,
+    _4: u60 = 0,
 };
 
 /// ICC_PMR_EL1.
@@ -912,7 +912,7 @@ pub const IccPmr = packed struct(u64) {
     /// Priority mask.
     priority: u8,
     /// Reserved.
-    _reserved: u56 = 0,
+    _8: u56 = 0,
 };
 
 /// ICC_BPRn_EL1. (n = 0,1)
@@ -922,7 +922,7 @@ pub const IccBpr = packed struct(u64) {
     /// Binary point.
     bpr: u3,
     /// Reserved.
-    _reserved: u61 = 0,
+    _3: u61 = 0,
 };
 
 /// ICC_IGRPEN1_EL1.
@@ -932,7 +932,7 @@ pub const IccIgrpen1El1 = packed struct(u64) {
     /// Enable Group 0 interrupts.
     enable: bool,
     /// Reserved.
-    _reserved: u63 = 0,
+    _1: u63 = 0,
 };
 
 /// ICC_IAR1_EL1
@@ -943,7 +943,7 @@ pub const IccIar1El1 = packed struct(u64) {
     /// The INTID of the signaled interrupt.
     intid: u24,
     /// Reserved.
-    _reserved: u40 = 0,
+    _24: u40 = 0,
 };
 
 /// ICC_DIR1_EL1.
@@ -956,7 +956,7 @@ pub const IccDirEl1 = packed struct(u64) {
     /// The INTID of the interrupt to deactivate.
     intid: u24,
     /// Reserved.
-    _reserved: u40 = 0,
+    _24: u40 = 0,
 };
 
 /// ICC_EOIR1_EL1.
@@ -966,7 +966,7 @@ pub const IccEoir1El1 = packed struct(u64) {
     /// The INTID from the corresponding IAR.
     intid: u24,
     /// Reserved.
-    _reserved: u40 = 0,
+    _24: u40 = 0,
 };
 
 /// ICC_SGI1R_EL1.
@@ -982,19 +982,19 @@ pub const IccSgi1r = packed struct(u64) {
     /// Interrupt ID.
     intid: u4,
     /// Reserved.
-    _reserved0: u4 = 0,
+    _28: u4 = 0,
     /// Affinity level 2.
     aff2: u8,
     /// Interrupt Routing Mode.
     irm: Irm,
     /// Reserved.
-    _reserved1: u3 = 0,
+    _41: u3 = 0,
     /// Range selector.
     rs: u4 = 0,
     /// Affinity level 3.
     aff3: u8,
     /// Reserved.
-    _reserved2: u8 = 0,
+    _56: u8 = 0,
 
     const Irm = enum(u1) {
         /// Routed to the PEs specified Aff3.Aff2.Aff1.<target_list>

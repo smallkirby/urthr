@@ -145,82 +145,82 @@ fn isClockRunning() bool {
 const Mode = packed struct(u32) {
     _0: u16,
     src_sel: u2,
-    _1: u10,
+    _18: u10,
     steps: u4,
 };
 
 const Local = packed struct(u32) {
     freq_sel: u10,
-    _0: u2,
+    _10: u2,
     clk_gen_sel: bool,
-    _1: u3,
+    _13: u3,
     card_clk_en: bool,
     card_clk_stable: bool,
     clk2card_on: bool,
-    _3: u1,
+    _19: u1,
     sample_cclk_sel: bool,
-    _4: u2,
+    _21: u2,
     tuning_cclk_update: bool,
     tuning_cclk_sel: u5,
-    _5: u3,
+    _29: u3,
 };
 
 const UseLocal = packed struct(u32) {
     freq_sel: bool,
-    _0: u11,
+    _1: u11,
     clk_gen_sel: bool,
-    _1: u3,
+    _13: u3,
     card_clk_en: bool,
-    _2: u1,
+    _17: u1,
     clk2card_on: bool,
-    _3: u1,
+    _19: u1,
     sample_cclk_sel: bool,
-    _4: u2,
+    _21: u2,
     tuning_cclk_update: bool,
     tuning_cclk_en: bool,
-    _5: u7,
+    _25: u7,
 };
 
 const SdDelay = packed struct(u32) {
     step: u5,
-    _0: u27,
+    _5: u27,
 };
 
 const RxDelay = packed struct(u32) {
     fixed: u5,
-    _0: u3,
+    _5: u3,
     map: enum(u2) {
         direct = 0,
         value = 1,
         stretch = 2,
     },
-    _1: u2,
+    _10: u2,
     overflow: enum(u2) {
         allow = 0,
         clamp = 1,
         fail = 2,
     },
-    _2: u2,
+    _14: u2,
     offset: u2,
-    _3: u2,
+    _18: u2,
     actual: u5,
-    _4: u2,
+    _25: u2,
     fail_actual: bool,
     bypass: bool,
-    _5: u3,
+    _29: u3,
 };
 
 const Cs = packed struct(u32) {
     reset: bool,
-    _0: u7,
+    _1: u7,
     tx_clk_running: bool,
-    _1: u3,
+    _9: u3,
     sd_clk_running: bool,
-    _2: u3,
+    _13: u3,
     rx_clk_running: bool,
-    _3: u3,
+    _17: u3,
     rx_del_updated: bool,
-    _4: u11,
+    _21: u11,
 };
 
 // =============================================================

@@ -80,9 +80,9 @@ pub fn init() void {}
 const Control = packed struct(u32) {
     src: u5,
     auxsrc: u5,
-    _0: u1 = 0,
+    _10: u1 = 0,
     enable: bool,
-    _1: u20 = 0,
+    _12: u20 = 0,
 };
 
 // =============================================================

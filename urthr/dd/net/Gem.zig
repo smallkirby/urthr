@@ -255,7 +255,7 @@ const RxQueue = struct {
         /// Buffer address (upper 32 bits).
         addr_hi: u32,
         /// Reserved.
-        _rsvd: u32 = 0,
+        _96: u32 = 0,
 
         /// Check if the descriptor is owned by software.
         pub fn swOwns(self: *const volatile Desc) bool {
@@ -307,7 +307,7 @@ const RxQueue = struct {
         sa3_match: bool,
         sa2_match: bool,
         sa1_match: bool,
-        _rsvd0: u1 = 0,
+        _27: u1 = 0,
         ext_match: bool,
         uhash_match: bool,
         mhash_match: bool,
@@ -333,7 +333,7 @@ const RxQueue = struct {
             const buffer = try self.createBuffer();
             self.buffers[i] = buffer;
 
-            desc._rsvd = 0;
+            desc._96 = 0;
             desc.setAddr(buffer.addr);
             desc.setHwOwn();
             if (i == num_desc - 1) {
@@ -525,7 +525,7 @@ fn mdioWaitForIdle(self: *Self) void {
 /// 0x00: Basic Mode Control Register.
 const Bmcr = packed struct(u16) {
     /// Reserved.
-    _rsvd: u7 = 0,
+    _0: u7 = 0,
     /// Collision test enable.
     collision_test: bool,
     /// Full duplex.
@@ -568,7 +568,7 @@ const Bmsr = packed struct(u16) {
     /// Preamble suppression Capable.
     mf_preamble_supp: bool,
     /// Reserved.
-    _rsvd0: u4 = 0,
+    _7: u4 = 0,
     /// 10BASE-T HALF DUPLEX.
     spd10baset_hd: bool,
     /// 10BASE-T FULL DUPLEX.
@@ -584,7 +584,7 @@ const Bmsr = packed struct(u16) {
 /// 0x0A: 1000BASE-T Status Register.
 const Stat1000 = packed struct(u16) {
     /// Reserved.
-    _rsvd: u10,
+    _0: u10,
     /// Half duplex.
     hd: bool,
     /// Full duplex.
@@ -632,23 +632,23 @@ const Ncr = packed struct(u32) {
     /// Transmit zero quantum pause frame.
     tzq: bool,
     /// Reserved.
-    _0: u2 = 0,
+    _13: u2 = 0,
     /// Store Receive Timestamp to Memory.
     srtsm: bool,
     /// Reserved.
-    _1: u4 = 0,
+    _16: u4 = 0,
     /// PTP Unicast packet enable.
     ptpuni: bool,
     /// Reserved.
-    _2: u3 = 0,
+    _21: u3 = 0,
     /// Enable One Step Synchro Mode.
     ossmode: bool,
     /// Reserved.
-    _3: u3 = 0,
+    _25: u3 = 0,
     /// MII Usage on RGMII Interface.
     miionrgmii: bool,
     /// Reserved.
-    _4: u2 = 0,
+    _29: u2 = 0,
     ///
     enable_hs_mac: bool,
 };
@@ -694,7 +694,7 @@ const Ncfgr = packed struct(u32) {
     /// Data bus width.
     dbw: u3,
     ///
-    _1: u8 = 0,
+    _24: u8 = 0,
 };
 
 /// Network Status Register.
@@ -706,14 +706,14 @@ const Nsr = packed struct(u32) {
     /// The PHY management logic is idle.
     idle: bool,
     /// Reserved.
-    _0: u29 = 0,
+    _3: u29 = 0,
 };
 
 /// User I/O Register.
 const Usrio = packed struct(u32) {
     rgmii: bool,
     clken: bool,
-    _rsvd: u30 = 0,
+    _2: u30 = 0,
 };
 
 /// DMA Configuration Register.
@@ -721,7 +721,7 @@ const Dmacfg = packed struct(u32) {
     /// Fixed burst length for DMA data operations.
     fbldo: u5,
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _5: u1 = 0,
     /// Endian swap mode for management descriptor access.
     endia_desc: bool,
     /// Endian swap mode for packet data access.
@@ -733,13 +733,13 @@ const Dmacfg = packed struct(u32) {
     /// TX IP/TCP/UDP checksum gen offload.
     txcoen: bool,
     /// Reserved.
-    _rsvd1: u4 = 0,
+    _12: u4 = 0,
     /// DMA receive buffer size.
     rxbs: u8,
     /// disc_when_no_ahb
     ddrp: bool,
     /// Reserved.
-    _rsvd2: u3 = 0,
+    _25: u3 = 0,
     /// RX extended Buffer Descriptor mode.
     rxext: bool,
     /// TX extended Buffer Descriptor mode.
@@ -747,7 +747,7 @@ const Dmacfg = packed struct(u32) {
     /// Address bus 64 bits.
     addr64: bool,
     /// Reserved.
-    _rsvd3: u1 = 0,
+    _31: u1 = 0,
 };
 
 /// Receive Buffer Queue Base Address Register.
@@ -779,7 +779,7 @@ const Rsr = packed struct(u32) {
     /// Overrun.
     overrun: bool,
     /// Reserved.
-    _rsvd: u29 = 0,
+    _3: u29 = 0,
 };
 
 /// Bitfields for ISR, IER, IDR, and IMR registers.
@@ -802,7 +802,7 @@ const InterruptBf = packed struct(u32) {
     tcomp: bool,
 
     /// Reserved.
-    _rsvd0: u1 = 0,
+    _8: u1 = 0,
     /// Link change.
     link: bool,
     /// Receive overrun.
@@ -816,10 +816,10 @@ const InterruptBf = packed struct(u32) {
     /// Wake-on-LAN frame received.
     wol: bool,
     /// Reserved.
-    _rsvd1: u1 = 0,
+    _15: u1 = 0,
 
     /// Reserved.
-    _rsvd2: u2 = 0,
+    _16: u2 = 0,
     /// PTP Delay request frame received.
     drqfr: bool,
     /// PTP Sync frame received.
@@ -840,11 +840,11 @@ const InterruptBf = packed struct(u32) {
     /// TSU seconds register increment.
     sri: bool,
     /// Reserved.
-    _rsvd3: u1 = 0,
+    _27: u1 = 0,
     /// Wake-on-LAN frame received.
     wol2: bool,
     /// Reserved.
-    _rsvd4: u3 = 0,
+    _29: u3 = 0,
 };
 
 /// Interrupt status register.
@@ -900,14 +900,14 @@ const Sa1b = packed struct(u32) {
 const Sa1t = packed struct(u32) {
     mac4: u8,
     mac5: u8,
-    _rsvd: u16 = 0,
+    _16: u16 = 0,
 };
 
 /// Identification Register.
 const Mid = packed struct(u32) {
     rev: u16,
     idnum: u12,
-    _0: u4,
+    _28: u4,
 };
 
 /// Receive Count Register.
@@ -916,11 +916,11 @@ const Rxcnt = packed struct(u32) { value: u32 };
 /// Design Configuration 1 Register.
 const Dconfig1 = packed struct(u32) {
     no_pcs: bool,
-    _0: u22 = 0,
+    _1: u22 = 0,
     irqcor: bool,
-    _1: u1 = 0,
+    _24: u1 = 0,
     dbwdef: u3,
-    _2: u4 = 0,
+    _28: u4 = 0,
 };
 
 // =============================================================

@@ -138,7 +138,7 @@ const Dr = packed struct {
     /// Overrun error.
     oe: bool,
     /// Reserved.
-    _rsvd: u4 = 0,
+    _12: u4 = 0,
 };
 
 /// UARTRSR / UARTECR: Receive Status / Error Clear Register.
@@ -219,7 +219,7 @@ const Cr = packed struct {
     /// SIR low power IrDA mode.
     sirlp: bool,
     /// Reserved.
-    _rsvd: u4 = 0,
+    _3: u4 = 0,
     /// Loopback enable.
     lbe: bool,
     /// Transmit enable.

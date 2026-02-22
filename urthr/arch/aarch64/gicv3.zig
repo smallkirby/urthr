@@ -258,11 +258,11 @@ const gicd = struct {
         /// When `.are` is set, Enable Group 1 interrupts. Otherwise, reserved.
         enable_grp1: bool,
         /// Reserved.
-        _rsvd0: u2 = 0,
+        _2: u2 = 0,
         /// Affinity routing enable.
         are: bool,
         /// Reserved.
-        _rsvd1: u26 = 0,
+        _5: u26 = 0,
         /// Register Write Pending (RO).
         ///
         /// Indicates that a write operation to the GICD_CTLR is in progress.
@@ -274,7 +274,7 @@ const gicd = struct {
         /// Number of interrupt lines.
         it_lines_number: u5,
         /// Reserved or not implemented.
-        _rsvd: u27,
+        _5: u27,
     };
 
     /// Distributor Implementer Identification Register.
@@ -286,7 +286,7 @@ const gicd = struct {
         /// Variant.
         variant: u4,
         /// Reserved.
-        _rsvd: u4 = 0,
+        _20: u4 = 0,
         /// Product identifier.
         product: u8,
     };
@@ -401,7 +401,7 @@ const gicr = struct {
         /// Register Write Pending (RO).
         rwp: bool,
         /// Reserved.
-        _rsvd0: u20 = 0,
+        _4: u20 = 0,
         /// Disable Processor selection for Group 0 interrupts.
         dpg0: bool,
         /// Disable Processor selection for Group 1 Non-Secure interrupts.
@@ -409,7 +409,7 @@ const gicr = struct {
         /// Disable Processor selection for Group 1 Secure interrupts.
         dpg1s: bool,
         /// Reserved.
-        _rsvd1: u4 = 0,
+        _27: u4 = 0,
         /// Upstream Write Pending (RO).
         ///
         /// Indicates whether all upstream writes have been communicated to the Distributor.
@@ -453,7 +453,7 @@ const gicr = struct {
     /// Redistributor Wake Register.
     const Waker = packed struct(u32) {
         /// Reserved.
-        _rsvd0: u1 = 0,
+        _0: u1 = 0,
         /// Processor Sleep.
         ///
         /// If false, this PE is not in, and is not entering, a low power state.
@@ -463,7 +463,7 @@ const gicr = struct {
         /// If true, all interfaces to the connected PE are quiesced.
         children_asleep: bool,
         /// Reserved.
-        _rsvd1: u29 = 0,
+        _3: u29 = 0,
     };
 };
 
