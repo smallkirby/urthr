@@ -12,6 +12,8 @@ var exception_handler: ?ExceptionHandler = null;
 var gem: dd.net.Gem = undefined;
 /// GEM network device instance.
 var gemdev: *net.Device = undefined;
+/// Packet queue for deferring RX processing.
+var pktq: net.PacketQueue(dd.net.Gem.mtu_all) = .{};
 
 /// Early board initialization.
 ///
@@ -198,13 +200,25 @@ fn handleIrq() ?void {
 
 /// Handle GEM interrupt.
 fn handleGemIrq() void {
-    var buffer: [dd.net.Gem.mtu_all]u8 = undefined;
-
-    while (gem.tryGetRx(&buffer)) |data| {
-        net.ether.inputFrame(gemdev, data);
+    while (true) {
+        const buf = pktq.acquireSlot() orelse break;
+        if (gem.tryGetRx(buf)) |data| {
+            pktq.commitSlot(@intCast(data.len));
+        } else break;
     }
 
     rdd.rp1.ackMsix(.eth);
+}
+
+/// Network RX worker thread entry point.
+pub fn netRxWorker() void {
+    log.info("Network RX worker started.", .{});
+
+    while (true) {
+        const desc = pktq.dequeue();
+        net.ether.inputFrame(gemdev, desc.data);
+        pktq.release(desc);
+    }
 }
 
 /// Get the block device interface.
