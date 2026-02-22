@@ -112,7 +112,7 @@ export fn kmain() callconv(.c) noreturn {
     }
 
     // Load Urthr kernel.
-    const header = (if (common.options.serial_boot) blk: {
+    const header = (if (options.serial_boot) blk: {
         log.info("Ready to receive Urthr kernel via serial.", .{});
         break :blk SrWyrd.startReceive();
     } else blk: {
@@ -302,6 +302,7 @@ const common = @import("common");
 const units = common.units;
 const util = common.util;
 const dd = @import("dd");
+const options = @import("options");
 
 const klog = @import("klog.zig");
 const FixedAllocator = @import("FixedAllocator.zig");

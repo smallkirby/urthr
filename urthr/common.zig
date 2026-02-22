@@ -12,8 +12,6 @@ pub const Console = @import("common/Console.zig");
 pub const RbTree = @import("common/RbTree.zig").RbTree;
 pub const Timer = @import("common/Timer.zig");
 
-pub const options = @import("options");
-
 /// Units definition.
 pub const units = struct {
     pub const kib = 1024;

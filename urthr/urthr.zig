@@ -86,5 +86,5 @@ test {
 
 const std = @import("std");
 const arch = @import("arch").impl;
-const options = @import("common").options;
+const options = @import("options");
 const board = @import("board").impl;

@@ -78,4 +78,4 @@ const std = @import("std");
 const io = std.io;
 const common = @import("common");
 const Console = common.Console;
-const options = common.options;
+const options = @import("options");
