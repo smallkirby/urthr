@@ -5,6 +5,7 @@ pub const ip = @import("net/ip.zig");
 pub const Device = @import("net/Device.zig");
 pub const Interface = @import("net/Interface.zig");
 pub const Loopback = @import("net/Loopback.zig");
+pub const PacketQueue = @import("net/queue.zig").PacketQueue;
 
 /// Registered network device list.
 var device_list: Device.DeviceList = .{};

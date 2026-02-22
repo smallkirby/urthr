@@ -8,6 +8,7 @@ pub const thread = @import("kernel/thread.zig");
 
 pub const LogFn = klog.LogFn;
 pub const SpinLock = @import("kernel/SpinLock.zig");
+pub const WaitQueue = @import("kernel/WaitQueue.zig");
 
 /// Runtime tests enabled.
 pub const enable_rtt = options.enable_rtt;
