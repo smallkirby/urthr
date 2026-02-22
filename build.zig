@@ -115,6 +115,8 @@ pub fn build(b: *std.Build) !void {
     options.addOption(bool, "restart_on_panic", restart);
     options.addOption(u64, "idle_watchdog", idle_watchdog);
 
+    const options_module = options.createModule();
+
     // =============================================================
     // Modules
     // =============================================================
@@ -132,7 +134,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("urthr/common.zig"),
         });
         module.addImport("common", module);
-        module.addOptions("options", options);
+        module.addImport("options", options_module);
 
         break :blk module;
     };
@@ -142,7 +144,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("urthr/arch.zig"),
         });
         module.addImport("common", common_module);
-        module.addOptions("options", options);
+        module.addImport("options", options_module);
 
         break :blk module;
     };
@@ -153,6 +155,7 @@ pub fn build(b: *std.Build) !void {
         });
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
+        module.addImport("options", options_module);
 
         break :blk module;
     };
@@ -164,6 +167,7 @@ pub fn build(b: *std.Build) !void {
         module.addImport("common", common_module);
         module.addImport("arch", arch_module);
         module.addImport("dd", dd_module);
+        module.addImport("options", options_module);
 
         break :blk module;
     };
@@ -177,6 +181,7 @@ pub fn build(b: *std.Build) !void {
         module.addImport("board", board_module);
         module.addImport("dd", dd_module);
         module.addImport("urthr", module);
+        module.addImport("options", options_module);
 
         break :blk module;
     };
@@ -290,7 +295,7 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("dd", dd_module);
         exe.root_module.addImport("urthr", urthr_module);
-        exe.root_module.addOptions("options", options);
+        exe.root_module.addImport("options", options_module);
 
         exe.step.dependOn(&pp_urthr.step);
 
@@ -333,7 +338,7 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("dd", dd_module);
-        exe.root_module.addOptions("options", options);
+        exe.root_module.addImport("options", options_module);
 
         exe.step.dependOn(&pp_wyrd.step);
 

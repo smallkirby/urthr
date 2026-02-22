@@ -197,9 +197,9 @@ const console = struct {
 
 const std = @import("std");
 const arch = @import("arch").impl;
+const options = @import("options");
 const common = @import("common");
 const mem = common.mem;
-const options = common.options;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
 const MemoryManager = common.mem.MemoryManager;

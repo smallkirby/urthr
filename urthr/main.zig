@@ -108,7 +108,7 @@ fn zmain() !void {
     urd.sched.reschedule();
 
     // If the idle watchdog is enabled, monitor the idle thread's execution time.
-    if (common.options.idle_watchdog != 0) {
+    if (options.idle_watchdog != 0) {
         while (true) {
             urd.sched.reschedule();
             arch.halt();
@@ -132,6 +132,7 @@ const board = @import("board").impl;
 const common = @import("common");
 const units = common.units;
 const urd = @import("urthr");
+const options = @import("options");
 
 // Force evaluate symbols exported but not referenced in Zig.
 comptime {

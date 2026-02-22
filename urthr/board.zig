@@ -35,7 +35,7 @@ pub const BoardType = enum {
 };
 
 /// Set of board-specific implementations.
-pub const impl = switch (common.options.board) {
+pub const impl = switch (options.board) {
     .rpi4b => @import("board/rpi4b/board.zig"),
     .rpi5 => @import("board/rpi5/board.zig"),
     .virt => @import("board/virt/board.zig"),
@@ -43,7 +43,7 @@ pub const impl = switch (common.options.board) {
 
 /// Get the name of the board.
 pub fn description() []const u8 {
-    return switch (common.options.board) {
+    return switch (options.board) {
         .rpi4b => "Raspberry Pi 4B",
         .rpi5 => "Raspberry Pi 5",
         .virt => "QEMU virt machine",
@@ -56,3 +56,4 @@ pub fn description() []const u8 {
 
 const std = @import("std");
 const common = @import("common");
+const options = @import("options");
