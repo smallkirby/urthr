@@ -120,11 +120,9 @@ fn zmain() !void {
 fn initialTask() !void {
     log.info("Initial task started.", .{});
 
-    // Start network worker thread if the board supports it.
-    // TODO: should not delegate this responsibility to the board module.
-    if (@hasDecl(board, "netRxWorker")) {
-        _ = try urd.sched.spawn("net", board.netRxWorker, .{});
-    }
+    // Start networking subsystem.
+    log.info("Starting networking subsystem.", .{});
+    try urd.net.run();
 }
 
 // =============================================================

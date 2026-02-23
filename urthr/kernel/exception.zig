@@ -4,7 +4,7 @@ pub const Error = error{
 };
 
 /// Interrupt handler function signature.
-pub const Handler = *const fn () void;
+pub const Handler = *const fn (id: Vector) void;
 
 /// Interrupt vector number.
 pub const Vector = u16;
@@ -42,7 +42,7 @@ pub fn initLocal() void {
 fn call(vector: u64) ?void {
     // Call corresponding handler.
     if (handlers[vector]) |handler| {
-        handler();
+        handler(@intCast(vector));
     } else {
         return null;
     }

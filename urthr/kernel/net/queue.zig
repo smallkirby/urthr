@@ -15,6 +15,8 @@ pub fn PacketQueue(comptime max_packet_size: comptime_int) type {
         pub const Descriptor = struct {
             // Slice referencing the packet data.
             data: []const u8,
+            /// Network device associated with the packet.
+            device: *Device,
             // Index of the slot in the ring buffer.
             _index: usize,
         };
@@ -27,6 +29,8 @@ pub fn PacketQueue(comptime max_packet_size: comptime_int) type {
             data: [max_packet_size]u8 = undefined,
             /// Actual length of the packet data stored in the buffer.
             len: u16 = 0,
+            /// Network device associated with the packet.
+            device: *Device = undefined,
         };
 
         /// Ring buffer of packets.
@@ -64,8 +68,9 @@ pub fn PacketQueue(comptime max_packet_size: comptime_int) type {
         ///
         /// Sets the packet length, advances the head pointer, increments
         /// the count, and wakes the consumer thread.
-        pub fn commitSlot(self: *Self, len: u16) void {
+        pub fn commitSlot(self: *Self, len: u16, device: *Device) void {
             self.slots[self.head].len = len;
+            self.slots[self.head].device = device;
 
             self.lock.lock();
 
@@ -93,6 +98,7 @@ pub fn PacketQueue(comptime max_packet_size: comptime_int) type {
             const slot = &self.slots[self.tail];
             const desc = Descriptor{
                 .data = slot.data[0..slot.len],
+                .device = slot.device,
                 ._index = self.tail,
             };
 
@@ -123,3 +129,4 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const SpinLock = urd.SpinLock;
 const WaitQueue = urd.WaitQueue;
+const Device = @import("Device.zig");

@@ -8,12 +8,8 @@ pub const ExceptionHandler = *const fn (u64) ?void;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
-/// GEM controller instance.
-var gem: dd.net.Gem = undefined;
-/// GEM network device instance.
-var gemdev: *net.Device = undefined;
-/// Packet queue for deferring RX processing.
-var pktq: net.PacketQueue(dd.net.Gem.mtu_all) = .{};
+/// MAC address of GEM controller.
+const gem_mac = net.ether.MacAddr.encode("B8:27:EB:00:00:00");
 
 /// Early board initialization.
 ///
@@ -120,28 +116,23 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     {
         rdd.ether.setBase(rdd.rp1.getEthrBase(), rdd.rp1.getEthrCfgBase());
 
-        // Initialize Ethernet MAC.
+        // Initialize Ethernet MAC PHY.
         rdd.ether.resetPhy();
-        gem = dd.net.Gem.new(
+
+        // Initialize GEM network device to register to the network stack.
+        const gemdev = try dd.net.Gem.new(
             rdd.rp1.getEthrBase(),
+            gem_mac,
+            mm.general,
             rdd.pcie.getDmaAllocator(),
         );
-        gem.init();
+        urd.net.registerDevice(gemdev);
 
         // Register interrupt handler.
-        const gem_intid = rdd.rp1.getIrqNumber(.eth);
-        urd.exception.setHandler(gem_intid, handleGemIrq) catch |err| {
-            log.err("Failed to register GEM IRQ handler: {}", .{err});
-        };
-        arch.gicv2.setTrigger(gem_intid, .edge);
-        arch.gicv2.enableIrq(gem_intid);
-
-        // Register network device.
-        // TODO: should we register a device here?
-        gemdev = GemDevice.new(mm.general) catch {
-            @panic("Failed to create GEM network device");
-        };
-        urd.net.registerDevice(gemdev);
+        const intid = rdd.rp1.getIrqNumber(.eth);
+        arch.gicv2.setTrigger(intid, .edge);
+        arch.gicv2.enableIrq(intid);
+        try net.registerIrq(gemdev, intid);
 
         // TODO: should we create an interface here?
         const ipif = try urd.net.ip.createInterface(
@@ -181,6 +172,8 @@ fn handleIrq() ?void {
         if (handler(intid)) |_| {
             arch.gicv2.eoi(iar);
 
+            rdd.rp1.ackMsix(.eth); // TODO: should check if this is actually an Ethernet interrupt
+
             if (urd.sched.shouldReschedule()) {
                 urd.sched.reschedule();
             }
@@ -195,29 +188,6 @@ fn handleIrq() ?void {
         // No root handler registered.
         arch.gicv2.eoi(iar);
         return null;
-    }
-}
-
-/// Handle GEM interrupt.
-fn handleGemIrq() void {
-    while (true) {
-        const buf = pktq.acquireSlot() orelse break;
-        if (gem.tryGetRx(buf)) |data| {
-            pktq.commitSlot(@intCast(data.len));
-        } else break;
-    }
-
-    rdd.rp1.ackMsix(.eth);
-}
-
-/// Network RX worker thread entry point.
-pub fn netRxWorker() void {
-    log.info("Network RX worker started.", .{});
-
-    while (true) {
-        const desc = pktq.dequeue();
-        net.ether.inputFrame(gemdev, desc.data);
-        pktq.release(desc);
     }
 }
 
@@ -264,50 +234,6 @@ const console = struct {
 
     fn flush(_: *anyopaque) void {
         return dd.pl011.flush();
-    }
-};
-
-// =============================================================
-// Network
-// =============================================================
-
-const GemDevice = struct {
-    const Self = @This();
-
-    const vtable = net.Device.Vtable{
-        .open = null,
-        .output = outputImpl,
-    };
-
-    /// Create a new GEM network device.
-    pub fn new(allocator: Allocator) net.Error!*net.Device {
-        const device = try allocator.create(net.Device);
-        errdefer allocator.destroy(device);
-
-        const flags = net.Device.Flag{
-            .up = true,
-        };
-
-        device.* = .{
-            .ctx = @ptrCast(&gem),
-            .vtable = vtable,
-            .mtu = dd.net.Gem.mtu,
-            .flags = flags,
-            .dev_type = .ether,
-            .addr = undefined,
-        };
-        const mac_addr = gem.getMacAddr();
-        @memcpy(device.addr[0..mac_addr.len], &mac_addr);
-
-        return device;
-    }
-
-    fn outputImpl(dev: *net.Device, prot: net.Protocol, data: []const u8) net.Error!void {
-        _ = dev;
-        _ = prot;
-        _ = data;
-
-        urd.unimplemented("gement.outputImpl");
     }
 };
 

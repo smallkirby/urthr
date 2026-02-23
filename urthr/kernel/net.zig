@@ -10,6 +10,9 @@ pub const PacketQueue = @import("net/queue.zig").PacketQueue;
 /// Registered network device list.
 var device_list: Device.DeviceList = .{};
 
+/// Packet queue for deferring RX processing.
+pub var pktq: PacketQueue(2048) = .{};
+
 /// Network error.
 pub const Error = error{
     /// Given operation would cause duplication.
@@ -53,6 +56,19 @@ pub const Protocol = enum(u16) {
 /// Initialize network subsystem.
 pub fn init() void {}
 
+/// Start running the network subsystem and register devices.
+pub fn run() (Error || urd.sched.Error)!void {
+    // Link-up all registered devices.
+    var iter = device_list.iter();
+    while (iter.next()) |device| {
+        std.log.info("device @ {X}", .{@intFromPtr(device)});
+        try device.open();
+    }
+
+    // Start the worker thread.
+    _ = try urd.sched.spawn("net", worker, .{});
+}
+
 /// Register a network device.
 pub fn registerDevice(device: *Device) void {
     device_list.append(device);
@@ -66,6 +82,43 @@ pub fn handleInput(dev: *const Device, prot: Protocol, data: []const u8) Error!v
     } else {
         // Ignore unrecognized protocol
         return;
+    }
+}
+
+/// Register IRQ vector for the given device.
+pub fn registerIrq(dev: *Device, irq: urd.exception.Vector) Error!void {
+    dev.irq = irq;
+
+    urd.exception.setHandler(irq, handleIrq) catch {
+        @panic("Failed to set IRQ handler for device");
+    };
+}
+
+/// IRQ handler for all registered devices.
+///
+/// Iterates through the device list to find the device associated with the given IRQ.
+fn handleIrq(irq: urd.exception.Vector) void {
+    var iter = device_list.iter();
+    while (iter.next()) |device| {
+        if (device.irq == irq) {
+            device.handleIrq();
+        }
+    }
+}
+
+/// Network worker thread function.
+///
+/// Continuously processes incoming packets from the packet queue
+/// and dispatches them to the appropriate device handlers.
+fn worker() void {
+    while (true) {
+        const pkt = pktq.dequeue();
+        defer pktq.release(pkt);
+
+        switch (pkt.device.dev_type) {
+            .ether => ether.inputFrame(pkt.device, pkt.data),
+            else => @panic("Unsupported device type in packet queue"),
+        }
     }
 }
 

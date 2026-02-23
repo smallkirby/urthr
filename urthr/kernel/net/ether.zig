@@ -54,6 +54,29 @@ pub const MacAddr = extern struct {
         @memcpy(&bytes, value);
         return MacAddr{ .value = bytes };
     }
+
+    /// Encode a MAC address from the given string.
+    pub fn encode(comptime s: []const u8) MacAddr {
+        var bytes: [length]u8 = undefined;
+        var parts = std.mem.splitAny(u8, s, ":");
+
+        var i: usize = 0;
+        while (parts.next()) |part| : (i += 1) {
+            if (i >= length) {
+                @compileError("Too many parts in MAC address string");
+            }
+            const byte = std.fmt.parseInt(u8, part, 16) catch {
+                @compileError("Invalid byte in MAC address string");
+            };
+            bytes[i] = byte;
+        }
+
+        if (i != length) {
+            @compileError("Too few parts in MAC address string");
+        }
+
+        return MacAddr{ .value = bytes };
+    }
 };
 
 /// Ethernet frame header.

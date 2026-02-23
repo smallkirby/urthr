@@ -45,32 +45,42 @@ const rxq_idx = 0;
 /// Queue index for TX.
 const txq_idx = 1;
 
-/// MAC address type.
-const MacAddr = [6]u8;
-
-/// Default MAC address value.
-const default_mac: MacAddr = [_]u8{ 0xB8, 0x27, 0xEB, 0x00, 0x00, 0x00 };
-
 /// Maximum Transmission Unit in bytes.
 pub const mtu = 1500;
 /// Maximum Transmission Unit in bytes including header.
 pub const mtu_all = mtu + 14; // + Ethernet header
 
-/// Create a new GEM instance.
+/// Create a new network device for GEM controller.
 ///
 /// Memory allocated for this driver will be managed by the given memory manager.
-pub fn new(base: usize, dma_allocator: DmaAllocator) Self {
-    var module = gem{};
-    module.setBase(base);
+pub fn new(base: usize, mac: MacAddr, allocator: Allocator, dma: DmaAllocator) Allocator.Error!*net.Device {
+    const self = try allocator.create(Self);
+    errdefer allocator.destroy(self);
+    const netdev = try allocator.create(net.Device);
+    errdefer allocator.destroy(netdev);
 
-    return .{
-        .module = module,
-        .dma_allocator = dma_allocator,
+    self.* = .{
+        .module = gem.new(base),
+        .dma_allocator = dma,
     };
+
+    netdev.* = .{
+        .ctx = @ptrCast(self),
+        .vtable = vtable,
+        .flags = .{ .up = false },
+        .mtu = mtu_all,
+        .dev_type = .ether,
+        .addr = undefined,
+    };
+    @memcpy(netdev.addr[0..MacAddr.length], &mac.value);
+
+    return netdev;
 }
 
 /// Initialize PHY and GEM controller.
-pub fn init(self: *Self) void {
+pub fn init(netdev: *net.Device) net.Error!void {
+    const self: *Self = @ptrCast(@alignCast(netdev.ctx));
+
     if (self.module.read(Mid).idnum < 2) {
         @panic("The macb device is not GEM.");
     }
@@ -113,14 +123,10 @@ pub fn init(self: *Self) void {
 
     // Initialize MAC address.
     var mac = self.getMacAddr();
-    log.debug("Initial MAC address: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}", .{
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-    });
-    self.setMacAddr(default_mac);
+    log.debug("Initial MAC address: {f}", .{mac});
+    self.setMacAddr(MacAddr.from(netdev.addr[0..net.ether.MacAddr.length]));
     mac = self.getMacAddr();
-    log.info("MAC address set to: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}", .{
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-    });
+    log.info("MAC address set to: {f}", .{mac});
 
     // Auto negotiation and wait for link up.
     self.mdioWrite(4, 0x01E1);
@@ -173,31 +179,33 @@ pub fn init(self: *Self) void {
 }
 
 /// Read the MAC address from the GEM controller.
-pub fn getMacAddr(self: *const Self) MacAddr {
+fn getMacAddr(self: *const Self) MacAddr {
     const sa1b = self.module.read(Sa1b);
     const sa1t = self.module.read(Sa1t);
 
-    return [_]u8{
-        sa1b.mac0,
-        sa1b.mac1,
-        sa1b.mac2,
-        sa1b.mac3,
-        sa1t.mac4,
-        sa1t.mac5,
+    return MacAddr{
+        .value = [_]u8{
+            sa1b.mac0,
+            sa1b.mac1,
+            sa1b.mac2,
+            sa1b.mac3,
+            sa1t.mac4,
+            sa1t.mac5,
+        },
     };
 }
 
 /// Set the MAC address in the GEM controller.
 fn setMacAddr(self: *const Self, mac: MacAddr) void {
     self.module.write(Sa1b, Sa1b{
-        .mac0 = mac[0],
-        .mac1 = mac[1],
-        .mac2 = mac[2],
-        .mac3 = mac[3],
+        .mac0 = mac.value[0],
+        .mac1 = mac.value[1],
+        .mac2 = mac.value[2],
+        .mac3 = mac.value[3],
     });
     self.module.write(Sa1t, Sa1t{
-        .mac4 = mac[4],
-        .mac5 = mac[5],
+        .mac4 = mac.value[4],
+        .mac5 = mac.value[5],
     });
 }
 
@@ -600,6 +608,36 @@ const Stat1000 = packed struct(u16) {
 };
 
 // =============================================================
+// Network Interface
+// =============================================================
+
+const vtable: net.Device.Vtable = .{
+    .open = init,
+    .output = outputImpl,
+    .input = inputImpl,
+};
+
+fn inputImpl(dev: *net.Device) net.Error!bool {
+    const self: *Self = @ptrCast(@alignCast(dev.ctx));
+    const slot = net.pktq.acquireSlot() orelse return false;
+
+    if (self.tryGetRx(slot)) |data| {
+        net.pktq.commitSlot(@intCast(data.len), dev);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+fn outputImpl(dev: *net.Device, prot: net.Protocol, data: []const u8) net.Error!void {
+    _ = dev;
+    _ = prot;
+    _ = data;
+
+    urd.unimplemented("gement.outputImpl");
+}
+
+// =============================================================
 // Registers
 // =============================================================
 
@@ -930,6 +968,7 @@ const Dconfig1 = packed struct(u32) {
 const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.gem);
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
 const mmio = common.mmio;
@@ -938,3 +977,6 @@ const Timer = common.Timer;
 const DmaAllocator = common.mem.DmaAllocator;
 const MemoryManager = common.mem.MemoryManager;
 const arch = @import("arch").impl;
+const urd = @import("urthr");
+const net = urd.net;
+const MacAddr = net.ether.MacAddr;
