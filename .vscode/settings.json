@@ -1,3 +1,12 @@
 {
-  "typos.config": "_typos.toml"
+  "typos.config": "_typos.toml",
+  "zig.buildOnSaveProvider": "extension",
+  "zig.buildOnSaveArgs": [
+    "-Dlog_level=debug",
+    "-Dboard=rpi5",
+    "-Dserial_boot",
+    "-Drtt",
+    "-Drestart",
+    "-Didle_watchdog=5",
+  ]
 }
