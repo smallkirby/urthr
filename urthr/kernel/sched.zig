@@ -200,7 +200,7 @@ const tick_interval_us: u64 = 10 * std.time.us_per_ms;
 /// Timer interrupt handler.
 ///
 /// Re-arms the timer and check if the current thread needs to be rescheduled.
-fn timerHandler() void {
+fn timerHandler(_: urd.exception.Vector) void {
     armTimer();
     markNeedResched();
 

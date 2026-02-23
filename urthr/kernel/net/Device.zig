@@ -22,6 +22,8 @@ addr: [max_addr_len]u8,
 dev_type: Type,
 /// Logical interfaces associated with this device.
 netif: Interface.InterfaceList = .{},
+/// Interrupt vector number for the device.
+irq: ?u32 = null,
 
 /// List head for linking network devices.
 list_head: DeviceList.Head = .{},
@@ -54,6 +56,10 @@ pub const Vtable = struct {
     open: ?*const fn (device: *Self) net.Error!void = null,
     /// Output the given data to the device.
     output: *const fn (device: *Self, prot: Protocol, data: []const u8) net.Error!void,
+    /// Input data from the device to the network stack.
+    ///
+    /// If no input data is available, returns `false`.
+    input: ?*const fn (device: *Self) net.Error!bool = null,
 };
 
 /// Link up the device.
@@ -96,12 +102,22 @@ pub fn findInterface(self: *const Self, family: Interface.Family) ?*Interface {
     } else null;
 }
 
+/// Handle IRQ for the device.
+pub fn handleIrq(self: *Self) void {
+    if (self.vtable.input) |input| {
+        while (true) {
+            if (!(input(self) catch continue)) break;
+        }
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
 const common = @import("common");
 const urd = @import("urthr");
+const exception = urd.exception;
 const net = urd.net;
 const Protocol = net.Protocol;
 const Interface = @import("Interface.zig");
