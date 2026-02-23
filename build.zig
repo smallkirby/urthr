@@ -121,71 +121,54 @@ pub fn build(b: *std.Build) !void {
     // Modules
     // =============================================================
 
-    const boot_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("boot.zig"),
-        });
+    const boot_module = b.createModule(.{
+        .root_source_file = b.path("boot.zig"),
+    });
+    const common_module = b.createModule(.{
+        .root_source_file = b.path("urthr/common.zig"),
+    });
+    const arch_module = b.createModule(.{
+        .root_source_file = b.path("urthr/arch.zig"),
+    });
+    const dd_module = b.createModule(.{
+        .root_source_file = b.path("urthr/dd.zig"),
+    });
+    const board_module = b.createModule(.{
+        .root_source_file = b.path("urthr/board.zig"),
+    });
+    const urthr_module = b.createModule(.{
+        .root_source_file = b.path("urthr/urthr.zig"),
+    });
 
-        break :blk module;
-    };
-
-    const common_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("urthr/common.zig"),
-        });
-        module.addImport("common", module);
-        module.addImport("options", options_module);
-
-        break :blk module;
-    };
-
-    const arch_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("urthr/arch.zig"),
-        });
-        module.addImport("common", common_module);
-        module.addImport("options", options_module);
-
-        break :blk module;
-    };
-
-    const dd_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("urthr/dd.zig"),
-        });
-        module.addImport("common", common_module);
-        module.addImport("arch", arch_module);
-        module.addImport("options", options_module);
-
-        break :blk module;
-    };
-
-    const board_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("urthr/board.zig"),
-        });
-        module.addImport("common", common_module);
-        module.addImport("arch", arch_module);
-        module.addImport("dd", dd_module);
-        module.addImport("options", options_module);
-
-        break :blk module;
-    };
-
-    const urthr_module = blk: {
-        const module = b.createModule(.{
-            .root_source_file = b.path("urthr/urthr.zig"),
-        });
-        module.addImport("common", common_module);
-        module.addImport("arch", arch_module);
-        module.addImport("board", board_module);
-        module.addImport("dd", dd_module);
-        module.addImport("urthr", module);
-        module.addImport("options", options_module);
-
-        break :blk module;
-    };
-    board_module.addImport("urthr", urthr_module);
+    // Define dependency between modules.
+    {
+        common_module.addImport("common", common_module);
+        common_module.addImport("options", options_module);
+    }
+    {
+        arch_module.addImport("common", common_module);
+        arch_module.addImport("options", options_module);
+    }
+    {
+        dd_module.addImport("common", common_module);
+        dd_module.addImport("arch", arch_module);
+        dd_module.addImport("options", options_module);
+    }
+    {
+        board_module.addImport("common", common_module);
+        board_module.addImport("arch", arch_module);
+        board_module.addImport("dd", dd_module);
+        board_module.addImport("urthr", urthr_module);
+        board_module.addImport("options", options_module);
+    }
+    {
+        urthr_module.addImport("common", common_module);
+        urthr_module.addImport("arch", arch_module);
+        urthr_module.addImport("board", board_module);
+        urthr_module.addImport("dd", dd_module);
+        urthr_module.addImport("urthr", urthr_module);
+        urthr_module.addImport("options", options_module);
+    }
 
     // =============================================================
     // Tools
