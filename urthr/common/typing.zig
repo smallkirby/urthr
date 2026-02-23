@@ -152,6 +152,27 @@ pub fn InlineDoublyLinkedList(comptime T: type, comptime field: []const u8) type
             return null;
         }
 
+        // Get an iterator for the list.
+        pub fn iter(self: *const Self) Iterator {
+            return .{
+                .current = self.first,
+            };
+        }
+
+        /// Iterator for the doubly-linked list.
+        pub const Iterator = struct {
+            current: ?*T,
+
+            /// Get the next node in the list.
+            ///
+            /// Returns null if there are no more nodes.
+            pub fn next(self: *Iterator) ?*T {
+                const node = self.current orelse return null;
+                self.current = head(node).next;
+                return node;
+            }
+        };
+
         inline fn head(node: *T) *Head {
             return &@field(node, field);
         }
