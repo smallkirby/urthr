@@ -5,13 +5,12 @@ pub const ip = @import("net/ip.zig");
 pub const Device = @import("net/Device.zig");
 pub const Interface = @import("net/Interface.zig");
 pub const Loopback = @import("net/Loopback.zig");
-pub const PacketQueue = @import("net/queue.zig").PacketQueue;
 
 /// Registered network device list.
 var device_list: Device.DeviceList = .{};
 
 /// Packet queue for deferring RX processing.
-pub var pktq: PacketQueue(2048) = .{};
+var pktq: PacketQueue(2048) = .{};
 
 /// Network error.
 pub const Error = error{
@@ -101,8 +100,21 @@ fn handleIrq(irq: urd.exception.Vector) void {
     var iter = device_list.iter();
     while (iter.next()) |device| {
         if (device.irq == irq) {
-            device.handleIrq();
+            break pollDevice(device);
         }
+    }
+}
+
+/// Poll a device for incoming packets and enqueue them.
+///
+/// Continuously polls the device until no more packets are available
+/// or the packet queue is full.
+fn pollDevice(device: *Device) void {
+    while (true) {
+        const slot = pktq.acquireSlot() orelse break;
+        if (device.poll(slot) catch continue) |d| {
+            pktq.commitSlot(@intCast(d.len), device);
+        } else break;
     }
 }
 
@@ -196,3 +208,5 @@ const common = @import("common");
 const bits = common.bits;
 const util = common.util;
 const urd = @import("urthr");
+
+const PacketQueue = @import("net/queue.zig").PacketQueue;

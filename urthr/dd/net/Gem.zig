@@ -614,19 +614,12 @@ const Stat1000 = packed struct(u16) {
 const vtable: net.Device.Vtable = .{
     .open = init,
     .output = outputImpl,
-    .input = inputImpl,
+    .poll = pollImpl,
 };
 
-fn inputImpl(dev: *net.Device) net.Error!bool {
+fn pollImpl(dev: *net.Device, buf: []u8) net.Error!?[]const u8 {
     const self: *Self = @ptrCast(@alignCast(dev.ctx));
-    const slot = net.pktq.acquireSlot() orelse return false;
-
-    if (self.tryGetRx(slot)) |data| {
-        net.pktq.commitSlot(@intCast(data.len), dev);
-        return true;
-    } else {
-        return false;
-    }
+    return self.tryGetRx(buf);
 }
 
 fn outputImpl(dev: *net.Device, prot: net.Protocol, data: []const u8) net.Error!void {
