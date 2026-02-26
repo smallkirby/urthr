@@ -71,6 +71,7 @@ pub fn new(base: usize, mac: MacAddr, allocator: Allocator, dma: DmaAllocator) A
         .mtu = mtu_all,
         .dev_type = .ether,
         .addr = undefined,
+        .addr_len = MacAddr.length,
     };
     @memcpy(netdev.addr[0..MacAddr.length], &mac.value);
 
@@ -124,7 +125,7 @@ pub fn init(netdev: *net.Device) net.Error!void {
     // Initialize MAC address.
     var mac = self.getMacAddr();
     log.debug("Initial MAC address: {f}", .{mac});
-    self.setMacAddr(MacAddr.from(netdev.addr[0..net.ether.MacAddr.length]));
+    self.setMacAddr(.from(netdev.getAddr()));
     mac = self.getMacAddr();
     log.info("MAC address set to: {f}", .{mac});
 

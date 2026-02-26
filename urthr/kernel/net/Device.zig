@@ -18,6 +18,8 @@ mtu: u16,
 flags: Flag,
 /// Device-specific address.
 addr: [max_addr_len]u8,
+/// Length of the valid address in `addr`.
+addr_len: u8,
 /// Network device type.
 dev_type: Type,
 /// Logical interfaces associated with this device.
@@ -112,6 +114,11 @@ pub fn poll(self: *Self, buf: []u8) net.Error!?[]const u8 {
         f(self, buf)
     else
         null;
+}
+
+/// Return the valid portion of the device address.
+pub fn getAddr(self: *const Self) []const u8 {
+    return self.addr[0..self.addr_len];
 }
 
 // =============================================================

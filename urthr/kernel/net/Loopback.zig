@@ -26,6 +26,7 @@ pub fn new(allocator: Allocator) net.Error!*Device {
         .flags = flags,
         .dev_type = .loopback,
         .addr = undefined,
+        .addr_len = 0,
     };
 
     return device;
