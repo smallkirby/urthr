@@ -63,6 +63,11 @@ pub const Vtable = struct {
     /// Fills the given buffer with the received packet data and returns the subslice
     /// containing the packet. Returns `null` if no packet is available.
     poll: ?*const fn (device: *Self, buf: []u8) net.Error!?[]const u8 = null,
+    /// Process an incoming L2 frame.
+    ///
+    /// Each device type sets this to the appropriate L2 handler.
+    /// Devices that do not receive frames via the packet queue (e.g. loopback) may leave this null.
+    inputFrame: ?*const fn (device: *Self, data: []const u8) void = null,
 };
 
 /// Link up the device.
@@ -114,6 +119,13 @@ pub fn poll(self: *Self, buf: []u8) net.Error!?[]const u8 {
         f(self, buf)
     else
         null;
+}
+
+/// Process an incoming L2 frame.
+pub fn inputFrame(self: *Self, data: []const u8) void {
+    if (self.vtable.inputFrame) |f| {
+        f(self, data);
+    }
 }
 
 /// Return the valid portion of the device address.
