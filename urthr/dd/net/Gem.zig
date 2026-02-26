@@ -616,6 +616,7 @@ const vtable: net.Device.Vtable = .{
     .open = init,
     .output = outputImpl,
     .poll = pollImpl,
+    .inputFrame = net.ether.inputFrame,
 };
 
 fn pollImpl(dev: *net.Device, buf: []u8) net.Error!?[]const u8 {

@@ -131,10 +131,7 @@ fn worker() void {
         const pkt = pktq.dequeue();
         defer pktq.release(pkt);
 
-        switch (pkt.device.dev_type) {
-            .ether => ether.inputFrame(pkt.device, pkt.data),
-            else => @panic("Unsupported device type in packet queue"),
-        }
+        pkt.device.inputFrame(pkt.data);
     }
 }
 
