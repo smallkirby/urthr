@@ -12,6 +12,9 @@ var device_list: Device.DeviceList = .{};
 /// Packet queue for deferring RX processing.
 var pktq: PacketQueue(2048) = .{};
 
+/// Maximum number of packets to process per device in a single IRQ poll.
+const poll_budget = 64;
+
 /// Network error.
 pub const Error = error{
     /// Given operation would cause duplication.
@@ -107,10 +110,11 @@ fn handleIrq(irq: urd.exception.Vector) void {
 
 /// Poll a device for incoming packets and enqueue them.
 ///
-/// Continuously polls the device until no more packets are available
-/// or the packet queue is full.
+/// Continuously polls the device until no more packets are available,
+/// the packet queue is full, or the budget is exhausted.
 fn pollDevice(device: *Device) void {
-    while (true) {
+    var budget: usize = poll_budget;
+    while (budget > 0) : (budget -= 1) {
         const slot = pktq.acquireSlot() orelse break;
         if (device.poll(slot) catch continue) |d| {
             pktq.commitSlot(@intCast(d.len), device);
