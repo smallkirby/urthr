@@ -56,10 +56,11 @@ pub const Vtable = struct {
     open: ?*const fn (device: *Self) net.Error!void = null,
     /// Output the given data to the device.
     output: *const fn (device: *Self, prot: Protocol, data: []const u8) net.Error!void,
-    /// Input data from the device to the network stack.
+    /// Poll the device for an incoming packet.
     ///
-    /// If no input data is available, returns `false`.
-    input: ?*const fn (device: *Self) net.Error!bool = null,
+    /// Fills the given buffer with the received packet data and returns the subslice
+    /// containing the packet. Returns `null` if no packet is available.
+    poll: ?*const fn (device: *Self, buf: []u8) net.Error!?[]const u8 = null,
 };
 
 /// Link up the device.
@@ -102,13 +103,15 @@ pub fn findInterface(self: *const Self, family: Interface.Family) ?*Interface {
     } else null;
 }
 
-/// Handle IRQ for the device.
-pub fn handleIrq(self: *Self) void {
-    if (self.vtable.input) |input| {
-        while (true) {
-            if (!(input(self) catch continue)) break;
-        }
-    }
+/// Poll the device for an incoming packet.
+///
+/// Fills the given buffer with the received packet data and returns the subslice containing the packet.
+/// Returns `null` if no packet is available.
+pub fn poll(self: *Self, buf: []u8) net.Error!?[]const u8 {
+    return if (self.vtable.poll) |f|
+        f(self, buf)
+    else
+        null;
 }
 
 // =============================================================
