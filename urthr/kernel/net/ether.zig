@@ -100,7 +100,7 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
     const io = net.WireReader(EtherHeader).new(data);
 
     // Check if the frame is destined to this device.
-    const addr = MacAddr.from(dev.addr[0..MacAddr.length]);
+    const addr = MacAddr.from(dev.getAddr());
     const dest = io.read(.dest);
     if (!dest.eql(.broadcast) and !dest.eql(addr)) {
         return;
