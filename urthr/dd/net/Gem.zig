@@ -246,6 +246,8 @@ const RxQueue = struct {
     buffers: [num_desc]DmaAllocator.BusAddress,
     /// Next descriptor index to start searching for received packets.
     next_idx: usize = 0,
+    /// Tracks descriptors that have been acquired but not yet released.
+    in_flights: std.StaticBitSet(num_desc) = std.StaticBitSet(num_desc).initEmpty(),
 
     /// DMA allocator that manages the memory.
     allocator: DmaAllocator,
@@ -367,17 +369,17 @@ const RxQueue = struct {
 
     /// Get a RX buffer if it has been consumed by MAC.
     ///
-    /// The descriptor is still owned by MAC.
-    ///
-    /// Returns null if the buffer is still owned by MAC.
-    fn tryAcquireBuffer(self: *const RxQueue, index: usize) ?[]const u8 {
+    /// The descriptor is still owned by SW after this call.
+    /// Returns null if the buffer is still owned by MAC or already acquired.
+    fn tryAcquireBuffer(self: *RxQueue, index: usize) ?[]const u8 {
         const desc = &self.getDescs()[index];
 
-        if (desc.swOwns()) {
+        if (!self.in_flights.isSet(index) and desc.swOwns()) {
             const ptr = self.allocator.translateV(self.buffers[index], [*]const u8);
             const len = desc.ctrl_stat.frmlen;
             arch.cache(.invalidate, ptr, len);
 
+            self.in_flights.set(index);
             return ptr[0..len];
         } else {
             return null;
@@ -386,30 +388,30 @@ const RxQueue = struct {
 
     /// Find and acquire the next received packet if available.
     ///
-    /// Received packet is copied into the given buffer and its descriptor is returned to HW.
-    ///
-    /// If the buffer size is smaller than the received packet size,
-    /// only the data that fits in the buffer is copied.
+    /// Returns a descriptor referencing the received buffer data.
+    /// The descriptor remains owned by software until `releaseRxBuf` is called.
     /// Returns null if no packet is available in the queue.
-    pub fn tryAcquireRx(self: *RxQueue, buf: []u8) ?[]const u8 {
+    pub fn tryAcquireRx(self: *RxQueue) ?net.Device.PollResult {
         arch.cache(.invalidate, self.memory.ptr, self.memory.len);
 
         for (0..num_desc) |i| {
             const idx = (self.next_idx + i) % num_desc;
             if (self.tryAcquireBuffer(idx)) |data| {
-                // Copy data to the given buffer.
-                const length = @min(data.len, buf.len);
-                @memcpy(buf[0..length], data[0..length]);
-
-                // Return descriptor to HW.
-                const desc = &self.getDescs()[idx];
-                desc.setHwOwn();
-                arch.cache(.clean, desc, @sizeOf(Desc));
-
                 self.next_idx = (idx + 1) % num_desc;
-                return buf[0..length];
+                return .{
+                    .data = data,
+                    .handle = idx,
+                };
             }
         } else return null;
+    }
+
+    /// Release an RX descriptor back to the hardware.
+    pub fn releaseRxBuf(self: *RxQueue, index: usize) void {
+        const desc = &self.getDescs()[index];
+        desc.setHwOwn();
+        arch.cache(.clean, desc, @sizeOf(Desc));
+        self.in_flights.unset(index);
     }
 
     /// Get the DMA address of the RX queue.
@@ -464,11 +466,10 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
 /// Get the next received packet if available.
 ///
 /// Calling this function clears the IRQ status for RX.
-/// Therefore, caller must ensure until this function returns null not to miss any incoming packets.
-pub fn tryGetRx(self: *Self, buf: []u8) ?[]const u8 {
+pub fn tryGetRx(self: *Self) ?net.Device.PollResult {
     _ = self.readClearIrq(rxq_idx);
 
-    return self.rxq.tryAcquireRx(buf);
+    return self.rxq.tryAcquireRx();
 }
 
 // =============================================================
@@ -616,12 +617,18 @@ const vtable: net.Device.Vtable = .{
     .open = init,
     .output = outputImpl,
     .poll = pollImpl,
+    .releaseRxBuf = releaseRxBufImpl,
     .inputFrame = net.ether.inputFrame,
 };
 
-fn pollImpl(dev: *net.Device, buf: []u8) net.Error!?[]const u8 {
+fn pollImpl(dev: *net.Device) net.Error!?net.Device.PollResult {
     const self: *Self = @ptrCast(@alignCast(dev.ctx));
-    return self.tryGetRx(buf);
+    return self.tryGetRx();
+}
+
+fn releaseRxBufImpl(dev: *net.Device, index: usize) void {
+    const self: *Self = @ptrCast(@alignCast(dev.ctx));
+    self.rxq.releaseRxBuf(index);
 }
 
 fn outputImpl(dev: *net.Device, prot: net.Protocol, data: []const u8) net.Error!void {
