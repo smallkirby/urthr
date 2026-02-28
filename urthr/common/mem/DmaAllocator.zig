@@ -93,7 +93,9 @@ pub fn allocBytesB(self: Self, size: usize) Error!BusAddress {
 
 /// Free the given bytes allocated by `allocBytesV()`.
 pub fn freeBytesV(self: Self, slice: []u8) void {
-    return self.freePagesV(slice);
+    const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(slice.ptr));
+    const pslice: []u8 = @as([*]u8, @ptrFromInt(paddr))[0..slice.len];
+    self.vtable.freePages(self.ptr, pslice);
 }
 
 /// Convert the given virtual pointer to pointer in bus address space.
