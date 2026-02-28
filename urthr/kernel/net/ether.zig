@@ -111,13 +111,16 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
         dev,
         io.read(.type),
         data[@sizeOf(EtherHeader)..],
-    ) catch {};
+    ) catch |err| {
+        log.warn("Failed to handle input: {}", .{err});
+    };
 }
 
 // =============================================================
 // Imports
 // =============================================================
 
+const log = std.log.scoped(.ether);
 const std = @import("std");
 const common = @import("common");
 const urd = @import("urthr");
