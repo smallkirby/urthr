@@ -80,11 +80,6 @@ pub const Vtable = struct {
     ///
     /// Called after the consumer has finished processing the packet.
     releaseRxBuf: ?*const fn (device: *Self, handle: usize) void = null,
-    /// Process an incoming L2 frame.
-    ///
-    /// Each device type sets this to the appropriate L2 handler.
-    /// Devices that do not receive frames via the packet queue (e.g. loopback) may leave this null.
-    inputFrame: ?*const fn (device: *Self, data: []const u8) void = null,
 };
 
 /// Link up the device.
@@ -148,8 +143,9 @@ pub fn releaseRxBuf(self: *Self, index: usize) void {
 
 /// Process an incoming L2 frame.
 pub fn inputFrame(self: *Self, data: []const u8) void {
-    if (self.vtable.inputFrame) |f| {
-        f(self, data);
+    switch (self.dev_type) {
+        .ether => ether.inputFrame(self, data),
+        .loopback => {},
     }
 }
 
@@ -167,4 +163,5 @@ const urd = @import("urthr");
 const exception = urd.exception;
 const net = urd.net;
 const Protocol = net.Protocol;
+const ether = @import("ether.zig");
 const Interface = @import("Interface.zig");

@@ -618,7 +618,6 @@ const vtable: net.Device.Vtable = .{
     .output = outputImpl,
     .poll = pollImpl,
     .releaseRxBuf = releaseRxBufImpl,
-    .inputFrame = net.ether.inputFrame,
 };
 
 fn pollImpl(dev: *net.Device) net.Error!?net.Device.PollResult {
