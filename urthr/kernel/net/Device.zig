@@ -50,6 +50,18 @@ pub const Type = enum {
     loopback,
 };
 
+/// Result of polling a device for an incoming packet.
+pub const PollResult = struct {
+    /// Slice referencing the received packet data.
+    ///
+    /// The buffer is owned by the owner of this PollResult.
+    data: []const u8,
+    /// Driver-specific RX buffer handle for deferred release.
+    handle: Handle,
+
+    const Handle = usize;
+};
+
 /// Functions that network device must implement.
 pub const Vtable = struct {
     /// Link up the device.
@@ -60,9 +72,14 @@ pub const Vtable = struct {
     output: *const fn (device: *Self, prot: Protocol, data: []const u8) net.Error!void,
     /// Poll the device for an incoming packet.
     ///
-    /// Fills the given buffer with the received packet data and returns the subslice
-    /// containing the packet. Returns `null` if no packet is available.
-    poll: ?*const fn (device: *Self, buf: []u8) net.Error!?[]const u8 = null,
+    /// Returns a PollResult containing a reference to the received packet data.
+    ///
+    /// Returns `null` if no packet is available.
+    poll: ?*const fn (device: *Self) net.Error!?PollResult = null,
+    /// Release a previously acquired RX buffer back to the device.
+    ///
+    /// Called after the consumer has finished processing the packet.
+    releaseRxBuf: ?*const fn (device: *Self, handle: usize) void = null,
     /// Process an incoming L2 frame.
     ///
     /// Each device type sets this to the appropriate L2 handler.
@@ -112,13 +129,21 @@ pub fn findInterface(self: *const Self, family: Interface.Family) ?*Interface {
 
 /// Poll the device for an incoming packet.
 ///
-/// Fills the given buffer with the received packet data and returns the subslice containing the packet.
-/// Returns `null` if no packet is available.
-pub fn poll(self: *Self, buf: []u8) net.Error!?[]const u8 {
+/// Returns a PollResult referencing the received packet data.
+///
+/// Returns null if no packet is available.
+pub fn poll(self: *Self) net.Error!?PollResult {
     return if (self.vtable.poll) |f|
-        f(self, buf)
+        f(self)
     else
         null;
+}
+
+/// Release a previously acquired RX buffer back to the device.
+pub fn releaseRxBuf(self: *Self, index: usize) void {
+    if (self.vtable.releaseRxBuf) |f| {
+        f(self, index);
+    }
 }
 
 /// Process an incoming L2 frame.

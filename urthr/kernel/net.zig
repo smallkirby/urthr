@@ -10,7 +10,7 @@ pub const Loopback = @import("net/Loopback.zig");
 var device_list: Device.DeviceList = .{};
 
 /// Packet queue for deferring RX processing.
-var pktq: PacketQueue(2048) = .{};
+var pktq: PacketQueue = .{};
 
 /// Maximum number of packets to process per device in a single IRQ poll.
 const poll_budget = 64;
@@ -115,10 +115,15 @@ fn handleIrq(irq: urd.exception.Vector) void {
 fn pollDevice(device: *Device) void {
     var budget: usize = poll_budget;
     while (budget > 0) : (budget -= 1) {
-        const slot = pktq.acquireSlot() orelse break;
-        if (device.poll(slot) catch continue) |d| {
-            pktq.commitSlot(@intCast(d.len), device);
-        } else break;
+        const result = device.poll() catch continue orelse break;
+        pktq.enqueue(.{
+            .data = result.data,
+            .device = device,
+            .handle = result.handle,
+        }) catch |err| switch (err) {
+            // If the queue is full, just drop the packet.
+            error.Full => {},
+        };
     }
 }
 
