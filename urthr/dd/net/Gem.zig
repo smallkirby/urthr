@@ -39,6 +39,8 @@ module: gem,
 dma_allocator: DmaAllocator,
 /// RX queue.
 rxq: RxQueue = undefined,
+/// TX queue.
+txq: TxQueue = undefined,
 
 /// Queue index for RX.
 const rxq_idx = 0;
@@ -173,9 +175,10 @@ pub fn init(netdev: *net.Device) net.Error!void {
     // Enable required interrupts.
     self.setEnableIrq(rxq_idx, true);
 
-    // Enable RX.
+    // Enable RX and TX.
     self.module.modify(Ncr, .{
         .re = true,
+        .te = true,
     });
 }
 
@@ -438,6 +441,149 @@ const RxQueue = struct {
     }
 };
 
+/// TX Queue structure.
+const TxQueue = struct {
+    /// DMA-capable memory for TX descriptor ring.
+    memory: []u8,
+    /// DMA-capable memory for TX data buffers.
+    buffer_memory: []u8,
+    /// Next descriptor index to use.
+    next_idx: usize = 0,
+    /// DMA allocator that manages the memory.
+    allocator: DmaAllocator,
+
+    /// Number of descriptors.
+    const num_desc = 16;
+    /// TX buffer size.
+    const buffer_size = 2048;
+
+    comptime {
+        urd.comptimeAssert(buffer_size >= mtu_all, "TX buffer too small: ", .{buffer_size});
+    }
+
+    /// TX descriptor for 64-bit addressing.
+    const Desc = packed struct(u128) {
+        /// Buffer address (lower 32 bits).
+        addr_lo: u32,
+        /// Control and status.
+        ctrl: Control,
+        /// Buffer address (upper 32 bits).
+        addr_hi: u32,
+        /// Reserved.
+        _96: u32 = 0,
+    };
+
+    /// TX control register.
+    const Control = packed struct(u32) {
+        /// Buffer length.
+        length: u14,
+        /// Reserved.
+        _14: u1 = 0,
+        /// Last buffer of frame.
+        last: bool,
+        /// Reserved.
+        _16: u14 = 0,
+        /// Wrap.
+        wrap: bool,
+        /// Used.
+        used: bool,
+    };
+
+    /// Create a new TX queue, allocating DMA memory.
+    pub fn create(allocator: DmaAllocator) DmaAllocator.Error!TxQueue {
+        const desc_mem = try allocator.allocBytesV(@sizeOf(Desc) * num_desc);
+        errdefer allocator.freeBytesV(desc_mem);
+
+        const buf_mem = try allocator.allocBytesV(buffer_size * num_desc);
+        errdefer allocator.freeBytesV(buf_mem);
+
+        return .{
+            .memory = desc_mem,
+            .buffer_memory = buf_mem,
+            .allocator = allocator,
+        };
+    }
+
+    /// Initialize all TX descriptors as used.
+    pub fn init(self: *TxQueue) void {
+        const descs = self.getDescs();
+        for (descs[0..], 0..) |*desc, i| {
+            const buf_addr = self.getBufferBusAddr(i);
+            desc.addr_lo = @truncate(buf_addr);
+            desc.addr_hi = @truncate(buf_addr >> 32);
+            desc._96 = 0;
+            desc.ctrl = .{
+                .length = 0,
+                .last = false,
+                .wrap = i == num_desc - 1,
+                .used = true,
+            };
+        }
+
+        arch.cache(.clean, self.memory.ptr, self.memory.len);
+    }
+
+    /// Copy frame data into the TX buffer and set up the descriptor.
+    pub fn prepareFrame(self: *TxQueue, data: []const u8) void {
+        const idx = self.next_idx;
+        self.next_idx = (idx + 1) % num_desc;
+
+        const buf = self.getBufferVirtPtr(idx);
+        @memcpy(buf[0..data.len], data);
+        arch.cache(.clean, buf, data.len);
+
+        const desc = &self.getDescs()[idx];
+        desc.ctrl = .{
+            .length = @intCast(data.len),
+            .last = true,
+            .wrap = idx == num_desc - 1,
+            .used = false,
+        };
+        arch.cache(.clean, desc, @sizeOf(Desc));
+    }
+
+    /// Poll until any descriptor's used bit is set by HW.
+    ///
+    /// Returns error.Timeout after timeout.
+    pub fn waitForCompletion(self: *const TxQueue, timeout: Timer.TimeSlice) net.Error!void {
+        const idx = self.next_idx;
+        const desc = &self.getDescs()[idx];
+
+        var timer = arch.timer.createTimer();
+        timer.start(timeout);
+
+        while (true) {
+            arch.cache(.invalidate, desc, @sizeOf(Desc));
+            if (desc.ctrl.used) return;
+
+            if (timer.expired()) return net.Error.Timeout;
+
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    /// Get the DMA bus address of the descriptor ring.
+    pub fn addrDma(self: *const TxQueue) usize {
+        return self.allocator.translateB(self.memory).addr;
+    }
+
+    /// Get the bus address of a specific TX buffer.
+    fn getBufferBusAddr(self: *const TxQueue, idx: usize) usize {
+        const base = self.allocator.translateB(self.buffer_memory).addr;
+        return base + idx * buffer_size;
+    }
+
+    /// Get a virtual pointer to a specific TX buffer.
+    fn getBufferVirtPtr(self: *const TxQueue, idx: usize) [*]u8 {
+        return self.buffer_memory.ptr + idx * buffer_size;
+    }
+
+    /// Get the pointer to the TX descriptors.
+    fn getDescs(self: *const TxQueue) *volatile [num_desc]Desc {
+        return @ptrCast(@alignCast(self.memory.ptr));
+    }
+};
+
 /// Configure DMA settings.
 fn configureDma(self: *Self) DmaAllocator.Error!void {
     // Configure DMA settings.
@@ -459,6 +605,15 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
     const rxq_dma = self.rxq.addrDma();
     self.module.write(Rxbqbh, @as(u32, @truncate(rxq_dma >> 32)));
     self.module.write(Rxbqb, @as(u32, @truncate(rxq_dma)));
+
+    // Allocate and configure TX queue.
+    self.txq = try TxQueue.create(self.dma_allocator);
+    self.txq.init();
+
+    // Set TX queue address.
+    const txq_dma = self.txq.addrDma();
+    self.module.write(Txbqbh, @as(u32, @truncate(txq_dma >> 32)));
+    self.module.write(Txbqb, @as(u32, @truncate(txq_dma)));
 
     arch.barrier(.full, .release);
 }

@@ -27,6 +27,8 @@ pub const Error = error{
     InvalidPacket,
     /// Given data, protocol, or operation is not supported.
     Unsupported,
+    /// Operation timed out.
+    Timeout,
 };
 
 /// Network protocols.
