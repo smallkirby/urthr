@@ -785,12 +785,23 @@ fn releaseRxBufImpl(dev: *net.Device, index: usize) void {
     self.rxq.releaseRxBuf(index);
 }
 
-fn outputImpl(dev: *net.Device, prot: net.Protocol, data: []const u8) net.Error!void {
-    _ = dev;
-    _ = prot;
-    _ = data;
+fn outputImpl(dev: *net.Device, _: net.Protocol, data: []const u8) net.Error!void {
+    const self: *Self = @ptrCast(@alignCast(dev.ctx));
 
-    urd.unimplemented("gement.outputImpl");
+    if (data.len == 0 or data.len > mtu_all) {
+        return net.Error.InvalidPacket;
+    }
+
+    // Prepare the frame in the TX buffer and descriptor.
+    self.txq.prepareFrame(data);
+    arch.barrier(.full, .release);
+
+    // Start transmission and wait for completion.
+    self.module.modify(Ncr, .{ .tstart = true });
+    self.txq.waitForCompletion(.ms(10)) catch |err| {
+        log.err("TX timeout on descriptor {}", .{self.txq.next_idx});
+        return err;
+    };
 }
 
 // =============================================================
