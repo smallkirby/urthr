@@ -9,6 +9,7 @@ const gem = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0004, Ncfgr },
     .{ 0x0008, Nsr },
     .{ 0x0010, Dmacfg },
+    .{ 0x0014, Tsr },
     .{ 0x0018, Rxbqb },
     .{ 0x001C, Txbqb },
     .{ 0x0020, Rsr },
@@ -21,6 +22,7 @@ const gem = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x008C, Sa1t },
     .{ 0x00C0, Usrio },
     .{ 0x00FC, Mid },
+    .{ 0x0108, Txcnt },
     .{ 0x0158, Rxcnt },
     .{ 0x0280, Dconfig1 },
     .{ 0x0400, mmio.Marker(.isr) },
@@ -132,30 +134,16 @@ pub fn init(netdev: *net.Device) net.Error!void {
     log.info("MAC address set to: {f}", .{mac});
 
     // Auto negotiation and wait for link up.
-    self.mdioWrite(4, 0x01E1);
-    self.mdioWrite(0, 0x1200);
-    timer.start(.sec(5));
-    while (true) {
-        const bmsr: Bmsr = @bitCast(self.mdioRead(1));
-        if (bmsr.auto_nego_complete and bmsr.link_status) {
-            break;
-        }
-
-        if (timer.expired()) {
-            @panic("PHY link up timed out.");
-        }
-
-        arch.timer.spinWaitMicro(100);
-    }
-    const lpa: Stat1000 = @bitCast(self.mdioRead(0xA));
-    log.info("Link is up - 1Gbps / {s} duplex", .{if (lpa.fd) "Full" else "Half"});
+    const link = self.linkUp(.sec(5));
+    arch.timer.spinWaitMilli(500);
+    log.info("Link is up - 1Gbps / {s} duplex", .{if (link.full_duplex) "Full" else "Half"});
 
     // Configure NCFGR.
     rtt.expectEqual(4, self.module.read(Dconfig1).dbwdef);
     self.module.modify(Ncfgr, .{
         .spd = false,
         .gbe = true,
-        .fd = lpa.fd,
+        .fd = link.full_duplex,
         .caf = false,
         .dbw = 2,
     });
@@ -180,6 +168,44 @@ pub fn init(netdev: *net.Device) net.Error!void {
         .re = true,
         .te = true,
     });
+}
+
+const LinkInfo = struct {
+    /// Link is full duplex.
+    full_duplex: bool,
+};
+
+// Auto negotiation and wait for link up.
+fn linkUp(self: *const Self, timeout: Timer.TimeSlice) LinkInfo {
+    self.mdioWrite(4, 0x01E1);
+    self.mdioWrite(0, 0x1200);
+
+    var timer = arch.timer.createTimer();
+    timer.start(timeout);
+
+    var ok_count: usize = 0;
+    while (true) {
+        const bmsr: Bmsr = @bitCast(self.mdioRead(1));
+        if (bmsr.auto_nego_complete and bmsr.link_status) {
+            ok_count += 1;
+            break;
+        }
+
+        if (ok_count >= 2) {
+            break;
+        }
+
+        if (timer.expired()) {
+            @panic("PHY link up timed out.");
+        }
+
+        arch.timer.spinWaitMicro(100);
+    }
+
+    const lpa: Stat1000 = @bitCast(self.mdioRead(0xA));
+    return LinkInfo{
+        .full_duplex = lpa.fd,
+    };
 }
 
 /// Read the MAC address from the GEM controller.
@@ -635,7 +661,7 @@ pub fn tryGetRx(self: *Self) ?net.Device.PollResult {
 const phy_addr = 1;
 
 /// Read a PHY register at a specific PHY address.
-fn mdioReadAddr(self: *Self, phy: u5, reg: u5) u16 {
+fn mdioReadAddr(self: *const Self, phy: u5, reg: u5) u16 {
     self.mdioWaitForIdle();
 
     self.module.write(Man, Man{
@@ -653,12 +679,12 @@ fn mdioReadAddr(self: *Self, phy: u5, reg: u5) u16 {
 }
 
 /// Read a PHY register.
-fn mdioRead(self: *Self, reg: u5) u16 {
+fn mdioRead(self: *const Self, reg: u5) u16 {
     return self.mdioReadAddr(phy_addr, reg);
 }
 
 /// Write to a PHY register.
-fn mdioWrite(self: *Self, reg: u5, value: u16) void {
+fn mdioWrite(self: *const Self, reg: u5, value: u16) void {
     self.mdioWaitForIdle();
 
     self.module.write(Man, Man{
@@ -674,7 +700,7 @@ fn mdioWrite(self: *Self, reg: u5, value: u16) void {
 }
 
 /// Wait for the MDIO operation to complete.
-fn mdioWaitForIdle(self: *Self) void {
+fn mdioWaitForIdle(self: *const Self) void {
     var timer = arch.timer.createTimer();
     timer.start(.ms(10));
 
@@ -975,6 +1001,28 @@ const Rxbqbh = packed struct(u32) {
     addr: u32,
 };
 
+/// TX Status Register.
+const Tsr = packed struct(u32) {
+    /// Used bit read.
+    ubr: bool,
+    /// Collision occurred.
+    col: bool,
+    /// Retry limit exceeded.
+    rle: bool,
+    /// Transmit go.
+    txgo: bool,
+    /// Transmit frame corruption (AHB error).
+    tfc: bool,
+    /// Transmit complete.
+    comp: bool,
+    /// Reserved.
+    _6: u2 = 0,
+    /// HRESP not OK.
+    hresp: bool,
+    /// Reserved.
+    _9: u23 = 0,
+};
+
 /// RX Status Register.
 const Rsr = packed struct(u32) {
     /// Buffer not available.
@@ -1114,6 +1162,9 @@ const Mid = packed struct(u32) {
     idnum: u12,
     _28: u4,
 };
+
+/// Transmit Count Register.
+const Txcnt = packed struct(u32) { value: u32 };
 
 /// Receive Count Register.
 const Rxcnt = packed struct(u32) { value: u32 };
