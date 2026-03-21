@@ -1,5 +1,6 @@
 pub const arp = @import("net/arp.zig");
 pub const ether = @import("net/ether.zig");
+pub const icmp = @import("net/icmp.zig");
 pub const ip = @import("net/ip.zig");
 
 pub const Device = @import("net/Device.zig");
@@ -50,8 +51,8 @@ pub const Protocol = enum(u16) {
     /// Get the handler for the given protocol.
     fn getHandler(self: Protocol) ?Protocol.Vtable {
         return switch (self) {
-            .ip => @import("net/ip.zig").vtable,
-            .arp => @import("net/arp.zig").vtable,
+            .ip => ip.vtable,
+            .arp => arp.vtable,
             else => null,
         };
     }

@@ -44,9 +44,13 @@ pub fn unimplemented(comptime msg: []const u8) noreturn {
 }
 
 /// Assert at compile time.
-pub fn comptimeAssert(cond: bool, comptime msg: []const u8, args: anytype) void {
+pub fn comptimeAssert(cond: bool, comptime msg: ?[]const u8, args: anytype) void {
     if (!cond) {
-        @compileError(std.fmt.comptimePrint(msg, args));
+        if (msg) |m| {
+            @compileError(std.fmt.comptimePrint(m, args));
+        } else {
+            @compileError("Assertion failed.");
+        }
     }
 }
 
