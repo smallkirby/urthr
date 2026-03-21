@@ -40,10 +40,16 @@ pub fn initLocal() void {
 ///
 /// Returns null if no handler is registered.
 fn call(vector: u64) ?void {
+    if (vector >= num_interrupts) {
+        log.warn("Received invalid interrupt vector: {}", .{vector});
+        return;
+    }
+
     // Call corresponding handler.
     if (handlers[vector]) |handler| {
         handler(@intCast(vector));
     } else {
+        log.warn("No handler registered for interrupt vector: {}", .{vector});
         return null;
     }
 }
@@ -63,6 +69,7 @@ pub fn setHandler(vector: Vector, handler: Handler) Error!void {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.exception);
 const board = @import("board").impl;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
