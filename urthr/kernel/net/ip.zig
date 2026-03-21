@@ -150,10 +150,13 @@ const Header = extern struct {
     }
 };
 
+/// IP header reader.
+pub const HeaderReader = net.WireReader(Header);
+
 /// Protocols encapsulated in IP packets.
 ///
 /// See https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
-const Protocol = enum(u8) {
+pub const Protocol = enum(u8) {
     /// IP.
     ip = 0,
     /// ICMP.
@@ -167,12 +170,13 @@ const Protocol = enum(u8) {
     /// Functions to handle the protocol data encapsulated in IP packets.
     pub const Vtable = struct {
         /// Process the incoming data.
-        input: *const fn (data: []const u8) net.Error!void,
+        input: *const fn (hdr: HeaderReader, data: []const u8) net.Error!void,
     };
 
     /// Get the handler for the given protocol.
     fn getHandler(self: Protocol) ?Protocol.Vtable {
         return switch (self) {
+            .icmp => @import("icmp.zig").vtable,
             else => null,
         };
     }
@@ -224,7 +228,7 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    if (calcChecksum(data[0..hlen]) != 0) {
+    if (nutil.calcChecksum(data[0..hlen]) != 0) {
         log.warn("Invalid IP header checksum", .{});
         return net.Error.InvalidPacket;
     }
@@ -242,28 +246,8 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     // Find the handlre for the encapsulated protocol.
     const protocol = io.read(.protocol);
     if (protocol.getHandler()) |handler| {
-        return handler.input(data[hlen..]);
+        return handler.input(io, data[hlen..]);
     }
-}
-
-/// Calculate the one's complement checksum of the given bytes.
-fn calcChecksum(header: []const u8) u16 {
-    var sum: u32 = 0;
-    var i: usize = 0;
-
-    while (i + 1 < header.len) : (i += 2) {
-        sum += @as(u32, std.mem.bytesToValue(u16, header[i .. i + 2]));
-    }
-
-    if (i < header.len) {
-        sum += @as(u32, header[i]);
-    }
-
-    while ((sum >> 16) != 0) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-
-    return ~@as(u16, @intCast(sum));
 }
 
 /// Print an IP packet data.
@@ -303,3 +287,4 @@ const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;
 const Interface = net.Interface;
+const nutil = @import("nutil.zig");
