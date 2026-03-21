@@ -150,7 +150,7 @@ const Header = extern struct {
     }
 };
 
-/// Protocol numbers for IP.
+/// Protocols encapsulated in IP packets.
 ///
 /// See https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 const Protocol = enum(u8) {
@@ -163,6 +163,19 @@ const Protocol = enum(u8) {
 
     /// All other unrecognized protocols.
     _,
+
+    /// Functions to handle the protocol data encapsulated in IP packets.
+    pub const Vtable = struct {
+        /// Process the incoming data.
+        input: *const fn (data: []const u8) net.Error!void,
+    };
+
+    /// Get the handler for the given protocol.
+    fn getHandler(self: Protocol) ?Protocol.Vtable {
+        return switch (self) {
+            else => null,
+        };
+    }
 };
 
 /// Create a logical interface for IP.
@@ -226,8 +239,11 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return;
     }
 
-    // TODO: just printing the packet for now.
-    printPacket(data, log.debug);
+    // Find the handlre for the encapsulated protocol.
+    const protocol = io.read(.protocol);
+    if (protocol.getHandler()) |handler| {
+        return handler.input(data[hlen..]);
+    }
 }
 
 /// Calculate the one's complement checksum of the given bytes.
