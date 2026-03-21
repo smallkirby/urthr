@@ -12,6 +12,7 @@
 var cfg = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, Control },
     .{ 0x04, Status },
+    .{ 0x14, Clkgen },
 }){};
 
 // =============================================================
@@ -81,6 +82,28 @@ pub const Status = packed struct(u32) {
     awlen_illegal: bool,
     /// Reserved.
     _6: u26,
+};
+
+/// Clock control, can be changed on-the-fly.
+const Clkgen = packed struct(u32) {
+    ///
+    speed_override: u2,
+    /// Reserved.
+    _2: u1 = 0,
+    /// Use speed we specify here instead of speed from mac speed.
+    speed_override_en: bool,
+    /// 0: 10M; 1: 100M (default); 2: 1000M
+    speed_from_mac: u2,
+    /// Asynchronously kills the clock generator.
+    kill: bool,
+    /// Starts and stops the clock generator cleanly.
+    enable: bool,
+    /// Enables duty cycle correction for odd divisors.
+    dc50: bool,
+    /// Adds delay to the rgmii_tx_clk.
+    txclkdelen: bool,
+    /// Reserved.
+    _10: u22,
 };
 
 // =============================================================
