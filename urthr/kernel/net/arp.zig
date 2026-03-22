@@ -77,6 +77,11 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     }
     const io_addr = net.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
 
+    // Update ARP cache.
+    const sha = io_addr.read(.sha);
+    const spa = io_addr.read(.spa);
+    try cache.update(spa, sha);
+
     // Debug print the ARP packet.
     log.debug("ARP packet: haddr_type={}, paddr_type={}, op={}", .{
         haddr_type,
@@ -113,12 +118,115 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     try dev.output(&io_addr.read(.sha).value, .arp, &nbuf);
 }
 
+/// Resolve the MAC address for the given IP address on the specified interface.
+pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Error!void {
+    if (iface.family != .ipv4) {
+        return net.Error.Unsupported;
+    }
+    if (iface.device.?.dev_type != .ether) {
+        return net.Error.Unsupported;
+    }
+
+    if (cache.find(ip)) |entry| {
+        if (entry.state == .resolved) {
+            @memcpy(hw[0..ether.MacAddr.length], &entry.mac.value);
+            return;
+        }
+    }
+
+    return net.Error.Unavailable;
+}
+
+// =============================================================
+// Address resolution
+// =============================================================
+
+/// ARP cache management.
+pub const cache = struct {
+    /// ARP cache hashmap type.
+    const Cache = std.AutoHashMap(net.ip.IpAddr, CacheEntry);
+
+    /// State of the cache entry.
+    const State = enum {
+        /// The entry is being resolved.
+        wip,
+        /// The entry is resolved and valid.
+        resolved,
+        /// The entry is registered statically.
+        static,
+    };
+
+    /// Cache entry.
+    const CacheEntry = struct {
+        /// IP address (key).
+        ip: net.ip.IpAddr,
+        /// MAC address (value).
+        mac: ether.MacAddr,
+        /// Timestamp of the last update.
+        timestamp: urd.time.Ktimestamp,
+        /// Cache entry state.
+        state: State,
+    };
+
+    /// ARP cache instance.
+    var instance: Cache = undefined;
+
+    /// Interval for cleaning up stale cache entries in microseconds.
+    const cleanup_interval_us = 10 * std.time.us_per_s;
+
+    /// Initialize ARP cache.
+    pub fn init(allocator: Allocator) Allocator.Error!void {
+        instance = .init(allocator);
+
+        // Register ARP cache cleanup timer.
+        _ = try urd.time.register(cleanup_interval_us, cleanup);
+    }
+
+    /// Register or update the MAC address for the given IP address.
+    pub fn update(ip: net.ip.IpAddr, mac: ether.MacAddr) Allocator.Error!void {
+        // TODO: should take a lock.
+        try instance.put(ip, .{
+            .ip = ip,
+            .mac = mac,
+            .timestamp = urd.time.getCurrentTimestamp(),
+            .state = .resolved,
+        });
+    }
+
+    /// Delete the cache entry for the given IP address.
+    ///
+    /// This function ignores the case where the entry does not exist.
+    pub fn delete(ip: net.ip.IpAddr) void {
+        // TODO: should take a lock.
+        _ = instance.remove(ip);
+    }
+
+    /// Find the cache entry for the given IP address.
+    fn find(ip: net.ip.IpAddr) ?CacheEntry {
+        // TODO: should take a lock.
+        return instance.get(ip);
+    }
+
+    /// Cleanup stale cache entries.
+    fn cleanup() void {
+        const now = urd.time.getCurrentTimestamp();
+        var it = instance.valueIterator();
+        while (it.next()) |entry| {
+            const staled = now - entry.timestamp > cleanup_interval_us;
+            if (entry.state == .resolved and staled) {
+                delete(entry.ip);
+            }
+        }
+    }
+};
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const log = std.log.scoped(.arp);
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const urd = @import("urthr");
 const net = urd.net;

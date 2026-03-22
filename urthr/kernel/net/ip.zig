@@ -313,12 +313,19 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     // Calculate and write the header checksum.
     io.writeRaw(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
 
-    // Transmit the packet.
-    const hwaddr = if (dest.eql(ip_iface.broadcast) or dest.eql(.broadcast))
-        iface.device.?.getBroadcastAddr()
-    else
-        @panic("ARP not implemented yet.");
+    // Resolve the destination hardware address.
+    const allocator = urd.mem.getGeneralAllocator();
+    const hwaddr = try allocator.alloc(u8, device.addr_len);
+    defer allocator.free(hwaddr);
+    @memset(hwaddr, 0);
 
+    if (dest.eql(ip_iface.broadcast) or dest.eql(.broadcast)) {
+        @memcpy(hwaddr, iface.device.?.getBroadcastAddr());
+    } else if (iface.device.?.flags.need_arp) {
+        try net.arp.resolve(iface, dest, hwaddr);
+    }
+
+    // Transmit the packet.
     try device.output(hwaddr, .ip, buf);
 }
 

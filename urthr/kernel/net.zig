@@ -64,7 +64,9 @@ pub const Protocol = enum(u16) {
 };
 
 /// Initialize network subsystem.
-pub fn init() void {}
+pub fn init() Allocator.Error!void {
+    try arp.cache.init(urd.mem.getGeneralAllocator());
+}
 
 /// Start running the network subsystem and register devices.
 pub fn run() (Error || urd.sched.Error)!void {
@@ -303,6 +305,7 @@ pub fn toNetEndian(value: anytype) @TypeOf(value) {
 
 const builtin = @import("builtin");
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
 const util = common.util;
