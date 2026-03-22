@@ -44,6 +44,8 @@ pub const DeviceList = common.typing.InlineDoublyLinkedList(Self, "list_head");
 pub const Flag = struct {
     /// The device is up and running.
     up: bool = false,
+    /// The device needs address resolution to transmit packets.
+    need_arp: bool = false,
 };
 
 /// Network device type.

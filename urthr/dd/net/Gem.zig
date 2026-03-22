@@ -71,7 +71,7 @@ pub fn new(base: usize, mac: MacAddr, allocator: Allocator, dma: DmaAllocator) A
     netdev.* = .{
         .ctx = @ptrCast(self),
         .vtable = vtable,
-        .flags = .{ .up = false },
+        .flags = .{ .up = false, .need_arp = true },
         .mtu = mtu_all,
         .dev_type = .ether,
         .addr = undefined,

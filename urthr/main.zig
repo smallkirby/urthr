@@ -63,7 +63,7 @@ fn zmain() !void {
 
     // Initialize networking stack.
     log.debug("Initializing networking stack.", .{});
-    urd.net.init();
+    try urd.net.init();
 
     // Initialize peripherals.
     log.info("Initializing peripherals.", .{});
