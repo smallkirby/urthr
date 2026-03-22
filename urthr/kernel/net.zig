@@ -50,7 +50,7 @@ pub const Protocol = enum(u16) {
     /// Functions to handle the protocol data.
     pub const Vtable = struct {
         /// Process the incoming data.
-        input: *const fn (dev: *const Device, data: []const u8) Error!void,
+        input: *const fn (dev: *Device, data: []const u8) Error!void,
     };
 
     /// Get the handler for the given protocol.
@@ -100,7 +100,7 @@ pub fn findInterface(cmp: CmpInterfaceFn, ctx: *const anyopaque) ?*Interface {
 }
 
 /// Handle incoming data to dispatch to the appropriate protocol handler.
-pub fn handleInput(dev: *const Device, prot: Protocol, data: []const u8) Error!void {
+pub fn handleInput(dev: *Device, prot: Protocol, data: []const u8) Error!void {
     if (prot.getHandler()) |handler| {
         // Delegate to the protocol handler
         return handler.input(dev, data);

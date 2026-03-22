@@ -33,11 +33,15 @@ const AddrInfoMacIp = extern struct {
 const HaddrType = enum(u16) {
     /// Ethernet.
     ether = 0x0001,
+
+    _,
 };
 
 const PaddrType = enum(u16) {
     /// IPv4.
     ip = 0x0800,
+
+    _,
 };
 
 const Op = enum(u16) {
@@ -45,9 +49,11 @@ const Op = enum(u16) {
     request = 0x0001,
     /// ARP reply.
     reply = 0x0002,
+
+    _,
 };
 
-fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
+fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     if (data.len < @sizeOf(GenericHeader)) {
         return net.Error.InvalidPacket;
     }
@@ -80,7 +86,31 @@ fn inputImpl(_: *const net.Device, data: []const u8) net.Error!void {
     log.debug("  Source: {f} , {f}", .{ io_addr.read(.sha), io_addr.read(.spa) });
     log.debug("  Target: {f} , {f}", .{ io_addr.read(.tha), io_addr.read(.tpa) });
 
-    // TODO: implement ARP reply.
+    var nbuf = try NetBuffer.init(
+        @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
+        urd.mem.getGeneralAllocator(),
+    );
+    defer nbuf.deinit();
+
+    // Construct common header.
+    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
+    const gio = net.WireWriter(GenericHeader).new(ghdr);
+    gio.write(.haddr_type, .ether);
+    gio.write(.paddr_type, .ip);
+    gio.write(.haddr_len, @sizeOf(ether.MacAddr));
+    gio.write(.paddr_len, @sizeOf(net.ip.IpAddr));
+    gio.write(.op, .reply);
+
+    // Construct address info.
+    const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
+    const sio = net.WireWriter(AddrInfoMacIp).new(shdr);
+    sio.write(.sha, io_addr.read(.tha));
+    sio.write(.spa, io_addr.read(.tpa));
+    sio.write(.tha, io_addr.read(.sha));
+    sio.write(.tpa, io_addr.read(.spa));
+
+    // Transmit the ARP reply.
+    try dev.output(&io_addr.read(.sha).value, .arp, &nbuf);
 }
 
 // =============================================================
@@ -93,3 +123,4 @@ const common = @import("common");
 const urd = @import("urthr");
 const net = urd.net;
 const ether = @import("ether.zig");
+const NetBuffer = @import("NetBuffer.zig");
