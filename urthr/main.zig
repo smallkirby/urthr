@@ -98,6 +98,10 @@ fn zmain() !void {
     log.info("Initializing scheduler.", .{});
     try urd.sched.init();
 
+    // Initialize time subsystem.
+    log.info("Initializing time subsystem.", .{});
+    urd.time.init();
+
     // Spawn the initial kernel thread.
     _ = try urd.sched.spawn("init", initialTask, .{});
 

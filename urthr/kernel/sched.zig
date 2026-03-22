@@ -36,21 +36,12 @@ pub fn init() Allocator.Error!void {
 
     // Set the idle thread as the current thread.
     current = idle;
-
-    // Set timer interrupt handler for preemptive scheduling.
-    urd.exception.setHandler(arch.timer.ppi_intid, timerHandler) catch {
-        @panic("Failed to set timer interrupt handler.");
-    };
 }
 
 /// Start the preemptive scheduling timer.
 pub fn start() !void {
-    // Enable timer IRQ.
-    board.enableIrq(arch.timer.ppi_intid);
-
-    // Start the timer.
-    arch.timer.enable();
-    armTimer();
+    // Register scheduler timer callback.
+    _ = try time.register(tick_interval_us, onTimerTick);
 
     // Initialize idle thread runtime accounting.
     idle.last_exec_start = arch.timer.getCount();
@@ -194,24 +185,14 @@ fn allocateId() thread.Id {
 // Timer
 // =============================================================
 
-/// Timer tick interval in microseconds.
+/// Scheduler preemption interval in microseconds.
 const tick_interval_us: u64 = 10 * std.time.us_per_ms;
 
-/// Timer interrupt handler.
-///
-/// Re-arms the timer and check if the current thread needs to be rescheduled.
-fn timerHandler(_: urd.exception.Vector) void {
-    armTimer();
+/// Scheduler preemption callback.
+fn onTimerTick() void {
     markNeedResched();
-
     accountRuntime();
     updateLastExecTimestamp();
-}
-
-/// Re-arm the timer for the next tick.
-fn armTimer() void {
-    const ticks = (tick_interval_us * arch.timer.getFreq()) / std.time.us_per_s;
-    arch.timer.setDeadline(@intCast(ticks));
 }
 
 /// Account the runtime of the current thread since the last switch-in.
@@ -337,7 +318,6 @@ const std = @import("std");
 const log = std.log.scoped(.sched);
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
-const board = @import("board").impl;
 const options = @import("options");
 const common = @import("common");
 const page_size = common.mem.size_4kib;
@@ -346,3 +326,4 @@ const SpinLock = urd.SpinLock;
 const thread = urd.thread;
 const Thread = thread.Thread;
 const ThreadList = thread.ThreadList;
+const time = @import("time.zig");
