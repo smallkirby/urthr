@@ -20,6 +20,10 @@ flags: Flag,
 addr: [max_addr_len]u8,
 /// Length of the valid address in `addr`.
 addr_len: u8,
+/// Broadcast address for the device.
+///
+/// Valid length of the address is `addr_len`.
+broadcast: [max_addr_len]u8,
 /// Network device type.
 dev_type: Type,
 /// Logical interfaces associated with this device.
@@ -68,8 +72,15 @@ pub const Vtable = struct {
     ///
     /// If the device is already up, this is a no-op.
     open: ?*const fn (device: *Self) net.Error!void = null,
-    /// Output the given data to the device.
-    output: *const fn (device: *Self, prot: Protocol, data: []const u8) net.Error!void,
+    /// Pre-process a TX packet before transmission.
+    ///
+    /// L2 header is prepended to the buffer and the whole frame should be ready for transmission.
+    prependHeader: ?*const fn (device: *Self, dest: []const u8, prot: Protocol, buf: *NetBuffer) net.Error!void = null,
+    /// Primitive output function that transmits the given buffer.
+    ///
+    /// This function does not prepend or process any data.
+    /// The given buffer is transmitted as-is.
+    transmit: *const fn (device: *Self, prot: Protocol, buf: *NetBuffer) net.Error!void,
     /// Poll the device for an incoming packet.
     ///
     /// Returns a PollResult containing a reference to the received packet data.
@@ -91,9 +102,14 @@ pub fn open(self: *Self) net.Error!void {
     self.flags.up = true;
 }
 
-/// Output the given data to the device.
-pub fn output(self: *Self, prot: Protocol, data: []const u8) net.Error!void {
-    return self.vtable.output(self, prot, data);
+/// Output a packet via the device.
+///
+/// `dest` is the destination hardware address to which the packet is sent.
+pub fn output(self: *Self, dest: []const u8, prot: Protocol, buf: *NetBuffer) net.Error!void {
+    if (self.vtable.prependHeader) |prepend| {
+        try prepend(self, dest, prot, buf);
+    }
+    try self.vtable.transmit(self, prot, buf);
 }
 
 /// Associate the given network interface with this device.
@@ -154,6 +170,11 @@ pub fn getAddr(self: *const Self) []const u8 {
     return self.addr[0..self.addr_len];
 }
 
+/// Return the valid portion of the broadcast address.
+pub fn getBroadcastAddr(self: *const Self) []const u8 {
+    return self.broadcast[0..self.addr_len];
+}
+
 // =============================================================
 // Imports
 // =============================================================
@@ -165,3 +186,4 @@ const net = urd.net;
 const Protocol = net.Protocol;
 const ether = @import("ether.zig");
 const Interface = @import("Interface.zig");
+const NetBuffer = @import("NetBuffer.zig");
