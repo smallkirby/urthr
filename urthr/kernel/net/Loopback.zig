@@ -6,8 +6,7 @@ const Self = @This();
 const mtu = std.math.maxInt(u16);
 
 const vtable = Device.Vtable{
-    .open = null,
-    .output = outputImpl,
+    .transmit = transmitImpl,
 };
 
 /// Create a new loopback device.
@@ -27,15 +26,18 @@ pub fn new(allocator: Allocator) net.Error!*Device {
         .dev_type = .loopback,
         .addr = undefined,
         .addr_len = 0,
+        .broadcast = undefined,
     };
 
     return device;
 }
 
-/// Output the given data to the device.
-fn outputImpl(dev: *Device, prot: Protocol, data: []const u8) net.Error!void {
+/// Transmit the given data to the device.
+///
+/// The packet is immediately looped back to the input path without any L2 framing.
+fn transmitImpl(dev: *Device, prot: Protocol, buf: *NetBuffer) net.Error!void {
     log.debug("Output to loopback: prot={}", .{prot});
-    try net.handleInput(dev, prot, data);
+    try net.handleInput(dev, prot, buf.data());
 }
 
 // =============================================================
@@ -45,9 +47,8 @@ fn outputImpl(dev: *Device, prot: Protocol, data: []const u8) net.Error!void {
 const std = @import("std");
 const log = std.log.scoped(.loopback);
 const Allocator = std.mem.Allocator;
-const common = @import("common");
-const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;
 const Protocol = net.Protocol;
+const NetBuffer = net.NetBuffer;
 const Device = @import("Device.zig");

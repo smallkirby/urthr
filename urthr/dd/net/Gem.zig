@@ -76,8 +76,10 @@ pub fn new(base: usize, mac: MacAddr, allocator: Allocator, dma: DmaAllocator) A
         .dev_type = .ether,
         .addr = undefined,
         .addr_len = MacAddr.length,
+        .broadcast = undefined,
     };
     @memcpy(netdev.addr[0..MacAddr.length], &mac.value);
+    @memcpy(netdev.broadcast[0..MacAddr.length], &MacAddr.broadcast.value);
 
     return netdev;
 }
@@ -796,7 +798,8 @@ const Stat1000 = packed struct(u16) {
 
 const vtable: net.Device.Vtable = .{
     .open = init,
-    .output = outputImpl,
+    .prependHeader = net.ether.prependHeader,
+    .transmit = transmitImpl,
     .poll = pollImpl,
     .releaseRxBuf = releaseRxBufImpl,
 };
@@ -811,9 +814,10 @@ fn releaseRxBufImpl(dev: *net.Device, index: usize) void {
     self.rxq.releaseRxBuf(index);
 }
 
-fn outputImpl(dev: *net.Device, _: net.Protocol, data: []const u8) net.Error!void {
+fn transmitImpl(dev: *net.Device, _: net.Protocol, buf: *net.NetBuffer) net.Error!void {
     const self: *Self = @ptrCast(@alignCast(dev.ctx));
 
+    const data = buf.data();
     if (data.len == 0 or data.len > mtu_all) {
         return net.Error.InvalidPacket;
     }

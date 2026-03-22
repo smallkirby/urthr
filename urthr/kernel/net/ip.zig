@@ -314,7 +314,12 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     io.writeRaw(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
 
     // Transmit the packet.
-    try device.output(.ip, buf.data());
+    const hwaddr = if (dest.eql(ip_iface.broadcast) or dest.eql(.broadcast))
+        iface.device.?.getBroadcastAddr()
+    else
+        @panic("ARP not implemented yet.");
+
+    try device.output(hwaddr, .ip, buf);
 }
 
 /// Check if the given interface is the target for receiving the packet.

@@ -91,6 +91,18 @@ const EtherHeader = extern struct {
     type: net.Protocol,
 };
 
+/// Prepend an Ethernet frame header to the given buffer.
+pub fn prependHeader(dev: *net.Device, dest: []const u8, prot: net.Protocol, buf: *net.NetBuffer) net.Error!void {
+    const dest_mac = MacAddr.from(dest);
+    const src_mac = MacAddr.from(dev.getAddr());
+    const hdr = try buf.prepend(@sizeOf(EtherHeader));
+
+    const io = net.WireWriter(EtherHeader).new(hdr);
+    io.write(.dest, dest_mac);
+    io.write(.src, src_mac);
+    io.write(.type, prot);
+}
+
 /// Input Ethernet frame data.
 pub fn inputFrame(dev: *net.Device, data: []const u8) void {
     // Check length of the frame.
