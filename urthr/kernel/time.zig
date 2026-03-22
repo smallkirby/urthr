@@ -19,7 +19,7 @@ pub fn init() void {
 
     board.enableIrq(arch.timer.ppi_intid);
     arch.timer.enable();
-    //armTimer();
+    armTimer();
 }
 
 /// Register a periodic timer callback.
