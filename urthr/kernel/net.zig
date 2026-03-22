@@ -6,6 +6,7 @@ pub const ip = @import("net/ip.zig");
 pub const Device = @import("net/Device.zig");
 pub const Interface = @import("net/Interface.zig");
 pub const Loopback = @import("net/Loopback.zig");
+pub const NetBuffer = @import("net/NetBuffer.zig");
 
 /// Registered network device list.
 var device_list: Device.DeviceList = .{};
@@ -26,6 +27,10 @@ pub const Error = error{
     InvalidAddress,
     /// Invalid packet data.
     InvalidPacket,
+    /// No data available to read.
+    NoData,
+    /// Requested resource is unavailable.
+    Unavailable,
     /// Given data, protocol, or operation is not supported.
     Unsupported,
     /// Operation timed out.
@@ -77,6 +82,21 @@ pub fn run() (Error || urd.sched.Error)!void {
 /// Register a network device.
 pub fn registerDevice(device: *Device) void {
     device_list.append(device);
+}
+
+const CmpInterfaceFn = *const fn (*const Interface, *const anyopaque) bool;
+
+/// Find the interface that satisfies the given condition.
+pub fn findInterface(cmp: CmpInterfaceFn, ctx: *const anyopaque) ?*Interface {
+    var iter = device_list.iter();
+    while (iter.next()) |device| {
+        var ifiter = device.netif.iter();
+        while (ifiter.next()) |netif| {
+            if (cmp(netif, ctx)) {
+                return netif;
+            }
+        }
+    } else return null;
 }
 
 /// Handle incoming data to dispatch to the appropriate protocol handler.
@@ -198,6 +218,75 @@ pub fn WireReader(T: type) type {
     };
 }
 
+/// Get a writer that handles writing data in network byte order.
+pub fn WireWriter(T: type) type {
+    return struct {
+        const Self = @This();
+
+        /// Pointer to the backing data.
+        p: *T,
+
+        /// Fields enum type.
+        const Fields = std.meta.FieldEnum(T);
+
+        /// Create a new writer for the given object.
+        pub fn new(obj: anytype) Self {
+            const ptr: *T = switch (@typeInfo(@TypeOf(obj))) {
+                .pointer => |pointer| switch (pointer.size) {
+                    .one, .many, .c => @ptrCast(@alignCast(obj)),
+                    .slice => @ptrCast(@alignCast(obj.ptr)),
+                },
+                else => @compileError("Invalid type for WireWriter"),
+            };
+
+            return Self{
+                .p = ptr,
+            };
+        }
+
+        /// Write a value to the given field.
+        ///
+        /// If the field is an extern struct, it is written as-is.
+        /// Otherwise, it is converted from native endian to big-endian.
+        pub fn write(self: *const Self, comptime field: Fields, value: @FieldType(T, @tagName(field))) void {
+            const name = @tagName(field);
+            const U = @FieldType(T, name);
+            const bitoffset = @bitOffsetOf(T, name);
+            const offset = @offsetOf(T, name);
+            const bitsize = @bitSizeOf(U);
+
+            if (bitsize % 8 != 0 or bitoffset % 8 != 0) {
+                @compileError("Unsupported field alignment for WireWriter");
+            }
+
+            const up = @intFromPtr(self.p) + offset;
+            const dest: *align(1) U = @ptrFromInt(up);
+
+            dest.* = switch (@typeInfo(U)) {
+                .@"struct" => |s| if (s.layout == .@"extern")
+                    value
+                else
+                    bits.toBigEndian(value),
+                else => bits.toBigEndian(value),
+            };
+        }
+
+        /// Write a value to the given field without byte order conversion.
+        pub fn writeRaw(self: *const Self, comptime field: Fields, value: @FieldType(T, @tagName(field))) void {
+            const name = @tagName(field);
+            const offset = @offsetOf(T, name);
+            const dest = @intFromPtr(self.p) + offset;
+
+            std.mem.writeInt(
+                @TypeOf(value),
+                @as([*]u8, @ptrFromInt(dest))[0..@sizeOf(@TypeOf(value))],
+                value,
+                builtin.cpu.arch.endian(),
+            );
+        }
+    };
+}
+
 /// Convert the given value in network endian to native endian.
 pub fn fromNetEndian(value: anytype) @TypeOf(value) {
     return bits.fromBigEndian(value);
@@ -212,6 +301,7 @@ pub fn toNetEndian(value: anytype) @TypeOf(value) {
 // Imports
 // =============================================================
 
+const builtin = @import("builtin");
 const std = @import("std");
 const common = @import("common");
 const bits = common.bits;

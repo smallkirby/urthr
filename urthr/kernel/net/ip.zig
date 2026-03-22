@@ -19,6 +19,11 @@ pub const IpAddr = extern struct {
     /// Maximum length of string representation of IP address.
     pub const string_length = 15;
 
+    /// Wildcard IP address that matches any address.
+    pub const any = IpAddr{
+        .value = Inner{ 0, 0, 0, 0 },
+    };
+
     /// Broadcast IP address.
     pub const broadcast = IpAddr{
         .value = Inner{ 0xFF, 0xFF, 0xFF, 0xFF },
@@ -250,6 +255,83 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     }
 }
 
+/// Default Time to Live value.
+const default_ttl: u8 = 64;
+
+/// Send an IP packet.
+///
+/// This function prepends the IP header and transmits the packet
+/// through the device whose IPv4 unicast address matches `src`.
+pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) net.Error!void {
+    if (src.eql(.broadcast) or dest.eql(.any)) {
+        return net.Error.InvalidAddress;
+    }
+
+    // Select interface.
+    const iface = net.findInterface(isTargetInterface, &src) orelse {
+        return net.Error.Unavailable;
+    };
+    const ip_iface: *const IpInterface = @ptrCast(@alignCast(iface.ctx));
+    const device = iface.device orelse {
+        return net.Error.Unavailable;
+    };
+
+    // Check if the destination address locates in the same subnet.
+    const src_subnet = ip_iface.unicast.value & ip_iface.netmask.value;
+    const dest_subnet = dest.value & ip_iface.netmask.value;
+    if (!@reduce(.And, src_subnet == dest_subnet)) {
+        return net.Error.InvalidAddress;
+    }
+
+    // Check if the packet size is within the MTU.
+    // No fragmentation support for now.
+    const packet_len = @sizeOf(Header) + buf.len();
+    if (packet_len > device.mtu) {
+        return net.Error.InvalidPacket;
+    }
+
+    // Fill header fields.
+    const hdr = try buf.prepend(@sizeOf(Header));
+    const io = net.WireWriter(Header).new(hdr);
+    io.write(.ihl_version, .{
+        .ihl = @sizeOf(Header) / 4,
+        .version = 4,
+    });
+    io.write(.tos, 0);
+    io.write(.total_length, @intCast(packet_len));
+    io.write(.id, 0);
+    io.write(.fragoff_flags, .{
+        .frag_off = 0,
+        .flags = .{ ._reserved = 0, .df = false, .mf = false },
+    });
+    io.write(.ttl, default_ttl);
+    io.write(.protocol, protocol);
+    io.write(.checksum, 0);
+    io.write(.src_addr, src);
+    io.write(.dest_addr, dest);
+
+    // Calculate and write the header checksum.
+    io.writeRaw(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
+
+    // Transmit the packet.
+    try device.output(.ip, buf.data());
+}
+
+/// Check if the given interface is the target for receiving the packet.
+fn isTargetInterface(interface: *const Interface, ctx: *const anyopaque) bool {
+    if (interface.family != .ipv4) {
+        return false;
+    }
+
+    const addr: *const IpAddr = @ptrCast(@alignCast(ctx));
+    const ip_iface: *const IpInterface = @ptrCast(@alignCast(interface.ctx));
+    return ip_iface.unicast.eql(addr.*);
+}
+
+// =============================================================
+// Debug
+// =============================================================
+
 /// Print an IP packet data.
 fn printPacket(data: []const u8, logger: anytype) void {
     const io = net.WireReader(Header).new(data);
@@ -288,3 +370,4 @@ const urd = @import("urthr");
 const net = urd.net;
 const Interface = net.Interface;
 const nutil = @import("nutil.zig");
+const NetBuffer = @import("NetBuffer.zig");
