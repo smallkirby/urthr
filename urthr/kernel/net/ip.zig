@@ -75,10 +75,22 @@ pub const IpAddr = extern struct {
     pub fn eql(self: IpAddr, other: IpAddr) bool {
         return std.meta.eql(self.value, other.value);
     }
+
+    /// Check if the two IP addresses are in the same subnet.
+    pub fn sameSubnet(self: IpAddr, other: IpAddr, netmask: IpAddr) bool {
+        const subnet1 = self.value & netmask.value;
+        const subnet2 = other.value & netmask.value;
+        return @reduce(.And, subnet1 == subnet2);
+    }
+
+    /// Get the subnet address by applying the netmask.
+    pub fn subnet(self: IpAddr, netmask: IpAddr) IpAddr {
+        return .{ .value = self.value & netmask.value };
+    }
 };
 
 /// IP specific interface information.
-const IpInterface = struct {
+pub const IpInterface = struct {
     /// Unicast IP address.
     unicast: IpAddr,
     /// Broadcast IP address.
@@ -251,7 +263,7 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     // Find the handlre for the encapsulated protocol.
     const protocol = io.read(.protocol);
     if (protocol.getHandler()) |handler| {
-        return handler.input(io, data[hlen..]);
+        return handler.input(io, data[hlen..io.read(.total_length)]);
     }
 }
 
@@ -269,17 +281,17 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
 
     // Select interface.
     const iface = net.findInterface(isTargetInterface, &src) orelse {
+        log.warn("No interface found for the source IP address", .{});
         return net.Error.Unavailable;
     };
     const ip_iface: *const IpInterface = @ptrCast(@alignCast(iface.ctx));
     const device = iface.device orelse {
+        log.warn("No device found for the interface", .{});
         return net.Error.Unavailable;
     };
 
     // Check if the destination address locates in the same subnet.
-    const src_subnet = ip_iface.unicast.value & ip_iface.netmask.value;
-    const dest_subnet = dest.value & ip_iface.netmask.value;
-    if (!@reduce(.And, src_subnet == dest_subnet)) {
+    if (!ip_iface.unicast.sameSubnet(dest, ip_iface.netmask)) {
         return net.Error.InvalidAddress;
     }
 
@@ -311,7 +323,7 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     io.write(.dest_addr, dest);
 
     // Calculate and write the header checksum.
-    io.writeRaw(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
+    io.write(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
 
     // Resolve the destination hardware address.
     const allocator = urd.mem.getGeneralAllocator();

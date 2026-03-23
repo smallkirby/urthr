@@ -51,7 +51,7 @@ pub const MacAddr = extern struct {
     /// Create a MAC address from the given byte slice.
     pub fn from(value: []const u8) MacAddr {
         var bytes: [length]u8 = undefined;
-        @memcpy(&bytes, value);
+        @memcpy(&bytes, value[0..length]);
         return MacAddr{ .value = bytes };
     }
 
