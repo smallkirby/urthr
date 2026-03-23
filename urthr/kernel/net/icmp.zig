@@ -118,7 +118,7 @@ pub const Message = union(MessageType) {
         }
 
         // Calculate and fill the checksum.
-        io.writeRaw(.checksum, nutil.calcChecksum(buf[0..self.len()]));
+        io.write(.checksum, nutil.calcChecksum(buf[0..self.len()]));
     }
 };
 

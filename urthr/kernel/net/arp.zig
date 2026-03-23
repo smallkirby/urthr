@@ -67,7 +67,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
         // Unsupported address type. Ignore.
         return;
     }
-    if (op != .request) {
+    if (op != .request and op != .reply) {
         // Unsupported operation. Ignore.
         return;
     }
@@ -90,6 +90,10 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     });
     log.debug("  Source: {f} , {f}", .{ io_addr.read(.sha), io_addr.read(.spa) });
     log.debug("  Target: {f} , {f}", .{ io_addr.read(.tha), io_addr.read(.tpa) });
+
+    if (op == .reply) {
+        return;
+    }
 
     var nbuf = try NetBuffer.init(
         @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
@@ -116,6 +120,42 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
 
     // Transmit the ARP reply.
     try dev.output(&io_addr.read(.sha).value, .arp, &nbuf);
+}
+
+/// Send an ARP request.
+pub fn request(iface: *net.Interface, ip: net.ip.IpAddr) net.Error!void {
+    if (iface.family != .ipv4) {
+        return net.Error.Unsupported;
+    }
+    const dev = iface.device.?;
+    const ip_iface: *const net.ip.IpInterface = @ptrCast(@alignCast(iface.ctx));
+
+    var nbuf = try NetBuffer.init(
+        @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
+        urd.mem.getGeneralAllocator(),
+    );
+    defer nbuf.deinit();
+
+    // Construct common header.
+    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
+    const gio = net.WireWriter(GenericHeader).new(ghdr);
+    gio.write(.haddr_type, .ether);
+    gio.write(.paddr_type, .ip);
+    gio.write(.haddr_len, @sizeOf(ether.MacAddr));
+    gio.write(.paddr_len, @sizeOf(net.ip.IpAddr));
+    gio.write(.op, .request);
+
+    // Construct address info.
+    const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
+    const sio = net.WireWriter(AddrInfoMacIp).new(shdr);
+    const sha: *const ether.MacAddr = @ptrCast(dev.getAddr());
+    sio.write(.sha, sha.*);
+    sio.write(.spa, ip_iface.unicast);
+    sio.write(.tha, net.ether.MacAddr.empty);
+    sio.write(.tpa, ip);
+
+    // Broadcast the ARP request.
+    try dev.output(dev.getBroadcastAddr(), .arp, &nbuf);
 }
 
 /// Resolve the MAC address for the given IP address on the specified interface.
@@ -184,6 +224,8 @@ pub const cache = struct {
 
     /// Register or update the MAC address for the given IP address.
     pub fn update(ip: net.ip.IpAddr, mac: ether.MacAddr) Allocator.Error!void {
+        log.debug("update arp", .{});
+        common.util.hexdump(&ip.value, 4, log.debug);
         // TODO: should take a lock.
         try instance.put(ip, .{
             .ip = ip,
