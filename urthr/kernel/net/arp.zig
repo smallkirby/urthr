@@ -123,7 +123,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
 }
 
 /// Send an ARP request.
-pub fn request(iface: *net.Interface, ip: net.ip.IpAddr) net.Error!void {
+pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
     if (iface.family != .ipv4) {
         return net.Error.Unsupported;
     }
@@ -168,13 +168,16 @@ pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Err
     }
 
     if (cache.find(ip)) |entry| {
-        if (entry.state == .resolved) {
-            @memcpy(hw[0..ether.MacAddr.length], &entry.mac.value);
-            return;
-        }
+        return switch (entry.state) {
+            .resolved, .static => @memcpy(hw[0..ether.MacAddr.length], &entry.mac.value),
+            .wip => net.Error.Resolving,
+        };
     }
 
-    return net.Error.Unavailable;
+    // Send ARP Request to resolve the address.
+    try request(iface, ip);
+
+    return net.Error.Resolving;
 }
 
 // =============================================================
