@@ -99,7 +99,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
         @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
         urd.mem.getGeneralAllocator(),
     );
-    defer nbuf.deinit();
+    errdefer nbuf.deinit();
 
     // Construct common header.
     const ghdr = try nbuf.append(@sizeOf(GenericHeader));
@@ -118,8 +118,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     sio.write(.tha, io_addr.read(.sha));
     sio.write(.tpa, io_addr.read(.spa));
 
-    // Transmit the ARP reply.
-    try dev.output(&io_addr.read(.sha).value, .arp, &nbuf);
+    try net.enqueueTx(dev, &io_addr.read(.sha).value, .arp, nbuf);
 }
 
 /// Send an ARP request.
@@ -134,7 +133,7 @@ pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
         @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
         urd.mem.getGeneralAllocator(),
     );
-    defer nbuf.deinit();
+    errdefer nbuf.deinit();
 
     // Construct common header.
     const ghdr = try nbuf.append(@sizeOf(GenericHeader));
@@ -154,8 +153,7 @@ pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
     sio.write(.tha, net.ether.MacAddr.empty);
     sio.write(.tpa, ip);
 
-    // Broadcast the ARP request.
-    try dev.output(dev.getBroadcastAddr(), .arp, &nbuf);
+    try net.enqueueTx(dev, dev.getBroadcastAddr(), .arp, nbuf);
 }
 
 /// Resolve the MAC address for the given IP address on the specified interface.

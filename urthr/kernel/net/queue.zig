@@ -3,10 +3,10 @@ pub const Error = error{
     Full,
 };
 
-/// Fixed-capacity single-producer single-consumer packet queue.
+/// Fixed-capacity single-producer single-consumer receive queue.
 ///
 /// Stores references to externally-owned packet data waiting to be processed by the consumer thread.
-pub const PacketQueue = struct {
+pub const RxQueue = struct {
     const Self = @This();
 
     /// Maximum number of packets in the queue.
@@ -91,6 +91,85 @@ pub const PacketQueue = struct {
     }
 };
 
+/// Fixed-capacity single-producer single-consumer transmit queue.
+///
+/// Stores owned packet data waiting to be transmitted by the TX worker thread.
+pub const TxQueue = struct {
+    const Self = @This();
+
+    /// Maximum number of packets in the queue.
+    const capacity = 64;
+
+    /// Packet slot holding owned transmit data.
+    pub const TxPacket = struct {
+        /// Network device to transmit on.
+        device: *Device,
+        /// Destination hardware address,
+        dest: [Device.max_addr_len]u8,
+        /// Length of the destination hardware address.
+        dest_len: u8,
+        /// Protocol type.
+        protocol: Protocol,
+        /// Packet data owned by this slot.
+        buf: NetBuffer,
+    };
+
+    /// Ring buffer of packet slots.
+    slots: [capacity]TxPacket = undefined,
+    /// Write index (producer).
+    head: usize = 0,
+    /// Read index (consumer).
+    tail: usize = 0,
+    /// Number of packets currently in the queue.
+    count: usize = 0,
+    /// Protecting lock.
+    lock: SpinLock = .{},
+    /// Wait queue for the TX worker thread.
+    waitq: WaitQueue = .{},
+    /// Number of dropped packets due to queue full.
+    drops: u64 = 0,
+
+    /// Enqueue a TX packet.
+    ///
+    /// Takes ownership of `pkt.buf` on success.
+    /// If the queue is full, returns `error.Full` without touching `pkt.buf`.
+    /// The caller is responsible for freeing `pkt.buf` on failure.
+    pub fn enqueue(self: *Self, pkt: TxPacket) Error!void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (self.count >= capacity) {
+            self.drops += 1;
+            return Error.Full;
+        }
+
+        self.slots[self.head] = pkt;
+        self.head = (self.head + 1) % capacity;
+        self.count += 1;
+
+        _ = self.waitq.wake();
+    }
+
+    /// Dequeue a TX packet in thread context.
+    ///
+    /// Blocks if the queue is empty until a packet is available.
+    /// Returns the `TxPacket` by value; the caller takes ownership of the `buf`.
+    pub fn dequeue(self: *Self) TxPacket {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        while (self.count == 0) {
+            self.waitq.wait(&self.lock);
+        }
+
+        const pkt = self.slots[self.tail];
+        self.tail = (self.tail + 1) % capacity;
+        self.count -= 1;
+
+        return pkt;
+    }
+};
+
 // =============================================================
 // Imports
 // =============================================================
@@ -101,3 +180,5 @@ const urd = @import("urthr");
 const SpinLock = urd.SpinLock;
 const WaitQueue = urd.WaitQueue;
 const Device = @import("Device.zig");
+const NetBuffer = @import("NetBuffer.zig");
+const Protocol = urd.net.Protocol;

@@ -45,7 +45,7 @@ pub fn output(src: net.ip.IpAddr, dest: net.ip.IpAddr, msg: Message) net.Error!v
         msg.len(),
         urd.mem.getGeneralAllocator(),
     );
-    defer nbuf.deinit();
+    errdefer nbuf.deinit();
 
     const buf = try nbuf.append(msg.len());
     msg.fill(buf);

@@ -12,7 +12,9 @@ pub const NetBuffer = @import("net/NetBuffer.zig");
 var device_list: Device.DeviceList = .{};
 
 /// Packet queue for deferring RX processing.
-var pktq: PacketQueue = .{};
+var rxq: RxQueue = .{};
+/// Packet queue for deferring TX processing.
+var txq: TxQueue = .{};
 
 /// Maximum number of packets to process per device in a single IRQ poll.
 const poll_budget = 64;
@@ -21,14 +23,16 @@ const poll_budget = 64;
 pub const Error = error{
     /// Given operation would cause duplication.
     Duplicated,
-    /// Memory allocation failed.
-    OutOfMemory,
     /// Invalid address.
     InvalidAddress,
     /// Invalid packet data.
     InvalidPacket,
     /// No data available to read.
     NoData,
+    /// Memory allocation failed.
+    OutOfMemory,
+    /// Address is being resolved. Wait and retry later.
+    Resolving,
     /// Requested resource is unavailable.
     Unavailable,
     /// Given data, protocol, or operation is not supported.
@@ -77,8 +81,9 @@ pub fn run() (Error || urd.sched.Error)!void {
         try device.open();
     }
 
-    // Start the worker thread.
-    _ = try urd.sched.spawn("net", worker, .{});
+    // Start the worker threads.
+    _ = try urd.sched.spawn("net-rx", rxworker, .{});
+    _ = try urd.sched.spawn("net-tx", txworker, .{});
 }
 
 /// Register a network device.
@@ -141,7 +146,7 @@ fn pollDevice(device: *Device) void {
     var budget: usize = poll_budget;
     while (budget > 0) : (budget -= 1) {
         const result = device.poll() catch continue orelse break;
-        pktq.enqueue(.{
+        rxq.enqueue(.{
             .data = result.data,
             .device = device,
             .handle = result.handle,
@@ -152,16 +157,54 @@ fn pollDevice(device: *Device) void {
     }
 }
 
-/// Network worker thread function.
+/// Enqueue a packet for deferred transmission.
+///
+/// The `buf` is an L3 packet without an L2 header.
+/// The L2 header should be prepended by the thread that dequeues the packet.
+///
+/// Owns the given buffer on success.
+/// Caller must not access the buffer after calling this function.
+pub fn enqueueTx(device: *Device, dest: []const u8, prot: Protocol, buf: NetBuffer) Error!void {
+    var pkt: TxQueue.TxPacket = .{
+        .device = device,
+        .dest_len = @intCast(dest.len),
+        .protocol = prot,
+        .buf = buf,
+        .dest = undefined,
+    };
+    @memcpy(pkt.dest[0..dest.len], dest);
+    txq.enqueue(pkt) catch return Error.Unavailable;
+}
+
+/// RX worker thread function.
 ///
 /// Continuously processes incoming packets from the packet queue
 /// and dispatches them to the appropriate device handlers.
-fn worker() void {
+fn rxworker() void {
     while (true) {
-        const pkt = pktq.dequeue();
-        defer pktq.release(pkt);
+        const pkt = rxq.dequeue();
+        defer rxq.release(pkt);
 
         pkt.device.inputFrame(pkt.data);
+    }
+}
+
+/// TX worker thread function.
+///
+/// Continuously dequeues pending transmit packets
+/// and sends them through the associated device.
+fn txworker() void {
+    while (true) {
+        var pkt = txq.dequeue();
+        defer pkt.buf.deinit();
+
+        pkt.device.output(
+            pkt.dest[0..pkt.dest_len],
+            pkt.protocol,
+            &pkt.buf,
+        ) catch |err| {
+            std.log.err("TX failed: {}", .{err});
+        };
     }
 }
 
@@ -171,14 +214,14 @@ pub fn WireReader(T: type) type {
         const Self = @This();
 
         /// Pointer to the backing data.
-        p: *const T,
+        p: *align(1) const T,
 
         /// Fields enum type.
         const Fields = std.meta.FieldEnum(T);
 
         /// Create a new reader for the given object.
         pub fn new(obj: anytype) Self {
-            const ptr: *const T = switch (@typeInfo(@TypeOf(obj))) {
+            const ptr: *align(1) const T = switch (@typeInfo(@TypeOf(obj))) {
                 .pointer => |pointer| switch (pointer.size) {
                     .one, .many, .c => @ptrCast(@alignCast(obj)),
                     .slice => @ptrCast(@alignCast(obj.ptr)),
@@ -311,4 +354,5 @@ const bits = common.bits;
 const util = common.util;
 const urd = @import("urthr");
 
-const PacketQueue = @import("net/queue.zig").PacketQueue;
+const RxQueue = @import("net/queue.zig").RxQueue;
+const TxQueue = @import("net/queue.zig").TxQueue;
