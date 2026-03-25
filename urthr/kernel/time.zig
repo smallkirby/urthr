@@ -105,7 +105,9 @@ fn allocateId() Id {
 
 /// Get the current kernel timestamp in microseconds.
 fn getCurrentTimestampUs() Ktimestamp {
-    return arch.timer.getCount() * std.time.us_per_s / arch.timer.getFreq();
+    const count: u128 = arch.timer.getCount();
+    const freq: u128 = arch.timer.getFreq();
+    return @truncate(count * std.time.us_per_s / freq);
 }
 
 /// Timer interrupt handler.
