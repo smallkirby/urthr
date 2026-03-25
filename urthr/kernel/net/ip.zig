@@ -274,6 +274,9 @@ const default_ttl: u8 = 64;
 ///
 /// This function prepends the IP header and transmits the packet
 /// through the device whose IPv4 unicast address matches `src`.
+///
+/// Owns the given buffer on success.
+/// Caller must not access the buffer after calling this function.
 pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) net.Error!void {
     if (src.eql(.broadcast) or dest.eql(.any)) {
         return net.Error.InvalidAddress;
@@ -337,8 +340,7 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
         try net.arp.resolve(iface, dest, hwaddr);
     }
 
-    // Transmit the packet.
-    try device.output(hwaddr, .ip, buf);
+    try net.enqueueTx(device, hwaddr, .ip, buf.*);
 }
 
 /// Check if the given interface is the target for receiving the packet.
