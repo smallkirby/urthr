@@ -337,7 +337,10 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     if (dest.eql(ip_iface.broadcast) or dest.eql(.broadcast)) {
         @memcpy(hwaddr, iface.device.?.getBroadcastAddr());
     } else if (iface.device.?.flags.need_arp) {
-        try net.arp.resolve(iface, dest, hwaddr);
+        return net.arp.resolve(iface, dest, hwaddr) catch |err| switch (err) {
+            error.Resolving => net.arp.cache.enqueuePending(dest, device, buf.*),
+            else => |e| e,
+        };
     }
 
     try net.enqueueTx(device, hwaddr, .ip, buf.*);
