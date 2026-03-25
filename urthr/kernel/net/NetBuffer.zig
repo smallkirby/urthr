@@ -27,7 +27,7 @@ pub fn init(data_size: usize, allocator: Allocator) Allocator.Error!Self {
 }
 
 /// Free the underlying buffer.
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *const Self) void {
     self._allocator.free(self._buffer);
 }
 

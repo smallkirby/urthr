@@ -80,7 +80,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     // Update ARP cache.
     const sha = io_addr.read(.sha);
     const spa = io_addr.read(.spa);
-    try cache.update(spa, sha);
+    try cache.update(spa, sha, .resolved);
 
     // Debug print the ARP packet.
     log.debug("ARP packet: haddr_type={}, paddr_type={}, op={}", .{
@@ -172,7 +172,9 @@ pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Err
         };
     }
 
-    // Send ARP Request to resolve the address.
+    // Insert a wip entry so pending packets can be queued against it.
+    try cache.update(ip, undefined, .wip);
+    // Send ARP request to resolve the address.
     try request(iface, ip);
 
     return net.Error.Resolving;
@@ -197,6 +199,20 @@ pub const cache = struct {
         static,
     };
 
+    /// Maximum number of packets queued per cache entry waiting for ARP resolution.
+    const pending_queue_capacity = 3;
+
+    /// Packet pending ARP resolution.
+    const PendingPacket = struct {
+        /// Device to transmit on.
+        device: *net.Device,
+        /// Packet data buffer.
+        buf: NetBuffer,
+    };
+
+    /// List type of pending packets.
+    const PendingList = std.array_list.Aligned(PendingPacket, null);
+
     /// Cache entry.
     const CacheEntry = struct {
         /// IP address (key).
@@ -207,6 +223,15 @@ pub const cache = struct {
         timestamp: urd.time.Ktimestamp,
         /// Cache entry state.
         state: State,
+        /// Packets waiting for ARP resolution.
+        pending: PendingList = .{},
+
+        /// Free the pending list backing memory.
+        ///
+        /// Does NOT free individual packet buffers. Callers must consume or free them first.
+        fn clearPending(self: *CacheEntry, allocator: Allocator) void {
+            self.pending.deinit(allocator);
+        }
     };
 
     /// ARP cache instance.
@@ -224,41 +249,109 @@ pub const cache = struct {
     }
 
     /// Register or update the MAC address for the given IP address.
-    pub fn update(ip: net.ip.IpAddr, mac: ether.MacAddr) Allocator.Error!void {
-        log.debug("update arp", .{});
-        common.util.hexdump(&ip.value, 4, log.debug);
+    pub fn update(ip: net.ip.IpAddr, mac: ether.MacAddr, state: State) Allocator.Error!void {
         // TODO: should take a lock.
-        try instance.put(ip, .{
-            .ip = ip,
-            .mac = mac,
-            .timestamp = urd.time.getCurrentTimestamp(),
-            .state = .resolved,
+
+        if (instance.getPtr(ip)) |entry| {
+            const old_state = entry.state;
+            entry.timestamp = urd.time.getCurrentTimestamp();
+            entry.state = state;
+            entry.mac = mac;
+
+            if (old_state == .wip and state == .resolved) {
+                flushPending(entry);
+            }
+        } else {
+            try instance.put(ip, .{
+                .ip = ip,
+                .mac = mac,
+                .timestamp = urd.time.getCurrentTimestamp(),
+                .state = state,
+            });
+        }
+    }
+
+    /// Send all pending packets now that the MAC address is resolved.
+    fn flushPending(entry: *CacheEntry) void {
+        for (entry.pending.items) |*pkt| {
+            net.enqueueTx(
+                pkt.device,
+                entry.mac.value[0..pkt.device.addr_len],
+                .ip,
+                pkt.buf,
+            ) catch |e| {
+                log.debug("Failed to enqueue packet for ARP resolution: {t}", .{e});
+                // If the transmission fails, this functions owns the packet buffer.
+                pkt.buf.deinit();
+            };
+        }
+
+        entry.clearPending(urd.mem.getGeneralAllocator());
+    }
+
+    /// Enqueue a packet to wait for ARP resolution of the given IP address.
+    ///
+    /// Takes ownership of buf.
+    /// If the entry does not exist or the queue is full, buf is freed and dropped immediately.
+    pub fn enqueuePending(ip: net.ip.IpAddr, device: *net.Device, buf: NetBuffer) Allocator.Error!void {
+        // TODO: should take a lock.
+        const entry = find(ip) orelse {
+            return buf.deinit();
+        };
+        if (entry.pending.items.len >= pending_queue_capacity) {
+            return buf.deinit();
+        }
+
+        const allocator = urd.mem.getGeneralAllocator();
+        try entry.pending.append(allocator, .{
+            .device = device,
+            .buf = buf,
         });
     }
 
     /// Delete the cache entry for the given IP address.
     ///
     /// This function ignores the case where the entry does not exist.
+    ///
+    /// Caller must ensure that the pending packets are consumed or freed.
     pub fn delete(ip: net.ip.IpAddr) void {
         // TODO: should take a lock.
+        if (find(ip)) |entry| {
+            entry.clearPending(urd.mem.getGeneralAllocator());
+        }
         _ = instance.remove(ip);
     }
 
     /// Find the cache entry for the given IP address.
-    fn find(ip: net.ip.IpAddr) ?CacheEntry {
+    fn find(ip: net.ip.IpAddr) ?*CacheEntry {
         // TODO: should take a lock.
-        return instance.get(ip);
+        return instance.getPtr(ip);
     }
 
     /// Cleanup stale cache entries.
     fn cleanup() void {
+        // TODO: should take a lock.
+
+        // Collect stale IPs first to avoid modifying the HashMap while iterating.
+        const max_stale_count = 16;
+        var stale: [max_stale_count]net.ip.IpAddr = undefined;
+        var stale_count: usize = 0;
         const now = urd.time.getCurrentTimestamp();
+
         var it = instance.valueIterator();
         while (it.next()) |entry| {
             const staled = now - entry.timestamp > cleanup_interval_us;
-            if (entry.state == .resolved and staled) {
-                delete(entry.ip);
+            if (entry.state != .static and staled) {
+                stale[stale_count] = entry.ip;
+                stale_count += 1;
             }
+
+            if (stale_count >= max_stale_count) {
+                break;
+            }
+        }
+        for (stale[0..stale_count]) |ip| {
+            delete(ip);
         }
     }
 };
