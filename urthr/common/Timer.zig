@@ -27,6 +27,16 @@ pub const TimeSlice = struct {
     pub fn sec(value: u64) TimeSlice {
         return .{ ._us = value * 1_000_000 };
     }
+
+    /// Converts the time slice to microseconds.
+    pub fn toUs(self: TimeSlice) u64 {
+        return self._us;
+    }
+
+    /// Converts the time slice to milliseconds.
+    pub fn toMs(self: TimeSlice) u64 {
+        return self._us / 1_000;
+    }
 };
 
 pub const Vtable = struct {

@@ -119,14 +119,11 @@ pub fn init(netdev: *net.Device) net.Error!void {
     self.mdioWrite(0, 0x8000);
 
     // Wait for reset to complete.
-    var timer = arch.timer.createTimer();
-    timer.start(.sec(1));
-    while (self.mdioRead(0) & 0x8000 != 0) {
-        if (timer.expired()) {
-            @panic("PHY reset timed out.");
+    spinWaitUntil(.sec(1), null, self, struct {
+        fn f(s: *const Self) bool {
+            return s.mdioRead(0) & 0x8000 == 0;
         }
-        std.atomic.spinLoopHint();
-    }
+    }.f) catch @panic("PHY reset timed out.");
 
     // Initialize MAC address.
     var mac = self.getMacAddr();
@@ -182,27 +179,12 @@ fn linkUp(self: *const Self, timeout: Timer.TimeSlice) LinkInfo {
     self.mdioWrite(4, 0x01E1);
     self.mdioWrite(0, 0x1200);
 
-    var timer = arch.timer.createTimer();
-    timer.start(timeout);
-
-    var ok_count: usize = 0;
-    while (true) {
-        const bmsr: Bmsr = @bitCast(self.mdioRead(1));
-        if (bmsr.auto_nego_complete and bmsr.link_status) {
-            ok_count += 1;
-            break;
+    spinWaitUntil(timeout, .us(100), self, struct {
+        fn f(s: *const Self) bool {
+            const bmsr: Bmsr = @bitCast(s.mdioRead(1));
+            return bmsr.auto_nego_complete and bmsr.link_status;
         }
-
-        if (ok_count >= 2) {
-            break;
-        }
-
-        if (timer.expired()) {
-            @panic("PHY link up timed out.");
-        }
-
-        arch.timer.spinWaitMicro(100);
-    }
+    }.f) catch @panic("PHY link up timed out.");
 
     const lpa: Stat1000 = @bitCast(self.mdioRead(0xA));
     return LinkInfo{
@@ -576,18 +558,12 @@ const TxQueue = struct {
     pub fn waitForCompletion(self: *const TxQueue, timeout: Timer.TimeSlice) net.Error!void {
         const idx = self.next_idx;
         const desc = &self.getDescs()[idx];
-
-        var timer = arch.timer.createTimer();
-        timer.start(timeout);
-
-        while (true) {
-            arch.cache(.invalidate, desc, @sizeOf(Desc));
-            if (desc.ctrl.used) return;
-
-            if (timer.expired()) return net.Error.Timeout;
-
-            std.atomic.spinLoopHint();
-        }
+        try spinWaitUntil(timeout, null, desc, struct {
+            fn f(d: *volatile Desc) bool {
+                arch.cache(.invalidate, d, @sizeOf(Desc));
+                return d.ctrl.used;
+            }
+        }.f);
     }
 
     /// Get the DMA bus address of the descriptor ring.
@@ -703,15 +679,29 @@ fn mdioWrite(self: *const Self, reg: u5, value: u16) void {
 
 /// Wait for the MDIO operation to complete.
 fn mdioWaitForIdle(self: *const Self) void {
-    var timer = arch.timer.createTimer();
-    timer.start(.ms(10));
-
-    while (self.module.read(Nsr).idle == false) {
-        if (timer.expired()) {
-            @panic("GEM MDIO operation timed out.");
+    spinWaitUntil(.ms(10), null, self, struct {
+        fn f(s: *const Self) bool {
+            return s.module.read(Nsr).idle;
         }
+    }.f) catch @panic("GEM MDIO operation timed out.");
+}
 
-        std.atomic.spinLoopHint();
+/// Spin-waits until pred returns true or timeout expires.
+fn spinWaitUntil(
+    timeout: Timer.TimeSlice,
+    interval: ?Timer.TimeSlice,
+    ctx: anytype,
+    comptime pred: fn (@TypeOf(ctx)) bool,
+) error{Timeout}!void {
+    var timer = arch.timer.createTimer();
+    timer.start(timeout);
+    while (!pred(ctx)) {
+        if (timer.expired()) return error.Timeout;
+        if (interval) |iv| {
+            arch.timer.spinWaitMicro(iv.toUs());
+        } else {
+            std.atomic.spinLoopHint();
+        }
     }
 }
 
