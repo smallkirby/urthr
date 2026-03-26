@@ -2,6 +2,7 @@ pub const arp = @import("net/arp.zig");
 pub const ether = @import("net/ether.zig");
 pub const icmp = @import("net/icmp.zig");
 pub const ip = @import("net/ip.zig");
+pub const udp = @import("net/udp.zig");
 
 pub const Device = @import("net/Device.zig");
 pub const Interface = @import("net/Interface.zig");

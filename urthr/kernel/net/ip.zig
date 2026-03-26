@@ -192,8 +192,8 @@ pub const Protocol = enum(u8) {
     ip = 0,
     /// ICMP.
     icmp = 1,
-    /// TCP.
-    tcp = 6,
+    /// UDP.
+    udp = 17,
 
     /// All other unrecognized protocols.
     _,
@@ -208,6 +208,7 @@ pub const Protocol = enum(u8) {
     fn getHandler(self: Protocol) ?Protocol.Vtable {
         return switch (self) {
             .icmp => @import("icmp.zig").vtable,
+            .udp => @import("udp.zig").vtable,
             else => null,
         };
     }
