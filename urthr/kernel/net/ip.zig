@@ -87,6 +87,13 @@ pub const IpAddr = extern struct {
     pub fn subnet(self: IpAddr, netmask: IpAddr) IpAddr {
         return .{ .value = self.value & netmask.value };
     }
+
+    /// Check if this IP address is greater than or equal to another IP address.
+    pub fn gte(self: IpAddr, other: IpAddr) bool {
+        const lhs = net.fromNetEndian(@as(u32, @bitCast(self.value)));
+        const rhs = net.fromNetEndian(@as(u32, @bitCast(other.value)));
+        return lhs >= rhs;
+    }
 };
 
 /// IP specific interface information.
@@ -97,6 +104,8 @@ pub const IpInterface = struct {
     broadcast: IpAddr,
     /// Subnet mask.
     netmask: IpAddr,
+    /// Pointer to the parent network interface for downcast.
+    netif: *Interface,
 
     /// Check if the given address is destined to this interface.
     pub fn isDestinedToMe(self: *const IpInterface, addr: IpAddr) bool {
@@ -105,6 +114,11 @@ pub const IpInterface = struct {
         const subnet_broadcast = addr.eql(self.broadcast);
 
         return unicast or broadcast or subnet_broadcast;
+    }
+
+    /// Add a routing entry for this interface.
+    pub fn addRoute(self: *IpInterface, network: IpAddr, netmask: IpAddr, gateway: IpAddr) net.Error!void {
+        try routeAdd(network, netmask, gateway, self);
     }
 };
 
@@ -213,11 +227,19 @@ pub fn createInterface(unicast: IpAddr, netmask: IpAddr, allocator: Allocator) n
         .broadcast = .{
             .value = (unicast.value & netmask.value) | ~netmask.value,
         },
+        .netif = interface,
     };
     interface.* = .{
         .ctx = @ptrCast(ipif),
         .family = .ipv4,
     };
+
+    // Register a route for the directly connected subnet of the interface.
+    try ipif.addRoute(
+        unicast.subnet(netmask),
+        netmask,
+        .any,
+    );
 
     return interface;
 }
@@ -278,25 +300,31 @@ const default_ttl: u8 = 64;
 /// Owns the given buffer on success.
 /// Caller must not access the buffer after calling this function.
 pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) net.Error!void {
-    if (src.eql(.broadcast) or dest.eql(.any)) {
+    if (src.eql(.any) and dest.eql(.broadcast)) {
+        log.warn("Cannot send a broadcast packet with wildcard source address", .{});
         return net.Error.InvalidAddress;
     }
 
-    // Select interface.
-    const iface = net.findInterface(isTargetInterface, &src) orelse {
-        log.warn("No interface found for the source IP address", .{});
+    // Lookup the route for the destination IP address.
+    const route = routeLookup(dest) orelse {
+        log.warn("No route found for the destination IP address", .{});
         return net.Error.Unavailable;
     };
-    const ip_iface: *const IpInterface = @ptrCast(@alignCast(iface.ctx));
+
+    // Select interface.
+    const ipiface = route.iface;
+    const iface = ipiface.netif;
     const device = iface.device orelse {
         log.warn("No device found for the interface", .{});
         return net.Error.Unavailable;
     };
 
-    // Check if the destination address locates in the same subnet.
-    if (!ip_iface.unicast.sameSubnet(dest, ip_iface.netmask)) {
+    if (!src.eql(.any) and !ipiface.unicast.eql(src)) {
+        log.warn("Source IP address does not match the interface address.", .{});
+        log.warn("source: {f} vs iface: {f}", .{ src, ipiface.unicast });
         return net.Error.InvalidAddress;
     }
+    const next = if (route.gateway.eql(.any)) dest else route.gateway;
 
     // Check if the packet size is within the MTU.
     // No fragmentation support for now.
@@ -323,7 +351,7 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     io.write(.protocol, protocol);
     io.write(.checksum, 0);
     io.write(.src_addr, src);
-    io.write(.dest_addr, dest);
+    io.write(.dest_addr, next);
 
     // Calculate and write the header checksum.
     io.write(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
@@ -334,11 +362,11 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     defer allocator.free(hwaddr);
     @memset(hwaddr, 0);
 
-    if (dest.eql(ip_iface.broadcast) or dest.eql(.broadcast)) {
-        @memcpy(hwaddr, iface.device.?.getBroadcastAddr());
-    } else if (iface.device.?.flags.need_arp) {
-        return net.arp.resolve(iface, dest, hwaddr) catch |err| switch (err) {
-            error.Resolving => net.arp.cache.enqueuePending(dest, device, buf.*),
+    if (next.eql(.broadcast)) {
+        @memcpy(hwaddr, device.getBroadcastAddr());
+    } else if (device.flags.need_arp) {
+        return net.arp.resolve(iface, next, hwaddr) catch |err| switch (err) {
+            error.Resolving => net.arp.cache.enqueuePending(next, device, buf.*),
             else => |e| e,
         };
     }
@@ -355,6 +383,73 @@ fn isTargetInterface(interface: *const Interface, ctx: *const anyopaque) bool {
     const addr: *const IpAddr = @ptrCast(@alignCast(ctx));
     const ip_iface: *const IpInterface = @ptrCast(@alignCast(interface.ctx));
     return ip_iface.unicast.eql(addr.*);
+}
+
+// =============================================================
+// Routing
+// =============================================================
+
+/// A list of registered routes.
+var routes: std.array_list.Aligned(Route, null) = .{};
+
+/// Represents a network routing entry that defines how packets should be forwarded.
+const Route = struct {
+    /// Network address.
+    ///
+    /// .any indicates a default gateway.
+    network: IpAddr,
+    /// Subnet mask.
+    netmask: IpAddr,
+    /// Next-hop IP address.
+    ///
+    /// .any indicates that the destination is directly connected to the interface.
+    gateway: IpAddr,
+    /// Interface to send the packet.
+    iface: *IpInterface,
+};
+
+/// Add a routing entry.
+fn routeAdd(network: IpAddr, netmask: IpAddr, gateway: IpAddr, iface: *IpInterface) Allocator.Error!void {
+    const allocator = urd.mem.getGeneralAllocator();
+    const route = try allocator.create(Route);
+    errdefer allocator.destroy(route);
+
+    route.* = .{
+        .network = network,
+        .netmask = netmask,
+        .gateway = gateway,
+        .iface = iface,
+    };
+
+    try routes.append(allocator, route.*);
+}
+
+/// Lookup the routing entry for the given destination IP address.
+///
+/// If multiple entries match the destination, the one with the longest prefix is selected.
+pub fn routeLookup(dest: IpAddr) ?*Route {
+    var ret: ?*Route = null;
+
+    for (routes.items) |*route| {
+        if (dest.subnet(route.netmask).eql(route.network)) {
+            if (ret) |candidate| {
+                if (route.netmask.gte(candidate.netmask)) {
+                    ret = route;
+                }
+            } else ret = route;
+        }
+    }
+
+    return ret;
+}
+
+/// Lookup the interface for the given destination IP address.
+pub fn ifaceLookup(dest: IpAddr) ?*IpInterface {
+    const route = routeLookup(dest) orelse {
+        return null;
+    };
+
+    return route.iface;
 }
 
 // =============================================================
