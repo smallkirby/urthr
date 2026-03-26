@@ -101,14 +101,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     );
     errdefer nbuf.deinit();
 
-    // Construct common header.
-    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
-    const gio = net.WireWriter(GenericHeader).new(ghdr);
-    gio.write(.haddr_type, .ether);
-    gio.write(.paddr_type, .ip);
-    gio.write(.haddr_len, @sizeOf(ether.MacAddr));
-    gio.write(.paddr_len, @sizeOf(net.ip.IpAddr));
-    gio.write(.op, .reply);
+    try writeGenericHeader(&nbuf, .reply);
 
     // Construct address info.
     const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
@@ -135,14 +128,7 @@ pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
     );
     errdefer nbuf.deinit();
 
-    // Construct common header.
-    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
-    const gio = net.WireWriter(GenericHeader).new(ghdr);
-    gio.write(.haddr_type, .ether);
-    gio.write(.paddr_type, .ip);
-    gio.write(.haddr_len, @sizeOf(ether.MacAddr));
-    gio.write(.paddr_len, @sizeOf(net.ip.IpAddr));
-    gio.write(.op, .request);
+    try writeGenericHeader(&nbuf, .request);
 
     // Construct address info.
     const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
@@ -178,6 +164,17 @@ pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Err
     try request(iface, ip);
 
     return net.Error.Resolving;
+}
+
+/// Write the common ARP GenericHeader with the given operation.
+fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
+    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
+    const gio = net.WireWriter(GenericHeader).new(ghdr);
+    gio.write(.haddr_type, .ether);
+    gio.write(.paddr_type, .ip);
+    gio.write(.haddr_len, @sizeOf(ether.MacAddr));
+    gio.write(.paddr_len, @sizeOf(net.ip.IpAddr));
+    gio.write(.op, op);
 }
 
 // =============================================================
