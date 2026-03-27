@@ -97,7 +97,7 @@ pub fn prependHeader(dev: *net.Device, dest: []const u8, prot: net.Protocol, buf
     const src_mac = MacAddr.from(dev.getAddr());
     const hdr = try buf.prepend(@sizeOf(EtherHeader));
 
-    const io = net.WireWriter(EtherHeader).new(hdr);
+    const io = net.util.WireWriter(EtherHeader).new(hdr);
     io.write(.dest, dest_mac);
     io.write(.src, src_mac);
     io.write(.type, prot);
@@ -109,7 +109,7 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
     if (data.len < @sizeOf(EtherHeader)) {
         return;
     }
-    const io = net.WireReader(EtherHeader).new(data);
+    const io = net.util.WireReader(EtherHeader).new(data);
 
     // Check if the frame is destined to this device.
     const addr = MacAddr.from(dev.getAddr());

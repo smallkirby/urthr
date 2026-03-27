@@ -90,8 +90,8 @@ pub const IpAddr = extern struct {
 
     /// Check if this IP address is greater than or equal to another IP address.
     pub fn gte(self: IpAddr, other: IpAddr) bool {
-        const lhs = net.fromNetEndian(@as(u32, @bitCast(self.value)));
-        const rhs = net.fromNetEndian(@as(u32, @bitCast(other.value)));
+        const lhs = net.util.fromNetEndian(@as(u32, @bitCast(self.value)));
+        const rhs = net.util.fromNetEndian(@as(u32, @bitCast(other.value)));
         return lhs >= rhs;
     }
 };
@@ -182,7 +182,7 @@ const Header = extern struct {
 };
 
 /// IP header reader.
-pub const HeaderReader = net.WireReader(Header);
+pub const HeaderReader = net.util.WireReader(Header);
 
 /// Protocols encapsulated in IP packets.
 ///
@@ -247,7 +247,7 @@ pub fn createInterface(unicast: IpAddr, netmask: IpAddr, allocator: Allocator) n
 
 /// Handle incoming IP packet.
 fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
-    const io = net.WireReader(Header).new(data);
+    const io = net.util.WireReader(Header).new(data);
 
     // Check validity of the packet.
     if (data.len < min_packet_size) {
@@ -268,7 +268,7 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    if (nutil.calcChecksum(data[0..hlen]) != 0) {
+    if (net.util.calcChecksum(data[0..hlen]) != 0) {
         log.warn("Invalid IP header checksum", .{});
         return net.Error.InvalidPacket;
     }
@@ -336,7 +336,7 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
 
     // Fill header fields.
     const hdr = try buf.prepend(@sizeOf(Header));
-    const io = net.WireWriter(Header).new(hdr);
+    const io = net.util.WireWriter(Header).new(hdr);
     io.write(.ihl_version, .{
         .ihl = @sizeOf(Header) / 4,
         .version = 4,
@@ -355,7 +355,7 @@ pub fn output(src: IpAddr, dest: IpAddr, protocol: Protocol, buf: *NetBuffer) ne
     io.write(.dest_addr, next);
 
     // Calculate and write the header checksum.
-    io.write(.checksum, nutil.calcChecksum(hdr[0..@sizeOf(Header)]));
+    io.write(.checksum, net.util.calcChecksum(hdr[0..@sizeOf(Header)]));
 
     // Resolve the destination hardware address.
     const allocator = urd.mem.getGeneralAllocator();
@@ -494,5 +494,4 @@ const util = common.util;
 const urd = @import("urthr");
 const net = urd.net;
 const Interface = net.Interface;
-const nutil = @import("nutil.zig");
 const NetBuffer = @import("NetBuffer.zig");

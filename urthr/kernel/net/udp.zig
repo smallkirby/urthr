@@ -12,8 +12,8 @@ fn inputImpl(iphdr: net.ip.HeaderReader, data: []const u8) net.Error!void {
     }
 
     var pseudo_data = std.mem.zeroInit(PseudoHeader, .{});
-    const pseudo = net.WireWriter(PseudoHeader).new(&pseudo_data);
-    const hdr = net.WireReader(Header).new(data);
+    const pseudo = net.util.WireWriter(PseudoHeader).new(&pseudo_data);
+    const hdr = net.util.WireReader(Header).new(data);
 
     // Validate data.
     if (data.len < hdr.read(.length)) {
@@ -28,8 +28,8 @@ fn inputImpl(iphdr: net.ip.HeaderReader, data: []const u8) net.Error!void {
         pseudo.write(.protocol, .udp);
         pseudo.write(.length, hdr.read(.length));
 
-        const pseudo_sum = nutil.calcChecksum(std.mem.asBytes(&pseudo_data));
-        if (nutil.calcChecksumFrom(data, ~pseudo_sum) != 0) {
+        const pseudo_sum = net.util.calcChecksum(std.mem.asBytes(&pseudo_data));
+        if (net.util.calcChecksumFrom(data, ~pseudo_sum) != 0) {
             log.warn("Invalid UDP checksum", .{});
             return net.Error.InvalidPacket;
         }
@@ -77,7 +77,7 @@ const PseudoHeader = extern struct {
 
 /// debug print the given UDP packet.
 fn print(data: []const u8, logger: anytype) void {
-    const io = net.WireReader(Header).new(data);
+    const io = net.util.WireReader(Header).new(data);
     const len = io.read(.length);
     const inner = data[@sizeOf(Header)..len];
 
@@ -99,4 +99,3 @@ const common = @import("common");
 const urd = @import("urthr");
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;
-const nutil = @import("nutil.zig");
