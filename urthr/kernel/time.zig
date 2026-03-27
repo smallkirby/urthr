@@ -65,7 +65,9 @@ pub fn unregister(id: Id) void {
 
 /// Get the current kernel timestamp in nanoseconds.
 pub fn getCurrentTimestamp() Ktimestamp {
-    return arch.timer.getCount() * 1_000_000_000 / arch.timer.getFreq();
+    const count: u128 = arch.timer.getCount();
+    const freq: u128 = arch.timer.getFreq();
+    return @truncate(count * 1_000_000_000 / freq);
 }
 
 // =============================================================
