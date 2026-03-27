@@ -21,13 +21,13 @@ const GenericHeader = extern struct {
 /// ARP header for MAC and IP address, following generic header.
 const AddrInfoMacIp = extern struct {
     /// Sender hardware address.
-    sha: ether.MacAddr align(1),
+    sha: MacAddr align(1),
     /// Sender protocol address.
-    spa: net.ip.IpAddr align(1),
+    spa: IpAddr align(1),
     /// Target hardware address.
-    tha: ether.MacAddr align(1),
+    tha: MacAddr align(1),
     /// Target protocol address.
-    tpa: net.ip.IpAddr align(1),
+    tpa: IpAddr align(1),
 };
 
 const HaddrType = enum(u16) {
@@ -115,12 +115,10 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
 }
 
 /// Send an ARP request.
-pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
-    if (iface.family != .ipv4) {
-        return net.Error.Unsupported;
-    }
+pub fn request(iface: *const net.Interface, ip: IpAddr) net.Error!void {
+    if (iface.family != .ipv4) return net.Error.Unsupported;
     const dev = iface.device.?;
-    const ip_iface: *const net.ip.IpInterface = @ptrCast(@alignCast(iface.ctx));
+    const ipif = net.ip.Interface.downcast(iface);
 
     var nbuf = try NetBuffer.init(
         @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
@@ -133,17 +131,17 @@ pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
     // Construct address info.
     const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
     const sio = net.util.WireWriter(AddrInfoMacIp).new(shdr);
-    const sha: *const ether.MacAddr = @ptrCast(dev.getAddr());
+    const sha: *const MacAddr = @ptrCast(dev.getAddr());
     sio.write(.sha, sha.*);
-    sio.write(.spa, ip_iface.unicast);
-    sio.write(.tha, net.ether.MacAddr.empty);
+    sio.write(.spa, ipif.unicast);
+    sio.write(.tha, .empty);
     sio.write(.tpa, ip);
 
     try net.enqueueTx(dev, dev.getBroadcastAddr(), .arp, nbuf);
 }
 
 /// Resolve the MAC address for the given IP address on the specified interface.
-pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Error!void {
+pub fn resolve(iface: *const net.Interface, ip: IpAddr, hw: []u8) net.Error!void {
     if (iface.family != .ipv4) {
         return net.Error.Unsupported;
     }
@@ -153,7 +151,7 @@ pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Err
 
     if (cache.find(ip)) |entry| {
         return switch (entry.state) {
-            .resolved, .static => @memcpy(hw[0..ether.MacAddr.length], &entry.mac.value),
+            .resolved, .static => @memcpy(hw[0..MacAddr.length], &entry.mac.value),
             .wip => net.Error.Resolving,
         };
     }
@@ -172,8 +170,8 @@ fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
     const gio = net.util.WireWriter(GenericHeader).new(ghdr);
     gio.write(.haddr_type, .ether);
     gio.write(.paddr_type, .ip);
-    gio.write(.haddr_len, @sizeOf(ether.MacAddr));
-    gio.write(.paddr_len, @sizeOf(net.ip.IpAddr));
+    gio.write(.haddr_len, @sizeOf(MacAddr));
+    gio.write(.paddr_len, @sizeOf(IpAddr));
     gio.write(.op, op);
 }
 
@@ -184,7 +182,7 @@ fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
 /// ARP cache management.
 pub const cache = struct {
     /// ARP cache hashmap type.
-    const Cache = std.AutoHashMap(net.ip.IpAddr, CacheEntry);
+    const Cache = std.AutoHashMap(IpAddr, CacheEntry);
 
     /// State of the cache entry.
     const State = enum {
@@ -213,9 +211,9 @@ pub const cache = struct {
     /// Cache entry.
     const CacheEntry = struct {
         /// IP address (key).
-        ip: net.ip.IpAddr,
+        ip: IpAddr,
         /// MAC address (value).
-        mac: ether.MacAddr,
+        mac: MacAddr,
         /// Timestamp of the last update.
         timestamp: urd.time.Ktimestamp,
         /// Cache entry state.
@@ -246,7 +244,7 @@ pub const cache = struct {
     }
 
     /// Register or update the MAC address for the given IP address.
-    pub fn update(ip: net.ip.IpAddr, mac: ether.MacAddr, state: State) Allocator.Error!void {
+    pub fn update(ip: IpAddr, mac: MacAddr, state: State) Allocator.Error!void {
         // TODO: should take a lock.
 
         if (instance.getPtr(ip)) |entry| {
@@ -274,7 +272,7 @@ pub const cache = struct {
             net.enqueueTx(
                 pkt.device,
                 entry.mac.value[0..pkt.device.addr_len],
-                .ip,
+                .ipv4,
                 pkt.buf,
             ) catch |e| {
                 log.debug("Failed to enqueue packet for ARP resolution: {t}", .{e});
@@ -290,7 +288,7 @@ pub const cache = struct {
     ///
     /// Takes ownership of buf.
     /// If the entry does not exist or the queue is full, buf is freed and dropped immediately.
-    pub fn enqueuePending(ip: net.ip.IpAddr, device: *net.Device, buf: NetBuffer) Allocator.Error!void {
+    pub fn enqueuePending(ip: IpAddr, device: *net.Device, buf: NetBuffer) Allocator.Error!void {
         // TODO: should take a lock.
         const entry = find(ip) orelse {
             return buf.deinit();
@@ -311,7 +309,7 @@ pub const cache = struct {
     /// This function ignores the case where the entry does not exist.
     ///
     /// Caller must ensure that the pending packets are consumed or freed.
-    pub fn delete(ip: net.ip.IpAddr) void {
+    pub fn delete(ip: IpAddr) void {
         // TODO: should take a lock.
         if (find(ip)) |entry| {
             entry.clearPending(urd.mem.getGeneralAllocator());
@@ -320,7 +318,7 @@ pub const cache = struct {
     }
 
     /// Find the cache entry for the given IP address.
-    fn find(ip: net.ip.IpAddr) ?*CacheEntry {
+    fn find(ip: IpAddr) ?*CacheEntry {
         // TODO: should take a lock.
         return instance.getPtr(ip);
     }
@@ -331,7 +329,7 @@ pub const cache = struct {
 
         // Collect stale IPs first to avoid modifying the HashMap while iterating.
         const max_stale_count = 16;
-        var stale: [max_stale_count]net.ip.IpAddr = undefined;
+        var stale: [max_stale_count]IpAddr = undefined;
         var stale_count: usize = 0;
         const now = urd.time.getCurrentTimestamp();
 
@@ -363,5 +361,7 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const urd = @import("urthr");
 const net = urd.net;
+const IpAddr = net.ip.IpAddr;
+const MacAddr = net.ether.MacAddr;
 const ether = @import("ether.zig");
 const NetBuffer = @import("NetBuffer.zig");

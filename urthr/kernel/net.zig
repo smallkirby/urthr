@@ -46,9 +46,9 @@ pub const Error = error{
 /// Network protocols.
 pub const Protocol = enum(u16) {
     /// IPv4
-    ip = 0x0800,
+    ipv4,
     /// ARP
-    arp = 0x0806,
+    arp,
 
     /// All other unrecognized protocols.
     _,
@@ -62,7 +62,7 @@ pub const Protocol = enum(u16) {
     /// Get the handler for the given protocol.
     fn getHandler(self: Protocol) ?Protocol.Vtable {
         return switch (self) {
-            .ip => ip.vtable,
+            .ipv4 => ip.vtable,
             .arp => arp.vtable,
             else => null,
         };
@@ -115,6 +115,7 @@ pub fn handleInput(dev: *Device, prot: Protocol, data: []const u8) Error!void {
         return handler.input(dev, data);
     } else {
         // Ignore unrecognized protocol
+        std.log.warn("Unsupported protocol: {d}", .{@intFromEnum(prot)});
         return;
     }
 }

@@ -135,12 +135,12 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
         try net.registerIrq(gemdev, intid);
 
         // TODO: should we create an interface here?
-        const ipif = try urd.net.ip.createInterface(
+        const iface = try urd.net.ip.Interface.create(
             net.ip.IpAddr.from("192.168.1.123") catch unreachable, // TODO
             net.ip.IpAddr.from("255.255.255.0") catch unreachable, // TODO
             mm.general,
         );
-        try gemdev.appendInterface(ipif);
+        try gemdev.appendInterface(iface);
     }
 }
 
