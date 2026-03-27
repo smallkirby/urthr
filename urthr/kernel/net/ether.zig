@@ -88,7 +88,29 @@ const EtherHeader = extern struct {
     /// Source MAC address.
     src: MacAddr,
     /// EtherType.
-    type: net.Protocol,
+    type: EtherType,
+};
+
+/// Ethernet frame EtherType field.
+const EtherType = enum(u16) {
+    ipv4 = 0x0800,
+    arp = 0x0806,
+
+    _,
+
+    /// Convert a network protocol to the corresponding EtherType.
+    fn from(prot: net.Protocol) EtherType {
+        return @enumFromInt(@intFromEnum(prot));
+    }
+
+    /// Convert the EtherType to the corresponding network protocol.
+    fn into(self: EtherType) net.Protocol {
+        return switch (self) {
+            .ipv4 => .ipv4,
+            .arp => .arp,
+            else => @enumFromInt(@intFromEnum(self)),
+        };
+    }
 };
 
 /// Prepend an Ethernet frame header to the given buffer.
@@ -100,7 +122,7 @@ pub fn prependHeader(dev: *net.Device, dest: []const u8, prot: net.Protocol, buf
     const io = net.util.WireWriter(EtherHeader).new(hdr);
     io.write(.dest, dest_mac);
     io.write(.src, src_mac);
-    io.write(.type, prot);
+    io.write(.type, .from(prot));
 }
 
 /// Input Ethernet frame data.
@@ -121,7 +143,7 @@ pub fn inputFrame(dev: *net.Device, data: []const u8) void {
     // Process the input frame.
     net.handleInput(
         dev,
-        io.read(.type),
+        io.read(.type).into(),
         data[@sizeOf(EtherHeader)..],
     ) catch |err| {
         log.warn("Failed to handle input: {}", .{err});

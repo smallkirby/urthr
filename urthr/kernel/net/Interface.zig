@@ -4,13 +4,10 @@
 
 const Self = @This();
 
-/// Type-erased pointer to the interface implementation.
-ctx: *anyopaque,
 /// Physical network device associated with this logical interface.
 device: ?*net.Device = null,
 /// Protocol suite family that defines the addressing scheme.
 family: Family,
-
 /// List head for linking network interfaces.
 list_head: InterfaceList.Head = .{},
 
