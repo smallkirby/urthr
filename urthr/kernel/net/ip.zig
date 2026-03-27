@@ -10,9 +10,9 @@ const min_packet_size = @sizeOf(Header);
 /// IP address type.
 pub const IpAddr = extern struct {
     /// Integer representation of the IP address in network byte order.
-    value: Inner,
+    _value: Inner,
 
-    const Inner = @Vector(4, u8);
+    const Inner = @Vector(length, u8);
 
     /// Length in bytes of IP address.
     pub const length = 4;
@@ -21,29 +21,23 @@ pub const IpAddr = extern struct {
 
     /// Wildcard IP address that matches any address.
     pub const any = IpAddr{
-        .value = Inner{ 0, 0, 0, 0 },
+        ._value = Inner{ 0, 0, 0, 0 },
     };
 
     /// Broadcast IP address.
     pub const broadcast = IpAddr{
-        .value = Inner{ 0xFF, 0xFF, 0xFF, 0xFF },
+        ._value = Inner{ 0xFF, 0xFF, 0xFF, 0xFF },
     };
-
-    /// Print the IP address into the given buffer.
-    fn print(self: IpAddr, buf: []u8) std.fmt.BufPrintError![]u8 {
-        const bytes = std.mem.asBytes(&self.value);
-
-        return std.fmt.bufPrint(
-            buf,
-            "{d}.{d}.{d}.{d}",
-            .{ bytes[0], bytes[1], bytes[2], bytes[3] },
-        );
-    }
 
     /// Custom formatter.
     pub fn format(self: IpAddr, writer: *std.Io.Writer) !void {
         var buf: [IpAddr.string_length + 1]u8 = undefined;
-        const s = self.print(&buf) catch "<invalid>";
+        const s = std.fmt.bufPrint(
+            &buf,
+            "{d}.{d}.{d}.{d}",
+            .{ self._value[0], self._value[1], self._value[2], self._value[3] },
+        ) catch "<invalid>";
+
         try writer.writeAll(s);
     }
 
@@ -68,30 +62,23 @@ pub const IpAddr = extern struct {
             return error.InvalidFormat;
         }
 
-        return .{ .value = value };
-    }
-
-    /// Check equality with another IP address.
-    pub fn eql(self: IpAddr, other: IpAddr) bool {
-        return std.meta.eql(self.value, other.value);
-    }
-
-    /// Check if the two IP addresses are in the same subnet.
-    pub fn sameSubnet(self: IpAddr, other: IpAddr, netmask: IpAddr) bool {
-        const subnet1 = self.value & netmask.value;
-        const subnet2 = other.value & netmask.value;
-        return @reduce(.And, subnet1 == subnet2);
+        return .{ ._value = value };
     }
 
     /// Get the subnet address by applying the netmask.
     pub fn subnet(self: IpAddr, netmask: IpAddr) IpAddr {
-        return .{ .value = self.value & netmask.value };
+        return .{ ._value = self._value & netmask._value };
+    }
+
+    /// Check equality with another IP address.
+    pub fn eql(self: IpAddr, other: IpAddr) bool {
+        return std.meta.eql(self._value, other._value);
     }
 
     /// Check if this IP address is greater than or equal to another IP address.
     pub fn gte(self: IpAddr, other: IpAddr) bool {
-        const lhs = net.util.fromNetEndian(@as(u32, @bitCast(self.value)));
-        const rhs = net.util.fromNetEndian(@as(u32, @bitCast(other.value)));
+        const lhs = net.util.fromNetEndian(@as(u32, @bitCast(self._value)));
+        const rhs = net.util.fromNetEndian(@as(u32, @bitCast(other._value)));
         return lhs >= rhs;
     }
 };
@@ -226,7 +213,7 @@ pub fn createInterface(unicast: IpAddr, netmask: IpAddr, allocator: Allocator) n
         .unicast = unicast,
         .netmask = netmask,
         .broadcast = .{
-            .value = (unicast.value & netmask.value) | ~netmask.value,
+            ._value = (unicast._value & netmask._value) | ~netmask._value,
         },
         .netif = interface,
     };
