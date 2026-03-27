@@ -58,7 +58,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
         return net.Error.InvalidPacket;
     }
 
-    const io_common = net.WireReader(GenericHeader).new(data);
+    const io_common = net.util.WireReader(GenericHeader).new(data);
     const haddr_type = io_common.read(.haddr_type);
     const paddr_type = io_common.read(.paddr_type);
     const op = io_common.read(.op);
@@ -75,7 +75,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     if (data.len < @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp)) {
         return net.Error.InvalidPacket;
     }
-    const io_addr = net.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
+    const io_addr = net.util.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
 
     // Update ARP cache.
     const sha = io_addr.read(.sha);
@@ -105,7 +105,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
 
     // Construct address info.
     const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
-    const sio = net.WireWriter(AddrInfoMacIp).new(shdr);
+    const sio = net.util.WireWriter(AddrInfoMacIp).new(shdr);
     sio.write(.sha, io_addr.read(.tha));
     sio.write(.spa, io_addr.read(.tpa));
     sio.write(.tha, io_addr.read(.sha));
@@ -132,7 +132,7 @@ pub fn request(iface: *const net.Interface, ip: net.ip.IpAddr) net.Error!void {
 
     // Construct address info.
     const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
-    const sio = net.WireWriter(AddrInfoMacIp).new(shdr);
+    const sio = net.util.WireWriter(AddrInfoMacIp).new(shdr);
     const sha: *const ether.MacAddr = @ptrCast(dev.getAddr());
     sio.write(.sha, sha.*);
     sio.write(.spa, ip_iface.unicast);
@@ -169,7 +169,7 @@ pub fn resolve(iface: *const net.Interface, ip: net.ip.IpAddr, hw: []u8) net.Err
 /// Write the common ARP GenericHeader with the given operation.
 fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
     const ghdr = try nbuf.append(@sizeOf(GenericHeader));
-    const gio = net.WireWriter(GenericHeader).new(ghdr);
+    const gio = net.util.WireWriter(GenericHeader).new(ghdr);
     gio.write(.haddr_type, .ether);
     gio.write(.paddr_type, .ip);
     gio.write(.haddr_len, @sizeOf(ether.MacAddr));

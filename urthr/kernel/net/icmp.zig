@@ -8,14 +8,14 @@ pub const vtable = net.ip.Protocol.Vtable{
 
 /// Handle an incoming ICMP packet.
 fn inputImpl(hdr: net.ip.HeaderReader, data: []const u8) net.Error!void {
-    const io = net.WireReader(HeaderCommon).new(data);
+    const io = net.util.WireReader(HeaderCommon).new(data);
 
     if (data.len < @sizeOf(HeaderCommon)) {
         log.warn("Too small ICMP packet: {d}", .{data.len});
         return net.Error.InvalidPacket;
     }
 
-    if (nutil.calcChecksum(data) != 0) {
+    if (net.util.calcChecksum(data) != 0) {
         log.warn("Invalid ICMP checksum", .{});
         return net.Error.InvalidPacket;
     }
@@ -24,7 +24,7 @@ fn inputImpl(hdr: net.ip.HeaderReader, data: []const u8) net.Error!void {
 
     switch (io.read(.type)) {
         .echo => {
-            const sio = net.WireReader(EchoHeader).new(data);
+            const sio = net.util.WireReader(EchoHeader).new(data);
             try output(
                 hdr.read(.dest_addr),
                 hdr.read(.src_addr),
@@ -100,7 +100,7 @@ pub const Message = union(MessageType) {
 
     /// Fill the given buffer with the message content.
     fn fill(self: Message, buf: []u8) void {
-        const io = net.WireWriter(HeaderCommon).new(buf);
+        const io = net.util.WireWriter(HeaderCommon).new(buf);
 
         // Fill the common fields.
         io.write(.type, self.typ());
@@ -111,14 +111,14 @@ pub const Message = union(MessageType) {
         // Fill the message-specific fields.
         switch (self) {
             .echo, .echo_reply => |echo| {
-                const sio = net.WireWriter(EchoHeader).new(buf);
+                const sio = net.util.WireWriter(EchoHeader).new(buf);
                 sio.write(.id, echo.id);
                 sio.write(.sequence, echo.sequence);
             },
         }
 
         // Calculate and fill the checksum.
-        io.write(.checksum, nutil.calcChecksum(buf[0..self.len()]));
+        io.write(.checksum, net.util.calcChecksum(buf[0..self.len()]));
     }
 };
 
@@ -184,7 +184,7 @@ const EchoHeader = extern struct {
 
 /// Debug print the given ICMP packet.
 fn print(data: []const u8, logger: anytype) void {
-    const io = net.WireReader(HeaderCommon).new(data);
+    const io = net.util.WireReader(HeaderCommon).new(data);
     const typ = io.read(.type);
 
     logger("ICMP packet: size={d}", .{data.len});
@@ -194,7 +194,7 @@ fn print(data: []const u8, logger: anytype) void {
 
     switch (typ) {
         .echo, .echo_reply => {
-            const sio = net.WireReader(EchoHeader).new(data);
+            const sio = net.util.WireReader(EchoHeader).new(data);
             logger("  id  : {d}", .{sio.read(.id)});
             logger("  seq : {d}", .{sio.read(.sequence)});
         },
@@ -210,5 +210,4 @@ const std = @import("std");
 const log = std.log.scoped(.icmp);
 const urd = @import("urthr");
 const net = urd.net;
-const nutil = @import("nutil.zig");
 const NetBuffer = @import("NetBuffer.zig");
