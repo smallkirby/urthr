@@ -625,7 +625,7 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
 /// Get the next received packet if available.
 ///
 /// Calling this function clears the IRQ status for RX.
-pub fn tryGetRx(self: *Self) ?net.Device.PollResult {
+fn tryGetRx(self: *Self) ?net.Device.PollResult {
     _ = self.readClearIrq(rxq_idx);
 
     return self.rxq.tryAcquireRx();

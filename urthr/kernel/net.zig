@@ -183,6 +183,9 @@ pub fn enqueueTx(device: *Device, dest: []const u8, prot: Protocol, buf: NetBuff
 ///
 /// Continuously processes incoming packets from the packet queue
 /// and dispatches them to the appropriate device handlers.
+///
+/// Dequeued packets are released after processing.
+/// Handlers must copy the packet data if they need to wait for the data to be consumed.
 fn rxworker() void {
     while (true) {
         const pkt = rxq.dequeue();
