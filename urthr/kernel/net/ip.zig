@@ -62,6 +62,24 @@ pub const IpAddr = extern struct {
         return .{ ._value = value };
     }
 
+    /// comptime version of `parse()`.
+    pub fn comptimeParse(comptime s: []const u8) IpAddr {
+        if (comptime std.mem.count(u8, s, ".") + 1 != 4) {
+            @compileError("Invalid IP address (wrong number of octets): " ++ s);
+        }
+        comptime var iter = std.mem.splitScalar(u8, s, '.');
+        comptime var count: usize = 0;
+        comptime var value: [length]u8 = undefined;
+        comptime while (iter.next()) |part| : (count += 1) {
+            const num = std.fmt.parseInt(u8, part, 10) catch {
+                @compileError("Invalid IP address part: " ++ part);
+            };
+            value[count] = num;
+        };
+
+        return .{ ._value = value };
+    }
+
     /// Get the subnet address by applying the netmask.
     pub fn subnet(self: IpAddr, netmask: IpAddr) IpAddr {
         return .{ ._value = self._value & netmask._value };
