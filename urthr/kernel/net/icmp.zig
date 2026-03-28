@@ -40,7 +40,7 @@ fn inputImpl(hdr: net.ip.HeaderReader, data: []const u8) net.Error!void {
 }
 
 /// Send an ICMP message.
-pub fn output(src: net.ip.IpAddr, dest: net.ip.IpAddr, msg: Message) net.Error!void {
+pub fn output(src: IpAddr, dest: IpAddr, msg: Message) net.Error!void {
     var nbuf = try NetBuffer.init(
         msg.len(),
         urd.mem.getGeneralAllocator(),
@@ -210,4 +210,5 @@ const std = @import("std");
 const log = std.log.scoped(.icmp);
 const urd = @import("urthr");
 const net = urd.net;
+const IpAddr = net.ip.IpAddr;
 const NetBuffer = @import("NetBuffer.zig");
