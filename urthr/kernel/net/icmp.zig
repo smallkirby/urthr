@@ -7,7 +7,11 @@ pub const vtable = net.ip.Protocol.Vtable{
 };
 
 /// Handle an incoming ICMP packet.
-fn inputImpl(hdr: net.ip.HeaderReader, data: []const u8) net.Error!void {
+fn inputImpl(
+    hdr: net.ip.HeaderReader,
+    _: *const net.ip.Interface,
+    data: []const u8,
+) net.Error!void {
     const io = net.util.WireReader(HeaderCommon).new(data);
 
     if (data.len < @sizeOf(HeaderCommon)) {
@@ -60,6 +64,8 @@ pub fn output(src: IpAddr, dest: IpAddr, msg: Message) net.Error!void {
 pub const Message = union(MessageType) {
     /// ICMP Echo Reply.
     echo_reply: Echo,
+    /// Destination Unreachable.
+    unreach: void,
     /// ICMP Echo Request.
     echo: Echo,
 
@@ -76,6 +82,7 @@ pub const Message = union(MessageType) {
     fn len(self: Message) usize {
         return switch (self) {
             .echo, .echo_reply => |echo| @sizeOf(EchoHeader) + echo.data.len,
+            .unreach => @sizeOf(VoidHeader),
         };
     }
 
@@ -83,6 +90,7 @@ pub const Message = union(MessageType) {
     fn code(self: Message) u8 {
         return switch (self) {
             .echo, .echo_reply => 0,
+            .unreach => 0,
         };
     }
 
@@ -90,6 +98,7 @@ pub const Message = union(MessageType) {
     fn data(self: Message) []const u8 {
         return switch (self) {
             .echo, .echo_reply => |echo| echo.data,
+            .unreach => &.{},
         };
     }
 
@@ -115,6 +124,7 @@ pub const Message = union(MessageType) {
                 sio.write(.id, echo.id);
                 sio.write(.sequence, echo.sequence);
             },
+            .unreach => {},
         }
 
         // Calculate and fill the checksum.
@@ -130,6 +140,8 @@ pub const Message = union(MessageType) {
 const MessageType = enum(u8) {
     /// Echo Reply.
     echo_reply = 0,
+    /// Destination Unreachable.
+    unreach = 3,
     /// Echo Request.
     echo = 8,
 
