@@ -136,8 +136,8 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
 
         // TODO: should we create an interface here?
         const iface = try urd.net.ip.Interface.create(
-            net.ip.IpAddr.from("192.168.1.123") catch unreachable, // TODO
-            net.ip.IpAddr.from("255.255.255.0") catch unreachable, // TODO
+            net.ip.IpAddr.comptimeParse("192.168.1.123"), // TODO
+            net.ip.IpAddr.comptimeParse("255.255.255.0"), // TODO
             mm.general,
         );
         try gemdev.appendInterface(iface);
