@@ -39,7 +39,7 @@ pub const IpAddr = extern struct {
     }
 
     /// Parse the IP address from the given string.
-    pub fn from(s: []const u8) error{InvalidFormat}!IpAddr {
+    pub fn parse(s: []const u8) error{InvalidFormat}!IpAddr {
         var count: usize = 0;
         var value: [length]u8 = undefined;
 
@@ -205,7 +205,11 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     // Find the handler for the encapsulated protocol.
     const protocol: Protocol = io.read(.protocol);
     if (protocol.getHandler()) |handler| {
-        return handler.input(io, data[hlen..io.read(.total_length)]);
+        return handler.input(
+            io,
+            ipif,
+            data[hlen..io.read(.total_length)],
+        );
     } else {
         log.warn("Unsupported IP protocol: {d}", .{@intFromEnum(protocol)});
         return;
@@ -287,9 +291,9 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
     if (next.eql(.limited_broadcast)) {
         @memcpy(hwaddr, device.getBroadcastAddr());
     } else if (device.flags.need_arp) {
-        return net.arp.resolve(&ipif.base, next, hwaddr) catch |err| switch (err) {
-            error.Resolving => net.arp.cache.enqueuePending(next, device, buf.*),
-            else => |e| e,
+        net.arp.resolve(&ipif.base, next, hwaddr) catch |err| switch (err) {
+            error.Resolving => return net.arp.cache.enqueuePending(next, device, buf.*),
+            else => return err,
         };
     }
 
@@ -448,7 +452,7 @@ pub const Protocol = enum(u8) {
     /// Functions to handle the protocol data encapsulated in IP packets.
     pub const Vtable = struct {
         /// Process the incoming data.
-        input: *const fn (hdr: HeaderReader, data: []const u8) net.Error!void,
+        input: *const fn (hdr: HeaderReader, iface: *const Interface, data: []const u8) net.Error!void,
     };
 
     /// Get the handler for the given protocol.

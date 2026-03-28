@@ -79,7 +79,6 @@ pub fn run() (Error || urd.sched.Error)!void {
     // Link-up all registered devices.
     var iter = device_list.iter();
     while (iter.next()) |device| {
-        std.log.info("device @ {X}", .{@intFromPtr(device)});
         try device.open();
     }
 

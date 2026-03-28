@@ -50,7 +50,8 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
             // Construct address info.
             const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
             const sio = net.util.WireWriter(AddrInfoMacIp).new(shdr);
-            sio.write(.sha, aio.read(.tha));
+            const hwadr = MacAddr.from(dev.getAddr());
+            sio.write(.sha, hwadr);
             sio.write(.spa, aio.read(.tpa));
             sio.write(.tha, aio.read(.sha));
             sio.write(.tpa, aio.read(.spa));
