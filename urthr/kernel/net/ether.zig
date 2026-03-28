@@ -100,7 +100,11 @@ const EtherType = enum(u16) {
 
     /// Convert a network protocol to the corresponding EtherType.
     fn from(prot: net.Protocol) EtherType {
-        return @enumFromInt(@intFromEnum(prot));
+        return switch (prot) {
+            .ipv4 => .ipv4,
+            .arp => .arp,
+            else => @enumFromInt(@intFromEnum(prot)),
+        };
     }
 
     /// Convert the EtherType to the corresponding network protocol.

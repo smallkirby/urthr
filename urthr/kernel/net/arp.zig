@@ -4,64 +4,16 @@ pub const vtable = net.Protocol.Vtable{
     .input = inputImpl,
 };
 
-/// ARP header common part.
-const GenericHeader = extern struct {
-    /// Hardware address type.
-    haddr_type: HaddrType,
-    /// Protocol address type.
-    paddr_type: PaddrType,
-    /// Hardware address length in bytes.
-    haddr_len: u8,
-    /// Protocol address length in bytes.
-    paddr_len: u8,
-    /// Operation code.
-    op: Op,
-};
-
-/// ARP header for MAC and IP address, following generic header.
-const AddrInfoMacIp = extern struct {
-    /// Sender hardware address.
-    sha: MacAddr align(1),
-    /// Sender protocol address.
-    spa: IpAddr align(1),
-    /// Target hardware address.
-    tha: MacAddr align(1),
-    /// Target protocol address.
-    tpa: IpAddr align(1),
-};
-
-const HaddrType = enum(u16) {
-    /// Ethernet.
-    ether = 0x0001,
-
-    _,
-};
-
-const PaddrType = enum(u16) {
-    /// IPv4.
-    ip = 0x0800,
-
-    _,
-};
-
-const Op = enum(u16) {
-    /// ARP request.
-    request = 0x0001,
-    /// ARP reply.
-    reply = 0x0002,
-
-    _,
-};
-
+/// Handle an incoming ARP packet.
 fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     if (data.len < @sizeOf(GenericHeader)) {
         return net.Error.InvalidPacket;
     }
 
-    const io_common = net.util.WireReader(GenericHeader).new(data);
-    const haddr_type = io_common.read(.haddr_type);
-    const paddr_type = io_common.read(.paddr_type);
-    const op = io_common.read(.op);
+    const gio = net.util.WireReader(GenericHeader).new(data);
+    const haddr_type = gio.read(.haddr_type);
+    const paddr_type = gio.read(.paddr_type);
+    const op = gio.read(.op);
 
     if (haddr_type != .ether or paddr_type != .ip) {
         // Unsupported address type. Ignore.
@@ -71,53 +23,59 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
         // Unsupported operation. Ignore.
         return;
     }
-
     if (data.len < @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp)) {
         return net.Error.InvalidPacket;
     }
-    const io_addr = net.util.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
 
     // Update ARP cache.
-    const sha = io_addr.read(.sha);
-    const spa = io_addr.read(.spa);
+    const aio = net.util.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
+    const sha = aio.read(.sha);
+    const spa = aio.read(.spa);
     try cache.update(spa, sha, .resolved);
 
-    // Debug print the ARP packet.
-    log.debug("ARP packet: haddr_type={}, paddr_type={}, op={}", .{
-        haddr_type,
-        paddr_type,
-        op,
-    });
-    log.debug("  Source: {f} , {f}", .{ io_addr.read(.sha), io_addr.read(.spa) });
-    log.debug("  Target: {f} , {f}", .{ io_addr.read(.tha), io_addr.read(.tpa) });
+    // Debug print the packet.
+    print(data, log.debug);
 
-    if (op == .reply) {
-        return;
+    switch (op) {
+        // Request: Send back a reply.
+        .request => {
+            var nbuf = try NetBuffer.init(
+                @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
+                urd.mem.getGeneralAllocator(),
+            );
+            errdefer nbuf.deinit();
+
+            try writeGenericHeader(&nbuf, .reply);
+
+            // Construct address info.
+            const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
+            const sio = net.util.WireWriter(AddrInfoMacIp).new(shdr);
+            sio.write(.sha, aio.read(.tha));
+            sio.write(.spa, aio.read(.tpa));
+            sio.write(.tha, aio.read(.sha));
+            sio.write(.tpa, aio.read(.spa));
+
+            try net.enqueueTx(dev, &aio.read(.sha).value, .arp, nbuf);
+        },
+
+        // Reply: No action needed.
+        .reply => {},
+
+        // Unrecognized operation.
+        else => {},
     }
-
-    var nbuf = try NetBuffer.init(
-        @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
-        urd.mem.getGeneralAllocator(),
-    );
-    errdefer nbuf.deinit();
-
-    try writeGenericHeader(&nbuf, .reply);
-
-    // Construct address info.
-    const shdr = try nbuf.append(@sizeOf(AddrInfoMacIp));
-    const sio = net.util.WireWriter(AddrInfoMacIp).new(shdr);
-    sio.write(.sha, io_addr.read(.tha));
-    sio.write(.spa, io_addr.read(.tpa));
-    sio.write(.tha, io_addr.read(.sha));
-    sio.write(.tpa, io_addr.read(.spa));
-
-    try net.enqueueTx(dev, &io_addr.read(.sha).value, .arp, nbuf);
 }
 
 /// Send an ARP request.
 pub fn request(iface: *const net.Interface, ip: IpAddr) net.Error!void {
-    if (iface.family != .ipv4) return net.Error.Unsupported;
-    const dev = iface.device.?;
+    if (iface.family != .ipv4) {
+        return net.Error.Unsupported;
+    }
+
+    const dev = iface.device orelse {
+        log.warn("No device registered for the interface.", .{});
+        return net.Error.Unavailable;
+    };
     const ipif = net.ip.Interface.downcast(iface);
 
     var nbuf = try NetBuffer.init(
@@ -139,6 +97,21 @@ pub fn request(iface: *const net.Interface, ip: IpAddr) net.Error!void {
 
     try net.enqueueTx(dev, dev.getBroadcastAddr(), .arp, nbuf);
 }
+
+/// Write the common ARP GenericHeader with the given operation.
+fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
+    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
+    const gio = net.util.WireWriter(GenericHeader).new(ghdr);
+    gio.write(.haddr_type, .ether);
+    gio.write(.paddr_type, .ip);
+    gio.write(.haddr_len, @sizeOf(MacAddr));
+    gio.write(.paddr_len, @sizeOf(IpAddr));
+    gio.write(.op, op);
+}
+
+// =============================================================
+// Address resolution
+// =============================================================
 
 /// Resolve the MAC address for the given IP address on the specified interface.
 pub fn resolve(iface: *const net.Interface, ip: IpAddr, hw: []u8) net.Error!void {
@@ -163,21 +136,6 @@ pub fn resolve(iface: *const net.Interface, ip: IpAddr, hw: []u8) net.Error!void
 
     return net.Error.Resolving;
 }
-
-/// Write the common ARP GenericHeader with the given operation.
-fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
-    const ghdr = try nbuf.append(@sizeOf(GenericHeader));
-    const gio = net.util.WireWriter(GenericHeader).new(ghdr);
-    gio.write(.haddr_type, .ether);
-    gio.write(.paddr_type, .ip);
-    gio.write(.haddr_len, @sizeOf(MacAddr));
-    gio.write(.paddr_len, @sizeOf(IpAddr));
-    gio.write(.op, op);
-}
-
-// =============================================================
-// Address resolution
-// =============================================================
 
 /// ARP cache management.
 pub const cache = struct {
@@ -350,6 +308,81 @@ pub const cache = struct {
         }
     }
 };
+
+// =============================================================
+// Data structures
+// =============================================================
+
+/// ARP header common part.
+const GenericHeader = extern struct {
+    /// Hardware address type.
+    haddr_type: HaddrType,
+    /// Protocol address type.
+    paddr_type: PaddrType,
+    /// Hardware address length in bytes.
+    haddr_len: u8,
+    /// Protocol address length in bytes.
+    paddr_len: u8,
+    /// Operation code.
+    op: Op,
+};
+
+/// ARP header for MAC and IP address, following generic header.
+const AddrInfoMacIp = extern struct {
+    /// Sender hardware address.
+    sha: MacAddr align(1),
+    /// Sender protocol address.
+    spa: IpAddr align(1),
+    /// Target hardware address.
+    tha: MacAddr align(1),
+    /// Target protocol address.
+    tpa: IpAddr align(1),
+};
+
+const HaddrType = enum(u16) {
+    /// Ethernet.
+    ether = 0x0001,
+
+    _,
+};
+
+const PaddrType = enum(u16) {
+    /// IPv4.
+    ip = 0x0800,
+
+    _,
+};
+
+const Op = enum(u16) {
+    /// ARP request.
+    request = 0x0001,
+    /// ARP reply.
+    reply = 0x0002,
+
+    _,
+};
+
+// =============================================================
+// Debug
+// =============================================================
+
+fn print(data: []const u8, logger: anytype) void {
+    const gio = net.util.WireReader(GenericHeader).new(data);
+
+    logger("ARP packet: size={d}", .{data.len});
+    logger("  haddr_type : {s}", .{@tagName(gio.read(.haddr_type))});
+    logger("  paddr_type : {s}", .{@tagName(gio.read(.paddr_type))});
+    logger("  op         : {s}", .{@tagName(gio.read(.op))});
+
+    switch (gio.read(.op)) {
+        .request, .reply => {
+            const aio = net.util.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
+            logger("  Source: {f}, {f}", .{ aio.read(.sha), aio.read(.spa) });
+            logger("  Target: {f}, {f}", .{ aio.read(.tha), aio.read(.tpa) });
+        },
+        else => {},
+    }
+}
 
 // =============================================================
 // Imports
