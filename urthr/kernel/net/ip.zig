@@ -260,7 +260,12 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
         log.warn("  source: {f} vs iface: {f}", .{ src, ipif.unicast });
         return net.Error.InvalidAddress;
     }
-    const next = if (route.gateway.eql(.any)) dest else route.gateway;
+    const next = if (route.gateway.eql(.any))
+        dest
+    else if (dest.subnet(ipif.netmask).eql(ipif.unicast.subnet(ipif.netmask)))
+        dest
+    else
+        route.gateway;
 
     // Check if the packet size is within the MTU.
     // No fragmentation support for now.
