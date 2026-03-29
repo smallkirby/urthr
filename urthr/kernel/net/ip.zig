@@ -234,7 +234,7 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
 
     // Lookup the route for the destination IP address.
     const route = routeLookup(dest) orelse {
-        log.warn("No route found for the destination IP address", .{});
+        log.warn("No route found for the destination IP address: {f}", .{dest});
         return net.Error.Unavailable;
     };
 

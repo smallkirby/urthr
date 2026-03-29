@@ -63,6 +63,45 @@ fn inputImpl(
     try sock.push(remote, payload);
 }
 
+/// Send a UDP packet to the remote endpoint.
+fn output(src: Endpoint, dest: Endpoint, data: []const u8) net.Error!void {
+    var nbuf = try net.NetBuffer.init(
+        @sizeOf(Header) + data.len,
+        urd.mem.getGeneralAllocator(),
+    );
+    errdefer nbuf.deinit();
+
+    // Construct UDP header.
+    const len: u16 = @intCast(@sizeOf(Header) + data.len);
+    const hdrp = try nbuf.append(@sizeOf(Header));
+    const hdr = net.util.WireWriter(Header).new(hdrp);
+    hdr.write(.src, src.port);
+    hdr.write(.dst, dest.port);
+    hdr.write(.length, len);
+    hdr.write(.checksum, 0);
+
+    // Copy payload data.
+    const payload = try nbuf.append(data.len);
+    @memcpy(payload, data);
+
+    // Construct pseudo header for checksum calculation.
+    var pseudo_data = std.mem.zeroInit(PseudoHeader, .{});
+    const pseudo = net.util.WireWriter(PseudoHeader).new(&pseudo_data);
+    pseudo.write(.src, src.ip);
+    pseudo.write(.dst, dest.ip);
+    pseudo.write(.zero, 0);
+    pseudo.write(.protocol, .udp);
+    pseudo.write(.length, len);
+
+    // Calculate checksum.
+    const pseudo_sum = net.util.calcChecksum(std.mem.asBytes(&pseudo_data));
+    const sum = net.util.calcChecksumFrom(nbuf.data(), ~pseudo_sum);
+    hdr.write(.checksum, if (sum == 0) 0xFFFF else sum);
+
+    // Send the packet via IP layer.
+    try net.ip.output(src.ip, dest.ip, .udp, &nbuf);
+}
+
 // =============================================================
 // Socket API
 // =============================================================
@@ -93,6 +132,87 @@ pub fn bind(desc: usize, local: Endpoint) net.Error!void {
     }
 
     sock.ep = local;
+}
+
+const RecvResult = struct {
+    /// Data received from the socket.
+    ///
+    /// Points to the buffer passed to `recvfrom()`.
+    data: []const u8,
+    /// Remote endpoint of the received packet.
+    remote: Endpoint,
+};
+
+/// Receive a UDP data from the socket.
+///
+/// This function blocks until a UDP packet is received for the socket.
+/// If the out buffer length is smaller than the received packet, the packet is truncated and lost.
+pub fn recvfrom(desc: usize, buf: []u8) RecvResult {
+    const sock = sock_table.get(desc);
+    rtt.expectEqual(.open, sock.state);
+
+    const pending: *const PendingEntry = while (true) {
+        const ie = sock.lock.lockDisableIrq();
+        defer sock.lock.unlockRestoreIrq(ie);
+
+        // Check if there is pending data.
+        if (sock.pending_data.popFirst()) |node| {
+            break @fieldParentPtr("_node", node);
+        }
+
+        // TODO: should return an error if the socket is closed while waiting
+
+        // Wait for incoming data.
+        sock.waitq.wait(&sock.lock);
+    };
+
+    const len = @min(buf.len, pending.data.len);
+    @memcpy(buf[0..len], pending.data[0..len]);
+    sock.free(pending);
+
+    return .{
+        .data = buf[0..len],
+        .remote = pending.remote,
+    };
+}
+
+/// Send a UDP packet to the remote endpoint via the socket.
+///
+/// If the socket is not bound to a local endpoint, appropriate interface is selected.
+pub fn sendto(desc: usize, data: []const u8, remote: Endpoint) net.Error!void {
+    const sock = sock_table.get(desc);
+    rtt.expectEqual(.open, sock.state);
+
+    const local = &sock.ep;
+    // Select a local port.
+    if (local.port == 0) {
+        local.port = selectDynamicPort();
+    }
+    // Select a local IP.
+    if (local.ip.eql(.any)) {
+        const iface = net.ip.ifaceLookup(remote.ip) orelse {
+            log.err("No interface found for remote IP: {f}", .{remote.ip});
+            return net.Error.Unavailable;
+        };
+        local.ip = iface.unicast;
+    }
+
+    try output(local.*, remote, data);
+}
+
+/// Range of dynamic UDP ports that can be used for automatic local port assignment.
+const dynamic_port = Range{
+    .start = 49152,
+    .end = 65535,
+};
+
+/// Select an available dynamic port for automatic local port assignment.
+fn selectDynamicPort() Port {
+    for (dynamic_port.start..dynamic_port.end) |port| {
+        _ = sock_table.select(.{ .ip = .any, .port = @intCast(port) }) orelse {
+            return @intCast(port);
+        };
+    } else @panic("UDP dynamic port exhaustion");
 }
 
 /// Socket table instance.
@@ -128,6 +248,10 @@ const Socket = struct {
     ep: Endpoint,
     /// List of pending packets.
     pending_data: std.DoublyLinkedList,
+    /// Wait queue to wake the receiver thread.
+    waitq: urd.WaitQueue = .{},
+    /// Lock to protect the socket state and pending data.
+    lock: SpinLock = .{},
 
     const State = enum {
         ///
@@ -151,11 +275,25 @@ const Socket = struct {
         errdefer allocator.free(buf);
 
         // Push the entry to the pending data list.
-        entry.* = .{
-            .remote = remote,
-            .data = buf,
-        };
-        self.pending_data.append(&entry._node);
+        {
+            const ie = self.lock.lockDisableIrq();
+            defer self.lock.unlockRestoreIrq(ie);
+            entry.* = .{
+                .remote = remote,
+                .data = buf,
+            };
+            self.pending_data.append(&entry._node);
+        }
+
+        // Wake a receiver thread.
+        _ = self.waitq.wake();
+    }
+
+    /// Free given pending entry data.
+    fn free(_: *Socket, entry: *const PendingEntry) void {
+        const allocator = urd.mem.getGeneralAllocator();
+        allocator.free(entry.data);
+        allocator.destroy(entry);
     }
 };
 
@@ -212,6 +350,9 @@ const SocketTable = struct {
             .state = .free,
             .ep = .empty,
         };
+
+        // Wake all waiting threads.
+        while (sock.waitq.wake()) {}
     }
 
     /// Get a socket by its descriptor.
@@ -303,6 +444,7 @@ const std = @import("std");
 const log = std.log.scoped(.udp);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
+const Range = common.Range;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const SpinLock = urd.SpinLock;
