@@ -254,6 +254,22 @@ fn validateAck(buf: []const u8, entry: *const QueryEntry) net.Error!void {
         log.err("Hardware address mismatch.", .{});
         return net.Error.InvalidPacket;
     }
+
+    // Parse options.
+    var options = OptionReader.init(buf);
+    while (options.next()) |opt| {
+        switch (opt.code) {
+            .message_type => if (opt.data.len != 1 or opt.data[0] != 5) {
+                log.err("Invalid DHCP message type: {d}", .{opt.data[0]});
+                return net.Error.InvalidPacket;
+            } else return,
+
+            else => {},
+        }
+    } else {
+        log.err("Missing DHCP message type option.", .{});
+        return net.Error.InvalidPacket;
+    }
 }
 
 /// Generate a random transaction ID.
