@@ -34,7 +34,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
     try cache.update(spa, sha, .resolved);
 
     // Debug print the packet.
-    print(data, log.debug);
+    print(data, trace);
 
     switch (op) {
         // Request: Send back a reply.
@@ -416,6 +416,7 @@ const log = std.log.scoped(.arp);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const urd = @import("urthr");
+const trace = urd.trace.scoped(.net, .arp);
 const SpinLock = urd.SpinLock;
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;

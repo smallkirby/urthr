@@ -40,7 +40,7 @@ fn inputImpl(
     }
 
     // Debug print the packet.
-    print(data, log.debug);
+    print(data, trace);
 
     // Find the socket matching the destination endpoint.
     const local = Endpoint{
@@ -442,6 +442,7 @@ fn print(data: []const u8, logger: anytype) void {
 
 const std = @import("std");
 const log = std.log.scoped(.udp);
+const trace = urd.trace.scoped(.net, .udp);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const Range = common.Range;
