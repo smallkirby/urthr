@@ -48,12 +48,24 @@ pub fn log(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
-    const level_str = comptime switch (level) {
-        .debug => "[DEBUG]",
-        .info => "[INFO ]",
-        .warn => "[WARN ]",
-        .err => "[ERROR]",
-    };
+    anyLog(switch (level) {
+        .debug => "DEBUG",
+        .info => "INFO",
+        .warn => "WARN",
+        .err => "ERROR",
+    }, scope, fmt, args);
+}
+
+pub fn anyLog(
+    comptime level: []const u8,
+    comptime scope: @Type(.enum_literal),
+    comptime fmt: []const u8,
+    args: anytype,
+) void {
+    if (level.len > 5) {
+        @compileError("Log level name too long: " ++ level);
+    }
+    const level_str = std.fmt.comptimePrint("[{s: <5}]", .{level});
 
     const scope_str = if (@tagName(scope).len <= 8) b: {
         break :b std.fmt.comptimePrint(

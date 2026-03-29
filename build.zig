@@ -47,6 +47,13 @@ pub fn build(b: *std.Build) !void {
             @panic("Invalid log level");
     };
 
+    const traces = b.option(
+        []const u8,
+        "trace",
+        "Enable the trace outputs of the specified domains (comma-separated).",
+    ) orelse "";
+    const typed_traces = try generateTraceDomains(traces, b);
+
     const serial_boot = b.option(
         bool,
         "serial_boot",
@@ -109,6 +116,7 @@ pub fn build(b: *std.Build) !void {
 
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
+    options.addOption([]const []const u8, "trace", typed_traces);
     options.addOption(board.BoardType, "board", board_type);
     options.addOption(bool, "serial_boot", serial_boot);
     options.addOption(bool, "enable_rtt", enable_rtt);
@@ -505,6 +513,20 @@ fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const 
     const ld = b.addInstallFile(out, output);
 
     return .{ out, ld };
+}
+
+/// Generate list of domains to enable trace outputs.
+fn generateTraceDomains(s: []const u8, b: *std.Build) ![][]const u8 {
+    const count_max = std.mem.count(u8, s, ",") + 1;
+    const domains = try b.allocator.alloc([]const u8, count_max);
+    var iter = std.mem.splitAny(u8, s, ",");
+    var count: usize = 0;
+    while (iter.next()) |part| : (count += 1) {
+        const p = std.mem.trim(u8, part, " ");
+        domains[count] = try b.allocator.dupe(u8, p);
+    }
+
+    return domains[0..count];
 }
 
 const ImportPair = struct {

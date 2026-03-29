@@ -7,6 +7,8 @@ pub const sched = @import("kernel/sched.zig");
 pub const thread = @import("kernel/thread.zig");
 pub const time = @import("kernel/time.zig");
 
+pub const trace = @import("trace.zig");
+
 pub const LogFn = klog.LogFn;
 pub const SpinLock = @import("kernel/SpinLock.zig");
 pub const WaitQueue = @import("kernel/WaitQueue.zig");
