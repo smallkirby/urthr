@@ -287,7 +287,7 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
     io.write(.protocol, prot);
     io.write(.checksum, 0);
     io.write(.src_addr, src);
-    io.write(.dest_addr, next);
+    io.write(.dest_addr, dest);
 
     // Calculate and write the header checksum.
     io.write(.checksum, net.util.calcChecksum(hdr[0..@sizeOf(Header)]));
