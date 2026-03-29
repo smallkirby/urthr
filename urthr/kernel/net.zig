@@ -1,4 +1,5 @@
 pub const arp = @import("net/arp.zig");
+pub const dhcp = @import("net/dhcp.zig");
 pub const ether = @import("net/ether.zig");
 pub const icmp = @import("net/icmp.zig");
 pub const ip = @import("net/ip.zig");

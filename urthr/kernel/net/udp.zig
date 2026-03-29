@@ -54,8 +54,8 @@ fn inputImpl(
     const sock = sock_table.select(local) orelse {
         const src = iface.unicast;
         const dest = iphdr.read(.src_addr);
-        try net.icmp.output(src, dest, .{ .unreach = {} });
-        return;
+        trace("No socket found for local endpoint {f}:{d}, remote endpoint {f}:{d}", .{ src, local.port, dest, remote.port });
+        return try net.icmp.output(src, dest, .{ .unreach = {} });
     };
 
     // Push the payloda to the socket's pending data list.
@@ -115,7 +115,7 @@ pub fn open() net.Error!usize {
 }
 
 /// Close the socket associated with the given descriptor.
-pub fn close(desc: usize) net.Error!void {
+pub fn close(desc: usize) void {
     const sock = sock_table.get(desc);
     rtt.expectEqual(.open, sock.state);
     sock_table.release(sock);
@@ -331,7 +331,7 @@ const SocketTable = struct {
     }
 
     /// Release to close the given socket.
-    fn release(self: *Self, sock: *const Socket) void {
+    fn release(self: *Self, sock: *Socket) void {
         _ = self.indexOf(sock);
 
         const ie = self.lock.lockDisableIrq();
@@ -341,7 +341,7 @@ const SocketTable = struct {
         const allocator = urd.mem.getGeneralAllocator();
         var iter = sock.pending_data.first;
         while (iter) |node| : (iter = node.next) {
-            const pending: *const PendingEntry = @fieldParentPtr("_node", iter);
+            const pending: *const PendingEntry = @fieldParentPtr("_node", node);
             allocator.free(pending.data);
         }
 
@@ -349,6 +349,7 @@ const SocketTable = struct {
         sock.* = .{
             .state = .free,
             .ep = .empty,
+            .pending_data = .{},
         };
 
         // Wake all waiting threads.

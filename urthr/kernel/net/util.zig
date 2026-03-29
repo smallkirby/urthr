@@ -85,6 +85,15 @@ pub fn WireReader(T: type) type {
                 else => bits.fromBigEndian(value.*),
             };
         }
+
+        /// Get a slice of the given field.
+        pub fn slice(self: *const Self, comptime field: Fields) []u8 {
+            const name = @tagName(field);
+            const U = @FieldType(T, name);
+            const offset = @offsetOf(T, name);
+            const dest = @intFromPtr(self.p) + offset;
+            return @as([*]u8, @ptrFromInt(dest))[0..@sizeOf(U)];
+        }
     };
 }
 
@@ -153,6 +162,20 @@ pub fn WireWriter(T: type) type {
                 value,
                 builtin.cpu.arch.endian(),
             );
+        }
+
+        /// Zero clear the given field.
+        pub fn clear(self: *const Self, comptime field: Fields) void {
+            @memset(self.slice(field), 0);
+        }
+
+        /// Get a slice of the given field.
+        pub fn slice(self: *const Self, comptime field: Fields) []u8 {
+            const name = @tagName(field);
+            const U = @FieldType(T, name);
+            const offset = @offsetOf(T, name);
+            const dest = @intFromPtr(self.p) + offset;
+            return @as([*]u8, @ptrFromInt(dest))[0..@sizeOf(U)];
         }
     };
 }
