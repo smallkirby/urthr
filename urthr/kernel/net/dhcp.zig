@@ -337,8 +337,10 @@ const Parameter = enum(u8) {
 const Option = union(OptionEnum) {
     /// PAD.
     pad: struct {
-        pub fn data(_: @This()) []const u8 {
-            return &[_]u8{};
+        pub fn copy(_: @This(), _: []u8) void {}
+
+        pub fn len(_: @This()) usize {
+            return 0;
         }
     },
 
@@ -346,8 +348,12 @@ const Option = union(OptionEnum) {
     subnet_mask: extern struct {
         ip: IpAddr,
 
-        pub fn data(self: @This()) []const u8 {
-            return std.mem.asBytes(&self.ip._value);
+        pub fn copy(self: @This(), out: []u8) void {
+            @memcpy(out[0..IpAddr.length], std.mem.asBytes(&self.ip._value));
+        }
+
+        pub fn len(_: @This()) usize {
+            return IpAddr.length;
         }
     },
 
@@ -355,8 +361,12 @@ const Option = union(OptionEnum) {
     router: extern struct {
         ip: IpAddr,
 
-        pub fn data(self: @This()) []const u8 {
-            return std.mem.asBytes(&self.ip._value);
+        pub fn copy(self: @This(), out: []u8) void {
+            @memcpy(out[0..IpAddr.length], std.mem.asBytes(&self.ip._value));
+        }
+
+        pub fn len(_: @This()) usize {
+            return IpAddr.length;
         }
     },
 
@@ -364,8 +374,12 @@ const Option = union(OptionEnum) {
     dns: extern struct {
         ip: IpAddr,
 
-        pub fn data(self: @This()) []const u8 {
-            return std.mem.asBytes(&self.ip._value);
+        pub fn copy(self: @This(), out: []u8) void {
+            @memcpy(out[0..IpAddr.length], std.mem.asBytes(&self.ip._value));
+        }
+
+        pub fn len(_: @This()) usize {
+            return IpAddr.length;
         }
     },
 
@@ -373,8 +387,12 @@ const Option = union(OptionEnum) {
     request_ip: extern struct {
         ip: IpAddr,
 
-        pub fn data(self: @This()) []const u8 {
-            return std.mem.asBytes(&self.ip._value);
+        pub fn copy(self: @This(), out: []u8) void {
+            @memcpy(out[0..IpAddr.length], std.mem.asBytes(&self.ip._value));
+        }
+
+        pub fn len(_: @This()) usize {
+            return IpAddr.length;
         }
     },
 
@@ -387,8 +405,12 @@ const Option = union(OptionEnum) {
         /// DHCPREQUEST
         request = 3,
 
-        pub fn data(self: @This()) []const u8 {
-            return &[_]u8{@intFromEnum(self)};
+        pub fn copy(self: @This(), out: []u8) void {
+            out[0] = @intFromEnum(self);
+        }
+
+        pub fn len(_: @This()) usize {
+            return 1;
         }
     },
 
@@ -396,8 +418,12 @@ const Option = union(OptionEnum) {
     server_id: extern struct {
         ip: IpAddr,
 
-        pub fn data(self: @This()) []const u8 {
-            return std.mem.asBytes(&self.ip._value);
+        pub fn copy(self: @This(), out: []u8) void {
+            @memcpy(out[0..IpAddr.length], std.mem.asBytes(&self.ip._value));
+        }
+
+        pub fn len(_: @This()) usize {
+            return IpAddr.length;
         }
     },
 
@@ -406,16 +432,22 @@ const Option = union(OptionEnum) {
         /// List of requested option codes.
         codes: []const Parameter,
 
-        pub fn data(self: @This()) []const u8 {
+        pub fn copy(self: @This(), out: []u8) void {
             const p: [*]const u8 = @ptrCast(self.codes.ptr);
-            return p[0..self.codes.len];
+            @memcpy(out[0..self.codes.len], p[0..self.codes.len]);
+        }
+
+        pub fn len(self: @This()) usize {
+            return self.codes.len;
         }
     },
 
     /// END
     end: struct {
-        pub fn data(_: @This()) []const u8 {
-            return &[_]u8{};
+        pub fn copy(_: @This(), _: []u8) void {}
+
+        pub fn len(_: @This()) usize {
+            return 0;
         }
     },
 };
@@ -445,13 +477,14 @@ const OptionWriter = struct {
     }
 
     pub fn write(self: *Self, code: Option) net.Error!void {
-        const data = switch (code) {
-            inline else => |c| c.data(),
-        };
-        const opt = try self.nbuf.append(2 + data.len);
-        opt[0] = @intFromEnum(code);
-        opt[1] = @intCast(data.len);
-        @memcpy(opt[2..], data);
+        switch (code) {
+            inline else => |c| {
+                const opt = try self.nbuf.append(2 + c.len());
+                opt[0] = @intFromEnum(code);
+                opt[1] = @intCast(c.len());
+                c.copy(opt[2..]);
+            },
+        }
     }
 
     pub fn finalize(self: *Self) net.Error!void {
