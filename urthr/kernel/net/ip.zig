@@ -38,6 +38,11 @@ pub const IpAddr = extern struct {
         try writer.writeAll(s);
     }
 
+    /// Create an IP address from the given byte array.
+    pub fn from(value: *const [length]u8) IpAddr {
+        return IpAddr{ ._value = value.* };
+    }
+
     /// Parse the IP address from the given string.
     pub fn parse(s: []const u8) error{InvalidFormat}!IpAddr {
         var count: usize = 0;
@@ -227,11 +232,6 @@ const default_ttl: u8 = 64;
 /// Owns the given buffer on success.
 /// Caller must not access the buffer after calling this function.
 pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Error!void {
-    if (src.eql(.any) and dest.eql(.limited_broadcast)) {
-        log.warn("Cannot send a broadcast packet with wildcard source address", .{});
-        return net.Error.InvalidAddress;
-    }
-
     // Lookup the route for the destination IP address.
     const route = routeLookup(dest) orelse {
         log.warn("No route found for the destination IP address: {f}", .{dest});
@@ -346,7 +346,7 @@ pub fn routeLookup(dest: IpAddr) ?*Route {
     var ret: ?*Route = null;
 
     for (routes.items) |*route| {
-        if (dest.subnet(route.netmask).eql(route.network)) {
+        if (dest.subnet(route.netmask).eql(route.network) or dest.eql(.limited_broadcast)) {
             if (ret) |candidate| {
                 if (route.netmask.gte(candidate.netmask)) {
                     ret = route;

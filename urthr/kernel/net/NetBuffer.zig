@@ -26,6 +26,17 @@ pub fn init(data_size: usize, allocator: Allocator) Allocator.Error!Self {
     };
 }
 
+/// Reserve an additional headroom.
+///
+/// This function must be called before any prepend/append operation.
+pub fn reserve(self: *Self, headroom: usize) void {
+    rtt.expectEqual(self._tail, self._head);
+    rtt.expect(self._buffer.len - self._head >= headroom);
+
+    self._head += headroom;
+    self._tail += headroom;
+}
+
 /// Free the underlying buffer.
 pub fn deinit(self: *const Self) void {
     self._allocator.free(self._buffer);
@@ -80,4 +91,6 @@ pub fn len(self: *const Self) usize {
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const common = @import("common");
+const rtt = common.rtt;
 const net = @import("urthr").net;
