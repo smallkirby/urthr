@@ -24,7 +24,7 @@ fn inputImpl(
         return net.Error.InvalidPacket;
     }
 
-    print(data, log.debug);
+    print(data, trace);
 
     switch (io.read(.type)) {
         .echo => {
@@ -220,6 +220,7 @@ fn print(data: []const u8, logger: anytype) void {
 
 const std = @import("std");
 const log = std.log.scoped(.icmp);
+const trace = urd.trace.scoped(.net, .icmp);
 const urd = @import("urthr");
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;
