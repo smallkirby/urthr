@@ -78,14 +78,37 @@ pub fn init() Allocator.Error!void {
 /// Start running the network subsystem and register devices.
 pub fn run() (Error || urd.sched.Error)!void {
     // Link-up all registered devices.
-    var iter = device_list.iter();
-    while (iter.next()) |device| {
-        try device.open();
+    {
+        var iter = device_list.iter();
+        while (iter.next()) |device| {
+            try device.open();
+        }
     }
 
     // Start the worker threads.
     _ = try urd.sched.spawn("net-rx", rxworker, .{});
     _ = try urd.sched.spawn("net-tx", txworker, .{});
+
+    // Obtain an IP address via DHCP.
+    {
+        var iter = device_list.iter();
+        while (iter.next()) |device| {
+            if (device.findInterface(.ipv4)) |iface| {
+                // Query DHCP server on this interface.
+                log.info("Starting DHCP query...", .{});
+                const result = try dhcp.query(iface);
+                log.info(
+                    "I/F got: {f}, subnet={f}, gateway={f}",
+                    .{ result.yip, result.subnet_mask, result.router },
+                );
+
+                // Update the interface configuration.
+                ip.updateConfig(iface, result.yip, result.subnet_mask);
+                // Update the default route to use the gateway.
+                try ip.routeAdd(.any, .any, result.router, iface);
+            }
+        }
+    }
 }
 
 /// Register a network device.
@@ -220,6 +243,7 @@ fn txworker() void {
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const log = std.log.scoped(.net);
 const common = @import("common");
 const bits = common.bits;
 const urd = @import("urthr");

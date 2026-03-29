@@ -153,13 +153,20 @@ pub const Interface = struct {
 
     /// Add a routing entry for this interface.
     pub fn addRoute(self: *Interface, network: IpAddr, netmask: IpAddr, gateway: IpAddr) net.Error!void {
-        try routeAdd(network, netmask, gateway, self);
+        try routeAdd(network, netmask, gateway, &self.base);
     }
 
     /// Downcast the common interface.
-    pub fn downcast(iface: *const net.Interface) *const Self {
+    pub fn downcast(iface: *net.Interface) *Self {
         rtt.expectEqual(.ipv4, iface.family);
         return @fieldParentPtr("base", iface);
+    }
+
+    /// Update the interface configuration.
+    pub fn update(self: *Interface, unicast: IpAddr, netmask: IpAddr) void {
+        self.unicast = unicast;
+        self.netmask = netmask;
+        self.broadcast = unicast.getDirectedBroadcast(netmask);
     }
 };
 
@@ -206,6 +213,9 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
         log.warn("Invalid IP header checksum", .{});
         return net.Error.InvalidPacket;
     }
+
+    // Debug print the packet.
+    print(data, trace);
 
     // Find the handler for the encapsulated protocol.
     const protocol: Protocol = io.read(.protocol);
@@ -300,6 +310,13 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
     try net.enqueueTx(device, hwaddr, .ipv4, buf.*);
 }
 
+/// Update the network configuration of the interface.
+pub fn updateConfig(iface: *net.Interface, unicast: IpAddr, netmask: IpAddr) void {
+    rtt.expectEqual(.ipv4, iface.family);
+    const ipif = Interface.downcast(iface);
+    ipif.update(unicast, netmask);
+}
+
 // =============================================================
 // Routing
 // =============================================================
@@ -324,7 +341,10 @@ const Route = struct {
 };
 
 /// Add a routing entry.
-fn routeAdd(network: IpAddr, netmask: IpAddr, gateway: IpAddr, iface: *Interface) Allocator.Error!void {
+pub fn routeAdd(network: IpAddr, netmask: IpAddr, gateway: IpAddr, iface: *net.Interface) Allocator.Error!void {
+    rtt.expectEqual(.ipv4, iface.family);
+    const ipif = Interface.downcast(iface);
+
     const allocator = urd.mem.getGeneralAllocator();
     const route = try allocator.create(Route);
     errdefer allocator.destroy(route);
@@ -333,7 +353,7 @@ fn routeAdd(network: IpAddr, netmask: IpAddr, gateway: IpAddr, iface: *Interface
         .network = network,
         .netmask = netmask,
         .gateway = gateway,
-        .iface = iface,
+        .iface = ipif,
     };
 
     try routes.append(allocator, route.*);
@@ -470,8 +490,8 @@ pub const Protocol = enum(u8) {
 // =============================================================
 
 /// Print an IP packet data.
-fn printPacket(data: []const u8, logger: anytype) void {
-    const io = net.WireReader(Header).new(data);
+fn print(data: []const u8, logger: anytype) void {
+    const io = net.util.WireReader(Header).new(data);
     const ihl = io.read(.ihl_version).ihl;
     const flags = io.read(.fragoff_flags).flags;
     const header_len = @as(usize, ihl) * 4;
@@ -500,6 +520,7 @@ fn printPacket(data: []const u8, logger: anytype) void {
 
 const std = @import("std");
 const log = std.log.scoped(.ip);
+const trace = urd.trace.scoped(.net, .ip);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
