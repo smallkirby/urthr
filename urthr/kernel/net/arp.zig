@@ -68,7 +68,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
 }
 
 /// Send an ARP request.
-pub fn request(iface: *const net.Interface, ip: IpAddr) net.Error!void {
+pub fn request(iface: *net.Interface, ip: IpAddr) net.Error!void {
     if (iface.family != .ipv4) {
         return net.Error.Unsupported;
     }
@@ -115,7 +115,7 @@ fn writeGenericHeader(nbuf: *NetBuffer, op: Op) net.Error!void {
 // =============================================================
 
 /// Resolve the MAC address for the given IP address on the specified interface.
-pub fn resolve(iface: *const net.Interface, ip: IpAddr, hw: []u8) net.Error!void {
+pub fn resolve(iface: *net.Interface, ip: IpAddr, hw: []u8) net.Error!void {
     const device = iface.device orelse {
         log.warn("No device registered for the interface.", .{});
         return net.Error.Unavailable;

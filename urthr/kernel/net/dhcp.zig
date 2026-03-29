@@ -19,7 +19,7 @@ const QueryResult = struct {
 /// Query the DHCP server to acquire an IP address and other network configuration parameters.
 ///
 /// This function blocks until the handshake is complete or an error occurs.
-pub fn query(iface: *const net.Interface) net.Error!void {
+pub fn query(iface: *const net.Interface) net.Error!QueryResult {
     // Set up UDP socket.
     var recvbuf: [512]u8 = undefined;
     const sock = try udp.open();
@@ -46,6 +46,8 @@ pub fn query(iface: *const net.Interface) net.Error!void {
     // Receive DHCPACK message.
     const ack = udp.recvfrom(sock, &recvbuf);
     try validateAck(ack.data, &entry);
+
+    return result;
 }
 
 /// Send DHCPDISCOVER message on all interfaces to acquire an IP address.
