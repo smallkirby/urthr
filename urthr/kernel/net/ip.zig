@@ -312,6 +312,7 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
         };
     }
 
+    trace("IP output: src={f}, dest={f}, next-hop={f}", .{ src, dest, next });
     try net.enqueueTx(device, hwaddr, .ipv4, buf.*);
 }
 
