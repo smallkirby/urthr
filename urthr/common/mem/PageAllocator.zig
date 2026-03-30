@@ -58,24 +58,20 @@ pub fn allocPagesV(self: Self, num_pages: usize) Error![]align(page_size) u8 {
 ///
 /// Returns a slice representing the allocated memory region.
 /// The slice points to a virtual address.
-///
-/// The size is rounded up to the nearest page size.
-/// The size of returned slice is equal to or greater than the requested size.
 pub fn allocBytesV(self: Self, size: usize) Error![]u8 {
     const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
-    return self.allocPagesV(aligned_size / common.mem.size_4kib);
+    const pages = try self.allocPagesV(aligned_size / common.mem.size_4kib);
+    return pages[0..size];
 }
 
 /// Allocate the given size in bytes of memory.
 ///
 /// Returns a slice representing the allocated memory region.
 /// The slice points to a physical address.
-///
-/// The size is rounded up to the nearest page size.
-/// The size of returned slice is equal to or greater than the requested size.
 pub fn allocBytesP(self: Self, size: usize) Error![]u8 {
     const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
-    return self.allocPagesP(aligned_size / common.mem.size_4kib);
+    const pages = try self.allocPagesP(aligned_size / common.mem.size_4kib);
+    return pages[0..size];
 }
 
 /// Allocate and construct an instance of the given type.
@@ -115,12 +111,16 @@ pub fn freePagesV(self: Self, slice: []u8) void {
 
 /// Free the given bytes allocated by `allocBytesP()`.
 pub fn freeBytesP(self: Self, slice: []u8) void {
-    return self.freePagesP(slice);
+    const aligned_size = std.mem.alignForward(usize, slice.len, common.mem.size_4kib);
+    const pages = @as([*]u8, @ptrCast(slice.ptr))[0..aligned_size];
+    return self.freePagesP(pages);
 }
 
 /// Free the given bytes allocated by `allocBytesV()`.
 pub fn freeBytesV(self: Self, slice: []u8) void {
-    return self.freePagesV(slice);
+    const aligned_size = std.mem.alignForward(usize, slice.len, common.mem.size_4kib);
+    const pages = @as([*]u8, @ptrCast(slice.ptr))[0..aligned_size];
+    return self.freePagesV(pages);
 }
 
 /// Destroy the given object allocated by `create()`.

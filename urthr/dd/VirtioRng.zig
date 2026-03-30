@@ -45,10 +45,7 @@ pub fn init(base: usize, page_allocator: PageAllocator, allocator: Allocator) Er
 /// Read random data from the device.
 ///
 /// Returns a slice to the buffer containing the random data.
-/// The buffer can be freed using the given allocator after use.
-///
-/// Note that the returned buffer size is equal to or greater than the requested size.
-/// The rest of the buffer is not initialized and should not be used.
+/// The buffer can be freed using the given allocator's `freeBytesV()` after use.
 pub fn read(self: *Self, size: usize, allocator: PageAllocator) Error![]u8 {
     const dev = self.dev;
 
