@@ -27,11 +27,11 @@ pub fn spinWaitMilli(ms: u64) void {
 
 /// Spin-wait for the given number of nanoseconds.
 fn spinWait(ns: u64) void {
-    const start = getCount();
-    const freq = @as(u64, getFreq());
-    const target = start + (ns * freq) / 1_000_000_000;
+    const start: u128 = getCount();
+    const freq = @as(u128, getFreq());
+    const target = start + (@as(u128, ns) * freq) / 1_000_000_000;
 
-    while (getCount() < target) {
+    while (@as(u128, getCount()) < target) {
         std.atomic.spinLoopHint();
     }
 }
