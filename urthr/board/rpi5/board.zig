@@ -94,6 +94,20 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
         rdd.clk.init();
     }
 
+    // RNG.
+    log.info("Initializing RNG.", .{});
+    {
+        const rng = try mm.io.reserveAndRemap(
+            "rng",
+            memmap.rng.start,
+            memmap.rng.size(),
+            null,
+        );
+
+        rdd.rng.setBase(rng);
+        rdd.rng.init();
+    }
+
     // SDHC.
     log.info("Initializing SDHC.", .{});
     {

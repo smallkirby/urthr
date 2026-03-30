@@ -67,6 +67,14 @@ pub const pm = Range{
     .end = 0x0010_7D20_1000,
 };
 
+/// Random number generator.
+///
+/// bcm2711-rng200
+pub const rng = Range{
+    .start = 0x0010_7D20_8000,
+    .end = 0x0010_7D20_9000,
+};
+
 /// GICv2 base.
 pub const gic = Range{
     .start = 0x0010_7FFF_8000,
