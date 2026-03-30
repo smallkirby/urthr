@@ -11,6 +11,9 @@ var exception_handler: ?ExceptionHandler = null;
 /// Virtio block device instance.
 var virtio_blk_dev: ?dd.VirtioBlk = null;
 
+/// Virtio RNG device instance.
+var virtio_rng_dev: ?dd.VirtioRng = null;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -66,15 +69,27 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
             null,
         );
 
+        // virtio-blk
         for (0..(memmap.virtio.size() / virtio_size)) |i| {
             const base = virtio_base + i * virtio_size;
 
-            // Try to initialize as virtio-blk.
             virtio_blk_dev = dd.VirtioBlk.init(base, mm.page, mm.general) catch {
                 continue;
             };
 
             log.info("Found virtio-blk device#{d}", .{i});
+            break;
+        }
+
+        // virtio-rng
+        for (0..(memmap.virtio.size() / virtio_size)) |i| {
+            const base = virtio_base + i * virtio_size;
+
+            virtio_rng_dev = dd.VirtioRng.init(base, mm.page, mm.general) catch {
+                continue;
+            };
+
+            log.info("Found virtio-rng device#{d}", .{i});
             break;
         }
     }

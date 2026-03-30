@@ -689,6 +689,15 @@ const Qemu = struct {
                 "-S",
             });
         }
+        switch (self.machine) {
+            .virt => try args.appendSlice(allocator, &.{
+                "-object",
+                "rng-random,id=rng0,filename=/dev/urandom",
+                "-device",
+                "virtio-rng-device,rng=rng0",
+            }),
+            else => {},
+        }
 
         // Enable verbose logs.
         var logiter = std.mem.splitAny(u8, self.verbose_logs, ",");
