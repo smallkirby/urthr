@@ -392,16 +392,16 @@ const Op = enum(u16) {
 fn print(data: []const u8, logger: anytype) void {
     const gio = net.util.WireReader(GenericHeader).new(data);
 
-    logger("ARP packet: size={d}", .{data.len});
-    logger("  haddr_type : {s}", .{@tagName(gio.read(.haddr_type))});
-    logger("  paddr_type : {s}", .{@tagName(gio.read(.paddr_type))});
-    logger("  op         : {s}", .{@tagName(gio.read(.op))});
-
+    logger("ARP: {s}", .{@tagName(gio.read(.op))});
     switch (gio.read(.op)) {
         .request, .reply => {
             const aio = net.util.WireReader(AddrInfoMacIp).new(data[@sizeOf(GenericHeader)..]);
-            logger("  Source: {f}, {f}", .{ aio.read(.sha), aio.read(.spa) });
-            logger("  Target: {f}, {f}", .{ aio.read(.tha), aio.read(.tpa) });
+            logger("  {f}, {f} -> {f}, {f}", .{
+                aio.read(.sha),
+                aio.read(.spa),
+                aio.read(.tha),
+                aio.read(.tpa),
+            });
         },
         else => {},
     }
