@@ -274,8 +274,10 @@ fn validateAck(buf: []const u8, entry: *const QueryEntry) net.Error!void {
 
 /// Generate a random transaction ID.
 fn generateXid() u32 {
-    // TODO: use a proper RNG.
-    return 0xDEADBEEF;
+    var buf: [@sizeOf(u32)]u8 = undefined;
+    urd.rng.getRandom(&buf);
+
+    return @bitCast(buf);
 }
 
 /// Context for an ongoing DHCP transaction.

@@ -283,7 +283,7 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
     });
     io.write(.tos, 0);
     io.write(.total_length, @intCast(packet_len));
-    io.write(.id, 0);
+    io.write(.id, getIdentification());
     io.write(.fragoff_flags, .{
         .frag_off = 0,
         .flags = .{ ._reserved = 0, .df = false, .mf = false },
@@ -321,6 +321,14 @@ pub fn updateConfig(iface: *net.Interface, unicast: IpAddr, netmask: IpAddr) voi
     rtt.expectEqual(.ipv4, iface.family);
     const ipif = Interface.downcast(iface);
     ipif.update(unicast, netmask);
+}
+
+/// Generate a random ID.
+fn getIdentification() u16 {
+    var buf: [@sizeOf(u16)]u8 = undefined;
+    urd.rng.getRandom(&buf);
+
+    return @bitCast(buf);
 }
 
 // =============================================================
