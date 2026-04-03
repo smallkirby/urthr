@@ -72,6 +72,10 @@ fn zmain() !void {
     log.debug("Memory Map:", .{});
     urd.mem.debugPrintResources(log.debug);
 
+    // Initialize RNG.
+    log.info("Initializing RNG.", .{});
+    urd.rng.init();
+
     // Setup IRQ.
     log.debug("Setting up IRQ.", .{});
     urd.exception.initLocal();

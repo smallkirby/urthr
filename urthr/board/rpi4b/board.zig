@@ -81,6 +81,11 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
     }
 }
 
+/// Fill the given buffer with random data.
+pub fn getRandom(buf: []u8) void {
+    _ = dd.fake_rng.read(buf);
+}
+
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
 
@@ -200,6 +205,7 @@ const arch = @import("arch").impl;
 const options = @import("options");
 const common = @import("common");
 const mem = common.mem;
+const rtt = common.rtt;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
 const MemoryManager = common.mem.MemoryManager;
