@@ -426,15 +426,13 @@ const PseudoHeader = extern struct {
 /// debug print the given UDP packet.
 fn print(data: []const u8, logger: anytype) void {
     const io = net.util.WireReader(Header).new(data);
-    const len = io.read(.length);
-    const inner = data[@sizeOf(Header)..len];
 
-    logger("UDP packet: size={d}", .{data.len});
-    logger("  source : {d}", .{io.read(.src)});
-    logger("  dest   : {d}", .{io.read(.dst)});
-    logger("  length : {d}", .{len});
-    logger("  sum    : {X:0>4}", .{io.read(.checksum)});
-    common.util.hexdump(inner, inner.len, logger);
+    logger("UDP: {d} -> {d}, length={d}, checksum={X:0>4}", .{
+        io.read(.src),
+        io.read(.dst),
+        io.read(.length),
+        io.read(.checksum),
+    });
 }
 
 // =============================================================

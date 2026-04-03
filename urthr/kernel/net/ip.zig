@@ -506,26 +506,14 @@ pub const Protocol = enum(u8) {
 /// Print an IP packet data.
 fn print(data: []const u8, logger: anytype) void {
     const io = net.util.WireReader(Header).new(data);
-    const ihl = io.read(.ihl_version).ihl;
-    const flags = io.read(.fragoff_flags).flags;
-    const header_len = @as(usize, ihl) * 4;
-    const total_len = @as(usize, io.read(.total_length));
-    const payload = data[header_len..total_len];
 
-    logger("Version     : {d}", .{io.read(.ihl_version).version});
-    logger("IHL         : {d}", .{io.read(.ihl_version).ihl});
-    logger("ToS         : {d}", .{io.read(.tos)});
-    logger("Length      : {d}", .{io.read(.total_length)});
-    logger("ID          : {d}", .{io.read(.id)});
-    logger("Flags       : DF={}, MF={}", .{ flags.df, flags.mf });
-    logger("FragOff     : {d}", .{io.read(.fragoff_flags).frag_off});
-    logger("TTL         : {d}", .{io.read(.ttl)});
-    logger("Protocol    : {d}", .{io.read(.protocol)});
-    logger("Checksum    : 0x{X:0>4}", .{io.read(.checksum)});
-    logger("Source      : {f}", .{io.read(.src_addr)});
-    logger("Dest        : {f}", .{io.read(.dest_addr)});
-    logger("Data        :", .{});
-    util.hexdump(payload, payload.len, logger);
+    logger("IP: {f} -> {f}, ID={d}, protocol={d}, TTL={d}", .{
+        io.read(.src_addr),
+        io.read(.dest_addr),
+        io.read(.ihl_version).version,
+        io.read(.protocol),
+        io.read(.ttl),
+    });
 }
 
 // =============================================================
