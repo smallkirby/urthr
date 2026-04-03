@@ -158,6 +158,16 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     }
 }
 
+/// Fill the given buffer with random data.
+pub fn getRandom(buf: []u8) void {
+    var count: usize = 0;
+
+    while (count < buf.len) {
+        const random = rdd.rng.read(buf[count..]);
+        count += random.len;
+    }
+}
+
 /// Initialize GICC for the calling AP.
 pub fn initIrqLocal() void {
     // Set exception handler.

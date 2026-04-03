@@ -14,6 +14,9 @@ var virtio_blk_dev: ?dd.VirtioBlk = null;
 /// Virtio RNG device instance.
 var virtio_rng_dev: ?dd.VirtioRng = null;
 
+/// Memory maanager instance.
+var gmm: common.mem.MemoryManager = undefined;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -93,6 +96,18 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
             break;
         }
     }
+
+    gmm = mm;
+}
+
+/// Fill the given buffer with random data.
+pub fn getRandom(buf: []u8) void {
+    rtt.expect(virtio_rng_dev != null);
+
+    const random = virtio_rng_dev.?.read(buf.len, gmm.page) catch {
+        @panic("Failed to read from virtio RNG device.");
+    };
+    @memcpy(buf, random);
 }
 
 /// Initialize GICC for the calling AP.
@@ -210,6 +225,7 @@ const log = std.log.scoped(.virt);
 const arch = @import("arch").impl;
 const common = @import("common");
 const mem = common.mem;
+const rtt = common.rtt;
 const util = common.util;
 const Console = common.Console;
 const MemoryManager = common.mem.MemoryManager;

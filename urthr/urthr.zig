@@ -3,6 +3,7 @@ pub const fs = @import("kernel/fs.zig");
 pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
+pub const rng = @import("kernel/rng.zig");
 pub const sched = @import("kernel/sched.zig");
 pub const thread = @import("kernel/thread.zig");
 pub const time = @import("kernel/time.zig");
