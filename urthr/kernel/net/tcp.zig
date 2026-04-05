@@ -717,7 +717,7 @@ const SocketTable = struct {
 
     /// Get the index of the given socket in the table.
     fn indexOf(self: *Self, socket: *const Socket) usize {
-        const index = (@intFromPtr(&self.sockets) - @intFromPtr(socket)) / @sizeOf(Socket);
+        const index = (@intFromPtr(socket) - @intFromPtr(&self.sockets)) / @sizeOf(Socket);
         rtt.expect(index < self.sockets.len);
         return index;
     }
