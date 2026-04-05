@@ -40,9 +40,8 @@ pub fn unimplemented(comptime msg: []const u8) noreturn {
     @branchHint(.cold);
 
     var console = board.getConsole();
-    _ = console.println("UNIMPLEMENTED: ");
+    _ = console.print("UNIMPLEMENTED: ");
     _ = console.println(msg);
-    _ = console.println("\n");
 
     eol(4);
 }

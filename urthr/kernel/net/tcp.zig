@@ -71,7 +71,7 @@ fn inputImpl(
 
     // Find a socket matching the endpoints.
     const sock = sock_table.select(local, remote) orelse {
-        trace("No matching socket found for {d} -> {d}", .{ local.port, remote.port });
+        trace("No matching socket found for {f}:{d} -> {f}:{d}", .{ local.ip, local.port, remote.ip, remote.port });
 
         if (flags.rst) {
             // Ignore RST segments that do not match any socket.
@@ -100,6 +100,14 @@ fn inputImpl(
         }
     };
 
+    var wakeup = false;
+    sock.lock();
+    defer {
+        sock.unlock();
+        if (wakeup) sock.wake();
+    }
+
+    // Handle the listening socket for a new connection request.
     switch (sock.state) {
         .listen => {
             if (flags.rst) {
@@ -137,9 +145,39 @@ fn inputImpl(
             return;
         },
 
-        else => urd.unimplemented("TCP state"),
+        .syn_sent => {
+            return; // drop
+        },
+
+        else => {},
     }
 
+    // Check the segment is acceptable according to the RCV.WND and RCV.NXT variables.
+    if (sock.state == .syn_received or sock.state == .established) {
+        const acceptable = if (seg.len == 0)
+            (sock.rcv.wnd == 0 and seg.seq == sock.rcv.nxt) or
+                (sock.rcv.nxt == seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd)
+        else
+            sock.rcv.wnd != 0 and
+                ((sock.rcv.nxt <= seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd) or
+                    (sock.rcv.nxt <= seg.seq + seg.len - 1 and seg.seq + seg.len - 1 < sock.rcv.nxt + sock.rcv.wnd));
+
+        if (!acceptable) {
+            if (flags.rst) try outputSegment(
+                local,
+                remote,
+                seg.ack,
+                0,
+                0,
+                .reset,
+                &.{},
+            );
+
+            return;
+        }
+    }
+
+    // Check validity of ACK number.
     if (!flags.ack) {
         return outputSegment(
             local,
@@ -151,12 +189,11 @@ fn inputImpl(
             &.{},
         );
     }
-
     switch (sock.state) {
         .syn_received => {
             if (sock.snd.una <= seg.ack and seg.ack <= sock.snd.nxt) {
                 sock.state = .established;
-                return sock.wake();
+                wakeup = true;
             } else {
                 return outputSegment(
                     local,
@@ -170,7 +207,49 @@ fn inputImpl(
             }
         },
 
-        else => urd.unimplemented("TCP state"),
+        else => {},
+    }
+    switch (sock.state) {
+        .syn_received, .established => {
+            if (sock.snd.una < seg.ack and seg.ack <= sock.snd.nxt) {
+                sock.snd.una = seg.ack;
+
+                if (sock.snd.wl1 < seg.seq or (sock.snd.wl1 == seg.seq and sock.snd.wl2 <= seg.ack)) {
+                    sock.snd.wl1 = seg.seq;
+                    sock.snd.wl2 = seg.ack;
+                    sock.snd.wnd = seg.wnd;
+                }
+            } else if (seg.ack < sock.snd.una) {
+                // ignore duplicated ACK
+            } else if (sock.snd.nxt < seg.ack) {
+                // ACK to unsent data, send an ACK with the current RCV.NXT and RCV.WND.
+                try output(sock, .ackn, &.{});
+            }
+        },
+
+        else => {},
+    }
+
+    // Process the segment data.
+    const hlen = (hdr.read(.offset) >> 4) * 4;
+    const dlen = data.len - hlen;
+    if (sock.state == .established and dlen != 0) {
+        if (sock.rcv.nxt != seg.seq or sock.rcv.wnd < dlen) {
+            // No support for out-of-order segments.
+            try output(sock, .ackn, &.{});
+        }
+
+        // Copy data to the receive buffer.
+        const offset = sock.buf.len - sock.rcv.wnd;
+        @memcpy(sock.buf[offset .. offset + dlen], data[hlen..]);
+        sock.rcv.nxt = seg.seq + @as(u32, @intCast(dlen));
+        sock.rcv.wnd -= @intCast(dlen);
+
+        // Send ACK.
+        try output(sock, .ackn, &.{});
+
+        // Wake up the thread waiting for data if any.
+        wakeup = true;
     }
 }
 
@@ -350,6 +429,42 @@ pub fn close(desc: usize) void {
     sock_table.release(sock);
 }
 
+/// Send data through a TCP socket.
+///
+/// This function blocks until all data is sent.
+pub fn send(desc: usize, data: []const u8) net.Error!void {
+    const sock = sock_table.get(desc);
+
+    if (sock.state != .established) {
+        log.warn("send: socket not established: {t}", .{sock.state});
+        return net.Error.Unavailable;
+    }
+
+    sock.lock();
+    defer sock.unlock();
+
+    var sent: usize = 0;
+    var cap: usize = 0;
+    while (sent < data.len) {
+        cap = sock.snd.wnd - (sock.snd.nxt - sock.snd.una);
+
+        if (cap == 0) {
+            trace("send: receiver window is full, waiting for ACK.", .{});
+            sock.wq.wait(&sock._lock);
+            continue;
+        }
+
+        const to_send = @min(sock.mss, data.len - sent, cap);
+        output(sock, .ack_push, data[sent .. sent + to_send]) catch |err| {
+            log.err("send: failed to send data: {t}", .{err});
+            sock.state = .closed;
+            return net.Error.Unavailable;
+        };
+        sock.snd.nxt += to_send;
+        sent += to_send;
+    }
+}
+
 // =============================================================
 // Socket Internal
 
@@ -372,6 +487,7 @@ const SocketTable = struct {
         .buf = undefined,
         .wq = .{},
         ._lock = .{},
+        ._lock_ie = 0,
     }} ** max_sockets,
 
     /// Lock to protect a socket table.
@@ -379,6 +495,9 @@ const SocketTable = struct {
 
     /// Maximum number of sockets to be open at the same time.
     const max_sockets = 10;
+
+    /// Size of the receive buffer for each socket in bytes.
+    const buf_size = 65335;
 
     /// Find a free socket to open.
     fn allocate(self: *Self) net.Error!*Socket {
@@ -389,8 +508,7 @@ const SocketTable = struct {
             if (s.state == .free) {
                 s.* = std.mem.zeroInit(Socket, .{
                     .state = .closed,
-                    .wq = .{},
-                    ._lock = .{},
+                    .buf = try urd.mem.getGeneralAllocator().alloc(u8, buf_size),
                 });
 
                 return s;
@@ -435,9 +553,15 @@ const SocketTable = struct {
                 s.local.port == local.port and
                 (s.local.ip.eql(local.ip) or s.local.ip.eql(.any) or local.ip.eql(.any));
             const remote_match =
+                remote.eql(s.remote) or
                 s.remote.eql(.empty) or
-                remote.eql(.empty) or
-                (remote.ip.eql(.any) and remote.port == 0);
+                remote.eql(.empty);
+            trace("  cand={f}:{d},{f}:{d}, local_match={d}, remote_match={d}, state={t}", .{
+                s.local.ip,                s.local.port,
+                s.remote.ip,               s.remote.port,
+                @intFromBool(local_match), @intFromBool(remote_match),
+                s.state,
+            });
             if (local_match and remote_match) {
                 if (s.state != .listen) {
                     return s;
@@ -502,6 +626,7 @@ const Socket = struct {
     wq: urd.WaitQueue,
     /// Lock to protect the wait queue.
     _lock: SpinLock,
+    _lock_ie: u64,
 
     pub fn wait(self: *Socket) void {
         rtt.expect(self.state != .free);
@@ -519,6 +644,16 @@ const Socket = struct {
         defer self._lock.unlockRestoreIrq(ie);
 
         _ = self.wq.wake();
+    }
+
+    pub fn lock(self: *Socket) void {
+        rtt.expect(self.state != .free);
+        self._lock_ie = self._lock.lockDisableIrq();
+    }
+
+    pub fn unlock(self: *Socket) void {
+        rtt.expect(self.state != .free);
+        self._lock.unlockRestoreIrq(self._lock_ie);
     }
 };
 
@@ -641,6 +776,13 @@ const Flags = packed struct(u8) {
     const reset_ack = std.mem.zeroInit(Flags, .{
         .rst = true,
         .ack = true,
+    });
+    const ackn = std.mem.zeroInit(Flags, .{
+        .ack = true,
+    });
+    const ack_push = std.mem.zeroInit(Flags, .{
+        .ack = true,
+        .psh = true,
     });
 
     pub fn format(self: Flags, writer: *std.Io.Writer) !void {
