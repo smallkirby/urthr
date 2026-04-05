@@ -846,9 +846,9 @@ const Socket = struct {
 };
 
 /// Default retransmission timeout in microseconds.
-const default_rto = 200 * std.time.us_per_s;
+const default_rto = 200;
 /// Interval for checking retransmission timeouts in microseconds.
-const retransmit_interval_us = 10 * std.time.us_per_s;
+const retransmit_interval_us = 100 * std.time.us_per_ms;
 /// Maximum number of seconds to keep an unacknowledged segment in the retransmission queue.
 const retransmit_deadline_sec = 12;
 
