@@ -3,6 +3,7 @@ pub const dhcp = @import("net/dhcp.zig");
 pub const ether = @import("net/ether.zig");
 pub const icmp = @import("net/icmp.zig");
 pub const ip = @import("net/ip.zig");
+pub const tcp = @import("net/tcp.zig");
 pub const udp = @import("net/udp.zig");
 pub const util = @import("net/util.zig");
 

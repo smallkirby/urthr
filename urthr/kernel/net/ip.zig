@@ -408,7 +408,7 @@ pub fn ifaceLookup(dest: IpAddr) ?*Interface {
 /// IP header.
 ///
 /// This struct provides only the mandatory fields excluding options.
-const Header = extern struct {
+pub const Header = extern struct {
     /// Header Length / Version.
     ///
     /// Header length is divided by 4.
@@ -477,6 +477,8 @@ pub const Protocol = enum(u8) {
     ip = 0,
     /// ICMP.
     icmp = 1,
+    /// TCP.
+    tcp = 6,
     /// UDP.
     udp = 17,
 
@@ -493,6 +495,7 @@ pub const Protocol = enum(u8) {
     fn getHandler(self: Protocol) ?Protocol.Vtable {
         return switch (self) {
             .icmp => @import("icmp.zig").vtable,
+            .tcp => @import("tcp.zig").vtable,
             .udp => @import("udp.zig").vtable,
             else => null,
         };
