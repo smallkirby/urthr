@@ -213,6 +213,7 @@ fn inputImpl(
         .syn_received, .established => {
             if (sock.snd.una < seg.ack and seg.ack <= sock.snd.nxt) {
                 sock.snd.una = seg.ack;
+                sock.rtclean();
 
                 if (sock.snd.wl1 < seg.seq or (sock.snd.wl1 == seg.seq and sock.snd.wl2 <= seg.ack)) {
                     sock.snd.wl1 = seg.seq;
@@ -259,10 +260,17 @@ fn output(sock: *Socket, flags: Flags, data: []const u8) net.Error!void {
         urd.unimplemented("TCP retransmission");
     }
 
+    // Push to the retransmission queue when the segment consumes sequence space.
+    const seq = if (flags.syn) sock.iss else sock.snd.nxt;
+    if (flags.syn or flags.fin or data.len != 0) {
+        try sock.rtpush(seq, flags, data);
+    }
+
+    // Output the segment.
     return outputSegment(
         sock.local,
         sock.remote,
-        if (flags.syn) sock.iss else sock.snd.nxt,
+        seq,
         sock.rcv.nxt,
         sock.rcv.wnd,
         flags,
@@ -341,6 +349,11 @@ const Endpoint = struct {
 // =============================================================
 // Socket
 // =============================================================
+
+/// Initialize TCP protocol stack.
+pub fn init() Allocator.Error!void {
+    _ = try urd.time.register(retransmit_interval_us, timerFn);
+}
 
 /// Open a TCP socket.
 pub fn open() net.Error!usize {
@@ -500,20 +513,11 @@ const SocketTable = struct {
     const Self = @This();
 
     /// Socket table.
-    sockets: [max_sockets]Socket = [_]Socket{.{
-        .state = .free,
-        .local = .empty,
-        .remote = .empty,
-        .snd = undefined,
-        .iss = undefined,
-        .rcv = undefined,
-        .irs = undefined,
-        .mss = undefined,
-        .buf = undefined,
-        .wq = .{},
-        ._lock = .{},
-        ._lock_ie = 0,
-    }} ** max_sockets,
+    sockets: [max_sockets]Socket = [_]Socket{std.mem.zeroInit(Socket, .{
+        .state = State.free,
+        .local = Endpoint.empty,
+        .remote = Endpoint.empty,
+    })} ** max_sockets,
 
     /// Lock to protect a socket table.
     lock: SpinLock = .{},
@@ -545,10 +549,23 @@ const SocketTable = struct {
     ///
     /// If a thread is waiting for the socket, wake it up.
     fn release(_: *Self, socket: *Socket) void {
+        const allocator = urd.mem.getGeneralAllocator();
+
+        // Notify the waiting thread if any to unblock it.
         _ = socket.wq.wake();
 
-        urd.mem.getGeneralAllocator().free(socket.buf);
+        // Free the queue.
+        var cur = socket.rq.first;
+        while (cur) |node| : (cur = node.next) {
+            const entry: *const RetransmitEntry = @fieldParentPtr("_node", node);
+            allocator.free(entry.data);
+            allocator.destroy(entry);
+        }
 
+        // Free the receive buffer.
+        allocator.free(socket.buf);
+
+        // Invalidate the socket.
         socket.* = std.mem.zeroInit(Socket, .{
             .state = .free,
         });
@@ -636,6 +653,8 @@ const Socket = struct {
     /// Receive buffer.
     buf: []u8,
 
+    /// Retransmission queue.
+    rq: std.DoublyLinkedList,
     /// Wait queue.
     wq: urd.WaitQueue,
     /// Lock to protect the wait queue.
@@ -669,7 +688,110 @@ const Socket = struct {
         rtt.expect(self.state != .free);
         self._lock.unlockRestoreIrq(self._lock_ie);
     }
+
+    /// Push the segment to the retransmission queue.
+    pub fn rtpush(self: *Socket, seq: u32, flags: Flags, data: []const u8) Allocator.Error!void {
+        const allocator = urd.mem.getGeneralAllocator();
+        const entry = try allocator.create(RetransmitEntry);
+        errdefer allocator.destroy(entry);
+
+        const buf = try allocator.alloc(u8, data.len);
+        errdefer allocator.free(buf);
+        @memcpy(buf, data);
+
+        const timestamp = urd.time.getCurrentTimestamp();
+        entry.* = .{
+            .time_first = timestamp,
+            .time_last = timestamp,
+            .rto = default_rto,
+            .seq = seq,
+            .flags = flags,
+            .data = buf,
+        };
+        self.rq.append(&entry._node);
+    }
+
+    /// Clean up all entries in the retransmission queue that have been acknowledged.
+    pub fn rtclean(self: *Socket) void {
+        var cur = self.rq.first;
+        while (cur) |node| : (cur = node.next) {
+            const entry: *const RetransmitEntry = @fieldParentPtr("_node", node);
+
+            var consume = entry.data.len;
+            if (entry.flags.syn or entry.flags.fin) {
+                consume += 1;
+            }
+            if (self.snd.una < entry.seq + consume) {
+                break;
+            }
+
+            const allocator = urd.mem.getGeneralAllocator();
+            self.rq.remove(node);
+            allocator.free(entry.data);
+            allocator.destroy(entry);
+        }
+    }
 };
+
+/// Default retransmission timeout in microseconds.
+const default_rto = 200 * std.time.us_per_s;
+/// Interval for checking retransmission timeouts in microseconds.
+const retransmit_interval_us = 10 * std.time.us_per_s;
+/// Maximum number of seconds to keep an unacknowledged segment in the retransmission queue.
+const retransmit_deadline_sec = 12;
+
+const RetransmitEntry = struct {
+    /// Timestamp of the first transmission of the segment.
+    time_first: urd.time.Ktimestamp,
+    /// Timestamp of the most recent transmission of the segment.
+    time_last: urd.time.Ktimestamp,
+    /// Retransmission timeout in microseconds.
+    rto: u64,
+    /// Sequence number of the segment.
+    seq: u32,
+    /// Flags of the segment.
+    flags: Flags,
+    /// Data of the segment.
+    data: []const u8,
+    /// List head.
+    _node: std.DoublyLinkedList.Node = .{},
+};
+
+/// Called periodically to check retransmission queue.
+fn timerFn() void {
+    for (&sock_table.sockets) |*sock| {
+        if (sock.state == .free) continue;
+
+        var cur = sock.rq.first;
+        while (cur) |node| : (cur = node.next) {
+            const entry: *RetransmitEntry = @fieldParentPtr("_node", node);
+            const timestamp = urd.time.getCurrentTimestamp();
+            const elapsed = timestamp - entry.time_last;
+
+            if (timestamp - entry.time_first > retransmit_deadline_sec * std.time.us_per_s) {
+                sock.state = .closed;
+                sock.wake();
+                continue;
+            }
+
+            if (elapsed >= entry.rto) {
+                outputSegment(
+                    sock.local,
+                    sock.remote,
+                    entry.seq,
+                    sock.rcv.nxt,
+                    sock.rcv.wnd,
+                    entry.flags,
+                    entry.data,
+                ) catch {};
+
+                // Exponential backoff.
+                entry.time_last = timestamp;
+                entry.rto = @min(entry.rto * 2, 60 * std.time.us_per_s);
+            }
+        }
+    }
+}
 
 const State = enum {
     /// Socket is not in use.
@@ -850,6 +972,7 @@ fn print(data: []const u8, logger: anytype) void {
 const std = @import("std");
 const log = std.log.scoped(.tcp);
 const trace = urd.trace.scoped(.net, .tcp);
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");

@@ -24,3 +24,5 @@ caf = "caf"
 aer = "aer"
 # Target Heartbeat Address
 tha = "tha"
+# Retransmission Timeout
+rto = "rto"
