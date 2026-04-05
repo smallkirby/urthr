@@ -146,6 +146,45 @@ fn inputImpl(
         },
 
         .syn_sent => {
+            var valid_ack = false;
+
+            if (flags.ack) {
+                // Drop a segment with invalid ACK number.
+                if (seg.ack <= sock.iss or seg.ack > sock.snd.nxt) {
+                    return outputSegment(
+                        local,
+                        remote,
+                        seg.ack,
+                        0,
+                        0,
+                        .reset,
+                        &.{},
+                    );
+                }
+                if (sock.snd.una <= seg.ack and seg.ack <= sock.snd.nxt) {
+                    valid_ack = true;
+                }
+            }
+
+            if (flags.syn) {
+                sock.rcv.nxt = seg.seq + 1;
+                sock.irs = seg.seq;
+
+                if (valid_ack) {
+                    sock.snd.una = seg.ack;
+                    sock.rtclean();
+                }
+                if (sock.snd.una > sock.iss) {
+                    sock.state = .established;
+                    try output(sock, .ackn, &.{});
+                    sock.snd.wnd = seg.wnd;
+                    sock.snd.wl1 = seg.seq;
+                    sock.snd.wl2 = seg.ack;
+                    wakeup = true;
+                    return;
+                }
+            }
+
             return; // drop
         },
 
@@ -369,11 +408,16 @@ pub fn bind(desc: usize, local: Endpoint) net.Error!void {
         return net.Error.Unavailable;
     }
 
-    if (sock_table.select(local, .empty) != null) {
+    var lc = local;
+    if (lc.port == 0) {
+        lc.port = selectDynamicPort();
+    }
+
+    if (sock_table.select(lc, .empty) != null) {
         return net.Error.Unavailable;
     }
 
-    sock.local = local;
+    sock.local = lc;
     sock.state = .closed;
 }
 
@@ -392,6 +436,69 @@ pub fn listen(desc: usize) net.Error!void {
     sock.state = .listen;
 
     // Wait until a connection is established.
+    try waitSockEstablished(sock);
+
+    // Set MSS for the established connection.
+    const iface = net.ip.ifaceLookup(sock.remote.ip) orelse {
+        log.err("connection failed: no interface for remote IP: {f}", .{sock.remote.ip});
+        sock.state = .closed;
+        return net.Error.Unavailable;
+    };
+    sock.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
+}
+
+/// Connect a TCP socket to the given remote endpoint.
+pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
+    const sock = sock_table.get(desc);
+
+    if (sock.state != .closed) {
+        log.err("connect: invalid socket state: {t}", .{sock.state});
+        return net.Error.Unavailable;
+    }
+
+    // Select a local interface to reach the remote endpoint.
+    if (sock.local.ip.eql(.any)) {
+        const iface = net.ip.ifaceLookup(remote.ip) orelse {
+            log.err("connect: no route to remote IP: {f}", .{remote.ip});
+            return net.Error.Unavailable;
+        };
+        sock.local.ip = iface.unicast;
+    }
+
+    // Check if the local endpoint is already used by another socket.
+    if (sock_table.select(sock.local, remote)) |s| {
+        if (sock_table.indexOf(s) != desc) {
+            log.err("connect: address already in use: {f}:{d}", .{ sock.local.ip, sock.local.port });
+            return net.Error.Unavailable;
+        }
+    }
+
+    sock.remote = remote;
+    sock.rcv.wnd = @intCast(sock.buf.len);
+    sock.iss = rng().int(u32);
+    output(sock, .sync, &.{}) catch {
+        sock.state = .closed;
+        sock_table.release(sock);
+        return net.Error.Unavailable;
+    };
+    sock.snd.una = sock.iss;
+    sock.snd.nxt = sock.iss + 1; // +1 for SYN
+    sock.state = .syn_sent;
+
+    // Wait until a connection is established.
+    try waitSockEstablished(sock);
+
+    // Set MSS for the established connection.
+    const iface = net.ip.ifaceLookup(sock.remote.ip) orelse {
+        log.err("connection failed: no interface for remote IP: {f}", .{sock.remote.ip});
+        sock.state = .closed;
+        return net.Error.Unavailable;
+    };
+    sock.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
+}
+
+/// Wait until a TCP socket is established.
+fn waitSockEstablished(sock: *Socket) net.Error!void {
     var state = sock.state;
     while (true) {
         sock.wait();
@@ -411,16 +518,6 @@ pub fn listen(desc: usize) net.Error!void {
             },
         }
     }
-
-    // Set MSS for the established connection.
-    const iface = net.ip.ifaceLookup(sock.remote.ip) orelse {
-        log.err("connection failed: no interface for remote IP: {f}", .{sock.remote.ip});
-        sock.state = .closed;
-        return net.Error.Unavailable;
-    };
-    sock.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
-
-    return;
 }
 
 /// Close a TCP socket.
@@ -501,6 +598,21 @@ pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
     sock.rcv.wnd += @intCast(len);
 
     return buf[0..len];
+}
+
+/// Range of dynamic TCP ports that can be used for automatic local port assignment.
+const dynamic_port = common.Range{
+    .start = 49152,
+    .end = 65535,
+};
+
+/// Select an available dynamic port for automatic local port assignment.
+fn selectDynamicPort() Port {
+    for (dynamic_port.start..dynamic_port.end) |port| {
+        _ = sock_table.select(.{ .ip = .any, .port = @intCast(port) }, .empty) orelse {
+            return @intCast(port);
+        };
+    } else @panic("TCP dynamic port exhaustion");
 }
 
 // =============================================================
