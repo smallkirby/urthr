@@ -138,7 +138,7 @@ fn inputImpl(
 
                 sock.snd.nxt = sock.iss + 1; // +1 for SYN
                 sock.snd.una = sock.iss;
-                sock.state = .syn_received;
+                sock.update(.syn_received);
                 return;
             }
             // Ignore.
@@ -175,7 +175,7 @@ fn inputImpl(
                     sock.rtclean();
                 }
                 if (sock.snd.una > sock.iss) {
-                    sock.state = .established;
+                    sock.update(.established);
                     try output(sock, .ackn, &.{});
                     sock.snd.wnd = seg.wnd;
                     sock.snd.wl1 = seg.seq;
@@ -192,28 +192,32 @@ fn inputImpl(
     }
 
     // Check the segment is acceptable according to the RCV.WND and RCV.NXT variables.
-    if (sock.state == .syn_received or sock.state == .established) {
-        const acceptable = if (seg.len == 0)
-            (sock.rcv.wnd == 0 and seg.seq == sock.rcv.nxt) or
-                (sock.rcv.nxt == seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd)
-        else
-            sock.rcv.wnd != 0 and
-                ((sock.rcv.nxt <= seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd) or
-                    (sock.rcv.nxt <= seg.seq + seg.len - 1 and seg.seq + seg.len - 1 < sock.rcv.nxt + sock.rcv.wnd));
+    switch (sock.state) {
+        .syn_received, .established, .close_wait, .last_ack => {
+            const acceptable = if (seg.len == 0)
+                (sock.rcv.wnd == 0 and seg.seq == sock.rcv.nxt) or
+                    (sock.rcv.nxt == seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd)
+            else
+                sock.rcv.wnd != 0 and
+                    ((sock.rcv.nxt <= seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd) or
+                        (sock.rcv.nxt <= seg.seq + seg.len - 1 and seg.seq + seg.len - 1 < sock.rcv.nxt + sock.rcv.wnd));
 
-        if (!acceptable) {
-            if (flags.rst) try outputSegment(
-                local,
-                remote,
-                seg.ack,
-                0,
-                0,
-                .reset,
-                &.{},
-            );
+            if (!acceptable) {
+                if (flags.rst) try outputSegment(
+                    local,
+                    remote,
+                    seg.ack,
+                    0,
+                    0,
+                    .reset,
+                    &.{},
+                );
 
-            return;
-        }
+                return;
+            }
+        },
+
+        else => {},
     }
 
     // Check validity of ACK number.
@@ -231,7 +235,7 @@ fn inputImpl(
     switch (sock.state) {
         .syn_received => {
             if (sock.snd.una <= seg.ack and seg.ack <= sock.snd.nxt) {
-                sock.state = .established;
+                sock.update(.established);
                 wakeup = true;
             } else {
                 return outputSegment(
@@ -249,7 +253,7 @@ fn inputImpl(
         else => {},
     }
     switch (sock.state) {
-        .syn_received, .established => {
+        .syn_received, .established, .close_wait => {
             if (sock.snd.una < seg.ack and seg.ack <= sock.snd.nxt) {
                 sock.snd.una = seg.ack;
                 sock.rtclean();
@@ -267,29 +271,56 @@ fn inputImpl(
             }
         },
 
+        .last_ack => {
+            if (seg.ack == sock.snd.nxt) {
+                sock.state = .closed;
+                sock_table.release(sock);
+            }
+        },
+
         else => {},
     }
 
     // Process the segment data.
     const hlen = (hdr.read(.offset) >> 4) * 4;
     const dlen = data.len - hlen;
-    if (sock.state == .established and dlen != 0) {
-        if (sock.rcv.nxt != seg.seq or sock.rcv.wnd < dlen) {
-            // No support for out-of-order segments.
+    switch (sock.state) {
+        .established => if (dlen != 0) {
+            if (sock.rcv.nxt != seg.seq or sock.rcv.wnd < dlen) {
+                // No support for out-of-order segments.
+                try output(sock, .ackn, &.{});
+            }
+
+            // Copy data to the receive buffer.
+            const offset = sock.buf.len - sock.rcv.wnd;
+            @memcpy(sock.buf[offset .. offset + dlen], data[hlen..]);
+            sock.rcv.nxt = seg.seq + @as(u32, @intCast(dlen));
+            sock.rcv.wnd -= @intCast(dlen);
+
+            // Send ACK.
             try output(sock, .ackn, &.{});
+
+            // Wake up the thread waiting for data if any.
+            wakeup = true;
+        },
+
+        .close_wait, .last_ack => {}, // ignore data in closing states
+
+        else => {},
+    }
+
+    // Handle FIN request.
+    if (flags.fin) {
+        if (sock.state == .closed or sock.state == .listen) {
+            return; // drop
         }
-
-        // Copy data to the receive buffer.
-        const offset = sock.buf.len - sock.rcv.wnd;
-        @memcpy(sock.buf[offset .. offset + dlen], data[hlen..]);
-        sock.rcv.nxt = seg.seq + @as(u32, @intCast(dlen));
-        sock.rcv.wnd -= @intCast(dlen);
-
-        // Send ACK.
+        sock.rcv.nxt = seg.seq + 1; // +1 for FIN
         try output(sock, .ackn, &.{});
 
-        // Wake up the thread waiting for data if any.
-        wakeup = true;
+        if (sock.state == .syn_received or sock.state == .established) {
+            sock.update(.close_wait);
+            wakeup = true;
+        }
     }
 }
 
@@ -418,7 +449,7 @@ pub fn bind(desc: usize, local: Endpoint) net.Error!void {
     }
 
     sock.local = lc;
-    sock.state = .closed;
+    sock.update(.closed);
 }
 
 /// Listen for incoming connection requests on a TCP socket.
@@ -433,7 +464,7 @@ pub fn listen(desc: usize) net.Error!void {
     }
 
     sock.remote = .empty;
-    sock.state = .listen;
+    sock.update(.listen);
 
     // Wait until a connection is established.
     try waitSockEstablished(sock);
@@ -441,7 +472,7 @@ pub fn listen(desc: usize) net.Error!void {
     // Set MSS for the established connection.
     const iface = net.ip.ifaceLookup(sock.remote.ip) orelse {
         log.err("connection failed: no interface for remote IP: {f}", .{sock.remote.ip});
-        sock.state = .closed;
+        sock.update(.closed);
         return net.Error.Unavailable;
     };
     sock.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
@@ -477,13 +508,13 @@ pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
     sock.rcv.wnd = @intCast(sock.buf.len);
     sock.iss = rng().int(u32);
     output(sock, .sync, &.{}) catch {
-        sock.state = .closed;
+        sock.update(.closed);
         sock_table.release(sock);
         return net.Error.Unavailable;
     };
     sock.snd.una = sock.iss;
     sock.snd.nxt = sock.iss + 1; // +1 for SYN
-    sock.state = .syn_sent;
+    sock.update(.syn_sent);
 
     // Wait until a connection is established.
     try waitSockEstablished(sock);
@@ -491,7 +522,7 @@ pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
     // Set MSS for the established connection.
     const iface = net.ip.ifaceLookup(sock.remote.ip) orelse {
         log.err("connection failed: no interface for remote IP: {f}", .{sock.remote.ip});
-        sock.state = .closed;
+        sock.update(.closed);
         return net.Error.Unavailable;
     };
     sock.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
@@ -513,7 +544,7 @@ fn waitSockEstablished(sock: *Socket) net.Error!void {
             .established => break,
             else => {
                 log.err("connection failed: unexpected state: {t}", .{state});
-                sock.state = .closed;
+                sock.update(.closed);
                 return net.Error.Unavailable;
             },
         }
@@ -524,19 +555,27 @@ fn waitSockEstablished(sock: *Socket) net.Error!void {
 pub fn close(desc: usize) void {
     const sock = sock_table.get(desc);
 
-    if (sock.state != .free and sock.state != .closed) {
-        outputSegment(
-            sock.local,
-            sock.remote,
-            sock.snd.nxt,
-            sock.rcv.nxt,
-            sock.rcv.wnd,
-            .reset,
-            &.{},
-        ) catch {};
+    switch (sock.state) {
+        .closed => return log.warn("close: socket already closed", .{}),
+        .listen, .syn_sent => sock.update(.closed),
+        .syn_received, .established => {
+            output(sock, .reset, &.{}) catch {};
+            sock.update(.close_wait);
+        },
+        .close_wait => {
+            output(sock, .fin_ack, &.{}) catch {};
+            sock.snd.nxt += 1; // +1 for FIN
+            sock.update(.last_ack);
+        },
+        .last_ack => {}, // already sent FIN-ACK
+        else => return log.err("close: invalid socket state: {t}", .{sock.state}),
     }
 
-    sock_table.release(sock);
+    if (sock.state == .closed) {
+        sock_table.release(sock);
+    } else {
+        sock.wake();
+    }
 }
 
 /// Send data through a TCP socket.
@@ -545,33 +584,42 @@ pub fn close(desc: usize) void {
 pub fn send(desc: usize, data: []const u8) net.Error!void {
     const sock = sock_table.get(desc);
 
-    if (sock.state != .established) {
-        log.warn("send: socket not established: {t}", .{sock.state});
-        return net.Error.Unavailable;
-    }
-
     sock.lock();
     defer sock.unlock();
 
-    var sent: usize = 0;
-    var cap: usize = 0;
-    while (sent < data.len) {
-        cap = sock.snd.wnd - (sock.snd.nxt - sock.snd.una);
+    switch (sock.state) {
+        .established, .close_wait => {
+            var sent: usize = 0;
+            var cap: usize = 0;
+            while (sent < data.len) {
+                cap = sock.snd.wnd - (sock.snd.nxt - sock.snd.una);
 
-        if (cap == 0) {
-            trace("send: receiver window is full, waiting for ACK.", .{});
-            sock.wq.wait(&sock._lock);
-            continue;
-        }
+                if (cap == 0) {
+                    trace("send: receiver window is full, waiting for ACK.", .{});
+                    sock.wq.wait(&sock._lock);
+                    continue;
+                }
 
-        const to_send = @min(sock.mss, data.len - sent, cap);
-        output(sock, .ack_push, data[sent .. sent + to_send]) catch |err| {
-            log.err("send: failed to send data: {t}", .{err});
-            sock.state = .closed;
+                const to_send = @min(sock.mss, data.len - sent, cap);
+                output(sock, .ack_push, data[sent .. sent + to_send]) catch |err| {
+                    log.err("send: failed to send data: {t}", .{err});
+                    sock.update(.closed);
+                    return net.Error.Unavailable;
+                };
+                sock.snd.nxt += to_send;
+                sent += to_send;
+            }
+        },
+
+        .last_ack => {
+            log.err("send: socket is closing, cannot send data", .{});
             return net.Error.Unavailable;
-        };
-        sock.snd.nxt += to_send;
-        sent += to_send;
+        },
+
+        else => {
+            log.err("send: invalid socket state: {t}", .{sock.state});
+            return net.Error.Unavailable;
+        },
     }
 }
 
@@ -580,15 +628,24 @@ pub fn send(desc: usize, data: []const u8) net.Error!void {
 /// This function blocks until at least one byte of data is received.
 pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
     const sock = sock_table.get(desc);
-    rtt.expectEqual(.established, sock.state);
 
     sock.lock();
     defer sock.unlock();
 
     // Wait until there is data in the receive buffer.
     var remain = sock.buf.len - sock.rcv.wnd;
-    while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
-        sock.wq.wait(&sock._lock);
+    switch (sock.state) {
+        .established => {
+            while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
+                sock.wq.wait(&sock._lock);
+            }
+        },
+        .close_wait => if (remain == 0) return &.{},
+        .last_ack => return &.{},
+        else => {
+            log.err("receive: invalid socket state: {t}", .{sock.state});
+            return net.Error.Unavailable;
+        },
     }
 
     // Copy data from the receive buffer to the user buffer.
@@ -792,12 +849,10 @@ const Socket = struct {
     }
 
     pub fn lock(self: *Socket) void {
-        rtt.expect(self.state != .free);
         self._lock_ie = self._lock.lockDisableIrq();
     }
 
     pub fn unlock(self: *Socket) void {
-        rtt.expect(self.state != .free);
         self._lock.unlockRestoreIrq(self._lock_ie);
     }
 
@@ -842,6 +897,11 @@ const Socket = struct {
             allocator.free(entry.data);
             allocator.destroy(entry);
         }
+    }
+
+    pub fn update(self: *Socket, state: State) void {
+        trace("socket#{d} state change: {t} -> {t}", .{ sock_table.indexOf(self), self.state, state });
+        self.state = state;
     }
 };
 
@@ -1011,6 +1071,10 @@ const Flags = packed struct(u8) {
     /// Reserved.
     _rsvd: u2 = 0,
 
+    const fin_ack = std.mem.zeroInit(Flags, .{
+        .fin = true,
+        .ack = true,
+    });
     const sync = std.mem.zeroInit(Flags, .{
         .syn = true,
     });
