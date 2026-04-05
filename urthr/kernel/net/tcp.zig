@@ -128,7 +128,7 @@ fn inputImpl(
                 sock.local = local;
                 sock.remote = remote;
                 sock.rcv = .{
-                    .wnd = seg.wnd,
+                    .wnd = @intCast(sock.buf.len),
                     .nxt = seg.seq + 1,
                 };
                 sock.irs = seg.seq;
@@ -465,6 +465,31 @@ pub fn send(desc: usize, data: []const u8) net.Error!void {
     }
 }
 
+/// Receive data from a TCP socket.
+///
+/// This function blocks until at least one byte of data is received.
+pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
+    const sock = sock_table.get(desc);
+    rtt.expectEqual(.established, sock.state);
+
+    sock.lock();
+    defer sock.unlock();
+
+    // Wait until there is data in the receive buffer.
+    var remain = sock.buf.len - sock.rcv.wnd;
+    while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
+        sock.wq.wait(&sock._lock);
+    }
+
+    // Copy data from the receive buffer to the user buffer.
+    const len = @min(buf.len, remain);
+    @memcpy(buf[0..len], sock.buf[0..len]);
+    @memmove(sock.buf[0 .. sock.buf.len - len], sock.buf[len..]);
+    sock.rcv.wnd += @intCast(len);
+
+    return buf[0..len];
+}
+
 // =============================================================
 // Socket Internal
 
@@ -540,11 +565,6 @@ const SocketTable = struct {
         const ie = self.lock.lockDisableIrq();
         defer self.lock.unlockRestoreIrq(ie);
 
-        trace("socket.select: {f}:{d}, {f}:{d}", .{
-            local.ip,  local.port,
-            remote.ip, remote.port,
-        });
-
         var cand: ?*Socket = null;
         for (&self.sockets) |*s| {
             if (s.state == .free) continue;
@@ -556,12 +576,6 @@ const SocketTable = struct {
                 remote.eql(s.remote) or
                 s.remote.eql(.empty) or
                 remote.eql(.empty);
-            trace("  cand={f}:{d},{f}:{d}, local_match={d}, remote_match={d}, state={t}", .{
-                s.local.ip,                s.local.port,
-                s.remote.ip,               s.remote.port,
-                @intFromBool(local_match), @intFromBool(remote_match),
-                s.state,
-            });
             if (local_match and remote_match) {
                 if (s.state != .listen) {
                     return s;
