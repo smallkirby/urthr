@@ -93,14 +93,18 @@ fn mapImpl(arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAlloc
     if (opts.exact) {
         if (arg.pa % granule != 0) return error.InvalidArgument;
         if (arg.va % granule != 0) return error.InvalidArgument;
+        if (arg.size % granule != 0) return error.InvalidArgument;
     }
 
     const asize = util.roundup(arg.size, granule);
     const page_type: @FieldType(PageDesc, "type") = if (level == 3) .page else .block;
 
+    const base_pa = util.rounddown(arg.pa, granule);
+    const base_va = util.rounddown(arg.va, granule);
+
     for (0..asize / granule) |i| {
-        const cur_pa = arg.pa + i * granule;
-        const cur_va = arg.va + i * granule;
+        const cur_pa = base_pa + i * granule;
+        const cur_va = base_va + i * granule;
         const desc = try lookupSpawn(cur_va, level, allocator);
 
         desc.* = PageDesc{
@@ -280,10 +284,13 @@ fn allocNewTable(allocator: PageAllocator, T: type) Error![]T {
 
 /// Get the root page table corresponding to the given virtual address.
 fn getRoot(va: usize) []TableDesc {
-    if (va >> 48 == 0) {
+    const top = va >> 48;
+    if (top == 0x0000) {
         return l0_0;
-    } else {
+    } else if (top == 0xFFFF) {
         return l0_1;
+    } else {
+        @panic("non-canonical virtual address");
     }
 }
 
