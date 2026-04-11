@@ -150,7 +150,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, mem.getPageAllocator());
+        }, .{}, mem.getPageAllocator());
         return map_size;
     }
 
@@ -166,7 +166,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, mem.getPageAllocator());
+        }, .{}, mem.getPageAllocator());
         return map_size;
     }
 
@@ -182,7 +182,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, mem.getPageAllocator());
+        }, .{}, mem.getPageAllocator());
         return map_size;
     }
 }

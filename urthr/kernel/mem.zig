@@ -35,7 +35,7 @@ pub fn init() Error!void {
             .size = util.roundup(kernelSize(), 2 * units.mib),
             .perm = .kernel_rwx,
             .attr = .normal,
-        }, allocator);
+        }, .{}, allocator);
     }
 
     // Linear mapping: 1GiB granule, RW, normal.
@@ -48,7 +48,7 @@ pub fn init() Error!void {
                 .size = dram.size(),
                 .perm = .kernel_rw,
                 .attr = .normal,
-            }, allocator);
+            }, .{}, allocator);
         }
     }
 
@@ -62,7 +62,7 @@ pub fn init() Error!void {
                 .size = range.size(),
                 .perm = .kernel_rw,
                 .attr = .device,
-            }, allocator);
+            }, .{}, allocator);
         }
     }
 
