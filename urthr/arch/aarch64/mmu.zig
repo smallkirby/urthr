@@ -43,26 +43,50 @@ pub const MapOption = struct {
     attr: Attribute,
 };
 
+const Granule = enum {
+    @"4kb",
+    @"2mb",
+    @"1gb",
+
+    fn granule(self: Granule) usize {
+        return switch (self) {
+            .@"4kb" => page_size,
+            .@"2mb" => 2 * units.mib,
+            .@"1gb" => 1 * units.gib,
+        };
+    }
+
+    fn level(self: Granule) Level {
+        return switch (self) {
+            .@"4kb" => 3,
+            .@"2mb" => 2,
+            .@"1gb" => 1,
+        };
+    }
+};
+
 /// Maps the VA to PA using 4KiB pages.
 pub fn map4kb(opt: MapOption, allocator: PageAllocator) Error!void {
-    return mapImpl(opt, page_size, 3, allocator);
+    return mapImpl(opt, .@"4kb", allocator);
 }
 
 /// Maps the VA to PA using 2MiB pages.
 pub fn map2mb(opt: MapOption, allocator: PageAllocator) Error!void {
-    return mapImpl(opt, 2 * units.mib, 2, allocator);
+    return mapImpl(opt, .@"2mb", allocator);
 }
 
 /// Maps the VA to PA using 1GiB pages.
 pub fn map1gb(opt: MapOption, allocator: PageAllocator) Error!void {
-    return mapImpl(opt, 1 * units.gib, 1, allocator);
+    return mapImpl(opt, .@"1gb", allocator);
 }
 
-fn mapImpl(opt: MapOption, granule: usize, level: Level, allocator: PageAllocator) Error!void {
+fn mapImpl(opt: MapOption, mg: Granule, allocator: PageAllocator) Error!void {
     if (opt.pa % page_size != 0) return Error.InvalidArgument;
     if (opt.va % page_size != 0) return Error.InvalidArgument;
     if (opt.size % page_size != 0) return Error.InvalidArgument;
 
+    const granule = mg.granule();
+    const level = mg.level();
     const asize = util.roundup(opt.size, granule);
     const page_type: @FieldType(PageDesc, "type") = if (level == 3) .page else .block;
 
