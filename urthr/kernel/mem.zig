@@ -29,28 +29,26 @@ pub fn init() Error!void {
     {
         rtt.expectEqual(0, pmap.kernel % size_2mib);
         rtt.expectEqual(0, vmap.kernel.start % size_2mib);
-        try arch.mmu.map2mb(
-            pmap.kernel,
-            vmap.kernel.start,
-            util.roundup(kernelSize(), 2 * units.mib),
-            .kernel_rwx,
-            .normal,
-            allocator,
-        );
+        try arch.mmu.map2mb(.{
+            .pa = pmap.kernel,
+            .va = vmap.kernel.start,
+            .size = util.roundup(kernelSize(), 2 * units.mib),
+            .perm = .kernel_rwx,
+            .attr = .normal,
+        }, allocator);
     }
 
     // Linear mapping: 1GiB granule, RW, normal.
     log.debug("Mapping linear memory.", .{});
     {
         for (pmap.drams) |dram| {
-            try arch.mmu.map1gb(
-                dram.start,
-                vmap.linear.start + dram.start,
-                dram.size(),
-                .kernel_rw,
-                .normal,
-                allocator,
-            );
+            try arch.mmu.map1gb(.{
+                .pa = dram.start,
+                .va = vmap.linear.start + dram.start,
+                .size = dram.size(),
+                .perm = .kernel_rw,
+                .attr = .normal,
+            }, allocator);
         }
     }
 
@@ -58,14 +56,13 @@ pub fn init() Error!void {
     log.debug("Mapping device memory.", .{});
     {
         for (board.getTempMaps()) |range| {
-            try arch.mmu.map4kb(
-                range.start,
-                range.start,
-                range.size(),
-                .kernel_rw,
-                .device,
-                allocator,
-            );
+            try arch.mmu.map4kb(.{
+                .pa = range.start,
+                .va = range.start,
+                .size = range.size(),
+                .perm = .kernel_rw,
+                .attr = .device,
+            }, allocator);
         }
     }
 

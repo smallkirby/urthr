@@ -80,28 +80,26 @@ export fn kmain() callconv(.c) noreturn {
 
         // Identity mapping for DRAM.
         const dram = board.memmap.drams[0];
-        arch.mmu.map1gb(
-            dram.start,
-            dram.start,
-            dram.size(),
-            .kernel_rwx,
-            .normal,
-            allocator.interface(),
-        ) catch {
+        arch.mmu.map1gb(.{
+            .pa = dram.start,
+            .va = dram.start,
+            .size = dram.size(),
+            .perm = .kernel_rwx,
+            .attr = .normal,
+        }, allocator.interface()) catch {
             @panic("Failed to map DRAM for Wyrd.");
         };
         log.info("Identity-mapped (DRAM): 0x{X:0>8} - 0x{X:0>8}", .{ dram.start, dram.end });
 
         // Identity mapping for UART.
         const uart = board.memmap.pl011;
-        arch.mmu.map1gb(
-            uart.start,
-            uart.start,
-            uart.size(),
-            .kernel_rw,
-            .device,
-            allocator.interface(),
-        ) catch {
+        arch.mmu.map1gb(.{
+            .pa = uart.start,
+            .va = uart.start,
+            .size = uart.size(),
+            .perm = .kernel_rw,
+            .attr = .device,
+        }, allocator.interface()) catch {
             @panic("Failed to map UART for Wyrd.");
         };
         log.info("Identity-mapped (UART): 0x{X:0>8} - 0x{X:0>8}", .{ uart.start, uart.end });
@@ -160,14 +158,13 @@ fn mapKernel(header: UrthrHeader) *KernelEntry {
     const pa = util.rounddown(board.memmap.kernel, page_size);
     const size = (board.memmap.kernel + header.mem_size) - pa;
     const aligned_size = util.roundup(size, page_size);
-    arch.mmu.map4kb(
-        pa,
-        va,
-        aligned_size,
-        .kernel_rwx,
-        .normal,
-        allocator.interface(),
-    ) catch {
+    arch.mmu.map4kb(.{
+        .pa = pa,
+        .va = va,
+        .size = aligned_size,
+        .perm = .kernel_rwx,
+        .attr = .normal,
+    }, allocator.interface()) catch {
         @panic("Failed to map Urthr kernel region.");
     };
 

@@ -144,14 +144,13 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
     // Map using 1GiB pages if possible.
     if (isMappableAs(virt, phys, max, common.mem.size_1gib)) {
         const map_size = util.rounddown(max, common.mem.size_1gib);
-        try arch.mmu.map1gb(
-            phys,
-            virt,
-            map_size,
-            .kernel_rw,
-            .device,
-            mem.getPageAllocator(),
-        );
+        try arch.mmu.map1gb(.{
+            .pa = phys,
+            .va = virt,
+            .size = map_size,
+            .perm = .kernel_rw,
+            .attr = .device,
+        }, mem.getPageAllocator());
         return map_size;
     }
 
@@ -161,14 +160,13 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             util.rounddown(max, common.mem.size_2mib),
             common.mem.size_1gib - (virt % common.mem.size_1gib),
         );
-        try arch.mmu.map2mb(
-            phys,
-            virt,
-            map_size,
-            .kernel_rw,
-            .device,
-            mem.getPageAllocator(),
-        );
+        try arch.mmu.map2mb(.{
+            .pa = phys,
+            .va = virt,
+            .size = map_size,
+            .perm = .kernel_rw,
+            .attr = .device,
+        }, mem.getPageAllocator());
         return map_size;
     }
 
@@ -178,14 +176,13 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             max,
             common.mem.size_2mib - (virt % common.mem.size_2mib),
         );
-        try arch.mmu.map4kb(
-            phys,
-            virt,
-            map_size,
-            .kernel_rw,
-            .device,
-            mem.getPageAllocator(),
-        );
+        try arch.mmu.map4kb(.{
+            .pa = phys,
+            .va = virt,
+            .size = map_size,
+            .perm = .kernel_rw,
+            .attr = .device,
+        }, mem.getPageAllocator());
         return map_size;
     }
 }
