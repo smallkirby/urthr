@@ -45,91 +45,35 @@ pub const MapOption = struct {
 
 /// Maps the VA to PA using 4KiB pages.
 pub fn map4kb(opt: MapOption, allocator: PageAllocator) Error!void {
-    if (opt.pa % page_size != 0) return Error.InvalidArgument;
-    if (opt.va % page_size != 0) return Error.InvalidArgument;
-    if (opt.size % page_size != 0) return Error.InvalidArgument;
-
-    const granule = page_size;
-    const asize = util.roundup(opt.size, page_size);
-
-    for (0..asize / page_size) |i| {
-        const cur_pa = opt.pa + i * granule;
-        const cur_va = opt.va + i * granule;
-        const desc = try lookupSpawn(cur_va, 3, allocator);
-
-        desc.* = PageDesc{
-            .valid = true,
-            .type = .page,
-            .lattr = LowerAttr{
-                .memattr = getAttrIndex(opt.attr),
-                .ap = Perm.from(opt.perm),
-                .sh = .inner,
-            },
-            .oa = @truncate(cur_pa >> page_shift),
-            .uattr = UpperAttr{
-                .dbm = false,
-                .contiguous = false,
-                .pxn = !opt.perm.kx,
-                .uxn = !opt.perm.ux,
-            },
-        };
-
-        flush();
-    }
+    return mapImpl(opt, page_size, 3, allocator);
 }
 
 /// Maps the VA to PA using 2MiB pages.
 pub fn map2mb(opt: MapOption, allocator: PageAllocator) Error!void {
-    if (opt.pa % page_size != 0) return Error.InvalidArgument;
-    if (opt.va % page_size != 0) return Error.InvalidArgument;
-    if (opt.size % page_size != 0) return Error.InvalidArgument;
-
-    const granule = 2 * units.mib;
-    const asize = util.roundup(opt.size, granule);
-
-    for (0..asize / granule) |i| {
-        const cur_pa = opt.pa + i * granule;
-        const cur_va = opt.va + i * granule;
-        const desc = try lookupSpawn(cur_va, 2, allocator);
-
-        desc.* = PageDesc{
-            .valid = true,
-            .type = .block,
-            .lattr = LowerAttr{
-                .memattr = getAttrIndex(opt.attr),
-                .ap = Perm.from(opt.perm),
-                .sh = .inner,
-            },
-            .oa = @truncate(cur_pa >> page_shift),
-            .uattr = UpperAttr{
-                .dbm = false,
-                .contiguous = false,
-                .pxn = !opt.perm.kx,
-                .uxn = !opt.perm.ux,
-            },
-        };
-
-        flush();
-    }
+    return mapImpl(opt, 2 * units.mib, 2, allocator);
 }
 
 /// Maps the VA to PA using 1GiB pages.
 pub fn map1gb(opt: MapOption, allocator: PageAllocator) Error!void {
+    return mapImpl(opt, 1 * units.gib, 1, allocator);
+}
+
+fn mapImpl(opt: MapOption, granule: usize, level: Level, allocator: PageAllocator) Error!void {
     if (opt.pa % page_size != 0) return Error.InvalidArgument;
     if (opt.va % page_size != 0) return Error.InvalidArgument;
     if (opt.size % page_size != 0) return Error.InvalidArgument;
 
-    const granule = 1 * units.gib;
-    const asize = util.roundup(opt.size, units.gib);
+    const asize = util.roundup(opt.size, granule);
+    const page_type: @FieldType(PageDesc, "type") = if (level == 3) .page else .block;
 
-    for (0..asize / units.gib) |i| {
+    for (0..asize / granule) |i| {
         const cur_pa = opt.pa + i * granule;
         const cur_va = opt.va + i * granule;
-        const desc = try lookupSpawn(cur_va, 1, allocator);
+        const desc = try lookupSpawn(cur_va, level, allocator);
 
         desc.* = PageDesc{
             .valid = true,
-            .type = .block,
+            .type = page_type,
             .lattr = LowerAttr{
                 .memattr = getAttrIndex(opt.attr),
                 .ap = Perm.from(opt.perm),
@@ -143,9 +87,9 @@ pub fn map1gb(opt: MapOption, allocator: PageAllocator) Error!void {
                 .uxn = !opt.perm.ux,
             },
         };
-
-        flush();
     }
+
+    flush();
 }
 
 /// Enable MMU.
