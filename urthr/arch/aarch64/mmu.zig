@@ -292,14 +292,6 @@ fn getAttrIndex(attr: Attribute) u3 {
 // Aarch64 structures
 // =============================================================
 
-/// Abstract descriptor.
-const AnyDesc = packed struct(u64) {
-    /// Valid descriptor.
-    valid: bool,
-    // Reserved.
-    _1: u63 = 0,
-};
-
 /// Table descriptor for Stage 1 translation.
 ///
 /// Supposing:
