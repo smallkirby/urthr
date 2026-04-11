@@ -30,7 +30,7 @@ pub fn init(allocator: PageAllocator) Error!void {
     l0_1 = try allocNewTable(allocator, TableDesc);
 }
 
-pub const MapOption = struct {
+pub const MapArgument = struct {
     /// Virtual address to map.
     va: usize,
     /// Physical address to map.
@@ -41,6 +41,11 @@ pub const MapOption = struct {
     perm: Permission,
     /// Attribute of the mapping.
     attr: Attribute,
+};
+
+pub const MapOptions = struct {
+    /// Returns an error if the given addresses are not aligned to the given granule size.
+    exact: bool = true,
 };
 
 const Granule = enum {
@@ -66,49 +71,52 @@ const Granule = enum {
 };
 
 /// Maps the VA to PA using 4KiB pages.
-pub fn map4kb(opt: MapOption, allocator: PageAllocator) Error!void {
-    return mapImpl(opt, .@"4kb", allocator);
+pub fn map4kb(arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+    return mapImpl(arg, .@"4kb", opts, allocator);
 }
 
 /// Maps the VA to PA using 2MiB pages.
-pub fn map2mb(opt: MapOption, allocator: PageAllocator) Error!void {
-    return mapImpl(opt, .@"2mb", allocator);
+pub fn map2mb(arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+    return mapImpl(arg, .@"2mb", opts, allocator);
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(opt: MapOption, allocator: PageAllocator) Error!void {
-    return mapImpl(opt, .@"1gb", allocator);
+pub fn map1gb(arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+    return mapImpl(arg, .@"1gb", opts, allocator);
 }
 
-fn mapImpl(opt: MapOption, mg: Granule, allocator: PageAllocator) Error!void {
-    if (opt.pa % page_size != 0) return Error.InvalidArgument;
-    if (opt.va % page_size != 0) return Error.InvalidArgument;
-    if (opt.size % page_size != 0) return Error.InvalidArgument;
-
+fn mapImpl(arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
-    const asize = util.roundup(opt.size, granule);
+
+    if (arg.size % page_size != 0) return error.InvalidArgument;
+    if (opts.exact) {
+        if (arg.pa % granule != 0) return error.InvalidArgument;
+        if (arg.va % granule != 0) return error.InvalidArgument;
+    }
+
+    const asize = util.roundup(arg.size, granule);
     const page_type: @FieldType(PageDesc, "type") = if (level == 3) .page else .block;
 
     for (0..asize / granule) |i| {
-        const cur_pa = opt.pa + i * granule;
-        const cur_va = opt.va + i * granule;
+        const cur_pa = arg.pa + i * granule;
+        const cur_va = arg.va + i * granule;
         const desc = try lookupSpawn(cur_va, level, allocator);
 
         desc.* = PageDesc{
             .valid = true,
             .type = page_type,
             .lattr = LowerAttr{
-                .memattr = getAttrIndex(opt.attr),
-                .ap = Perm.from(opt.perm),
+                .memattr = getAttrIndex(arg.attr),
+                .ap = Perm.from(arg.perm),
                 .sh = .inner,
             },
             .oa = @truncate(cur_pa >> page_shift),
             .uattr = UpperAttr{
                 .dbm = false,
                 .contiguous = false,
-                .pxn = !opt.perm.kx,
-                .uxn = !opt.perm.ux,
+                .pxn = !arg.perm.kx,
+                .uxn = !arg.perm.ux,
             },
         };
     }
@@ -190,9 +198,9 @@ fn flush() void {
 pub fn translateWalk(va: usize, allocator: PageAllocator) ?usize {
     var tbl = allocator.translateV(getRoot(va));
 
-    var cur_level: Level = 0;
+    var cur_level: usize = 0;
     while (cur_level <= 3) : (cur_level += 1) {
-        const tdesc: *const TableDesc = &tbl[getIndex(cur_level, va)];
+        const tdesc: *const TableDesc = &tbl[getIndex(@intCast(cur_level), va)];
         const pdesc: *const PageDesc = @ptrCast(tdesc);
 
         if (!tdesc.valid) {
@@ -200,8 +208,9 @@ pub fn translateWalk(va: usize, allocator: PageAllocator) ?usize {
         }
 
         if (cur_level == 3 or pdesc.type == .block) {
-            const page_desc: *const PageDesc = @ptrCast(tdesc);
-            return @as(usize, @intCast(page_desc.oa)) << 12;
+            const offset_bits: u6 = @intCast(page_shift + (3 - cur_level) * 9);
+            const offset_mask = (@as(usize, 1) << offset_bits) - 1;
+            return (@as(usize, @intCast(pdesc.oa)) << page_shift) | (va & offset_mask);
         }
 
         // Descend to the next level.
@@ -225,8 +234,6 @@ fn lookupSpawn(va: usize, level: Level, allocator: PageAllocator) Error!*PageDes
         if (!desc.valid) {
             const new_tbl = try allocNewTable(allocator, TableDesc);
             desc.* = TableDesc.new(@intFromPtr(allocator.translateP(new_tbl).ptr));
-
-            flush();
         }
 
         // The region is already mapped as a block or page.
@@ -437,12 +444,14 @@ const Perm = enum(u2) {
     pub fn from(perm: Permission) Perm {
         if (perm.kr and perm.kw and perm.ur and perm.uw) {
             return .prpwrw;
-        } else if (perm.kr and perm.kw) {
+        } else if (perm.kr and perm.kw and !perm.ur and !perm.uw) {
             return .prpw;
-        } else if (perm.kr and perm.ur) {
+        } else if (perm.kr and !perm.kw and perm.ur and !perm.uw) {
             return .prr;
-        } else {
+        } else if (perm.kr and !perm.kw and !perm.ur and !perm.uw) {
             return .pr;
+        } else {
+            @panic("Invalid permission combination.");
         }
     }
 };

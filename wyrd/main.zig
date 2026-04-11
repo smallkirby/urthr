@@ -86,7 +86,7 @@ export fn kmain() callconv(.c) noreturn {
             .size = dram.size(),
             .perm = .kernel_rwx,
             .attr = .normal,
-        }, allocator.interface()) catch {
+        }, .{ .exact = false }, allocator.interface()) catch {
             @panic("Failed to map DRAM for Wyrd.");
         };
         log.info("Identity-mapped (DRAM): 0x{X:0>8} - 0x{X:0>8}", .{ dram.start, dram.end });
@@ -99,7 +99,7 @@ export fn kmain() callconv(.c) noreturn {
             .size = uart.size(),
             .perm = .kernel_rw,
             .attr = .device,
-        }, allocator.interface()) catch {
+        }, .{ .exact = false }, allocator.interface()) catch {
             @panic("Failed to map UART for Wyrd.");
         };
         log.info("Identity-mapped (UART): 0x{X:0>8} - 0x{X:0>8}", .{ uart.start, uart.end });
@@ -164,7 +164,7 @@ fn mapKernel(header: UrthrHeader) *KernelEntry {
         .size = aligned_size,
         .perm = .kernel_rwx,
         .attr = .normal,
-    }, allocator.interface()) catch {
+    }, .{}, allocator.interface()) catch {
         @panic("Failed to map Urthr kernel region.");
     };
 
