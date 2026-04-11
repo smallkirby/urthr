@@ -85,9 +85,9 @@ pub fn map2mb(opt: MapOption, allocator: PageAllocator) Error!void {
     if (opt.size % page_size != 0) return Error.InvalidArgument;
 
     const granule = 2 * units.mib;
-    const asize = util.roundup(opt.size, units.mib);
+    const asize = util.roundup(opt.size, granule);
 
-    for (0..asize / units.mib) |i| {
+    for (0..asize / granule) |i| {
         const cur_pa = opt.pa + i * granule;
         const cur_va = opt.va + i * granule;
         const desc = try lookupSpawn(cur_va, 2, allocator);
