@@ -14,6 +14,8 @@ const gem_mac = net.ether.MacAddr.encode("B8:27:EB:00:00:00");
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
+///
+/// Expects all virtual address range is identity-mapped.
 pub fn boot() void {
     // Setup PL011 UART.
     dd.pl011.setBase(memmap.pl011.start);
@@ -32,6 +34,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pl011.size(),
         null,
     ));
+    try allocator.iounmap(memmap.pl011.start, memmap.pl011.size());
 
     // PM.
     rdd.pm.setBase(try allocator.reserveAndRemap(
@@ -40,6 +43,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pm.size(),
         null,
     ));
+    try allocator.iounmap(memmap.pm.start, memmap.pm.size());
 }
 
 /// De-initialize loader resources.

@@ -117,6 +117,21 @@ pub fn map1gb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: 
     return mapImpl(pt.select(arg.va), arg, .@"1gb", opts, allocator);
 }
 
+/// Unmaps the VA range using 4KiB pages.
+pub fn unmap4kb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
+    return unmapImpl(pt.select(va), va, size, .@"4kb", allocator);
+}
+
+/// Unmaps the VA range using 2MiB pages.
+pub fn unmap2mb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
+    return unmapImpl(pt.select(va), va, size, .@"2mb", allocator);
+}
+
+/// Unmaps the VA range using 1GiB pages.
+pub fn unmap1gb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
+    return unmapImpl(pt.select(va), va, size, .@"1gb", allocator);
+}
+
 fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
@@ -158,6 +173,41 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
     }
 
     flush();
+}
+
+fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: PageAllocator) Error!void {
+    const granule = mg.granule();
+    const level = mg.level();
+
+    if (size % page_size != 0) return error.InvalidArgument;
+    if (va % granule != 0) return error.InvalidArgument;
+    if (size % granule != 0) return error.InvalidArgument;
+
+    for (0..size / granule) |i| {
+        const cur_va = va + i * granule;
+        try lookupInvalidate(root._tbl, cur_va, level, allocator);
+    }
+
+    flush();
+}
+
+/// Lookup the page descriptor for the given virtual address and invalidate it.
+fn lookupInvalidate(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!void {
+    var tbl = allocator.translateV(root);
+
+    var cur_level: Level = 0;
+    while (cur_level < level) : (cur_level += 1) {
+        const desc = &tbl[getIndex(cur_level, va)];
+
+        if (!desc.valid) return error.InvalidMapping;
+        if (!desc.table) return error.InvalidMapping;
+
+        tbl = allocator.translateV(getTable(TableDesc, desc.next()));
+    }
+
+    const leaf: *PageDesc = @ptrCast(&tbl[getIndex(level, va)]);
+    if (!leaf.valid) return error.InvalidMapping;
+    leaf.valid = false;
 }
 
 /// Enable MMU.
