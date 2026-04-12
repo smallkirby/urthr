@@ -102,22 +102,6 @@ pub fn createPageTablePair(allocator: PageAllocator) Error!PageTablePair {
     };
 }
 
-/// Switch TTBR0_EL1 to the given page table.
-pub fn switchPageTable(pt: PageTablePair, allocator: PageAllocator) void {
-    const ttbr0 = regs.Ttbr0El1{
-        .addr = @intCast(pt.phys(allocator)),
-        .asid = 0,
-    };
-    am.msr(.ttbr0_el1, ttbr0);
-    asm volatile (
-        \\isb
-        \\dsb sy
-        \\tlbi vmalle1
-        \\dsb sy
-        \\isb
-    );
-}
-
 /// Maps the VA to PA using 4KiB pages.
 pub fn map4kb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
     return mapImpl(pt.select(arg.va), arg, .@"4kb", opts, allocator);
@@ -251,7 +235,7 @@ fn flush() void {
 
 /// Translate the given virtual address to physical address by walking the page tables.
 pub fn translateWalk(pt: PageTable, va: usize, allocator: PageAllocator) ?usize {
-    var tbl = allocator.translateV(pt);
+    var tbl = allocator.translateV(pt._tbl);
 
     var cur_level: usize = 0;
     while (cur_level <= 3) : (cur_level += 1) {
