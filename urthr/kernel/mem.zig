@@ -14,6 +14,8 @@ var buddy_allocator: BuddyAllocator = undefined;
 var bin_allocator: BinAllocator = undefined;
 /// VM allocator instance.
 var phys_allocator: PhysAllocator = undefined;
+/// Init task's page table.
+var init_pt: arch.mmu.PageTablePair = .{};
 
 /// Initialize memory management.
 ///
@@ -21,15 +23,15 @@ var phys_allocator: PhysAllocator = undefined;
 pub fn init() Error!void {
     const allocator = urd.boot.getAllocator().interface();
 
-    // Arch-specific MMU preparation.
-    try arch.mmu.init(allocator);
+    // Allocate kernel root page table and init task's user page table.
+    init_pt = try arch.mmu.createPageTablePair(allocator);
 
     // Kernel mapping: 2MiB granule, RWX, normal.
     log.debug("Mapping kernel.", .{});
     {
         rtt.expectEqual(0, pmap.kernel % size_2mib);
         rtt.expectEqual(0, vmap.kernel.start % size_2mib);
-        try arch.mmu.map2mb(.{
+        try arch.mmu.map2mb(init_pt, .{
             .pa = pmap.kernel,
             .va = vmap.kernel.start,
             .size = util.roundup(kernelSize(), 2 * units.mib),
@@ -42,13 +44,13 @@ pub fn init() Error!void {
     log.debug("Mapping linear memory.", .{});
     {
         for (pmap.drams) |dram| {
-            try arch.mmu.map1gb(.{
+            try arch.mmu.map1gb(init_pt, .{
                 .pa = dram.start,
                 .va = vmap.linear.start + dram.start,
                 .size = dram.size(),
                 .perm = .kernel_rw,
                 .attr = .normal,
-            }, .{}, allocator);
+            }, .{ .exact = false }, allocator);
         }
     }
 
@@ -56,7 +58,7 @@ pub fn init() Error!void {
     log.debug("Mapping device memory.", .{});
     {
         for (board.getTempMaps()) |range| {
-            try arch.mmu.map4kb(.{
+            try arch.mmu.map4kb(init_pt, .{
                 .pa = range.start,
                 .va = range.start,
                 .size = range.size(),
@@ -68,7 +70,7 @@ pub fn init() Error!void {
 
     // Switch to the new page table.
     log.debug("Switching to new page table.", .{});
-    arch.mmu.enable(allocator);
+    arch.mmu.enable(init_pt, allocator);
 }
 
 /// Initialize allocators.
@@ -143,6 +145,16 @@ pub fn getAllocators() MemoryManager {
         .general = getGeneralAllocator(),
         .io = getIoAllocator(),
         .page = getPageAllocator(),
+    };
+}
+
+/// Get the kernel page table.
+///
+/// The returned table pair does not contain the user page table.
+pub fn getKernelPageTable() arch.mmu.PageTablePair {
+    return .{
+        .l0 = null,
+        .l1 = init_pt.l1,
     };
 }
 

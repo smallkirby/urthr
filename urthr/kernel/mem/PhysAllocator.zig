@@ -141,16 +141,19 @@ fn compareResources(a: *Resource, b: *Resource) std.math.Order {
 ///
 /// Returns the size of mapped range in bytes.
 fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
+    const pt = mem.getKernelPageTable();
+    const allocator = mem.getPageAllocator();
+
     // Map using 1GiB pages if possible.
     if (isMappableAs(virt, phys, max, common.mem.size_1gib)) {
         const map_size = util.rounddown(max, common.mem.size_1gib);
-        try arch.mmu.map1gb(.{
+        try arch.mmu.map1gb(pt, .{
             .pa = phys,
             .va = virt,
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, .{}, mem.getPageAllocator());
+        }, .{}, allocator);
         return map_size;
     }
 
@@ -160,13 +163,13 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             util.rounddown(max, common.mem.size_2mib),
             common.mem.size_1gib - (virt % common.mem.size_1gib),
         );
-        try arch.mmu.map2mb(.{
+        try arch.mmu.map2mb(pt, .{
             .pa = phys,
             .va = virt,
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, .{}, mem.getPageAllocator());
+        }, .{}, allocator);
         return map_size;
     }
 
@@ -176,13 +179,13 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             max,
             common.mem.size_2mib - (virt % common.mem.size_2mib),
         );
-        try arch.mmu.map4kb(.{
+        try arch.mmu.map4kb(pt, .{
             .pa = phys,
             .va = virt,
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, .{}, mem.getPageAllocator());
+        }, .{}, allocator);
         return map_size;
     }
 }
