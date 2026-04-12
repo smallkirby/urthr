@@ -12,23 +12,10 @@ const num_ents = page_size / @sizeOf(PageDesc);
 /// Virtual address space range in bits.
 const va_range = 48;
 
-/// Table pointed to by TTBR0_EL1.
-var l0_0: []TableDesc = undefined;
-/// Table pointed to by TTBR1_EL1.
-var l0_1: []TableDesc = undefined;
-
 /// Translation level.
 ///
 /// 5-level translation is not supported.
 const Level = u2;
-
-/// Initialize MMU with the given level 0 table address.
-///
-/// MMU is not enabled by this function.
-pub fn init(allocator: PageAllocator) Error!void {
-    l0_0 = try allocNewTable(allocator, TableDesc);
-    l0_1 = try allocNewTable(allocator, TableDesc);
-}
 
 pub const MapArgument = struct {
     /// Virtual address to map.
@@ -70,22 +57,83 @@ const Granule = enum {
     }
 };
 
+/// Describes a pair of page tables.
+pub const PageTablePair = struct {
+    /// Virtual address of the page table for lower VA range.
+    l0: ?PageTable = null,
+    /// Virtual address of the page table for higher VA range.
+    l1: ?PageTable = null,
+
+    /// Select the page table for the given virtual address.
+    pub fn select(self: PageTablePair, va: usize) PageTable {
+        const top = va >> 48;
+        if (top == 0) {
+            rtt.expect(self.l0 != null);
+            return self.l0.?;
+        } else if (top == 0xFFFF) {
+            rtt.expect(self.l1 != null);
+            return self.l1.?;
+        } else {
+            @panic("Non-canonical address to select page table.");
+        }
+    }
+};
+
+/// Describes a single root page table.
+pub const PageTable = struct {
+    /// Virtual address of the page table.
+    _tbl: []TableDesc,
+
+    pub fn phys(self: PageTable, allocator: PageAllocator) usize {
+        return @intFromPtr(allocator.translateP(self._tbl).ptr);
+    }
+};
+
+/// Allocate a new root page table.
+pub fn createPageTable(allocator: PageAllocator) Error!PageTable {
+    return .{ ._tbl = try allocNewTable(allocator, TableDesc) };
+}
+
+/// Allocate a new pair of root page tables.
+pub fn createPageTablePair(allocator: PageAllocator) Error!PageTablePair {
+    return .{
+        .l0 = try createPageTable(allocator),
+        .l1 = try createPageTable(allocator),
+    };
+}
+
+/// Switch TTBR0_EL1 to the given page table.
+pub fn switchPageTable(pt: PageTablePair, allocator: PageAllocator) void {
+    const ttbr0 = regs.Ttbr0El1{
+        .addr = @intCast(pt.phys(allocator)),
+        .asid = 0,
+    };
+    am.msr(.ttbr0_el1, ttbr0);
+    asm volatile (
+        \\isb
+        \\dsb sy
+        \\tlbi vmalle1
+        \\dsb sy
+        \\isb
+    );
+}
+
 /// Maps the VA to PA using 4KiB pages.
-pub fn map4kb(arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
-    return mapImpl(arg, .@"4kb", opts, allocator);
+pub fn map4kb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+    return mapImpl(pt.select(arg.va), arg, .@"4kb", opts, allocator);
 }
 
 /// Maps the VA to PA using 2MiB pages.
-pub fn map2mb(arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
-    return mapImpl(arg, .@"2mb", opts, allocator);
+pub fn map2mb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+    return mapImpl(pt.select(arg.va), arg, .@"2mb", opts, allocator);
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
-    return mapImpl(arg, .@"1gb", opts, allocator);
+pub fn map1gb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+    return mapImpl(pt.select(arg.va), arg, .@"1gb", opts, allocator);
 }
 
-fn mapImpl(arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAllocator) Error!void {
+fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
 
@@ -105,7 +153,7 @@ fn mapImpl(arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAlloc
     for (0..asize / granule) |i| {
         const cur_pa = base_pa + i * granule;
         const cur_va = base_va + i * granule;
-        const desc = try lookupSpawn(cur_va, level, allocator);
+        const desc = try lookupSpawn(root._tbl, cur_va, level, allocator);
 
         desc.* = PageDesc{
             .valid = true,
@@ -129,9 +177,12 @@ fn mapImpl(arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAlloc
 }
 
 /// Enable MMU.
-pub fn enable(allocator: PageAllocator) void {
-    const l0_0_phys = @intFromPtr(allocator.translateP(l0_0).ptr);
-    const l0_1_phys = @intFromPtr(allocator.translateP(l0_1).ptr);
+pub fn enable(pt: PageTablePair, allocator: PageAllocator) void {
+    rtt.expect(pt.l0 != null);
+    rtt.expect(pt.l1 != null);
+
+    const l0_0_phys = pt.l0.?.phys(allocator);
+    const l0_1_phys = pt.l1.?.phys(allocator);
 
     // Configure TCR_EL1.
     const tcr = regs.Tcr{
@@ -199,8 +250,8 @@ fn flush() void {
 }
 
 /// Translate the given virtual address to physical address by walking the page tables.
-pub fn translateWalk(va: usize, allocator: PageAllocator) ?usize {
-    var tbl = allocator.translateV(getRoot(va));
+pub fn translateWalk(pt: PageTable, va: usize, allocator: PageAllocator) ?usize {
+    var tbl = allocator.translateV(pt);
 
     var cur_level: usize = 0;
     while (cur_level <= 3) : (cur_level += 1) {
@@ -227,8 +278,8 @@ pub fn translateWalk(va: usize, allocator: PageAllocator) ?usize {
 /// Lookup the page descriptor for the given virtual address.
 ///
 /// If the descriptor does not exist, spawn a new table descriptor recursively.
-fn lookupSpawn(va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
-    var tbl = allocator.translateV(getRoot(va));
+fn lookupSpawn(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
+    var tbl = allocator.translateV(root);
 
     var cur_level: Level = 0;
     while (cur_level < level) : (cur_level += 1) {
@@ -280,18 +331,6 @@ fn allocNewTable(allocator: PageAllocator, T: type) Error![]T {
     @memset(table, std.mem.zeroInit(T, .{ .valid = false }));
 
     return table;
-}
-
-/// Get the root page table corresponding to the given virtual address.
-fn getRoot(va: usize) []TableDesc {
-    const top = va >> 48;
-    if (top == 0x0000) {
-        return l0_0;
-    } else if (top == 0xFFFF) {
-        return l0_1;
-    } else {
-        @panic("non-canonical virtual address");
-    }
 }
 
 /// Get the MAIR index for the given attribute.
@@ -469,6 +508,7 @@ const Perm = enum(u2) {
 
 const std = @import("std");
 const common = @import("common");
+const rtt = common.rtt;
 const units = common.units;
 const util = common.util;
 const Attribute = common.mem.Attribute;
