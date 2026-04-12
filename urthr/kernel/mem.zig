@@ -158,6 +158,11 @@ pub fn getKernelPageTable() arch.mmu.PageTablePair {
     };
 }
 
+/// Get the initial task's page table.
+pub fn getInitPageTablePair() arch.mmu.PageTablePair {
+    return init_pt;
+}
+
 /// End virtual address of kernel image.
 extern const __end: *void;
 

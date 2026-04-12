@@ -14,6 +14,7 @@ _resources: ResourceList = .{},
 /// Vtable for IoAllocator interface.
 const vtable = IoAllocator.Vtable{
     .ioremap = ioremap,
+    .iounmap = iounmap,
     .reserve = reserve,
 };
 
@@ -60,9 +61,23 @@ fn ioremap(ctx: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
         remaining -= try mapPage(v, p, remaining);
     }
 
-    // TODO: fill VmStruct
-
     return vm_area.start;
+}
+
+fn iounmap(ctx: *anyopaque, virt: usize, size: usize) IoAllocator.Error!void {
+    rtt.expect(util.isAligned(size, common.mem.size_4kib));
+
+    const self: *Self = @ptrCast(@alignCast(ctx));
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    var remaining = size;
+    while (remaining > 0) {
+        const v = virt + (size - remaining);
+        remaining -= try unmapPage(v, remaining);
+    }
+
+    // TODO: free the virtual memory area.
 }
 
 /// Reserve a physical memory range as a resource.
@@ -187,6 +202,38 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .attr = .device,
         }, .{}, allocator);
         return map_size;
+    }
+}
+
+fn unmapPage(virt: Virt, max: usize) Error!usize {
+    const pt = mem.getInitPageTablePair();
+    const allocator = mem.getPageAllocator();
+
+    // Unmap using 1GiB pages if possible.
+    if (isMappableAs(virt, 0, max, common.mem.size_1gib)) {
+        const unmap_size = util.rounddown(max, common.mem.size_1gib);
+        try arch.mmu.unmap1gb(pt, virt, unmap_size, allocator);
+        return unmap_size;
+    }
+
+    // Unmap using 2MiB pages, until next 1GiB boundary.
+    if (isMappableAs(virt, 0, max, common.mem.size_2mib)) {
+        const unmap_size = @min(
+            util.rounddown(max, common.mem.size_2mib),
+            common.mem.size_1gib - (virt % common.mem.size_1gib),
+        );
+        try arch.mmu.unmap2mb(pt, virt, unmap_size, allocator);
+        return unmap_size;
+    }
+
+    // Unmap using 4KiB pages, until next 2MiB boundary.
+    {
+        const unmap_size = @min(
+            max,
+            common.mem.size_2mib - (virt % common.mem.size_2mib),
+        );
+        try arch.mmu.unmap4kb(pt, virt, unmap_size, allocator);
+        return unmap_size;
     }
 }
 

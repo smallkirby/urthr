@@ -11,6 +11,8 @@ var exception_handler: ?ExceptionHandler = null;
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like GPIO and UART.
+///
+/// Expects all virtual address range is identity-mapped.
 pub fn boot() void {
     // Setup GPIO.
     dd.gpio.setBase(map.gpio.start);
@@ -42,6 +44,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         map.pl011.size(),
         null,
     ));
+    try allocator.iounmap(map.pl011.start, map.pl011.size());
 
     // PM.
     rdd.pm.setBase(try allocator.reserveAndRemap(
@@ -50,6 +53,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pm.size(),
         null,
     ));
+    try allocator.iounmap(memmap.pm.start, memmap.pm.size());
 }
 
 /// Initialize peripherals.

@@ -41,6 +41,9 @@ pub const Vtable = struct {
     /// This function can map the memory using any size of pages.
     ioremap: *const fn (ctx: *anyopaque, paddr: usize, size: usize) Error!usize,
 
+    /// Unmap the given virtual memory region.
+    iounmap: *const fn (ctx: *anyopaque, virt: usize, size: usize) Error!void,
+
     /// Reserve the given physical I/O memory region.
     reserve: *const fn (ctx: *anyopaque, name: []const u8, phys: usize, size: usize, parent: ?*Resource) Error!*Resource,
 };
@@ -55,6 +58,11 @@ pub fn reserve(self: Self, name: []const u8, phys: usize, size: usize, parent: ?
 /// Map the given physical I/O memory region into the virtual address space.
 pub fn ioremap(self: Self, paddr: usize, size: usize) Error!usize {
     return self.vtable.ioremap(self.ptr, paddr, size);
+}
+
+/// Unmap the given virtual memory region.
+pub fn iounmap(self: Self, virt: usize, size: usize) Error!void {
+    return self.vtable.iounmap(self.ptr, virt, size);
 }
 
 /// Reserve the given physical I/O memory region and map it to virtual address space.
