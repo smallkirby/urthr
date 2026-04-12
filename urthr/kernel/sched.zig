@@ -31,6 +31,7 @@ pub fn init() Allocator.Error!void {
         .name = "idle",
         .state = .running,
         .sp = undefined,
+        .mm = urd.mem.getKernelPageTable(),
     };
     idle = th;
 
@@ -262,6 +263,7 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
         .state = .ready,
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
+        .mm = urd.mem.getKernelPageTable(),
     };
 
     // Add the thread to the ready queue.

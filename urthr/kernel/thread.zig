@@ -16,6 +16,8 @@ pub const Thread = struct {
     runtime_us: u64 = 0,
     /// Raw timer ticks when this thread last started executing.
     last_exec_start: u64 = 0,
+    /// Page tables for this thread.
+    mm: ?arch.mmu.PageTablePair,
     /// Thread list node.
     head: ThreadList.Head = .{},
 };
@@ -51,3 +53,4 @@ pub const ThreadList = typing.InlineDoublyLinkedList(Thread, "head");
 const urd = @import("urthr");
 const common = @import("common");
 const typing = common.typing;
+const arch = @import("arch").impl;
