@@ -8,6 +8,8 @@ pub const Error = error{
     InvalidFilesystem,
     /// The path component is not a directory.
     NotDirectory,
+    /// The entry is not a file.
+    NotFile,
     /// Filesystem data is corrupted.
     CorruptedData,
 } || block.Error;
@@ -26,6 +28,8 @@ pub const FileSystem = struct {
         getRootDir: *const fn (ctx: *anyopaque) Error!Directory,
         /// Open a directory from an entry.
         openDir: *const fn (ctx: *anyopaque, entry: *const Entry) Error!Directory,
+        /// Open a file from an entry.
+        openFile: *const fn (ctx: *anyopaque, entry: *const Entry) Error!File,
     };
 
     /// Get the root directory of the filesystem.
@@ -40,6 +44,15 @@ pub const FileSystem = struct {
         }
 
         return self.vtable.openDir(self.ptr, entry);
+    }
+
+    /// Open a file from an entry.
+    pub fn openFile(self: FileSystem, entry: *const Entry) Error!File {
+        if (entry.kind != .file) {
+            return Error.NotFile;
+        }
+
+        return self.vtable.openFile(self.ptr, entry);
     }
 };
 
@@ -86,6 +99,43 @@ pub const Iterator = struct {
     /// Returns `null` when there are no more entries.
     pub fn next(self: *Iterator) Error!?*Entry {
         return self.vtable.next(self.ptr, self.allocator);
+    }
+};
+
+/// File interface.
+pub const File = struct {
+    /// Type-erased pointer to the file implementation.
+    ptr: *anyopaque,
+    /// Vtable for the file interface.
+    vtable: *const Vtable,
+    /// Current read position in bytes from the start of the file.
+    offset: u64,
+    /// Total file size in bytes.
+    size: u64,
+
+    pub const Vtable = struct {
+        /// Read bytes from the file at the given offset into the buffer.
+        ///
+        /// Returns the number of bytes actually read.
+        read: *const fn (ctx: *anyopaque, offset: u64, buffer: []u8) Error!usize,
+        /// Close the file and release associated resources.
+        close: *const fn (ctx: *anyopaque) void,
+    };
+
+    /// Read bytes from the current position into the buffer.
+    ///
+    /// Advances the internal offset by the number of bytes read.
+    /// Returns 0 at EOF.
+    pub fn read(self: *File, buffer: []u8) Error!usize {
+        if (self.offset >= self.size) return 0;
+        const n = try self.vtable.read(self.ptr, self.offset, buffer);
+        self.offset += n;
+        return n;
+    }
+
+    /// Close the file and release associated resources.
+    pub fn close(self: File) void {
+        self.vtable.close(self.ptr);
     }
 };
 
