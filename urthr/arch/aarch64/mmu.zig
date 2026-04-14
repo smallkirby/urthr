@@ -313,7 +313,7 @@ pub fn translateWalk(pt: PageTable, va: usize, allocator: PageAllocator) ?usize 
 ///
 /// If the descriptor does not exist, spawn a new table descriptor recursively.
 fn lookupSpawn(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
-    var tbl = allocator.translateV(root);
+    var tbl = root;
 
     var cur_level: Level = 0;
     while (cur_level < level) : (cur_level += 1) {
