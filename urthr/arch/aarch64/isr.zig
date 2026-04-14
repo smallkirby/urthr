@@ -205,6 +205,11 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
 }
 
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {
+    if (handler) |f| {
+        if (f()) |_| {
+            return;
+        }
+    }
     return defaultHandler(ctx, "IRQ, Lower EL, A64");
 }
 
