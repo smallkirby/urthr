@@ -88,11 +88,16 @@ pub fn initAllocators() void {
     };
     buddy_allocator.init(&avails, &reserveds, log.debug);
 
+    // Update page table virtual address.
+    init_pt.l1.?._tbl = buddy_allocator.interface().translateV(init_pt.l1.?._tbl);
+
     // Bin allocator.
     bin_allocator.init(getPageAllocator());
 
     // I/O allocator.
     phys_allocator.init();
+
+    // Now then, boot allocator is no longer needed.
 }
 
 /// Initialize memory resources.
