@@ -88,6 +88,11 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
 /// Switch context from the old thread to the new thread.
 pub extern fn switchContext(old: *usize, new: *const usize) callconv(.c) void;
 
+/// Drop from EL1 to EL0 and start executing at the given user PC with the given user SP.
+///
+/// Does not return.
+pub extern fn enterUserland(pc: usize, sp: usize) callconv(.c) noreturn;
+
 /// Thread entry trampoline function.
 fn trampoline() callconv(.naked) noreturn {
     asm volatile (

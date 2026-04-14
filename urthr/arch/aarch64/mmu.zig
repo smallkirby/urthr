@@ -272,6 +272,20 @@ pub fn enable(pt: PageTablePair, allocator: PageAllocator) void {
     );
 }
 
+/// Switch the user-space page table (TTBR0_EL1) to the given page table.
+///
+/// If `l0` is null, TTBR0_EL1 is cleared.
+/// TLB is flushed after the switch.
+pub fn switchUserTable(l0: ?PageTable, allocator: PageAllocator) void {
+    am.msr(.ttbr0_el1, regs.Ttbr0El1{
+        .addr = if (l0) |tbl| @intCast(tbl.phys(allocator)) else 0,
+        .asid = 0,
+    });
+
+    // Should use ASID to avoid flushing the entire TLB, but it's not implemented yet.
+    flush();
+}
+
 /// Flush all TLB entries.
 fn flush() void {
     asm volatile (

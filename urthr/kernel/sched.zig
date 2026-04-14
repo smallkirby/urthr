@@ -77,6 +77,9 @@ pub fn blockCurrent(caller_lock: *SpinLock) void {
     current = next;
     next.state = .running;
 
+    // Switch user-space page table if needed.
+    arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
+
     lock.unlock();
     caller_lock.unlock();
 
@@ -112,6 +115,9 @@ pub fn reschedule() void {
 
     current = next;
 
+    // Switch user-space page table if needed.
+    arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
+
     // Release lock before switching. IRQs remain disabled until restored.
     lock.unlock();
 
@@ -141,6 +147,9 @@ fn exitCurrent() noreturn {
     const next = pickNext();
     current = next;
     next.state = .running;
+
+    // Switch user-space page table if needed.
+    arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
 
     // Release lock before switching. IRQs remain disabled.
     lock.unlock();
