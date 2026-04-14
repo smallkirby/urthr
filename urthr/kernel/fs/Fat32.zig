@@ -49,6 +49,7 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 const fs_vtable = fs.FileSystem.Vtable{
     .getRootDir = &getRootDir,
     .openDir = &openDir,
+    .openFile = &openFile,
 };
 
 fn getRootDir(ctx: *anyopaque) fs.Error!fs.Directory {
@@ -62,6 +63,25 @@ fn openDir(ctx: *anyopaque, entry: *const fs.Entry) fs.Error!fs.Directory {
     const cluster: u32 = @intCast(entry.handle);
 
     return self.openDirByCluster(cluster);
+}
+
+fn openFile(ctx: *anyopaque, entry: *const fs.Entry) fs.Error!fs.File {
+    const self: *Self = @ptrCast(@alignCast(ctx));
+
+    const state = try self.allocator.create(FileState);
+    errdefer self.allocator.destroy(state);
+
+    state.* = .{
+        .fat32 = self,
+        .start_cluster = @intCast(entry.handle),
+    };
+
+    return .{
+        .ptr = state,
+        .vtable = &file_vtable,
+        .offset = 0,
+        .size = entry.size,
+    };
 }
 
 /// Open a directory by cluster number.
@@ -291,6 +311,72 @@ const DirIteratorState = struct {
         return sum;
     }
 };
+
+// =============================================================
+// File Interface
+// =============================================================
+
+/// FAT32-specific file state.
+const FileState = struct {
+    /// FAT32 filesystem this file belongs to.
+    fat32: *Self,
+    /// First cluster of the file.
+    start_cluster: Cluster,
+};
+
+const file_vtable = fs.File.Vtable{
+    .read = &fileRead,
+    .close = &fileClose,
+};
+
+fn fileRead(ctx: *anyopaque, offset: u64, buffer: []u8) fs.Error!usize {
+    const state: *FileState = @ptrCast(@alignCast(ctx));
+    const fat32 = state.fat32;
+    const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
+
+    // Seek to the cluster that contains `offset`.
+    var clus = state.start_cluster; // cluster number of the current position in the file
+    var clus_file_offset: u64 = 0; // offset of the current cluster in the file
+    while (clus_file_offset + bytes_per_cluster <= offset) : (clus_file_offset += bytes_per_cluster) {
+        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
+    }
+
+    // Read sector by sector, copying into the caller's buffer.
+    var bytes_read: usize = 0;
+    var cur_offset = offset;
+    var cur_clus = clus;
+    var cur_clus_file_offset = clus_file_offset;
+
+    while (bytes_read < buffer.len) {
+        const offset_in_clus = cur_offset - cur_clus_file_offset;
+        const sector_in_clus = offset_in_clus / sector_size;
+        const offset_in_sec = offset_in_clus % sector_size;
+
+        const lba = fat32.clusterToLba(cur_clus) + sector_in_clus;
+        var sec_buf: [sector_size]u8 = undefined;
+        try fat32.device.readBlock(lba, &sec_buf);
+
+        const to_copy = @min(sector_size - offset_in_sec, buffer.len - bytes_read);
+        @memcpy(buffer[bytes_read..][0..to_copy], sec_buf[offset_in_sec..][0..to_copy]);
+
+        bytes_read += to_copy;
+        cur_offset += to_copy;
+
+        // If we crossed a cluster boundary, follow the FAT chain to seek the next cluster.
+        if (cur_offset - cur_clus_file_offset >= bytes_per_cluster) {
+            rtt.expect(cur_offset == cur_clus_file_offset + bytes_per_cluster);
+            cur_clus = try fat32.getNextCluster(cur_clus) orelse break;
+            cur_clus_file_offset += bytes_per_cluster;
+        }
+    }
+
+    return bytes_read;
+}
+
+fn fileClose(ctx: *anyopaque) void {
+    const state: *FileState = @ptrCast(@alignCast(ctx));
+    state.fat32.allocator.destroy(state);
+}
 
 /// Convert cluster number to LBA.
 fn clusterToLba(self: *const Self, cluster: Cluster) Lba {
