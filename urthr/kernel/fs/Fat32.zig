@@ -86,16 +86,10 @@ fn openFile(ctx: *anyopaque, entry: *const fs.Entry) fs.Error!fs.File {
 
 /// Open a directory by cluster number.
 fn openDirByCluster(self: *Self, cluster: u32) fs.Error!fs.Directory {
-    const dir = try self.allocator.create(DirIteratorState);
+    const dir = try self.allocator.create(DirState);
     errdefer self.allocator.destroy(dir);
 
-    dir.* = .{
-        .fat32 = self,
-        .cluster = cluster,
-        .offset = 0,
-        .buffer = undefined,
-        .buffer_valid = false,
-    };
+    dir.* = .{ .fat32 = self, .cluster = cluster };
 
     return .{
         .ptr = dir,
@@ -109,17 +103,41 @@ fn openDirByCluster(self: *Self, cluster: u32) fs.Error!fs.Directory {
 
 const dir_vtable = fs.Directory.Vtable{
     .iterator = &dirIterate,
+    .close = &dirClose,
 };
 
 fn dirIterate(ctx: *anyopaque, allocator: Allocator) fs.Error!fs.Iterator {
-    const state: *DirIteratorState = @ptrCast(@alignCast(ctx));
+    const dir: *DirState = @ptrCast(@alignCast(ctx));
+
+    const iter = try dir.fat32.allocator.create(DirIteratorState);
+    errdefer dir.fat32.allocator.destroy(iter);
+    iter.* = .{
+        .fat32 = dir.fat32,
+        .cluster = dir.cluster,
+        .offset = 0,
+        .buffer = undefined,
+        .buffer_valid = false,
+    };
 
     return .{
-        .ptr = state,
+        .ptr = iter,
         .vtable = &iter_vtable,
         .allocator = allocator,
     };
 }
+
+fn dirClose(ctx: *anyopaque) void {
+    const dir: *DirState = @ptrCast(@alignCast(ctx));
+    dir.fat32.allocator.destroy(dir);
+}
+
+/// Directory state holding the identity of a directory.
+const DirState = struct {
+    /// FAT32 filesystem this directory belongs to.
+    fat32: *Self,
+    /// Starting cluster of the directory.
+    cluster: Cluster,
+};
 
 // =============================================================
 // Iterator Interface
@@ -127,6 +145,7 @@ fn dirIterate(ctx: *anyopaque, allocator: Allocator) fs.Error!fs.Iterator {
 
 const iter_vtable = fs.Iterator.Vtable{
     .next = &iterNext,
+    .close = &dirClose,
 };
 
 fn iterNext(ctx: *anyopaque, allocator: Allocator) fs.Error!?*fs.Entry {
