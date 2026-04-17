@@ -68,6 +68,8 @@ pub const Directory = struct {
         ///
         /// Iterator can own the given allocator for allocating memory for directory entries.
         iterator: *const fn (ctx: *anyopaque, allocator: Allocator) Error!Iterator,
+        /// Close the directory and release associated resources.
+        close: *const fn (ctx: *anyopaque) void,
     };
 
     /// Create an iterator for directory entries.
@@ -75,6 +77,11 @@ pub const Directory = struct {
     /// The given allocator is used for allocating memory to create directory entry.
     pub fn iterator(self: Directory, allocator: Allocator) Error!Iterator {
         return self.vtable.iterator(self.ptr, allocator);
+    }
+
+    /// Close the directory and release associated resources.
+    pub fn close(self: Directory) void {
+        self.vtable.close(self.ptr);
     }
 };
 
@@ -92,13 +99,22 @@ pub const Iterator = struct {
         ///
         /// Returns `null` when there are no more entries.
         next: *const fn (ctx: *anyopaque, allocator: Allocator) Error!?*Entry,
+        /// Close the iterator and release associated resources.
+        close: *const fn (ctx: *anyopaque) void,
     };
 
     /// Get the next directory entry.
     ///
+    /// Caller must call `close()` to release resources when finished iterating.
+    ///
     /// Returns `null` when there are no more entries.
     pub fn next(self: *Iterator) Error!?*Entry {
         return self.vtable.next(self.ptr, self.allocator);
+    }
+
+    /// Close the iterator and release associated resources.
+    pub fn close(self: Iterator) void {
+        self.vtable.close(self.ptr);
     }
 };
 
@@ -157,6 +173,14 @@ pub const Entry = struct {
         /// Directory.
         directory,
     };
+
+    /// Free the entry and its name slice.
+    ///
+    /// The allocator must be the same one that was passed to `Iterator.iterator()`.
+    pub fn deinit(self: *const Entry, allocator: Allocator) void {
+        allocator.free(self.name);
+        allocator.destroy(self);
+    }
 };
 
 // =============================================================
