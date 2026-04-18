@@ -6,6 +6,8 @@ const Self = @This();
 device: block.Device,
 /// BIOS Parameter Block information.
 bpb: BpbInfo,
+/// Root directory inode.
+root: *InodeImpl,
 /// Memory allocator.
 allocator: Allocator,
 
@@ -17,8 +19,11 @@ const Lba = u64;
 /// Initialize FAT32 filesystem from a block device.
 ///
 /// The allocator is owned by this filesystem instance.
-pub fn init(device: block.Device, allocator: Allocator) fs.Error!Self {
+pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
     rtt.expectEqual(device.getBlockSize(), sector_size);
+
+    const self = try allocator.create(Self);
+    errdefer allocator.destroy(self);
 
     // Read boot sector.
     var buf: [sector_size]u8 = undefined;
@@ -27,11 +32,27 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!Self {
     // Parse BPB info.
     const bpb = try BpbInfo.parse(&buf);
 
-    return Self{
+    // Create root directory inode.
+    const root = try allocator.create(InodeImpl);
+    errdefer allocator.destroy(root);
+    root.* = .{
+        .common = .{
+            .number = 1,
+            .size = 0,
+            .ftype = .directory,
+            .ops = inode_vtable,
+        },
+        .fat32 = self,
+        .cluster = bpb.root_clus,
+    };
+
+    self.* = .{
         .device = device,
         .bpb = bpb,
         .allocator = allocator,
+        .root = root,
     };
+    return self;
 }
 
 /// Get the filesystem interface.
@@ -39,6 +60,7 @@ pub fn filesystem(self: *Self) fs.FileSystem {
     return .{
         .ptr = self,
         .vtable = &fs_vtable,
+        .root = &self.root.common,
     };
 }
 
@@ -46,127 +68,123 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 // Filesystem Interface
 // =============================================================
 
-const fs_vtable = fs.FileSystem.Vtable{
-    .getRootDir = &getRootDir,
-    .openDir = &openDir,
-    .openFile = &openFile,
-};
-
-fn getRootDir(ctx: *anyopaque) fs.Error!fs.Directory {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-
-    return self.openDirByCluster(self.bpb.root_clus);
-}
-
-fn openDir(ctx: *anyopaque, entry: *const fs.Entry) fs.Error!fs.Directory {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-    const cluster: u32 = @intCast(entry.handle);
-
-    return self.openDirByCluster(cluster);
-}
-
-fn openFile(ctx: *anyopaque, entry: *const fs.Entry) fs.Error!fs.File {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-
-    const state = try self.allocator.create(FileState);
-    errdefer self.allocator.destroy(state);
-
-    state.* = .{
-        .fat32 = self,
-        .start_cluster = @intCast(entry.handle),
-    };
-
-    return .{
-        .ptr = state,
-        .vtable = &file_vtable,
-        .offset = 0,
-        .size = entry.size,
-    };
-}
-
-/// Open a directory by cluster number.
-fn openDirByCluster(self: *Self, cluster: u32) fs.Error!fs.Directory {
-    const dir = try self.allocator.create(DirState);
-    errdefer self.allocator.destroy(dir);
-
-    dir.* = .{ .fat32 = self, .cluster = cluster };
-
-    return .{
-        .ptr = dir,
-        .vtable = &dir_vtable,
-    };
-}
+const fs_vtable = fs.FileSystem.Vtable{};
 
 // =============================================================
-// Directory Interface
+// Inode Interface
 // =============================================================
 
-const dir_vtable = fs.Directory.Vtable{
-    .iterator = &dirIterate,
-    .close = &dirClose,
+const inode_vtable = fs.Inode.Ops{
+    .lookup = &ilookup,
+    .deinit = &ideinit,
 };
 
-fn dirIterate(ctx: *anyopaque, allocator: Allocator) fs.Error!fs.Iterator {
-    const dir: *DirState = @ptrCast(@alignCast(ctx));
-
-    const iter = try dir.fat32.allocator.create(DirIteratorState);
-    errdefer dir.fat32.allocator.destroy(iter);
-    iter.* = .{
-        .fat32 = dir.fat32,
-        .cluster = dir.cluster,
-        .offset = 0,
-        .buffer = undefined,
-        .buffer_valid = false,
-    };
-
-    return .{
-        .ptr = iter,
-        .vtable = &iter_vtable,
-        .allocator = allocator,
-    };
-}
-
-fn dirClose(ctx: *anyopaque) void {
-    const dir: *DirState = @ptrCast(@alignCast(ctx));
-    dir.fat32.allocator.destroy(dir);
-}
-
-/// Directory state holding the identity of a directory.
-const DirState = struct {
-    /// FAT32 filesystem this directory belongs to.
+/// FAT32-specific inode implementation.
+const InodeImpl = struct {
+    /// Common part of inode.
+    common: fs.Inode,
+    /// FAT32 filesystem this inode belongs to.
     fat32: *Self,
-    /// Starting cluster of the directory.
+    /// Cluster number of the inode.
     cluster: Cluster,
+
+    pub fn from(inode: *fs.Inode) *InodeImpl {
+        return @fieldParentPtr("common", inode);
+    }
 };
 
-// =============================================================
-// Iterator Interface
-// =============================================================
+/// Lookup an inode by its name in a directory inode.
+fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
+    rtt.expect(dir.ftype == .directory);
 
-const iter_vtable = fs.Iterator.Vtable{
-    .next = &iterNext,
-    .close = &dirClose,
-};
+    const ctx = InodeImpl.from(dir);
+    const self = ctx.fat32;
+    var iter = DirIterator{
+        .fat32 = self,
+        .cluster = ctx.cluster,
+    };
 
-fn iterNext(ctx: *anyopaque, allocator: Allocator) fs.Error!?*fs.Entry {
-    const state: *DirIteratorState = @ptrCast(@alignCast(ctx));
-    return state.next(allocator);
+    // Create upper case name for comparson.
+    var uname = try self.allocator.alloc(u8, name.len);
+    defer self.allocator.free(uname);
+    uname = std.ascii.upperString(uname, name);
+
+    while (try iter.next(self.allocator)) |result| {
+        defer result.deinit(self.allocator);
+
+        if (std.mem.eql(u8, result.name, uname)) {
+            const inode = try self.allocator.create(InodeImpl);
+            errdefer self.allocator.destroy(inode);
+
+            inode.* = .{
+                .common = .{
+                    .number = calcInodeNumber(result.pos),
+                    .size = result.entry.file_size,
+                    .ftype = if (result.entry.attr.directory) .directory else .regular,
+                    .ops = inode_vtable,
+                },
+                .fat32 = self,
+                .cluster = result.entry.clusterNumber(),
+            };
+
+            return &inode.common;
+        }
+    } else return null;
 }
 
-/// Directory iterator state.
-const DirIteratorState = struct {
+/// Release resources associated with an inode.
+fn ideinit(inode: *fs.Inode) void {
+    const ctx = InodeImpl.from(inode);
+    ctx.fat32.allocator.destroy(ctx);
+}
+
+/// Calculate inode number.
+///
+/// FAT32 does not have a real inode number.
+/// So we synthesize a unique number for each file based on its directory entry position.
+fn calcInodeNumber(pos: DirIterator.DirEntryPosition) u64 {
+    const index_offset: u8 = @intCast(pos.offset / @sizeOf(DirEntry));
+    const sector: u64 = @as(u56, @truncate(pos.sector));
+    return (sector << 8) + index_offset;
+}
+
+/// Directory iterator.
+const DirIterator = struct {
     /// FAT32 filesystem this directory belongs to.
     fat32: *Self,
     /// Current cluster position.
     cluster: u32,
     /// Current offset in bytes within the cluster.
-    offset: usize,
+    offset: usize = 0,
     /// Buffer for reading sectors.
-    buffer: [sector_size]u8,
+    buffer: [sector_size]u8 = undefined,
     /// Whether the buffer contains a valid sector.
-    buffer_valid: bool,
+    buffer_valid: bool = false,
     /// Long file name info.
     lfn: LfnInfo = .{},
+
+    const Result = struct {
+        /// Directory entry.
+        entry: *const DirEntry,
+        /// Name of the entry.
+        ///
+        /// `entry` also contains the short name, but caller must use this field to get the correct name.
+        name: []const u8,
+        /// Position of the directory entry.
+        pos: DirEntryPosition,
+
+        pub fn deinit(self: *const Result, allocator: Allocator) void {
+            allocator.free(self.name);
+            allocator.destroy(self.entry);
+        }
+    };
+
+    const DirEntryPosition = struct {
+        /// Sector number of the directory entry from the start of the partition.
+        sector: usize,
+        /// Offset of the directory entry in bytes from the start of the sector.
+        offset: usize,
+    };
 
     const LfnInfo = struct {
         /// Buffer for collecting long file name characters.
@@ -195,7 +213,7 @@ const DirIteratorState = struct {
     /// Get the next directory entry.
     ///
     /// Returns `null` when there are no more entries.
-    fn next(self: *DirIteratorState, allocator: Allocator) fs.Error!?*fs.Entry {
+    fn next(self: *DirIterator, allocator: Allocator) fs.Error!?Result {
         while (true) {
             const entry_offset_in_sector = self.offset % sector_size;
 
@@ -270,26 +288,29 @@ const DirIteratorState = struct {
                 continue;
             }
 
-            const res = try allocator.create(fs.Entry);
-            errdefer allocator.destroy(res);
-
             // Use LFN if valid, otherwise fall back to short name.
-            const name = if (self.lfn.isValid(&entry.name))
-                try allocator.dupe(u8, self.lfn.buf[0..self.lfn.len])
-            else
-                try parseName(entry, allocator);
+            const name = if (self.lfn.isValid(&entry.name)) blk: {
+                const buf = try allocator.alloc(u8, self.lfn.len);
+                break :blk std.ascii.upperString(buf, self.lfn.buf[0..buf.len]);
+            } else try parseName(entry, allocator);
+            errdefer allocator.free(name);
 
             // Reset LFN state for next entry.
             self.lfn.clear();
 
-            res.* = .{
-                .name = name,
-                .kind = if (entry.attr.directory) .directory else .file,
-                .size = entry.file_size,
-                .handle = entry.clusterNumber(),
-            };
+            // Copy the entry.
+            const cloned = try allocator.create(DirEntry);
+            errdefer allocator.destroy(cloned);
+            cloned.* = entry.*;
 
-            return res;
+            return .{
+                .entry = cloned,
+                .name = name,
+                .pos = .{
+                    .sector = self.fat32.clusterToLba(self.cluster) + (self.offset - @sizeOf(DirEntry)) / sector_size,
+                    .offset = (self.offset - @sizeOf(DirEntry)) % sector_size,
+                },
+            };
         }
     }
 
@@ -318,7 +339,8 @@ const DirIteratorState = struct {
             }
         }
 
-        return allocator.dupe(u8, buf[0..len]);
+        const name = try allocator.alloc(u8, len);
+        return std.ascii.upperString(name, buf[0..len]);
     }
 
     /// Compute checksum of the short name.
@@ -332,70 +354,8 @@ const DirIteratorState = struct {
 };
 
 // =============================================================
-// File Interface
+// Utilities
 // =============================================================
-
-/// FAT32-specific file state.
-const FileState = struct {
-    /// FAT32 filesystem this file belongs to.
-    fat32: *Self,
-    /// First cluster of the file.
-    start_cluster: Cluster,
-};
-
-const file_vtable = fs.File.Vtable{
-    .read = &fileRead,
-    .close = &fileClose,
-};
-
-fn fileRead(ctx: *anyopaque, offset: u64, buffer: []u8) fs.Error!usize {
-    const state: *FileState = @ptrCast(@alignCast(ctx));
-    const fat32 = state.fat32;
-    const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
-
-    // Seek to the cluster that contains `offset`.
-    var clus = state.start_cluster; // cluster number of the current position in the file
-    var clus_file_offset: u64 = 0; // offset of the current cluster in the file
-    while (clus_file_offset + bytes_per_cluster <= offset) : (clus_file_offset += bytes_per_cluster) {
-        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
-    }
-
-    // Read sector by sector, copying into the caller's buffer.
-    var bytes_read: usize = 0;
-    var cur_offset = offset;
-    var cur_clus = clus;
-    var cur_clus_file_offset = clus_file_offset;
-
-    while (bytes_read < buffer.len) {
-        const offset_in_clus = cur_offset - cur_clus_file_offset;
-        const sector_in_clus = offset_in_clus / sector_size;
-        const offset_in_sec = offset_in_clus % sector_size;
-
-        const lba = fat32.clusterToLba(cur_clus) + sector_in_clus;
-        var sec_buf: [sector_size]u8 = undefined;
-        try fat32.device.readBlock(lba, &sec_buf);
-
-        const to_copy = @min(sector_size - offset_in_sec, buffer.len - bytes_read);
-        @memcpy(buffer[bytes_read..][0..to_copy], sec_buf[offset_in_sec..][0..to_copy]);
-
-        bytes_read += to_copy;
-        cur_offset += to_copy;
-
-        // If we crossed a cluster boundary, follow the FAT chain to seek the next cluster.
-        if (cur_offset - cur_clus_file_offset >= bytes_per_cluster) {
-            rtt.expect(cur_offset == cur_clus_file_offset + bytes_per_cluster);
-            cur_clus = try fat32.getNextCluster(cur_clus) orelse break;
-            cur_clus_file_offset += bytes_per_cluster;
-        }
-    }
-
-    return bytes_read;
-}
-
-fn fileClose(ctx: *anyopaque) void {
-    const state: *FileState = @ptrCast(@alignCast(ctx));
-    state.fat32.allocator.destroy(state);
-}
 
 /// Convert cluster number to LBA.
 fn clusterToLba(self: *const Self, cluster: Cluster) Lba {
