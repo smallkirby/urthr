@@ -45,6 +45,7 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
         .fat32 = self,
         .cluster = bpb.root_clus,
     };
+    root.common.ref();
 
     self.* = .{
         .device = device,
@@ -126,6 +127,7 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
                 .fat32 = self,
                 .cluster = result.entry.clusterNumber(),
             };
+            inode.common.ref();
 
             return &inode.common;
         }
