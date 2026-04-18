@@ -408,8 +408,6 @@ fn getNextCluster(self: *Self, cluster: Cluster) fs.Error!?Cluster {
 
 /// BPB information extracted from the boot sector.
 const BpbInfo = struct {
-    /// Count of bytes per sector.
-    bytes_per_sect: u16,
     /// Number of sectors per cluster.
     sec_per_clus: u8,
     /// Number of reserved sectors.
@@ -427,19 +425,27 @@ const BpbInfo = struct {
 
         // Check boot signature.
         if (!std.mem.eql(u8, &bpb.fil_sys_type, fat32_signature)) {
+            log.err("Invalid FAT32 siagnature: {s}", .{bpb.fil_sys_type});
             return fs.Error.InvalidFilesystem;
         }
         if (bpb.boot_sig != Bpb.valid_boot_sig) {
+            log.err("Invalid FAT32 boot signature: 0x{X}", .{bpb.boot_sig});
             return fs.Error.InvalidFilesystem;
         }
 
         // FAT32 specific validation.
         if (bpb.root_ent_cnt != 0 or bpb.fat_sz16 != 0) {
+            log.err("Invalid FAT32 BPB info.", .{});
+            return fs.Error.InvalidFilesystem;
+        }
+
+        // Check sector size.
+        if (bpb.bytes_per_sec != sector_size) {
+            log.err("Unsupported sector size: {d} bytes", .{bpb.bytes_per_sec});
             return fs.Error.InvalidFilesystem;
         }
 
         return BpbInfo{
-            .bytes_per_sect = bpb.bytes_per_sec,
             .sec_per_clus = bpb.sec_per_clus,
             .rsvd_sec_cnt = bpb.rsvd_sec_cnt,
             .num_fats = bpb.num_fats,
@@ -698,6 +704,7 @@ const DirEntry = extern struct {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.fat32);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
