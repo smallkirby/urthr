@@ -32,6 +32,7 @@ pub fn init() Allocator.Error!void {
         .state = .running,
         .sp = undefined,
         .mm = urd.mem.getKernelPageTable(),
+        .fs = undefined, // filled later on fs subsystem initialization.
     };
     idle = th;
 
@@ -266,6 +267,11 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     );
 
     // Initialize thread.
+    const fs = getCurrent().fs;
+    fs.root.dentry.ref();
+    errdefer fs.root.dentry.unref();
+    fs.cwd.dentry.ref();
+    errdefer fs.cwd.dentry.unref();
     th.* = .{
         .id = allocateId(),
         .name = try ga.dupe(u8, name),
@@ -273,6 +279,7 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
         .mm = urd.mem.getKernelPageTable(),
+        .fs = fs,
     };
 
     // Add the thread to the ready queue.

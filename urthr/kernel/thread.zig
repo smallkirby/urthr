@@ -18,6 +18,13 @@ pub const Thread = struct {
     last_exec_start: u64 = 0,
     /// Page tables for this thread.
     mm: arch.mmu.PageTablePair,
+    /// File system information.
+    fs: struct {
+        /// Root directory of this thread.
+        root: urd.fs.Path,
+        /// Current working directory of this thread.
+        cwd: urd.fs.Path,
+    },
     /// Thread list node.
     head: ThreadList.Head = .{},
 };
