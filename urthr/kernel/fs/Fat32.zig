@@ -40,7 +40,8 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
             .number = 1,
             .size = 0,
             .ftype = .directory,
-            .ops = inode_vtable,
+            .iops = inode_vtable,
+            .fops = file_vtable,
         },
         .fat32 = self,
         .cluster = bpb.root_clus,
@@ -69,7 +70,14 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 // Filesystem Interface
 // =============================================================
 
-const fs_vtable = fs.FileSystem.Vtable{};
+const fs_vtable = fs.FileSystem.Vtable{
+    .getLabel = fsGetLabel,
+};
+
+fn fsGetLabel(ctx: *const anyopaque, allocator: Allocator) fs.Error![]const u8 {
+    const self: *const Self = @ptrCast(@alignCast(ctx));
+    return allocator.dupe(u8, self.bpb.label[0..]);
+}
 
 // =============================================================
 // Inode Interface
@@ -122,7 +130,8 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
                     .number = calcInodeNumber(result.pos),
                     .size = result.entry.file_size,
                     .ftype = if (result.entry.attr.directory) .directory else .regular,
-                    .ops = inode_vtable,
+                    .iops = inode_vtable,
+                    .fops = file_vtable,
                 },
                 .fat32 = self,
                 .cluster = result.entry.clusterNumber(),
@@ -356,6 +365,15 @@ const DirIterator = struct {
 };
 
 // =============================================================
+// File Interface
+// =============================================================
+
+const file_vtable = fs.File.Ops{
+    .iterate = undefined, // TODO
+    .read = undefined, // TODO
+};
+
+// =============================================================
 // Utilities
 // =============================================================
 
@@ -416,6 +434,8 @@ const BpbInfo = struct {
     num_fats: u8,
     /// Count of sectors occupied by ONE FAT.
     fat_sz32: u32,
+    /// Volume label.
+    label: [11]u8,
     /// Cluster number of the first cluster of the root directory.
     root_clus: Cluster,
 
@@ -445,13 +465,16 @@ const BpbInfo = struct {
             return fs.Error.InvalidFilesystem;
         }
 
-        return BpbInfo{
+        var info = BpbInfo{
             .sec_per_clus = bpb.sec_per_clus,
             .rsvd_sec_cnt = bpb.rsvd_sec_cnt,
             .num_fats = bpb.num_fats,
             .fat_sz32 = bpb.fat_sz32,
             .root_clus = bpb.root_clus,
+            .label = undefined,
         };
+        @memcpy(&info.label, &bpb.vol_lab);
+        return info;
     }
 };
 
