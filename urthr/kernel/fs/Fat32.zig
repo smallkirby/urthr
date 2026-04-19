@@ -167,6 +167,8 @@ const DirIterator = struct {
     cluster: u32,
     /// Current offset in bytes within the cluster.
     offset: usize = 0,
+    /// Total offset in bytes from the start of the directory stream.
+    consumed: usize = 0,
     /// Buffer for reading sectors.
     buffer: [sector_size]u8 = undefined,
     /// Whether the buffer contains a valid sector.
@@ -260,6 +262,7 @@ const DirIterator = struct {
 
             const entry: *const DirEntry = @ptrCast(@alignCast(&self.buffer[entry_offset_in_sector]));
             self.offset += @sizeOf(DirEntry);
+            self.consumed += @sizeOf(DirEntry);
 
             // Check for end of directory.
             if (entry.isFree()) {
@@ -325,6 +328,19 @@ const DirIterator = struct {
         }
     }
 
+    /// Seek to the given position in the directory stream.
+    fn seek(self: *DirIterator, pos: usize, allocator: Allocator) fs.Error!void {
+        if (pos == 0) return;
+
+        while (try self.next(allocator)) |result| {
+            result.deinit(allocator);
+            if (self.consumed >= pos) {
+                rtt.expect(self.consumed == pos);
+                return;
+            }
+        } else return fs.Error.CorruptedData;
+    }
+
     /// Parse name field to construct the file name.
     fn parseName(entry: *const DirEntry, allocator: Allocator) Allocator.Error![]const u8 {
         var len: usize = 0;
@@ -369,9 +385,29 @@ const DirIterator = struct {
 // =============================================================
 
 const file_vtable = fs.File.Ops{
-    .iterate = undefined, // TODO
+    .iterate = fiterate,
     .read = undefined, // TODO
 };
+
+/// Get the next file entry in a directory file.
+fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
+    const file = iter.file;
+    const inode = InodeImpl.from(file.path.dentry.inode);
+    var diter = DirIterator{
+        .fat32 = inode.fat32,
+        .cluster = inode.cluster,
+    };
+    diter.seek(iter.offset, allocator) catch return null;
+
+    if (try diter.next(allocator)) |result| {
+        iter.offset = diter.consumed;
+        return .{
+            .name = try allocator.dupe(u8, result.name),
+            .inum = calcInodeNumber(result.pos),
+            .type = if (result.entry.attr.directory) .directory else .regular,
+        };
+    } else return null;
+}
 
 // =============================================================
 // Utilities
