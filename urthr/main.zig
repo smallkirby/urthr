@@ -80,12 +80,21 @@ fn zmain() !void {
     log.debug("Setting up IRQ.", .{});
     urd.exception.initLocal();
 
-    // List partitions on the block device.
+    // Initialize scheduler.
+    log.info("Initializing scheduler.", .{});
+    try urd.sched.init();
+
+    // Initialize filesystem.
+    log.info("Initializing filesystem.", .{});
+    try urd.fs.init(urd.mem.getGeneralAllocator());
+
     if (board.getBlockDevice()) |dev| {
+        // List partitions on the block device.
         const partitions = try common.block.partitions.listPartitions(dev, urd.mem.getGeneralAllocator());
+        defer urd.mem.getGeneralAllocator().free(partitions);
         log.info("Found {d} partitions:", .{partitions.len});
 
-        for (partitions, 0..) |part, i| {
+        for (partitions, 0..) |*part, i| {
             const bytes_per_sector = 512;
             log.info("  Partition#{d}: LBA {d}, Size {d} sectors ({d} MiB)", .{
                 i,
@@ -94,19 +103,23 @@ fn zmain() !void {
                 (part.nsecs * bytes_per_sector) / units.mib,
             });
         }
+
+        // Mount the boot filesystem.
+        if (try createBootFs(dev)) |fs| {
+            try urd.fs.mount(urd.sched.getCurrent().fs.root, fs, urd.mem.getGeneralAllocator());
+        } else {
+            log.warn("No boot filesystem found.", .{});
+        }
     } else {
         log.warn("No block device found", .{});
     }
-
-    // Initialize scheduler.
-    log.info("Initializing scheduler.", .{});
-    try urd.sched.init();
 
     // Initialize time subsystem.
     log.info("Initializing time subsystem.", .{});
     urd.time.init();
 
     // Spawn the initial kernel thread.
+    log.info("Spawning initial task.", .{});
     _ = try urd.sched.spawn("init", initialTask, .{});
 
     // Start preemptive scheduling timer.
@@ -131,6 +144,53 @@ fn initialTask() !void {
     // Start networking subsystem.
     log.info("Starting networking subsystem.", .{});
     try urd.net.run();
+}
+
+// =============================================================
+// Utilities
+// =============================================================
+
+fn createBootFs(dev: common.block.Device) urd.fs.Error!?urd.fs.FileSystem {
+    const allocator = urd.mem.getGeneralAllocator();
+    const partitions = try common.block.partitions.listPartitions(dev, allocator);
+    defer allocator.free(partitions);
+
+    // Find a partition with a specific label.
+    for (partitions) |*p| {
+        const part = try allocator.create(common.block.partitions.Partition);
+        errdefer allocator.destroy(part);
+        part.* = p.*;
+
+        const fat32 = urd.fs.Fat32.init(part.interface(), allocator) catch {
+            continue;
+        };
+        const fs = fat32.filesystem();
+
+        const label = fs.getLabel(allocator) catch {
+            allocator.destroy(fat32);
+            continue;
+        };
+        defer allocator.free(label);
+
+        if (std.mem.eql(u8, label, "bootfs")) {
+            return fs;
+        }
+
+        allocator.destroy(fat32);
+        allocator.destroy(part);
+    }
+
+    // Use the first partition.
+    if (partitions.len > 0) {
+        const part = try allocator.create(common.block.partitions.Partition);
+        errdefer allocator.destroy(part);
+        part.* = partitions[0];
+
+        const fat32 = try urd.fs.Fat32.init(part.interface(), allocator);
+        return fat32.filesystem();
+    }
+
+    return null;
 }
 
 // =============================================================
