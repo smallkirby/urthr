@@ -10,7 +10,7 @@ pub const Ops = struct {
     /// This function allocates a memory using the given allocator,
     /// then stores file entries in the allocated buffer.
     /// Caller must free the allocated buffer.
-    iterate: *const fn (self: *File, allocator: Allocator) Error![]IterResult,
+    iterate: *const fn (iter: *Iterator, allocator: Allocator) Error!?IterResult,
     /// Read data from the file at position `pos` to `buf`.
     ///
     /// Return the number of bytes read.
@@ -26,8 +26,23 @@ pub const IterResult = struct {
     /// File type.
     type: fs.FileType,
 
-    pub fn deinit(self: *IterResult, allocator: Allocator) void {
+    pub fn deinit(self: *const IterResult, allocator: Allocator) void {
         allocator.free(self.name);
+    }
+};
+
+/// Iterator instance.
+pub const Iterator = struct {
+    /// File this iterator is associated with.
+    file: *File,
+    /// Current offset in the directory.
+    offset: usize,
+
+    /// Get the next file entry in the directory.
+    ///
+    /// Caller must call `deinit` on the returned result after use.
+    pub fn next(self: *Iterator, allocator: Allocator) Error!?IterResult {
+        return self.file.ops.iterate(self, allocator);
     }
 };
 
@@ -77,13 +92,14 @@ pub fn read(self: *Self, buf: []u8) Error!usize {
     return num_read;
 }
 
-/// Get children of the directory.
-///
-/// Caller must call `deinit()` for each entry after use.
-pub fn iterate(self: *Self, allocator: Allocator) Error![]IterResult {
+/// Create an iterator for this file.
+pub fn iterator(self: *Self) Error!Iterator {
     if (self.inode().ftype != .directory) return Error.NotFile;
 
-    return try self.ops.iterate(self, allocator);
+    return .{
+        .file = self,
+        .offset = 0,
+    };
 }
 
 /// Increment the reference count of this file.
