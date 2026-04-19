@@ -54,32 +54,32 @@ offset: usize,
 ops: Ops,
 /// Reference count.
 refcnt: std.atomic.Value(usize) = .init(0),
-
-/// Arbitrary context.
-ctx: ?*anyopaque,
+/// Type-erased pointer to the file instance.
+ctx: *anyopaque,
 /// Memory allocator.
 allocator: Allocator,
 
-/// Create a new file instance.
-///
-/// Variable entry is zero initialized.
-pub fn new(path: fs.Path, allocator: Allocator) Error!*File {
+/// Open a file at the specified path.
+pub fn open(path: fs.Path, allocator: Allocator) Error!*File {
     path.dentry.ref();
     errdefer path.dentry.unref();
 
+    const ctx = try path.mount.?.filesystem.vtable.open(path.dentry.inode, allocator);
     const file = try allocator.create(File);
-    file.* = std.mem.zeroInit(File, .{
+    file.* = .{
         .path = path,
+        .offset = 0,
         .ops = path.dentry.inode.fops,
         .allocator = allocator,
-    });
+        .ctx = ctx,
+    };
 
     file.ref();
     return file;
 }
 
 /// Read data from the file into the buffer.
-pub fn read(self: *Self, buf: []u8) Error!usize {
+pub fn read(self: *Self, buf: []u8) Error![]u8 {
     if (self.inode().ftype == .directory) return Error.NotFile;
 
     const num_read = try self.ops.read(
@@ -89,7 +89,7 @@ pub fn read(self: *Self, buf: []u8) Error!usize {
     );
     self.offset += @intCast(num_read);
 
-    return num_read;
+    return buf[0..num_read];
 }
 
 /// Create an iterator for this file.

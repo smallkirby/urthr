@@ -17,6 +17,8 @@ root: *Inode,
 pub const Vtable = struct {
     /// Get the label of the filesystem.
     getLabel: ?*const fn (*const anyopaque, Allocator) Error![]const u8 = null,
+    /// Open the file represented by the given inode.
+    open: *const fn (inode: *Inode, allocator: Allocator) Error!*anyopaque,
 };
 
 /// Get the label of the filesystem.

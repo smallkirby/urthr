@@ -152,7 +152,7 @@ pub fn open(s: []const u8, allocator: Allocator) Error!*File {
         cur = .{ .dentry = dentry, .mount = cur.mount };
     }
 
-    return File.new(cur, allocator);
+    return try File.open(cur, allocator);
 }
 
 // =============================================================
