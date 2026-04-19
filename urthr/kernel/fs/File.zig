@@ -15,6 +15,10 @@ pub const Ops = struct {
     ///
     /// Return the number of bytes read.
     read: *const fn (self: *File, buf: []u8, pos: usize) Error!usize,
+    /// Release filesystem-specific resources associated with the file context.
+    ///
+    /// Called when the file's reference count reaches zero.
+    close: *const fn (ctx: *anyopaque, allocator: Allocator) void,
 };
 
 /// Context used in `iterate` operation.
@@ -64,7 +68,10 @@ pub fn open(path: fs.Path, allocator: Allocator) Error!*File {
     path.dentry.ref();
     errdefer path.dentry.unref();
 
-    const ctx = try path.mount.?.filesystem.vtable.open(path.dentry.inode, allocator);
+    rtt.expect(path.mount != null);
+    const filesystem = path.mount.?.filesystem;
+
+    const ctx = try filesystem.vtable.open(path.dentry.inode, allocator);
     const file = try allocator.create(File);
     file.* = .{
         .path = path,
@@ -112,6 +119,7 @@ pub fn ref(self: *Self) void {
 /// If the count reaches zero, the file is deallocated and its resources are released.
 pub fn unref(self: *Self) void {
     if (self.refcnt.fetchSub(1, .acq_rel) == 1) {
+        self.ops.close(self.ctx, self.allocator);
         self.path.dentry.unref();
         self.allocator.destroy(self);
     }
@@ -128,6 +136,8 @@ fn inode(self: *Self) *Inode {
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const common = @import("common");
+const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
 const Inode = @import("Inode.zig");
