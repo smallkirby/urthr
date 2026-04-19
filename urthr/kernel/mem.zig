@@ -89,6 +89,7 @@ pub fn initAllocators() void {
     buddy_allocator.init(&avails, &reserveds, log.debug);
 
     // Update page table virtual address.
+    init_pt.l0.?._tbl = buddy_allocator.interface().translateV(init_pt.l0.?._tbl);
     init_pt.l1.?._tbl = buddy_allocator.interface().translateV(init_pt.l1.?._tbl);
 
     // Bin allocator.
