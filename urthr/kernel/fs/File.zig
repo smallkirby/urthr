@@ -101,7 +101,7 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
 
 /// Create an iterator for this file.
 pub fn iterator(self: *Self) Error!Iterator {
-    if (self.inode().ftype != .directory) return Error.NotFile;
+    if (self.inode().ftype != .directory) return Error.NotDirectory;
 
     return .{
         .file = self,
