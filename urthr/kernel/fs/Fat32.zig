@@ -401,6 +401,7 @@ const DirIterator = struct {
 const file_vtable = fs.File.Ops{
     .iterate = fiterate,
     .read = fread,
+    .close = fclose,
 };
 
 const FileImpl = struct {
@@ -414,6 +415,12 @@ const FileImpl = struct {
     }
 };
 
+/// Release filesystem-specific resources associated with the file context.
+fn fclose(ctx: *anyopaque, allocator: Allocator) void {
+    const file: *FileImpl = @ptrCast(@alignCast(ctx));
+    allocator.destroy(file);
+}
+
 /// Get the next file entry in a directory file.
 fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
     const file = iter.file;
@@ -425,6 +432,8 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
     diter.seek(iter.offset, allocator) catch return null;
 
     if (try diter.next(allocator)) |result| {
+        defer result.deinit(allocator);
+
         iter.offset = diter.consumed;
         return .{
             .name = try allocator.dupe(u8, result.name),
