@@ -193,7 +193,7 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: Pa
 
 /// Lookup the page descriptor for the given virtual address and invalidate it.
 fn lookupInvalidate(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!void {
-    var tbl = allocator.translateV(root);
+    var tbl = root;
 
     var cur_level: Level = 0;
     while (cur_level < level) : (cur_level += 1) {
