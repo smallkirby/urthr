@@ -24,9 +24,20 @@ export fn kmain() callconv(.c) noreturn {
     log.info("Booting Urthr...", .{});
 
     // Init early page allocator.
+    // We assume loader < loader reserved < kernel,
+    // and the loader region is larger than 1 MiB.
+    const boot_worksize = 1 * units.mib;
+    urd.comptimeAssert(
+        board.memmap.loader + boot_worksize <= board.memmap.loader_reserved.start,
+        \\Region reserved for boot-time allocator overwraps the bootloader region.
+        \\  Loader Start + Work Buffer = 0x{X:0>8}
+        \\  Loader Reserved Start      = 0x{X:0>8}
+    ,
+        .{ board.memmap.loader + boot_worksize, board.memmap.loader_reserved.start },
+    );
     const pa_reserved = common.Range{
-        .start = board.memmap.loader_reserved.end,
-        .end = board.memmap.loader_reserved.end + 1 * units.mib,
+        .start = board.memmap.loader,
+        .end = board.memmap.loader + boot_worksize,
     };
     urd.boot.initAllocator(pa_reserved.start, pa_reserved.size());
     log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
