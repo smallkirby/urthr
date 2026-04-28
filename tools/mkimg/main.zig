@@ -149,6 +149,19 @@ const MkImage = struct {
         var wbuf: [4096]u8 = undefined;
         var writer = self.output.writer(&wbuf);
 
+        // Size check
+        if (self.mode == .single) {
+            var total: usize = 0;
+
+            total += (try self.wyrd.?.stat()).size;
+            total += @sizeOf(UrthrHeader);
+            total += (try self.urthr.stat()).size;
+
+            if (memmap.loader_reserved.start - memmap.loader < total) {
+                return error.ImageTooLarge;
+            }
+        }
+
         // Write Wyrd binary.
         switch (self.mode) {
             .single => try copy(&self.wyrd.?, &writer.interface),
@@ -260,4 +273,6 @@ const Base64Encoder = std.base64.Base64Encoder;
 const fs = std.fs;
 const os = std.os;
 const boot = @import("boot");
+const board = @import("board").impl;
+const memmap = board.memmap;
 const UrthrHeader = boot.UrthrHeader;
