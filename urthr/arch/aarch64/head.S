@@ -19,7 +19,7 @@ _start:
   ldr   x1, =__bss_end
 .Lbss_loop:
   cmp   x0, x1
-  b.eq  .Ljump_el1
+  b.hs  .Ljump_el1
   stp   xzr, xzr, [x0], #16
   b     .Lbss_loop
 
@@ -30,6 +30,10 @@ _start:
 
   // If she's in EL2, she is a bootloader.
   // Prepare to jump to EL1.
+
+  ldr   x0, =boottime_exception_handlers // Set boot-time exception handlers.
+  msr   VBAR_EL2, x0
+  msr   VBAR_EL1, x0
 
   mov   x0, #(1 << 31)      // Set EL1 to use AArch64.
   msr   HCR_EL2, x0
@@ -48,6 +52,7 @@ _start:
   ldr   x0, =.Lel1_entry
   msr   ELR_EL2, x0
 
+  isb
   eret
 
 .Lprepare_el1:
@@ -57,6 +62,10 @@ _start:
 
 .Lel1_entry:
 .Ljump_to_kernel:
+  // Set boot-time exception handlers.
+  ldr   x0, =boottime_exception_handlers
+  msr   VBAR_EL1, x0
+
   // Jump to the bootloader or kernel entry point.
   ldr   x0, =kmain
   br    x0
@@ -64,3 +73,52 @@ _start:
 .Lhang:
   wfe
   b    .Lhang
+
+// Boot-time exception handlers.
+.balign 0x800
+boottime_exception_handlers:
+1: // Sync current EL SP0
+  b 1b
+.balign 0x80
+2: // IRQ current EL SP0
+  b 2b
+.balign 0x80
+3: // FIQ current EL SP0
+  b 3b
+.balign 0x80
+4: // SError current EL SP0
+  b 4b
+.balign 0x80
+5: // Sync current EL SPx
+  b 5b
+.balign 0x80
+6: // IRQ current EL SPx
+  b 6b
+.balign 0x80
+7: // FIQ current EL SPx
+  b 7b
+.balign 0x80
+8: // SError current EL SPx
+  b 8b
+9: // Sync lower EL using AArch64
+  b 9b
+.balign 0x80
+10: // IRQ lower EL using AArch64
+  b 10b
+.balign 0x80
+11: // FIQ lower EL using AArch64
+  b 11b
+.balign 0x80
+12: // SError lower EL using AArch64
+  b 12b
+13: // Sync lower EL using AArch32
+  b 13b
+.balign 0x80
+14: // IRQ lower EL using AArch32
+  b 14b
+.balign 0x80
+15: // FIQ lower EL using AArch32
+  b 15b
+.balign 0x80
+16: // SError lower EL using AArch32
+  b 16b
