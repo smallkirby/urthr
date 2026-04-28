@@ -24,20 +24,14 @@ pub const loader = 0x4008_0000;
 ///
 /// Kernel can use the region after it ensures that the region is free.
 pub const loader_reserved = Range{
-    .start = drams[0].start,
-    .end = loader,
+    .start = kernel - 0x10_0000,
+    .end = kernel,
 };
 
 /// Physical load address of the kernel image.
 pub const kernel = 0x4100_0000;
 
 comptime {
-    if (drams[0].start > loader_reserved.start) {
-        @compileError("Condition not met: drams[0].start <= loader_reserved.start");
-    }
-    if (loader_reserved.end > loader) {
-        @compileError("Condition not met: loader_reserved.end <= loader");
-    }
     if (loader >= kernel) {
         @compileError("Condition not met: loader < kernel");
     }

@@ -6,7 +6,7 @@
 pub const drams = [_]Range{
     // 1016 MiB
     .{
-        .start = 0x0000_0000,
+        .start = 0x0008_0000, // [0, 0x8_0000) is reserved for ATF.
         .end = 0x3F80_0000,
     },
     // 7168 MiB
@@ -21,7 +21,7 @@ pub const drams = [_]Range{
 // =============================================================
 
 /// Physical load address of the bootloader.
-pub const loader = 0x0020_0000;
+pub const loader = 0x008_0000;
 
 /// DRAM region reserved for the bootloader.
 ///
@@ -29,8 +29,8 @@ pub const loader = 0x0020_0000;
 ///
 /// Kernel can use the region after it ensures that the region is free.
 pub const loader_reserved = Range{
-    .start = drams[0].start,
-    .end = loader,
+    .start = kernel - 0x10_0000,
+    .end = kernel,
 };
 
 /// Physical load address of the kernel image.
@@ -39,9 +39,6 @@ pub const kernel = 0x0040_0000;
 comptime {
     if (drams[0].start > loader_reserved.start) {
         @compileError("Condition not met: drams[0].start <= loader_reserved.start");
-    }
-    if (loader_reserved.end > loader) {
-        @compileError("Condition not met: loader_reserved.end <= loader");
     }
     if (loader >= kernel) {
         @compileError("Condition not met: loader < kernel");
