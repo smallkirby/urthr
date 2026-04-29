@@ -106,7 +106,7 @@ var pads_base: usize = undefined;
 /// Pin number type.
 const Pin = u8;
 /// Type of function select ID.
-const FselId = @Type(.enum_literal);
+const FselId = @EnumLiteral();
 
 /// Function select.
 const Funcs = struct {

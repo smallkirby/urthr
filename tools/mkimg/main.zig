@@ -64,10 +64,10 @@ fn usage(logger: anytype) noreturn {
 
 /// Command line options.
 const Args = struct {
-    wyrd: ?fs.File = null,
-    urthr: ?fs.File = null,
-    urthr_elf: ?fs.File = null,
-    output: ?fs.File = null,
+    wyrd: ?std.Io.File = null,
+    urthr: ?std.Io.File = null,
+    urthr_elf: ?std.Io.File = null,
+    output: ?std.Io.File = null,
 };
 
 /// Composing mode.
@@ -88,9 +88,11 @@ const Mode = enum {
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     var args = Args{};
-    var argiter = std.process.args();
+    var argiter = init.minimal.args.iterate();
+    defer argiter.deinit();
     _ = argiter.next(); // skip program name
 
     const mode = if (argiter.next()) |arg|
@@ -99,24 +101,30 @@ pub fn main() !void {
         usage(log.err);
     };
 
+    // Open CWD.
+    var cwd_buf: [128]u8 = undefined;
+    const cwd_path = cwd_buf[0..try std.process.currentPath(init.io, &cwd_buf)];
+    const cwd = try std.Io.Dir.openDirAbsolute(init.io, cwd_path, .{});
+    defer cwd.close(init.io);
+
     // Parse arguments.
     while (argiter.next()) |arg| {
         switch (optmap.get(arg) orelse usage(log.err)) {
             .wyrd => {
                 const path = argiter.next() orelse usage(log.err);
-                args.wyrd = try fs.cwd().openFile(path, .{});
+                args.wyrd = try cwd.openFile(io, path, .{});
             },
             .urthr => {
                 const path = argiter.next() orelse usage(log.err);
-                args.urthr = try fs.cwd().openFile(path, .{});
+                args.urthr = try cwd.openFile(io, path, .{});
             },
             .urthr_elf => {
                 const path = argiter.next() orelse usage(log.err);
-                args.urthr_elf = try fs.cwd().openFile(path, .{});
+                args.urthr_elf = try cwd.openFile(io, path, .{});
             },
             .output => {
                 const path = argiter.next() orelse usage(log.err);
-                args.output = try fs.cwd().createFile(path, .{});
+                args.output = try cwd.createFile(io, path, .{});
             },
         }
     }
@@ -128,6 +136,7 @@ pub fn main() !void {
         .urthr = args.urthr orelse usage(log.err),
         .urthr_elf = args.urthr_elf orelse usage(log.err),
         .output = args.output orelse usage(log.err),
+        .io = io,
     };
     defer mkimg.deinit();
 
@@ -139,23 +148,24 @@ const MkImage = struct {
     const Self = @This();
 
     mode: Mode,
-    wyrd: ?fs.File = null,
-    urthr: fs.File,
-    urthr_elf: fs.File,
-    output: fs.File,
+    wyrd: ?std.Io.File = null,
+    urthr: std.Io.File,
+    urthr_elf: std.Io.File,
+    output: std.Io.File,
+    io: std.Io,
 
     /// Create the image file.
     pub fn compose(self: *Self) !void {
         var wbuf: [4096]u8 = undefined;
-        var writer = self.output.writer(&wbuf);
+        var writer = self.output.writer(self.io, &wbuf);
 
         // Size check
         if (self.mode == .single) {
             var total: usize = 0;
 
-            total += (try self.wyrd.?.stat()).size;
+            total += (try self.wyrd.?.stat(self.io)).size;
             total += @sizeOf(UrthrHeader);
-            total += (try self.urthr.stat()).size;
+            total += (try self.urthr.stat(self.io)).size;
 
             if (memmap.loader_reserved.start - memmap.loader < total) {
                 return error.ImageTooLarge;
@@ -164,7 +174,7 @@ const MkImage = struct {
 
         // Write Wyrd binary.
         switch (self.mode) {
-            .single => try copy(&self.wyrd.?, &writer.interface),
+            .single => try self.copy(&self.wyrd.?, &writer.interface),
             else => {},
         }
 
@@ -172,26 +182,26 @@ const MkImage = struct {
         try self.writeHeader(&writer.interface);
 
         // Write Urthr binary.
-        try copy(&self.urthr, &writer.interface);
+        try self.copy(&self.urthr, &writer.interface);
     }
 
     /// Deinitialize to release resources.
     pub fn deinit(self: *Self) void {
         if (self.wyrd) |w| {
-            w.close();
+            w.close(self.io);
         }
-        self.urthr.close();
-        self.urthr_elf.close();
-        self.output.close();
+        self.urthr.close(self.io);
+        self.urthr_elf.close(self.io);
+        self.output.close(self.io);
     }
 
     /// Write Urthr header to the given writer.
     fn writeHeader(self: *Self, w: *std.Io.Writer) !void {
-        const urthr_size = (try self.urthr.stat()).size;
+        const urthr_size = (try self.urthr.stat(self.io)).size;
         const info = try self.parseUrthr();
 
         // Construct header.
-        var urthr_reader = self.urthr.reader(&.{});
+        var urthr_reader = self.urthr.reader(self.io, &.{});
         const header = UrthrHeader{
             .size = urthr_size,
             .encoded_size = self.getEncodedSize(urthr_size),
@@ -209,10 +219,10 @@ const MkImage = struct {
     }
 
     /// Copy from the given file to the given writer.
-    fn copy(r: *fs.File, w: *std.Io.Writer) !void {
+    fn copy(self: *Self, r: *std.Io.File, w: *std.Io.Writer) !void {
         var rbuf: [4096]u8 = undefined;
 
-        var reader = r.reader(&rbuf);
+        var reader = r.reader(self.io, &rbuf);
         _ = try reader.interface.streamRemaining(w);
 
         try w.flush();
@@ -222,7 +232,7 @@ const MkImage = struct {
     fn parseUrthr(self: *Self) !UrthrInfo {
         var rbuf: [4096]u8 = undefined;
 
-        var urthr_elf_reader = self.urthr_elf.reader(&rbuf);
+        var urthr_elf_reader = self.urthr_elf.reader(self.io, &rbuf);
         const header = try std.elf.Header.read(&urthr_elf_reader.interface);
 
         var piter = header.iterateProgramHeaders(&urthr_elf_reader);

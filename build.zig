@@ -77,7 +77,7 @@ pub fn build(b: *std.Build) !void {
         []const u8,
         "qemu",
         "Path to QEMU install directory",
-    ) orelse b.fmt("{s}/qemu-aarch64/bin", .{home()});
+    ) orelse "";
 
     const wait_qemu = b.option(
         bool,
@@ -281,11 +281,11 @@ pub fn build(b: *std.Build) !void {
         });
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = urthr_ld;
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
@@ -327,8 +327,8 @@ pub fn build(b: *std.Build) !void {
         });
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = wyrd_ld;
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
-        exe.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
+        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
         exe.root_module.addImport("boot", boot_module);
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
@@ -495,11 +495,6 @@ pub fn build(b: *std.Build) !void {
         },
         optimize,
     );
-}
-
-/// Get home directory path.
-fn home() []const u8 {
-    return std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch "..";
 }
 
 /// Create a new preprocess "Run" and return its artifact.

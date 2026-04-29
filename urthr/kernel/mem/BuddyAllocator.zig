@@ -38,7 +38,7 @@ const page_mask = page_size - 1;
 /// `reserveds` may be not sorted, but must not overlap each other.
 ///
 /// All arguments are in physical addresses.
-pub fn init(self: *Self, avails: []const Range, reserveds: []Range, log_fn: ?urd.LogFn) void {
+pub fn init(self: *Self, avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.LogFn) void {
     self.* = .{
         .lock = SpinLock{},
         .arena = Arena.new(),
@@ -444,7 +444,7 @@ fn phys2virtInterface(_: *const anyopaque, paddr: usize) usize {
 // =============================================================
 
 // Debug print the statistics of managed regions.
-fn debugPrintStatistics(self: *Self, log_fn: urd.LogFn) void {
+fn debugPrintStatistics(self: *Self, comptime log_fn: urd.LogFn) void {
     log_fn("Statistics of Buddy Allocator's initial state:", .{});
     const arena = &self.arena;
     log_fn(

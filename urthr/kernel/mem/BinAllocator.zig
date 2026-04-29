@@ -31,7 +31,7 @@ comptime {
 /// Metadata of free chunk.
 ///
 /// NOTE: In zig, we don't need to store the size of the in-use chunk.
-const ChunkMetaNode = packed struct {
+const ChunkMetaNode = extern struct {
     next: ChunkMetaPointer = null,
 };
 const ChunkMetaPointer = ?*ChunkMetaNode;

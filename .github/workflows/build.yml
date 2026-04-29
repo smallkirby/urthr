@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZIG_VERSION: 0.15.2
+  ZIG_VERSION: 0.16.0
 
 jobs:
   runtime_test:

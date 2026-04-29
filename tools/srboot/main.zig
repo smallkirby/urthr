@@ -9,26 +9,34 @@ var opts: struct {
     nowait: bool = false,
 } = .{};
 
-pub fn main() !void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    defer _ = gpa.deinit();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+    const args = try init.minimal.args.toSlice(init.gpa);
+    defer gpa.free(args);
 
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     var stdin_buf: [4096]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+    var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buf);
 
-    if (os.argv.len < 2 + 1) {
-        log.err("Usage: {s} <urthr.elf> <serial device> <?options>", .{os.argv[0]});
+    if (args.len < 2 + 1) {
+        log.err("Usage: {s} <urthr.elf> <serial device> <?options>", .{args[0]});
         return error.InvalidArgs;
     }
 
-    const binary_path = std.mem.span(os.argv[1]);
-    const serial_path = std.mem.span(os.argv[2]);
+    const binary_path = args[1];
+    const serial_path = args[2];
+
+    // Open CWD.
+    var cwd_buf: [128]u8 = undefined;
+    const cwd_path = cwd_buf[0..try std.process.currentPath(init.io, &cwd_buf)];
+    const cwd = try std.Io.Dir.openDirAbsolute(init.io, cwd_path, .{});
+    defer cwd.close(io);
 
     // Parse options.
-    for (0..os.argv.len - 3) |i| {
-        const option = std.mem.span(os.argv[3 + i]);
+    for (0..args.len - 3) |i| {
+        const option = args[3 + i];
         if (std.mem.eql(u8, option, "--quick")) {
             opts.quick = true;
         } else if (std.mem.eql(u8, option, "--nowait")) {
@@ -40,14 +48,14 @@ pub fn main() !void {
     }
 
     // Open Urthr kernel.
-    var urthr = try fs.cwd().openFile(binary_path, .{});
-    defer urthr.close();
+    var urthr = try cwd.openFile(io, binary_path, .{});
+    defer urthr.close(io);
 
     // Open serial device.
-    var sr = try fs.openFileAbsolute(serial_path, .{
+    var sr = try std.Io.Dir.openFileAbsolute(io, serial_path, .{
         .mode = .read_write,
     });
-    defer sr.close();
+    defer sr.close(io);
 
     // Configure baudrate.
     try setBaudrate(&sr, 921600);
@@ -59,6 +67,7 @@ pub fn main() !void {
             &sr,
             &stdin_reader.interface,
             &stdout_writer.interface,
+            io,
         );
     }
 
@@ -66,6 +75,7 @@ pub fn main() !void {
     var srboot = SrBoot{
         .sr = &sr,
         .urthr = &urthr,
+        .io = io,
     };
     try srboot.boot();
 
@@ -75,11 +85,12 @@ pub fn main() !void {
         &sr,
         &stdin_reader.interface,
         &stdout_writer.interface,
+        io,
     );
 }
 
 /// Set the baudrate of the serial device.
-fn setBaudrate(sr: *fs.File, comptime baudrate: u32) !void {
+fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     const linux = std.os.linux;
     const speed: linux.speed_t = switch (baudrate) {
         19200 => .B19200,
@@ -94,13 +105,16 @@ fn setBaudrate(sr: *fs.File, comptime baudrate: u32) !void {
     _ = linux.tcsetattr(sr.handle, linux.TCSA.NOW, &termios);
 }
 
-/// Wait <Enter> key press while printing UART output.
-fn waitEnterWhileUart(sr: *fs.File, stdin: *std.Io.Reader, stdout: *std.Io.Writer) !void {
-    terminate_thread.store(false, .release);
-    var thread = try std.Thread.spawn(
-        .{},
+/// Blocks until <Enter> key press while printing UART output.
+fn waitEnterWhileUart(
+    sr: *std.Io.File,
+    stdin: *std.Io.Reader,
+    stdout: *std.Io.Writer,
+    io: std.Io,
+) !void {
+    var task = io.async(
         printUartThread,
-        .{ sr, stdout },
+        .{ sr, stdout, io },
     );
 
     while (true) {
@@ -109,8 +123,7 @@ fn waitEnterWhileUart(sr: *fs.File, stdin: *std.Io.Reader, stdout: *std.Io.Write
         }
     }
 
-    terminate_thread.store(true, .release);
-    thread.join();
+    _ = task.cancel(io);
 }
 
 const TimeoutKiller = struct {
@@ -120,20 +133,22 @@ const TimeoutKiller = struct {
     _thread: std.Thread = undefined,
     /// Stop flag.
     _stop: std.atomic.Value(bool) = .init(false),
+    /// I/O interface.
+    io: std.Io,
 
     const f = struct {
-        fn f(timeout_ns: ?u64, flag: *const std.atomic.Value(bool)) void {
+        fn f(timeout_ns: ?u64, flag: *const std.atomic.Value(bool), io: std.Io) void {
             if (timeout_ns) |ns| {
-                var timer = std.time.Timer.start() catch {
-                    @panic("Failed to start killer timer.");
-                };
-                while (!flag.load(.acquire) and timer.read() < ns) {
+                const s = std.Io.Timestamp.now(io, .real).nanoseconds;
+                while (!flag.load(.acquire) and
+                    (std.Io.Timestamp.now(io, .real).nanoseconds - s) < ns)
+                {
                     std.atomic.spinLoopHint();
                 }
 
                 if (!flag.load(.acquire)) {
                     log.err("Operation timed out. Exiting.", .{});
-                    std.posix.exit(1);
+                    std.process.exit(1);
                 }
             } else {
                 std.atomic.spinLoopHint();
@@ -141,15 +156,15 @@ const TimeoutKiller = struct {
         }
     }.f;
 
-    pub fn new(timeout: u64) TimeoutKiller {
-        return .{ .timeout = timeout };
+    pub fn new(timeout: u64, io: std.Io) TimeoutKiller {
+        return .{ .timeout = timeout, .io = io };
     }
 
     pub fn start(self: *TimeoutKiller) !void {
         self._thread = try std.Thread.spawn(
             .{},
             f,
-            .{ self.timeout, &self._stop },
+            .{ self.timeout, &self._stop, self.io },
         );
     }
 
@@ -160,39 +175,27 @@ const TimeoutKiller = struct {
 };
 
 /// Thread function to print UART output.
-fn printUartThread(sr: *fs.File, stdout: *std.Io.Writer) void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    defer _ = gpa.deinit();
-
-    const wait_time_ns = 10 * std.time.ns_per_ms;
+fn printUartThread(
+    sr: *std.Io.File,
+    stdout: *std.Io.Writer,
+    io: std.Io,
+) void {
     var buf: [1]u8 = undefined;
-    var continue_poll = true;
-
-    var poller = std.Io.poll(
-        gpa.allocator(),
-        enum { uart },
-        .{ .uart = sr.* },
-    );
-    defer poller.deinit();
+    var reader = sr.reader(io, &.{});
 
     // Poll UART and print received data to stdout.
-    while (continue_poll and !terminate_thread.load(.acquire)) {
-        continue_poll = poller.pollTimeout(wait_time_ns) catch {
-            @panic("Failed to poll stdin.");
+    while (true) {
+        _ = reader.interface.readSliceShort(&buf) catch |err| switch (err) {
+            // Error happens when this thread is requested to be cancelled.
+            else => break,
         };
-        var reader = poller.reader(.uart);
 
-        // Read until no more data is available.
-        while (true) {
-            _ = reader.readSliceShort(&buf) catch break;
+        if (!std.ascii.isAscii(buf[0])) continue;
 
-            if (!std.ascii.isAscii(buf[0])) continue;
-
-            stdout.writeByte(buf[0]) catch {
-                @panic("Failed to write to stdout.");
-            };
-            stdout.flush() catch {};
-        }
+        stdout.writeByte(buf[0]) catch {
+            @panic("Failed to write to stdout.");
+        };
+        stdout.flush() catch {};
     }
 
     log.info("UART print thread exiting.", .{});
@@ -206,9 +209,11 @@ const SrBoot = struct {
     /// Current state.
     state: State = .sync,
     /// Serial device file.
-    sr: *fs.File,
+    sr: *std.Io.File,
     /// Urthr kernel file with header.
-    urthr: *fs.File,
+    urthr: *std.Io.File,
+    /// I/O interface.
+    io: std.Io,
 
     const State = enum {
         sync,
@@ -234,10 +239,13 @@ const SrBoot = struct {
     }
 
     fn sync(self: *Self) !void {
-        try self.sr.writeAll("SYNC");
+        try self.sr.writeStreamingAll(self.io, "SYNC");
 
         if (opts.quick) {
-            var killer = TimeoutKiller.new(5 * std.time.ns_per_s);
+            var killer = TimeoutKiller.new(
+                5 * std.time.ns_per_s,
+                self.io,
+            );
             try killer.start();
             defer killer.stop();
 
@@ -249,17 +257,15 @@ const SrBoot = struct {
 
     fn sendHeader(self: *Self) !void {
         var header: UrthrHeader = undefined;
-        const n = try self.urthr.readAll(std.mem.asBytes(&header));
-
-        if (n != @sizeOf(UrthrHeader)) {
-            return error.InvalidHeader;
-        }
+        var reader = self.urthr.reader(self.io, &.{});
+        try reader.interface.readSliceAll(std.mem.asBytes(&header));
 
         if (!header.valid()) {
             return error.InvalidHeader;
         }
 
-        try self.sr.writeAll(std.mem.asBytes(&header));
+        var writer = self.sr.writer(self.io, &.{});
+        try writer.interface.writeStruct(header, .little);
 
         try self.waitAck();
     }
@@ -267,8 +273,8 @@ const SrBoot = struct {
     fn sendBinary(self: *Self) !void {
         var rbuf: [4096]u8 = undefined;
         var wbuf: [4096]u8 = undefined;
-        var writer = self.sr.writer(&wbuf);
-        var reader = self.urthr.reader(&rbuf);
+        var writer = self.sr.writer(self.io, &wbuf);
+        var reader = self.urthr.reader(self.io, &rbuf);
 
         // Discard header part.
         try reader.seekTo(@sizeOf(UrthrHeader));
@@ -288,8 +294,9 @@ const SrBoot = struct {
         var buf: [1]u8 = undefined;
         var match_idx: usize = 0;
 
+        var reader = self.sr.readerStreaming(self.io, &.{});
         while (true) {
-            _ = try self.sr.read(&buf);
+            _ = try reader.interface.readSliceShort(&buf);
             if (buf[0] == s[match_idx]) {
                 match_idx += 1;
                 if (match_idx == s.len) {
@@ -308,6 +315,7 @@ const SrBoot = struct {
 
 const std = @import("std");
 const log = std.log.scoped(.srboot);
+const Allocator = std.mem.Allocator;
 const os = std.os;
 const fs = std.fs;
 const common = @import("common");

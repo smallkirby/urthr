@@ -142,7 +142,7 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
 
     // Print the stack trace.
     w.log("Stack Trace:", .{});
-    var it = std.debug.StackIterator.init(null, ctx.x29);
+    var it = StackIterator.init(ctx.x29);
     var ix: usize = 0;
     while (it.next()) |frame| : (ix += 1) {
         w.log("#{d:0>2}: 0x{X:0>16}", .{ ix, frame });
@@ -284,3 +284,4 @@ const common = @import("common");
 const Console = common.Console;
 const am = @import("asm.zig");
 const regs = @import("register.zig");
+const StackIterator = @import("StackIterator.zig");
