@@ -212,7 +212,7 @@ const TestPageAllocator = struct {
 var test_page_allocator = TestPageAllocator.new();
 
 test {
-    testing.refAllDeclsRecursive(@This());
+    testing.refAllDecls(@This());
 }
 
 fn getTestingAllocator() Allocator {
