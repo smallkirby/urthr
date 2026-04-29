@@ -1,6 +1,6 @@
 # Urthr
 
-![Zig](https://shields.io/badge/Zig-v0%2E15%2E2-blue?logo=zig&color=F7A41D&style=for-the-badge)
+![Zig](https://shields.io/badge/Zig-v0%2E16%2E0-blue?logo=zig&color=F7A41D&style=for-the-badge)
 
 ![Lint](https://github.com/smallkirby/urthr/actions/workflows/lint.yml/badge.svg)
 ![Unit Tests](https://github.com/smallkirby/urthr/actions/workflows/unittest.yml/badge.svg)
@@ -12,11 +12,13 @@
 ### Raspberry Pi 4 emulated on QEMU
 
 ```bash
+export QEMU_DIR=$HOME/qemu-aarch64/bin
 zig build run --summary all \
   -Dlog_level=debug \
   -Doptimize=Debug \
   -Dboard=rpi4b \
-  -Drtt
+  -Drtt \
+  -Dqemu=$QEMU_DIR
 ```
 
 ### Raspberry Pi 5
@@ -73,7 +75,7 @@ zig build test --summary all -Doptimize=Debug
 | `trace` | String (Comma-separated): `sdhc,net` | Enable trace outputs. | - |
 | `rtt` | Flag | Enable runtime tests. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
-| `qemu` | Path | Path to QEMU (aarch64) directory. | `$HOME/qemu-aarch64/bin` |
+| `qemu` | Path | Path to QEMU (aarch64) directory. | `""` |
 | `qemu_log` | String (Comma-separated): `sd` | Enable specified QEMU verbose log outputs. Comma-separated list. | - |
 | `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |
 | `idle_watchdog` | Integer | Terminate if the idle thread's execution time exceeds this threshold in seconds. | `0` (disabled) |

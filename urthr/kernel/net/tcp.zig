@@ -1129,7 +1129,7 @@ const PseudoHeader = extern struct {
 // Debug
 // =============================================================
 
-fn print(data: []const u8, logger: anytype) void {
+fn print(data: []const u8, comptime logger: anytype) void {
     const io = net.util.WireReader(Header).new(data);
 
     logger("TCP: {d} -> {d}, seq={d}, ack={d}, flags=[{f}]", .{

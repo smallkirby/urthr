@@ -159,6 +159,8 @@ fn initialTask() !void {
     // Start networking subsystem.
     log.info("Starting networking subsystem.", .{});
     try urd.net.run();
+
+    log.warn("Initiali task reached EOL.", .{});
 }
 
 // =============================================================

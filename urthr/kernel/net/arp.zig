@@ -181,7 +181,7 @@ pub const cache = struct {
         /// Cache entry state.
         state: State,
         /// Packets waiting for ARP resolution.
-        pending: PendingList = .{},
+        pending: PendingList = .empty,
 
         /// Free the pending list backing memory.
         ///
@@ -389,7 +389,7 @@ const Op = enum(u16) {
 // Debug
 // =============================================================
 
-fn print(data: []const u8, logger: anytype) void {
+fn print(data: []const u8, comptime logger: anytype) void {
     const gio = net.util.WireReader(GenericHeader).new(data);
 
     logger("ARP: {s}", .{@tagName(gio.read(.op))});

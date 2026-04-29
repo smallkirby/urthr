@@ -195,7 +195,7 @@ const EchoHeader = extern struct {
 // =============================================================
 
 /// Debug print the given ICMP packet.
-fn print(data: []const u8, logger: anytype) void {
+fn print(data: []const u8, comptime logger: anytype) void {
     const io = net.util.WireReader(HeaderCommon).new(data);
     const typ = io.read(.type);
 

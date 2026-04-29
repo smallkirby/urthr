@@ -8,6 +8,8 @@ pub const smp = @import("smp.zig");
 pub const timer = @import("timer.zig");
 pub const thread = @import("thread.zig");
 
+pub const StackIterator = @import("StackIterator.zig");
+
 /// Execute a single NOP instruction.
 pub fn nop() void {
     asm volatile ("nop");

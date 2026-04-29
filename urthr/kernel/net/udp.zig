@@ -424,7 +424,7 @@ const PseudoHeader = extern struct {
 // =============================================================
 
 /// debug print the given UDP packet.
-fn print(data: []const u8, logger: anytype) void {
+fn print(data: []const u8, comptime logger: anytype) void {
     const io = net.util.WireReader(Header).new(data);
 
     logger("UDP: {d} -> {d}, length={d}, checksum={X:0>4}", .{

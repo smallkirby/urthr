@@ -1,4 +1,4 @@
-pub fn scoped(comptime domain: @Type(.enum_literal), comptime scope: @Type(.enum_literal)) Logger {
+pub fn scoped(comptime domain: @EnumLiteral(), comptime scope: @EnumLiteral()) Logger {
     return struct {
         fn f(comptime fmt: []const u8, args: anytype) void {
             if (isEnabled(domain)) {
@@ -10,7 +10,7 @@ pub fn scoped(comptime domain: @Type(.enum_literal), comptime scope: @Type(.enum
 
 const Logger = *const fn (comptime fmt: []const u8, args: anytype) void;
 
-fn isEnabled(comptime domain: @Type(.enum_literal)) bool {
+fn isEnabled(comptime domain: @EnumLiteral()) bool {
     for (traces) |d| {
         if (std.mem.eql(u8, @tagName(domain), d)) {
             return true;

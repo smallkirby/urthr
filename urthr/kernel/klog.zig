@@ -44,7 +44,7 @@ pub fn set(c: Console) void {
 /// Log implementation.
 pub fn log(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime fmt: []const u8,
     args: anytype,
 ) void {
@@ -58,7 +58,7 @@ pub fn log(
 
 pub fn anyLog(
     comptime level: []const u8,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime fmt: []const u8,
     args: anytype,
 ) void {

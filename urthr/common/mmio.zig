@@ -76,7 +76,7 @@ pub const Align = union(enum) {
 ///
 /// The marker does not have its own data.
 /// It just serves as an address offset identifier within a MMIO module.
-pub fn Marker(comptime name: @Type(.enum_literal)) type {
+pub fn Marker(comptime name: @EnumLiteral()) type {
     return enum(u32) {
         const __ = name;
     };

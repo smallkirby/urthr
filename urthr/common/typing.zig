@@ -10,7 +10,7 @@ pub fn InlineDoublyLinkedList(comptime T: type, comptime field: []const u8) type
     return struct {
         const Self = @This();
 
-        pub const Head = packed struct {
+        pub const Head = extern struct {
             next: ?*T = null,
             prev: ?*T = null,
         };

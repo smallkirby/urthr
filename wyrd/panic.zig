@@ -20,7 +20,7 @@ fn panic(msg: []const u8, _: ?*builtin.StackTrace, _: ?usize) noreturn {
     panicked.store(true, .release);
 
     // Print the stack trace.
-    var it = std.debug.StackIterator.init(@returnAddress(), null);
+    var it = arch.StackIterator.init(@frameAddress());
     var ix: usize = 0;
     log.err("=== Stack Trace ==============", .{});
     while (it.next()) |frame| : (ix += 1) {

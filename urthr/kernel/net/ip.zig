@@ -336,7 +336,7 @@ fn getIdentification() u16 {
 // =============================================================
 
 /// A list of registered routes.
-var routes: std.array_list.Aligned(Route, null) = .{};
+var routes: std.array_list.Aligned(Route, null) = .empty;
 
 /// Represents a network routing entry that defines how packets should be forwarded.
 const Route = struct {
@@ -507,7 +507,7 @@ pub const Protocol = enum(u8) {
 // =============================================================
 
 /// Print an IP packet data.
-fn print(data: []const u8, logger: anytype) void {
+fn print(data: []const u8, comptime logger: anytype) void {
     const io = net.util.WireReader(Header).new(data);
 
     logger("IP: {f} -> {f}, ID={d}, protocol={d}, TTL={d}", .{
