@@ -323,6 +323,19 @@ pub fn translateWalk(pt: PageTable, va: usize, allocator: PageAllocator) ?usize 
     return null;
 }
 
+/// Get the physical address corresponding to the given virtual address.
+pub fn getPhysicalAddress(va: usize) usize {
+    const ret = asm volatile (
+        \\at S1E1R, %[va]
+        \\mrs %[pa], PAR_EL1
+        : [pa] "=r" (-> usize),
+        : [va] "r" (va),
+    );
+
+    rtt.expect(ret & 1 == 0);
+    return (ret & 0x00FF_FFFF_FFFF_F000) + (va & 0xFFF);
+}
+
 /// Lookup the page descriptor for the given virtual address.
 ///
 /// If the descriptor does not exist, spawn a new table descriptor recursively.

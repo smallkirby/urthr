@@ -8,6 +8,11 @@ pub const Virt = usize;
 /// Physical address type.
 pub const Phys = usize;
 
+pub const page_size = common.mem.size_4kib;
+pub const size_4kib = common.mem.size_4kib;
+pub const size_2mib = common.mem.size_2mib;
+pub const size_1gib = common.mem.size_1gib;
+
 /// Buddy allocator instance.
 var buddy_allocator: BuddyAllocator = undefined;
 /// Bin allocator instance.
@@ -217,7 +222,3 @@ const pmap = board.memmap;
 const BinAllocator = @import("mem/BinAllocator.zig");
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
 const PhysAllocator = @import("mem/PhysAllocator.zig");
-
-const size_4kib = common.mem.size_4kib;
-const size_2mib = common.mem.size_2mib;
-const size_1gib = common.mem.size_1gib;

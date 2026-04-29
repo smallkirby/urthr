@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) !void {
         .ofmt = .elf,
         .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
             .strict_align,
+            .el3,
         }),
         .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
             .neon,
@@ -195,6 +196,7 @@ pub fn build(b: *std.Build) !void {
             }),
         });
         exe.root_module.addImport("boot", boot_module);
+        exe.root_module.addImport("board", board_module);
 
         break :blk exe;
     };
@@ -283,6 +285,7 @@ pub fn build(b: *std.Build) !void {
         exe.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
         exe.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
         exe.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
+        exe.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
@@ -604,7 +607,7 @@ const Qemu = struct {
         const machine_name = switch (self.machine) {
             .rpi4b => "raspi4b",
             .rpi5 => "raspi5",
-            .virt => "virt-9.0,gic-version=3,secure=off,virtualization=on",
+            .virt => "virt-9.0,gic-version=3,secure=on,virtualization=on",
         };
 
         var args = std.array_list.Aligned([]const u8, null).empty;
@@ -621,6 +624,8 @@ const Qemu = struct {
             .virt => try args.appendSlice(allocator, &.{
                 "-cpu",
                 "cortex-a76",
+                "-smp",
+                "4",
             }),
             else => {},
         }

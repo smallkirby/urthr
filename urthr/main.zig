@@ -80,6 +80,10 @@ fn zmain() !void {
     log.info("Initializing peripherals.", .{});
     try board.initPeripherals(urd.mem.getAllocators());
 
+    // Warm up secondary CPUs.
+    log.info("Warming up secondary CPUs.", .{});
+    try urd.smp.init();
+
     log.debug("Memory Map:", .{});
     urd.mem.debugPrintResources(log.debug);
 

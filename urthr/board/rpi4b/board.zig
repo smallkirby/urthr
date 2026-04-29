@@ -5,6 +5,9 @@ pub const memmap = @import("memmap.zig");
 /// Returns null if the exception cannot be handled.
 pub const ExceptionHandler = *const fn (u64) ?void;
 
+/// Number of CPU cores in the system.
+pub const num_cpus = 4;
+
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
@@ -83,6 +86,71 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
             mm.page,
         );
     }
+}
+
+/// Prepare for waking up secondary cores.
+pub fn prepareSubcoreWakeup() urd.mem.Error!void {
+    // Identity-map the entry point page for secondary cores.
+    const kentry = std.mem.alignBackward(
+        usize,
+        arch.smp.getIdentityAddress(),
+        urd.mem.page_size,
+    );
+    try arch.mmu.map4kb(
+        urd.mem.getInitPageTablePair(),
+        .{
+            .va = kentry,
+            .pa = kentry,
+            .size = urd.mem.page_size,
+            .perm = .kernel_rwx,
+            .attr = .normal,
+        },
+        .{},
+        urd.mem.getPageAllocator(),
+    );
+}
+
+/// De-initialize resources used for waking up secondary cores.
+pub fn deinitSubcoreWakeup() void {
+    const kentry = std.mem.alignBackward(
+        usize,
+        arch.smp.getIdentityAddress(),
+        urd.mem.page_size,
+    );
+    arch.mmu.unmap4kb(
+        urd.mem.getInitPageTablePair(),
+        kentry,
+        kentry,
+        urd.mem.getPageAllocator(),
+    ) catch {};
+}
+
+/// Wakeup a secondary core.
+///
+/// This function returns before the core is actually awake.
+/// The caller should wait for the core to be awake.
+///
+/// - core: Core number to wake up.
+/// - entry: Virtual address of the entry point.
+/// - stack: Virtual address of the stack pointer.
+pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
+    // Map the spin table page.
+    const io = urd.mem.getIoAllocator();
+    const page = try io.ioremap(
+        std.mem.alignBackward(usize, memmap.cpu_spintable, urd.mem.page_size),
+        urd.mem.page_size,
+    );
+    defer io.iounmap(page, urd.mem.page_size) catch {};
+    const spintable = page + (memmap.cpu_spintable % urd.mem.page_size);
+
+    // Wakeup the core.
+    arch.smp.wakeSpin(
+        core,
+        spintable + core * 8,
+        @ptrFromInt(entry),
+        stack,
+        sync.cleanAllDataCache,
+    );
 }
 
 /// Fill the given buffer with random data.
@@ -208,6 +276,7 @@ const std = @import("std");
 const arch = @import("arch").impl;
 const options = @import("options");
 const common = @import("common");
+const bits = common.bits;
 const mem = common.mem;
 const rtt = common.rtt;
 const Console = common.Console;
@@ -217,3 +286,4 @@ const urd = @import("urthr");
 const dd = @import("dd");
 const map = @import("memmap.zig");
 const rdd = @import("dd.zig");
+const sync = @import("sync.zig");

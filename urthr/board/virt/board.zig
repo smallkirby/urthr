@@ -5,6 +5,9 @@ pub const memmap = @import("memmap.zig");
 /// Returns null if the exception cannot be handled.
 pub const ExceptionHandler = *const fn (u64) ?void;
 
+/// Number of CPU cores in the system.
+pub const num_cpus = 4;
+
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
@@ -101,6 +104,59 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
     }
 
     gmm = mm;
+}
+
+/// Prepare for waking up secondary cores.
+pub fn prepareSubcoreWakeup() urd.mem.Error!void {
+    // Identity-map the entry point page for secondary cores.
+    const kentry = std.mem.alignBackward(
+        usize,
+        arch.smp.getIdentityAddress(),
+        urd.mem.page_size,
+    );
+    try arch.mmu.map4kb(
+        urd.mem.getInitPageTablePair(),
+        .{
+            .va = kentry,
+            .pa = kentry,
+            .size = urd.mem.page_size,
+            .perm = .kernel_rwx,
+            .attr = .normal,
+        },
+        .{},
+        urd.mem.getPageAllocator(),
+    );
+}
+
+/// De-initialize resources used for waking up secondary cores.
+pub fn deinitSubcoreWakeup() void {
+    const kentry = std.mem.alignBackward(
+        usize,
+        arch.smp.getIdentityAddress(),
+        urd.mem.page_size,
+    );
+    arch.mmu.unmap4kb(
+        urd.mem.getInitPageTablePair(),
+        kentry,
+        kentry,
+        urd.mem.getPageAllocator(),
+    ) catch {};
+}
+
+/// Wakeup a secondary core.
+///
+/// This function returns before the core is actually awake.
+/// The caller should wait for the core to be awake.
+///
+/// - core: Core number to wake up.
+/// - entry: Virtual address of the entry point.
+/// - stack: Virtual address of the stack pointer.
+pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
+    // `virt` target doest not have to maintain cache coherency!
+    const f = struct {
+        fn f() void {}
+    }.f;
+    arch.smp.wakePsci(core, entry, stack, f);
 }
 
 /// Fill the given buffer with random data.
