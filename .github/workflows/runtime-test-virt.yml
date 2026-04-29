@@ -1,0 +1,68 @@
+name: Runtime Tests (QEMU virt)
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  runtime_test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/urthr:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        BUILD_TYPE: [Debug, ReleaseSafe, ReleaseFast]
+      max-parallel: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependency
+        run: |
+          apt update
+          apt install -y \
+            git \
+            sudo \
+            binutils \
+            curl \
+            wget \
+            tar \
+            xz-utils \
+            qemu-system-arm \
+            qemu-utils \
+            cpp \
+            libcapstone-dev \
+            fdisk \
+            dosfstools \
+            mtools
+
+      - name: Create SD card image
+        run: |
+          bash ./scripts/create_disk.bash ./scripts ./sdcard.img
+
+      - name: Install zig
+        run: |
+          curl https://ziglang.org/download/${{env.ZIG_VERSION}}/zig-x86_64-linux-${{env.ZIG_VERSION}}.tar.xz -L -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "$(pwd)/zig-x86_64-linux-${{env.ZIG_VERSION}}" >> $GITHUB_PATH
+
+      - name: Runtime Tests (virt)
+        run: |
+          zig build run --summary all \
+            -Dlog_level=debug \
+            -Doptimize=${{ matrix.BUILD_TYPE }} \
+            -Dboard=virt \
+            -Dqemu=$QEMU_DIR/bin \
+            -Drtt \
+            -Drestart \
+            -Dsdin=sdcard.img
