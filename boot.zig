@@ -31,9 +31,11 @@ pub const UrthrHeader = extern struct {
     load_at: u64,
     /// Virtual address of the entry point.
     entry: u64,
+    /// Reserved.
+    _56: u64 = 0,
 
     comptime {
-        if (@sizeOf(UrthrHeader) != 56) {
+        if (@sizeOf(UrthrHeader) != 64) {
             @compileError("UrthrHeader size must be 56 bytes");
         }
     }
