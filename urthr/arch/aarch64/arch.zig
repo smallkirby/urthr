@@ -1,8 +1,10 @@
+pub const sync = @import("sync.zig");
 pub const exception = @import("isr.zig");
 pub const gicv2 = @import("gicv2.zig");
 pub const gicv3 = @import("gicv3.zig");
 pub const mmu = @import("mmu.zig");
 pub const psci = @import("psci.zig");
+pub const smp = @import("smp.zig");
 pub const timer = @import("timer.zig");
 pub const thread = @import("thread.zig");
 
@@ -41,6 +43,16 @@ pub fn barrier(domain: BarrierDomain, typ: BarrierType) void {
             .acquire => asm volatile ("dsb ishld"),
         },
     }
+}
+
+/// Get the Unique ID of the current core.
+pub fn getCoreNumber() usize {
+    const mpidr = am.mrs(.mpidr_el1);
+
+    return (@as(usize, mpidr.aff3) << 32) |
+        (@as(usize, mpidr.aff2) << 16) |
+        (@as(usize, mpidr.aff1) << 8) |
+        @as(usize, mpidr.aff0);
 }
 
 /// Cache operation type.

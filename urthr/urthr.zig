@@ -5,6 +5,7 @@ pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
 pub const rng = @import("kernel/rng.zig");
 pub const sched = @import("kernel/sched.zig");
+pub const smp = @import("kernel/smp.zig");
 pub const thread = @import("kernel/thread.zig");
 pub const time = @import("kernel/time.zig");
 
@@ -47,7 +48,7 @@ pub fn unimplemented(comptime msg: []const u8) noreturn {
 }
 
 /// Assert at compile time.
-pub fn comptimeAssert(cond: bool, comptime msg: ?[]const u8, args: anytype) void {
+pub fn comptimeAssert(comptime cond: bool, comptime msg: ?[]const u8, args: anytype) void {
     if (!cond) {
         if (msg) |m| {
             @compileError(std.fmt.comptimePrint(m, args));
