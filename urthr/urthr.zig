@@ -3,6 +3,7 @@ pub const fs = @import("kernel/fs.zig");
 pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
+pub const pcpu = @import("kernel/pcpu.zig");
 pub const rng = @import("kernel/rng.zig");
 pub const sched = @import("kernel/sched.zig");
 pub const smp = @import("kernel/smp.zig");

@@ -47,6 +47,7 @@ pub const SystemReg = enum {
     cntp_tval_el0,
 
     mpidr_el1,
+    tpidr_el1,
 
     icc_ctlr_el1,
     icc_sre_el1,
@@ -89,6 +90,7 @@ pub const SystemReg = enum {
             .cntp_ctl_el0 => CntpCtl,
             .cntp_tval_el0 => CntpTval,
             .mpidr_el1 => Mpidr,
+            .tpidr_el1 => Tpidr,
             .icc_ctlr_el1 => IccCtlr,
             .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
             .icc_pmr_el1 => IccPmr,
@@ -847,6 +849,11 @@ pub const Mpidr = packed struct(u64) {
     /// Reserved.
     _40: u24 = 0,
 };
+
+/// TPIDR_EL<n>.
+///
+/// Thread ID Register.
+pub const Tpidr = u64;
 
 /// ICC_CTLR_EL1.
 ///
