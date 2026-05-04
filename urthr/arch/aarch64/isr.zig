@@ -77,9 +77,11 @@ var console: Console = undefined;
 
 fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     var w = UnsafeWriter.new();
+    const mpidr = am.mrsi(.mpidr_el1);
 
     w.log("", .{});
     w.log("=== Oops! ===============================", .{});
+    w.log("Core: 0x{X:0>16}", .{mpidr});
     w.log("Type: {s}", .{kind});
     w.log("", .{});
 
