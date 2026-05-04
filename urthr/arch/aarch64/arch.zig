@@ -48,7 +48,7 @@ pub fn barrier(domain: BarrierDomain, typ: BarrierType) void {
 }
 
 /// Get the Unique ID of the current core.
-pub fn getCoreNumber() usize {
+pub fn getCoreId() usize {
     const mpidr = am.mrs(.mpidr_el1);
 
     return (@as(usize, mpidr.aff3) << 32) |
