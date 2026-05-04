@@ -47,10 +47,12 @@ fn ksubmain() callconv(.c) noreturn {
     // Fill the CPU ID mapping for this core.
     idmap[waked.load(.acquire) + 1] = arch.getCoreId();
 
+    // Set the exception vector for this CPU.
+    urd.exception.initLocal();
+
     // Increment the waked counter to notify the main core that this core is awake.
     _ = waked.fetchAdd(1, .release);
 
-    // TODO: Set exception handlers.
     // TODO: Per-cpu initialization (e.g. GIC).
 
     // TODO: not implemented.

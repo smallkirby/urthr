@@ -15,21 +15,21 @@ const num_interrupts = 512;
 /// Interrupt handlers.
 var handlers: [num_interrupts]?Handler = [_]?Handler{null} ** num_interrupts;
 
-/// Initialize the basic exception handling for booting the kernel.
+/// Initialize IRQ handling common to all CPUs.
 ///
 /// IRQs are not enabled yet.
-pub fn boot() void {
+pub fn initGlobal() void {
+    // Set console for exception handlers.
     arch.exception.setConsole(board.getConsole());
-    arch.exception.initLocal();
 
     // Set terminator function.
     arch.exception.setTerminator(urd.eol);
 
-    // Set handler function.
-    board.setIrqHandler(call);
+    // Initialize board-specific IRQ handling.
+    board.initIrqGlobal(call);
 }
 
-/// Initialize local IRQ handling.
+/// Initialize local IRQ handling for the current core.
 ///
 /// IRQs are still masked at this point.
 pub fn initLocal() void {
