@@ -57,6 +57,16 @@ pub fn getCoreNumber() usize {
         @as(usize, mpidr.aff0);
 }
 
+/// Get the value that is unique to each core.
+pub fn getPerCpuBase() usize {
+    return am.mrs(.tpidr_el1);
+}
+
+/// Set the value that is unique to each core.
+pub fn setPerCpuBase(addr: usize) void {
+    am.msr(.tpidr_el1, addr);
+}
+
 /// Cache operation type.
 const CacheOp = enum {
     /// Invalidate cache lines.

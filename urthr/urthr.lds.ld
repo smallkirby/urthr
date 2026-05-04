@@ -25,6 +25,13 @@ SECTIONS
       *(.rodata .rodata.*)
     } :text
 
+    .__per_cpu : ALIGN(4K)
+    {
+      __per_cpu_start = .;
+      *(.data..percpu)
+      __per_cpu_end = .;
+    } :text
+
     .data : ALIGN(4K)
     {
       *(.data .data.* .ldata)

@@ -72,6 +72,11 @@ fn zmain() !void {
     log.info("Remapping board I/O memory.", .{});
     try urd.mem.remapBoard();
 
+    // Initialize per-CPU data.
+    log.info("Initializing per-CPU data.", .{});
+    try urd.pcpu.globalInit(urd.mem.getPageAllocator());
+    urd.pcpu.localInit(0);
+
     // Initialize networking stack.
     log.debug("Initializing networking stack.", .{});
     try urd.net.init();
