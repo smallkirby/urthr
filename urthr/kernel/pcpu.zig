@@ -79,11 +79,6 @@ pub inline fn get(comptime pointer: anytype) @typeInfo(@TypeOf(pointer)).pointer
     return ptr(pointer).*;
 }
 
-/// Set the value of the per-CPU variable.
-pub inline fn set(comptime pointer: anytype, value: @typeInfo(@TypeOf(pointer)).pointer.child) void {
-    ptr(pointer).* = value;
-}
-
 /// Get the virtual address of per-CPU data area for the given CPU.
 inline fn rawGetCpuHead(cpu: usize) [*]u8 {
     return @ptrFromInt(@intFromPtr(percpu_instance.ptr) +% cpu_offsets[cpu]);

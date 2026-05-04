@@ -44,11 +44,16 @@ var waked: std.atomic.Value(u8) = .init(0);
 
 /// Entry point for subcores.
 fn ksubmain() callconv(.c) noreturn {
+    const logical_core = waked.load(.acquire) + 1;
+
     // Fill the CPU ID mapping for this core.
-    idmap[waked.load(.acquire) + 1] = arch.getCoreId();
+    idmap[logical_core] = arch.getCoreId();
 
     // Set the exception vector for this CPU.
     urd.exception.initLocal();
+
+    // Initialize per-CPU data.
+    urd.pcpu.localInit(logical_core);
 
     // Increment the waked counter to notify the main core that this core is awake.
     _ = waked.fetchAdd(1, .release);
