@@ -238,23 +238,27 @@ pub fn getRandom(buf: []u8) void {
     }
 }
 
-/// Initialize GICC for the calling AP.
-pub fn initIrqLocal() void {
+/// Initialize the exception handling common to all CPUs.
+pub fn initIrqGlobal(f: ExceptionHandler) void {
+    // Set exception handler stub.
+    exception_handler = f;
+
     // Set exception handler.
     arch.intr.setHandler(handleIrq);
+}
 
+/// Initialize GIC for the calling AP.
+pub fn initIrqLocal() void {
     // Initialize CPU interface.
     arch.gicv2.initLocal();
+
+    // Initialize exception handling for this CPU.
+    arch.exception.initLocal();
 }
 
 /// Enable an interrupt by ID.
 pub fn enableIrq(id: usize) void {
     arch.gicv2.enableIrq(id);
-}
-
-/// Set the exception handler for IRQs.
-pub fn setIrqHandler(f: ExceptionHandler) void {
-    exception_handler = f;
 }
 
 /// IRQ handler function.

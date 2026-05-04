@@ -17,7 +17,7 @@ export fn kmain() callconv(.c) noreturn {
     urd.klog.set(board.getConsole());
 
     // Initialize exception handling.
-    urd.exception.boot();
+    urd.exception.initGlobal();
 
     // Print a boot message.
     log.info("", .{});
@@ -84,21 +84,20 @@ fn zmain() !void {
     // Initialize peripherals.
     log.info("Initializing peripherals.", .{});
     try board.initPeripherals(urd.mem.getAllocators());
+    log.debug("Memory Map:", .{});
+    urd.mem.debugPrintResources(log.debug);
+
+    // Setup IRQ.
+    log.debug("Setting up IRQ.", .{});
+    urd.exception.initLocal();
 
     // Warm up secondary CPUs.
     log.info("Warming up secondary CPUs.", .{});
     try urd.smp.init();
 
-    log.debug("Memory Map:", .{});
-    urd.mem.debugPrintResources(log.debug);
-
     // Initialize RNG.
     log.info("Initializing RNG.", .{});
     urd.rng.init();
-
-    // Setup IRQ.
-    log.debug("Setting up IRQ.", .{});
-    urd.exception.initLocal();
 
     // Initialize scheduler.
     log.info("Initializing scheduler.", .{});
