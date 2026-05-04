@@ -131,7 +131,7 @@ const FreeList = struct {
         };
     }
 
-    /// Add a memory region to this free list.
+    /// Add a new memory region under the management of this list as a free block.
     pub fn addRegion(self: *FreeList, phys: Phys) *FreePage {
         const new_page: *FreePage = @ptrFromInt(phys2virt(phys));
         self.insertSorted(new_page);
@@ -173,7 +173,7 @@ const FreeList = struct {
         return page;
     }
 
-    /// Insert the block to the freelist keeping list sorted.
+    /// Insert the block to the freelist keeping list sorted in ascending order of physical addresses.
     ///
     /// Note that this function does not increment the counter.
     ///
@@ -264,6 +264,10 @@ const Arena = struct {
         const free_list = self.getList(order);
 
         const block = free_list.allocBlock() catch retry: {
+            if (order == avail_orders - 1) {
+                return Error.OutOfMemory;
+            }
+
             // Split the free list and retry.
             self.splitRecursive(order + 1);
             break :retry try free_list.allocBlock();
