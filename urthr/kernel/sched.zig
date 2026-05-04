@@ -3,7 +3,7 @@ var qready: ThreadList = .{};
 /// Idle thread.
 var idle: *Thread = undefined;
 /// Currently running thread.
-var current: ?*Thread = null;
+var current: ?*Thread linksection(pcpu.section) = null;
 
 /// Spin lock for scheduler and thread management.
 var lock: SpinLock = .{};
@@ -37,7 +37,7 @@ pub fn init() Allocator.Error!void {
     idle = th;
 
     // Set the idle thread as the current thread.
-    current = idle;
+    setCurrent(idle);
 }
 
 /// Start the preemptive scheduling timer.
@@ -75,7 +75,7 @@ pub fn blockCurrent(caller_lock: *SpinLock) void {
     cur.need_resched = false;
 
     const next = pickNext();
-    current = next;
+    setCurrent(next);
     next.state = .running;
 
     // Switch user-space page table if needed.
@@ -114,7 +114,7 @@ pub fn reschedule() void {
         qready.append(cur);
     }
 
-    current = next;
+    setCurrent(next);
 
     // Switch user-space page table if needed.
     arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
@@ -146,7 +146,7 @@ fn exitCurrent() noreturn {
 
     // Select and set the next thread to run.
     const next = pickNext();
-    current = next;
+    setCurrent(next);
     next.state = .running;
 
     // Switch user-space page table if needed.
@@ -181,7 +181,12 @@ fn pickNext() *Thread {
 
 /// Get the currently running thread.
 pub fn getCurrent() *Thread {
-    return current.?;
+    return pcpu.get(&current).?;
+}
+
+/// Set the currently running thread.
+fn setCurrent(th: *Thread) void {
+    pcpu.ptr(&current).* = th;
 }
 
 /// Allocate a new thread ID.
@@ -340,6 +345,7 @@ const options = @import("options");
 const common = @import("common");
 const page_size = common.mem.size_4kib;
 const urd = @import("urthr");
+const pcpu = urd.pcpu;
 const SpinLock = urd.SpinLock;
 const thread = urd.thread;
 const Thread = thread.Thread;
