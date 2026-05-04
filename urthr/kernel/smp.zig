@@ -5,15 +5,23 @@ const substack_size = 5 * urd.mem.size_4kib;
 /// Size in pages of the subcore stack.
 const substack_pages = substack_size / urd.mem.page_size;
 
+/// Mapping from logical CPU ID to architecture-specific core ID.
+var idmap = [_]u64{0} ** board.num_cpus;
+
 /// Initialize the SMP subsystem.
 ///
 /// Wakes up all secondary cores.
 pub fn init() urd.mem.Error!void {
     const allocator = urd.mem.getPageAllocator();
 
+    // Initialize the CPU ID mapping.
+    idmap[0] = arch.getCoreId();
+
+    // Architecture-specific preparation for waking up secondary cores.
     try board.prepareSubcoreWakeup();
     defer board.deinitSubcoreWakeup();
 
+    // Wake up secondary cores.
     for (1..board.num_cpus) |i| {
         const stack = try allocator.allocPagesV(substack_pages);
         const sp = @intFromPtr(stack.ptr) + substack_size;
@@ -36,10 +44,13 @@ var waked: std.atomic.Value(u8) = .init(0);
 
 /// Entry point for subcores.
 fn ksubmain() callconv(.c) noreturn {
+    // Fill the CPU ID mapping for this core.
+    idmap[waked.load(.acquire) + 1] = arch.getCoreId();
+
+    // Increment the waked counter to notify the main core that this core is awake.
     _ = waked.fetchAdd(1, .release);
 
     // TODO: Set exception handlers.
-    // TODO: Record CPU ID and corresponding logical core ID (sequential number starting from 0).
     // TODO: Per-cpu initialization (e.g. GIC).
 
     // TODO: not implemented.
