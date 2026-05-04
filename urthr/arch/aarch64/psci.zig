@@ -133,7 +133,6 @@ fn psci(func: Func) Error!u32 {
         inline else => |v| am.smc(@intFromEnum(func), v.x1, v.x2, v.x3),
     };
     const iret: i32 = @bitCast(@as(u32, @truncate(ret)));
-    @import("std").log.debug("PSCI return: {d}", .{iret});
 
     if (iret < 0) {
         return @as(ErrorCodes, @enumFromInt(iret)).unwrap();
@@ -148,4 +147,3 @@ fn psci(func: Func) Error!u32 {
 
 const std = @import("std");
 const am = @import("asm.zig");
-const hugin = @import("hugin");
