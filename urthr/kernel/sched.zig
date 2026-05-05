@@ -1,7 +1,9 @@
 /// Ready queue of threads.
+///
+/// Idle thread is not included in the ready queue and is handled separately.
 var qready: ThreadList = .{};
 /// Idle thread.
-var idle: *Thread = undefined;
+var idle: *Thread linksection(pcpu.section) = undefined;
 /// Currently running thread.
 var current: ?*Thread linksection(pcpu.section) = null;
 
@@ -20,7 +22,7 @@ pub const Error = error{
 /// Initialize the scheduler.
 ///
 /// Currently running context is set to the idle thread.
-pub fn init() Allocator.Error!void {
+pub fn initLocal() Allocator.Error!void {
     const allocator = urd.mem.getGeneralAllocator();
 
     // Create the idle thread.
@@ -28,25 +30,27 @@ pub fn init() Allocator.Error!void {
     errdefer allocator.destroy(th);
     th.* = .{
         .id = 0,
-        .name = "idle",
+        .name = "idle", // TODO: should be unique per core.
         .state = .running,
         .sp = undefined,
         .mm = urd.mem.getKernelPageTable(),
         .fs = undefined, // filled later on fs subsystem initialization.
     };
-    idle = th;
+    pcpu.ptr(&idle).* = th;
 
     // Set the idle thread as the current thread.
-    setCurrent(idle);
+    setCurrent(th);
 }
 
 /// Start the preemptive scheduling timer.
 pub fn start() !void {
+    rtt.expectEqual(getIdle(), getCurrent());
+
     // Register scheduler timer callback.
     _ = try time.register(tick_interval_us, onTimerTick);
 
     // Initialize idle thread runtime accounting.
-    idle.last_exec_start = arch.timer.getCount();
+    getCurrent().last_exec_start = arch.timer.getCount();
 }
 
 /// Add a thread to the ready queue.
@@ -110,7 +114,7 @@ pub fn reschedule() void {
     const cur = getCurrent();
     cur.state = .ready;
     cur.need_resched = false;
-    if (cur != idle) {
+    if (cur != getIdle()) {
         qready.append(cur);
     }
 
@@ -137,6 +141,8 @@ pub fn reschedule() void {
 /// Marks the current thread as dead and switches to the next ready thread.
 fn exitCurrent() noreturn {
     _ = lock.lockDisableIrq();
+
+    rtt.expect(getCurrent() != getIdle());
 
     accountRuntime();
 
@@ -176,7 +182,7 @@ pub fn markNeedResched() void {
 ///
 /// Falls back to the idle thread if the ready queue is empty.
 fn pickNext() *Thread {
-    return qready.popFirst() orelse idle;
+    return qready.popFirst() orelse getIdle();
 }
 
 /// Get the currently running thread.
@@ -187,6 +193,11 @@ pub fn getCurrent() *Thread {
 /// Set the currently running thread.
 fn setCurrent(th: *Thread) void {
     pcpu.ptr(&current).* = th;
+}
+
+/// Get the idle thread for this core.
+fn getIdle() *Thread {
+    return pcpu.get(&idle);
 }
 
 /// Allocate a new thread ID.
@@ -223,9 +234,12 @@ fn accountRuntime() void {
     cur.runtime_us += (delta_ticks * std.time.us_per_s) / freq;
 
     if (options.idle_watchdog != 0) {
-        if (idle.runtime_us >= options.idle_watchdog * std.time.us_per_s) {
-            log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
-            urd.eol(0);
+        if (urd.smp.getLogicalCoreId()) |id| {
+            if (id == 0 and getIdle().runtime_us >= options.idle_watchdog * std.time.us_per_s) {
+                @branchHint(.cold);
+                log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
+                urd.eol(0);
+            }
         }
     }
 }
@@ -343,6 +357,7 @@ const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const options = @import("options");
 const common = @import("common");
+const rtt = common.rtt;
 const page_size = common.mem.size_4kib;
 const urd = @import("urthr");
 const pcpu = urd.pcpu;

@@ -10,16 +10,19 @@ pub const Id = u32;
 var lock: SpinLock = .{};
 
 /// Initialize the timer subsystem.
-///
-/// Registers the hardware timer interrupt handler and starts the timer.
-pub fn init() void {
+pub fn initGlobal() void {
     urd.exception.setHandler(arch.timer.ppi_intid, timerHandler) catch {
         @panic("Failed to set timer interrupt handler.");
     };
+}
 
-    board.enableIrq(arch.timer.ppi_intid);
+/// Initialize the timer for the calling CPU.
+///
+/// Must be called on each CPU after GIC CPU interface initialization.
+pub fn initLocal() void {
     arch.timer.enable();
     armTimer();
+    board.enableIrq(arch.timer.ppi_intid);
 }
 
 /// Register a periodic timer callback.
