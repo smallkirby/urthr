@@ -26,3 +26,5 @@ aer = "aer"
 tha = "tha"
 # Retransmission Timeout
 rto = "rto"
+# Flate (compression)
+flate = "flate"

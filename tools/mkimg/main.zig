@@ -36,6 +36,8 @@ const Options = enum {
     urthr_elf,
     /// Path to output image file.
     output,
+    /// How the Urthr kernel binary is encoded.
+    encoding,
 };
 
 /// Options map.
@@ -44,6 +46,7 @@ const optmap = std.StaticStringMap(Options).initComptime(&.{
     .{ "--urthr", .urthr },
     .{ "--urthr-elf", .urthr_elf },
     .{ "--output", .output },
+    .{ "--encoding", .encoding },
 });
 
 /// Print a usage and exit.
@@ -55,6 +58,7 @@ fn usage(logger: anytype) noreturn {
         \\  --urthr <path>       Path to Urthr binary (required)
         \\  --urthr-elf <path>   Path to Urthr ELF file (required)
         \\  --output <path>      Path to output image file (required)
+        \\  --encoding <type>    How the Urthr kernel binary is encoded (none, zlib)
     ,
         .{},
     );
@@ -68,6 +72,7 @@ const Args = struct {
     urthr: ?std.Io.File = null,
     urthr_elf: ?std.Io.File = null,
     output: ?std.Io.File = null,
+    encoding: UrthrHeader.Encoding = .none,
 };
 
 /// Composing mode.
@@ -126,6 +131,15 @@ pub fn main(init: std.process.Init) !void {
                 const path = argiter.next() orelse usage(log.err);
                 args.output = try cwd.createFile(io, path, .{});
             },
+            .encoding => {
+                const s = argiter.next() orelse usage(log.err);
+                args.encoding = if (std.mem.eql(u8, s, "none"))
+                    .none
+                else if (std.mem.eql(u8, s, "zlib"))
+                    .zlib
+                else
+                    usage(log.err);
+            },
         }
     }
 
@@ -137,6 +151,7 @@ pub fn main(init: std.process.Init) !void {
         .urthr_elf = args.urthr_elf orelse usage(log.err),
         .output = args.output orelse usage(log.err),
         .io = io,
+        .encoding = args.encoding,
     };
     defer mkimg.deinit();
 
@@ -152,6 +167,7 @@ const MkImage = struct {
     urthr: std.Io.File,
     urthr_elf: std.Io.File,
     output: std.Io.File,
+    encoding: UrthrHeader.Encoding,
     io: std.Io,
 
     /// Create the image file.
@@ -174,15 +190,20 @@ const MkImage = struct {
 
         // Write Wyrd binary.
         switch (self.mode) {
-            .single => try self.copy(&self.wyrd.?, &writer.interface),
+            .single => _ = try self.copy(&self.wyrd.?, &writer.interface),
             else => {},
         }
 
-        // Write Urthr header.
-        try self.writeHeader(&writer.interface);
+        // Write Urthr binary first.
+        const header_start = writer.logicalPos();
+        const urthr_start = header_start + @sizeOf(UrthrHeader);
+        try writer.seekTo(urthr_start);
+        try self.writeUrthr(&self.urthr, &writer.interface);
+        const urthr_size = writer.logicalPos() - urthr_start;
 
-        // Write Urthr binary.
-        try self.copy(&self.urthr, &writer.interface);
+        // Write Urthr header.
+        try writer.seekTo(header_start);
+        try self.writeHeader(&writer.interface, urthr_size);
     }
 
     /// Deinitialize to release resources.
@@ -196,20 +217,19 @@ const MkImage = struct {
     }
 
     /// Write Urthr header to the given writer.
-    fn writeHeader(self: *Self, w: *std.Io.Writer) !void {
-        const urthr_size = (try self.urthr.stat(self.io)).size;
+    fn writeHeader(self: *Self, w: *std.Io.Writer, encoded_size: usize) !void {
         const info = try self.parseUrthr();
 
         // Construct header.
         var urthr_reader = self.urthr.reader(self.io, &.{});
         const header = UrthrHeader{
-            .size = urthr_size,
-            .encoded_size = self.getEncodedSize(urthr_size),
+            .size = (try self.urthr.stat(self.io)).size,
+            .encoded_size = encoded_size,
             .mem_size = info.mem_size,
             .load_at = info.load_addr,
             .checksum = try UrthrHeader.calcChecksum(&urthr_reader.interface),
             .entry = info.entry,
-            .encoding = .none,
+            .encoding = self.encoding,
         };
 
         // Write header.
@@ -219,13 +239,17 @@ const MkImage = struct {
     }
 
     /// Copy from the given file to the given writer.
-    fn copy(self: *Self, r: *std.Io.File, w: *std.Io.Writer) !void {
+    ///
+    /// Returns the number of bytes copied.
+    fn copy(self: *Self, r: *std.Io.File, w: *std.Io.Writer) !usize {
         var rbuf: [4096]u8 = undefined;
 
         var reader = r.reader(self.io, &rbuf);
-        _ = try reader.interface.streamRemaining(w);
+        const size = try reader.interface.streamRemaining(w);
 
         try w.flush();
+
+        return size;
     }
 
     /// Parse Urthr ELF file and get kernel info.
@@ -257,9 +281,29 @@ const MkImage = struct {
         };
     }
 
-    /// Get the encoded size.
-    fn getEncodedSize(_: *Self, size: usize) usize {
-        return size;
+    /// Write Urthr binary using the given encoding.
+    ///
+    /// Returns the encoded size.
+    fn writeUrthr(self: *Self, r: *std.Io.File, w: *std.Io.Writer) !void {
+        switch (self.encoding) {
+            .none => {
+                _ = try self.copy(r, w);
+            },
+            .zlib => {
+                var flate_buf: [std.compress.flate.max_window_len]u8 = undefined;
+                var reader = r.reader(self.io, &.{});
+
+                var flate = try std.compress.flate.Compress.init(
+                    w,
+                    &flate_buf,
+                    .zlib,
+                    .default,
+                );
+                _ = try reader.interface.streamRemaining(&flate.writer);
+                try flate.finish();
+                try w.flush();
+            },
+        }
     }
 
     /// Urthr kernel information.

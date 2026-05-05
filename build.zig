@@ -377,6 +377,8 @@ pub fn build(b: *std.Build) !void {
             run.addFileArg(urthr_bin.source);
             run.addArg("--urthr-elf");
             run.addFileArg(urthr.getEmittedBin());
+            run.addArg("--encoding");
+            run.addArg("zlib");
             run.addArg("--output");
             const out = run.addOutputFileArg(booter_name);
 
@@ -401,6 +403,8 @@ pub fn build(b: *std.Build) !void {
         run.addFileArg(urthr_bin.source);
         run.addArg("--urthr-elf");
         run.addFileArg(urthr.getEmittedBin());
+        run.addArg("--encoding");
+        run.addArg("zlib");
         run.addArg("--output");
         const out = run.addOutputFileArg(remote_name);
 

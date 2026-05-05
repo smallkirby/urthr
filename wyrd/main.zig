@@ -187,6 +187,13 @@ const MemWyrd = struct {
             .none => {
                 @memcpy(loadp[0..header.size], phys[0..header.size]);
             },
+            // zlib compression.
+            .zlib => {
+                var reader = std.Io.Reader.fixed(phys[0..header.encoded_size]);
+                var flate_buf: [std.compress.flate.max_window_len]u8 = undefined;
+                var flate = std.compress.flate.Decompress.init(&reader, .zlib, &flate_buf);
+                try flate.reader.readSliceAll(loadp[0..header.size]);
+            },
         }
 
         // Validate checksum.
@@ -233,6 +240,13 @@ const SrWyrd = struct {
             // No encoding. Just copy.
             .none => {
                 @memcpy(loadp[0..header.size], phys[0..header.size]);
+            },
+            // zlib compression.
+            .zlib => {
+                var reader = std.Io.Reader.fixed(phys[0..header.encoded_size]);
+                var flate_buf: [std.compress.flate.max_window_len]u8 = undefined;
+                var flate = std.compress.flate.Decompress.init(&reader, .zlib, &flate_buf);
+                try flate.reader.readSliceAll(loadp[0..header.size]);
             },
         }
 
