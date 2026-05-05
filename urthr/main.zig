@@ -91,6 +91,15 @@ fn zmain() !void {
     log.debug("Setting up IRQ.", .{});
     urd.exception.initLocal();
 
+    // Initialize scheduler.
+    log.info("Initializing scheduler.", .{});
+    try urd.sched.initLocal();
+
+    // Initialize time subsystem.
+    log.info("Initializing time subsystem.", .{});
+    urd.time.initGlobal();
+    urd.time.initLocal();
+
     // Warm up secondary CPUs.
     log.info("Warming up secondary CPUs.", .{});
     try urd.smp.init();
@@ -98,10 +107,6 @@ fn zmain() !void {
     // Initialize RNG.
     log.info("Initializing RNG.", .{});
     urd.rng.init();
-
-    // Initialize scheduler.
-    log.info("Initializing scheduler.", .{});
-    try urd.sched.init();
 
     // Initialize filesystem.
     log.info("Initializing filesystem.", .{});
@@ -132,10 +137,6 @@ fn zmain() !void {
     } else {
         log.warn("No block device found", .{});
     }
-
-    // Initialize time subsystem.
-    log.info("Initializing time subsystem.", .{});
-    urd.time.init();
 
     // Spawn the initial kernel thread.
     log.info("Spawning initial task.", .{});

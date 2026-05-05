@@ -48,6 +48,8 @@ pub fn globalInit(allocator: PageAllocator) PageAllocator.Error!void {
     }
 
     percpu_initialized = true;
+
+    // TODO: make the initial per-CPU data area non-accessible.
 }
 
 /// Initialize per-CPU data for this core.

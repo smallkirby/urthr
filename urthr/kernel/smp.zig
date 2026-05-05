@@ -39,11 +39,33 @@ pub fn init() urd.mem.Error!void {
     log.info("All subcores are awake.", .{});
 }
 
+/// Get the logical CPU ID of the current core.
+pub fn getLogicalCoreId() ?usize {
+    const core_id = arch.getCoreId();
+    for (idmap, 0..) |id, i| {
+        if (id == core_id) {
+            return i;
+        }
+    } else return null;
+}
+
 /// Counter indicating how many cores have been waked up.
 var waked: std.atomic.Value(u8) = .init(0);
 
 /// Entry point for subcores.
 fn ksubmain() callconv(.c) noreturn {
+    const logical_core = waked.load(.acquire) + 1;
+
+    zsubmain() catch |err| {
+        log.err("ERROR(Core#{d}): {}", .{ logical_core, err });
+    };
+
+    // Halt.
+    log.err("Core#{d} reached unreachable EOL.", .{logical_core});
+    urd.eol(0);
+}
+
+fn zsubmain() !void {
     const logical_core = waked.load(.acquire) + 1;
 
     // Fill the CPU ID mapping for this core.
@@ -55,10 +77,14 @@ fn ksubmain() callconv(.c) noreturn {
     // Initialize per-CPU data.
     urd.pcpu.localInit(logical_core);
 
+    // Initializing scheduler.
+    try urd.sched.initLocal();
+
+    // Initialize timer.
+    urd.time.initLocal();
+
     // Increment the waked counter to notify the main core that this core is awake.
     _ = waked.fetchAdd(1, .release);
-
-    // TODO: Per-cpu initialization (e.g. GIC).
 
     // TODO: not implemented.
     while (true) asm volatile ("nop");
