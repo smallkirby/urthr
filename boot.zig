@@ -13,6 +13,8 @@ pub const UrthrHeader = extern struct {
     pub const Encoding = enum(u32) {
         /// Not encoded.
         none = 0,
+        /// zlib compressed.
+        zlib = 1,
     };
 
     /// Magic value.
