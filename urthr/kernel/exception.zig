@@ -20,7 +20,7 @@ var handlers: [num_interrupts]?Handler = [_]?Handler{null} ** num_interrupts;
 /// IRQs are not enabled yet.
 pub fn initGlobal() void {
     // Set console for exception handlers.
-    arch.exception.setConsole(board.getConsole());
+    arch.exception.setConsole(urd.console.getUnsafeConsole());
 
     // Set terminator function.
     arch.exception.setTerminator(urd.eol);

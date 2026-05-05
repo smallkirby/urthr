@@ -1,3 +1,4 @@
+pub const console = @import("kernel/console.zig");
 pub const exception = @import("kernel/exception.zig");
 pub const fs = @import("kernel/fs.zig");
 pub const klog = @import("kernel/klog.zig");
@@ -24,9 +25,7 @@ pub const enable_rtt = options.enable_rtt;
 /// `status` argument is used only if the board supports reset with status code.
 pub fn eol(status: u8) noreturn {
     if (options.restart_on_panic) {
-        var console = board.getConsole();
-        _ = console.println("Restarting CPU...");
-
+        console.writeUnsafe("Restarting CPU...\r\n");
         board.reset(status);
     }
 
@@ -41,9 +40,9 @@ pub fn eol(status: u8) noreturn {
 pub fn unimplemented(comptime msg: []const u8) noreturn {
     @branchHint(.cold);
 
-    var console = board.getConsole();
-    _ = console.print("UNIMPLEMENTED: ");
-    _ = console.println(msg);
+    console.writeUnsafe("UNIMPLEMENTED: ");
+    console.writeUnsafe(msg);
+    console.writeUnsafe("\r\n");
 
     eol(4);
 }
