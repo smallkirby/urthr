@@ -72,7 +72,7 @@ pub fn read(self: *Self, size: usize, allocator: PageAllocator) Error![]u8 {
 
     // Wait for completion.
     var timer = arch.timer.createTimer();
-    timer.start(.ms(1));
+    timer.start(.ms(500));
     while (vq.getUsed() == null) {
         if (timer.expired()) @panic("virtio RNG read timed out");
         std.atomic.spinLoopHint();
