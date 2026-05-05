@@ -2,6 +2,7 @@ pub const console = @import("kernel/console.zig");
 pub const exception = @import("kernel/exception.zig");
 pub const fs = @import("kernel/fs.zig");
 pub const klog = @import("kernel/klog.zig");
+pub const loader = @import("kernel/loader.zig");
 pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
 pub const pcpu = @import("kernel/pcpu.zig");
