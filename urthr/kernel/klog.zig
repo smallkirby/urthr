@@ -21,24 +21,15 @@ var writer = std.Io.Writer{
     .buffer = &.{},
 };
 
-/// Console instance.
-///
-/// Log functions use this console to output log messages.
-var console: Console = undefined;
-
-/// Write data to the serial console.
+/// Write data to the console subsystem.
 fn drain(_: *std.Io.Writer, data: []const []const u8, _: usize) !usize {
     var written: usize = 0;
     for (data) |bytes| {
-        written += console.print(bytes);
+        console.write(bytes);
+        written += bytes.len;
     }
 
     return written;
-}
-
-/// Set a console used for logging.
-pub fn set(c: Console) void {
-    console = c;
 }
 
 /// Log implementation.
@@ -91,6 +82,5 @@ pub fn anyLog(
 
 const std = @import("std");
 const io = std.io;
-const common = @import("common");
-const Console = common.Console;
 const options = @import("options");
+const console = @import("console.zig");

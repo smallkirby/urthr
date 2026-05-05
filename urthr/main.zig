@@ -13,8 +13,8 @@ export fn kmain() callconv(.c) noreturn {
     // Early board initialization.
     board.boot();
 
-    // Init kernel logger.
-    urd.klog.set(board.getConsole());
+    // Register UART as the first console backend.
+    urd.console.addBackend(board.getConsole()) catch unreachable;
 
     // Initialize exception handling.
     urd.exception.initGlobal();
