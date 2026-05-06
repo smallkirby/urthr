@@ -1,4 +1,8 @@
 //! I/O allocator interface.
+//!
+//! This allocator manages I/O memory resources.
+//! You can map the physical memory to virtual address space using this allocator,
+//! while you cannot specify the virtual address to map to.
 
 /// The type erased pointer to the allocator implementation.
 ptr: *anyopaque,
