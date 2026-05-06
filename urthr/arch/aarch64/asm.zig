@@ -76,6 +76,9 @@ pub fn smc(arg0: u64, arg1: u64, arg2: u64, arg3: u64) u64 {
           [x2] "r" (arg2),
           [x3] "r" (arg3),
         : .{
+          .x1 = true,
+          .x2 = true,
+          .x3 = true,
           .x4 = true,
           .x5 = true,
           .x6 = true,
