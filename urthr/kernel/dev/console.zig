@@ -2,12 +2,14 @@
 //!
 //! Implements `fs.File` interface.
 
-pub const file_ops = fs.File.Ops{
+pub const fops = fs.File.Ops{
     .iterate = iterate,
     .read = read,
     .write = write,
     .close = close,
 };
+
+pub const name = "console";
 
 fn write(_: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     urd.console.write(buf);
