@@ -15,6 +15,10 @@ pub const Ops = struct {
     ///
     /// Return the number of bytes read.
     read: *const fn (self: *File, buf: []u8, pos: usize) Error!usize,
+    /// Write data from `buf` to the file at position `pos`.
+    ///
+    /// Return the number of bytes written.
+    write: ?*const fn (self: *File, buf: []const u8, pos: usize) Error!usize = null,
     /// Release filesystem-specific resources associated with the file context.
     ///
     /// Called when the file's reference count reaches zero.
@@ -97,6 +101,23 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
     self.offset += @intCast(num_read);
 
     return buf[0..num_read];
+}
+
+/// Write data from the buffer into the file.
+pub fn write(self: *Self, buf: []const u8) Error!usize {
+    if (self.inode().ftype == .directory) return Error.NotFile;
+
+    if (self.ops.write) |f| {
+        const num_written = try f(
+            self,
+            buf,
+            self.offset,
+        );
+        self.offset += @intCast(num_written);
+        return num_written;
+    } else {
+        return Error.Unsupported;
+    }
 }
 
 /// Create an iterator for this file.
