@@ -24,6 +24,8 @@ pub const Thread = struct {
         root: urd.fs.Path,
         /// Current working directory of this thread.
         cwd: urd.fs.Path,
+        /// File descriptor table.
+        fdtbl: urd.fs.FdTable = .{},
     },
     /// Thread list node.
     head: ThreadList.Head = .{},

@@ -293,11 +293,12 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     errdefer vmm.deinit(ga);
 
     // Initialize thread.
-    const fs = getCurrent().fs;
+    var fs = getCurrent().fs;
     fs.root.dentry.ref();
     errdefer fs.root.dentry.unref();
     fs.cwd.dentry.ref();
     errdefer fs.cwd.dentry.unref();
+    fs.fdtbl = .{};
 
     th.* = .{
         .id = allocateId(),
