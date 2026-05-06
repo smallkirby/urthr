@@ -6,6 +6,8 @@
 
 const staticdevs = StaticDevices(&.{
     @import("dev/console.zig"),
+    @import("dev/null.zig"),
+    @import("dev/zero.zig"),
 });
 
 // =============================================================
