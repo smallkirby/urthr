@@ -121,7 +121,7 @@ pub fn open(s: []const u8, allocator: Allocator) Error!*File {
         cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
-    var iter = ComponentIterator.init(s) catch unreachable;
+    var iter = ComponentIterator.init(s);
     while (iter.next()) |c| {
         if (std.mem.eql(u8, ".", c.name)) continue;
         if (std.mem.eql(u8, "..", c.name)) urd.unimplemented("fs.open: ..");

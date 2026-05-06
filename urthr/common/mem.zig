@@ -56,6 +56,15 @@ pub const Permission = struct {
         .kw = true,
         .kx = false,
     };
+
+    pub const none = Permission{
+        .ur = false,
+        .uw = false,
+        .ux = false,
+        .kr = false,
+        .kw = false,
+        .kx = false,
+    };
 };
 
 /// Memory attribute.

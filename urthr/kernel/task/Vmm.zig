@@ -6,7 +6,8 @@ pub const Error = error{
     /// The specified virtual memory range is already mapped.
     AlreadyMapped,
 } ||
-    common.mem.PageAllocator.Error;
+    common.mem.PageAllocator.Error ||
+    arch.mmu.Error;
 
 /// Page table for this task.
 pgtbl: arch.mmu.PageTablePair,
@@ -15,11 +16,20 @@ tree: VmTree = .{},
 
 /// Create a new instance.
 pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!*Self {
+    rtt.expectEqual(null, pgtbl.l0);
+
     const vmm = try allocator.create(Self);
     errdefer allocator.destroy(vmm);
 
+    const upgtbl = arch.mmu.createPageTable(
+        urd.mem.getPageAllocator(),
+    ) catch return error.OutOfMemory;
+
     vmm.* = .{
-        .pgtbl = pgtbl,
+        .pgtbl = .{
+            .l0 = upgtbl,
+            .l1 = pgtbl.l1,
+        },
     };
 
     return vmm;
@@ -42,9 +52,6 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
-    rtt.expectEqual(true, perm.kr);
-    rtt.expectEqual(true, perm.kw);
-    rtt.expectEqual(false, perm.kx);
 
     const pallocator = urd.mem.getPageAllocator();
     const gallocator = urd.mem.getGeneralAllocator();
@@ -68,7 +75,12 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
         .perm = perm,
         .attr = .normal,
     }, .{ .exact = true }, pallocator);
-    errdefer arch.mmu.unmap4kb(self.pgtbl, vaddr, size, pallocator);
+    errdefer arch.mmu.unmap4kb(
+        self.pgtbl,
+        vaddr,
+        size,
+        pallocator,
+    ) catch unreachable;
 
     // Create a virtual memory area and insert it into the tree.
     // TODO: merge adjacent areas with the same permissions.
@@ -108,17 +120,14 @@ const VmArea = struct {
     _rbnode: VmTree.Node = .{},
 
     /// Compares two `VmArea` instances based on their start addresses.
-    pub fn compare(ap: *const VmArea, bp: *const VmArea) std.math.Order {
-        const a: *const VmArea = @ptrCast(@alignCast(ap));
-        const b: *const VmArea = @ptrCast(@alignCast(bp));
+    pub fn compare(a: *const VmArea, b: *const VmArea) std.math.Order {
         if (a.start < b.start) return .lt;
         if (a.start > b.start) return .gt;
         return .eq;
     }
 
     /// Compares a `VmArea` with a key based on the start address of the `VmArea`.
-    pub fn compareByKey(key: usize, ap: *const VmArea) std.math.Order {
-        const a: *const VmArea = @ptrCast(@alignCast(ap));
+    pub fn compareByKey(key: usize, a: *const VmArea) std.math.Order {
         if (key < a.start) return .lt;
         if (key >= a.start + a.size) return .gt;
         return .eq;
