@@ -154,16 +154,7 @@ fn zmain() !void {
 
     // Mount devfs at /dev and register devices.
     log.info("Mounting devfs.", .{});
-    {
-        const allocator = urd.mem.getGeneralAllocator();
-        const devfs = try urd.fs.DevFs.init(allocator);
-        const mntpnt = try urd.fs.resolve("/dev", allocator);
-
-        defer mntpnt.dentry.unref();
-        try urd.fs.mount(mntpnt, devfs.filesystem(), allocator);
-
-        try devfs.registerDevice("console", urd.dev.console.file_ops);
-    }
+    try urd.dev.init();
 
     // Initialize syscall subsystem.
     log.info("Initializing syscall subsystem.", .{});
