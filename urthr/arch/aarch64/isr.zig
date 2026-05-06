@@ -207,7 +207,13 @@ export fn serrorCurElSpx(ctx: *Context) callconv(.c) void {
 }
 
 export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
-    return defaultHandler(ctx, "Synchronous, Lower EL, A64");
+    switch (am.mrs(.esr_el1).ec) {
+        // System call.
+        .svc_a64 => return svc.svc(ctx),
+
+        // Unhandled.
+        else => return defaultHandler(ctx, "Synchronous, Lower EL, A64"),
+    }
 }
 
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {
@@ -291,3 +297,4 @@ const Console = common.Console;
 const am = @import("asm.zig");
 const regs = @import("register.zig");
 const StackIterator = @import("StackIterator.zig");
+const svc = @import("svc.zig");
