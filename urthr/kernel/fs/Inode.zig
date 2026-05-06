@@ -16,6 +16,11 @@ pub const Ops = struct {
     /// Returns an inode that is associated with the found file.
     lookup: *const fn (dir: *Inode, name: []const u8) Error!?*Inode,
 
+    /// Create a new directory under `dir` with the given name.
+    ///
+    /// null if the filesystem does not support directory creation.
+    mkdir: ?*const fn (dir: *Inode, name: []const u8, allocator: Allocator) Error!void = null,
+
     /// Deinitialize the inode and release associated resources.
     ///
     /// Called when the reference count of the inode reaches zero.
@@ -62,11 +67,23 @@ pub fn unref(self: *Self) void {
     }
 }
 
+/// Create a directory under this inode with the given name.
+pub fn mkdir(self: *Self, name: []const u8, allocator: Allocator) Error!void {
+    if (self.ftype != .directory) return Error.NotDirectory;
+
+    if (self.iops.mkdir) |f| {
+        return f(self, name, allocator);
+    } else {
+        return Error.Unsupported;
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const urd = @import("urthr");
 const fs = urd.fs;

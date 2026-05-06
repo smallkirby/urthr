@@ -5,6 +5,7 @@ pub const File = @import("fs/File.zig");
 pub const Mount = @import("fs/Mount.zig");
 
 pub const Fat32 = @import("fs/Fat32.zig");
+pub const RootFs = @import("fs/RootFs.zig");
 
 /// Filesystem-specific errors.
 pub const Error = error{
@@ -108,10 +109,36 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
     path.dentry.mount = mnt;
 }
 
+/// Create a directory at the given path with the given name.
+pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!void {
+    var cur = path;
+    if (cur.dentry.mount) |mnt| {
+        cur = .{ .dentry = mnt.root, .mount = mnt };
+    }
+
+    return cur.dentry.inode.mkdir(name, allocator);
+}
+
+/// Resolve a path to a Path without opening a File.
+///
+/// Caller must call `path.dentry.unref()` after use.
+pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
+    const path = try resolvePath(s, allocator);
+    path.dentry.ref();
+
+    return path;
+}
+
 /// Open a file at the specified path.
 ///
 /// TODO: attributes and options.
 pub fn open(s: []const u8, allocator: Allocator) Error!*File {
+    const path = try resolvePath(s, allocator);
+    return File.open(path, allocator);
+}
+
+/// Resolve a file path to a `Path`.
+fn resolvePath(s: []const u8, allocator: Allocator) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))
         sched.getCurrent().fs.root
     else
@@ -124,7 +151,7 @@ pub fn open(s: []const u8, allocator: Allocator) Error!*File {
     var iter = ComponentIterator.init(s);
     while (iter.next()) |c| {
         if (std.mem.eql(u8, ".", c.name)) continue;
-        if (std.mem.eql(u8, "..", c.name)) urd.unimplemented("fs.open: ..");
+        if (std.mem.eql(u8, "..", c.name)) urd.unimplemented("fs: ..");
 
         // Check if the current dentry is a mount point.
         if (cur.dentry.mount) |mnt| {
@@ -152,7 +179,7 @@ pub fn open(s: []const u8, allocator: Allocator) Error!*File {
         cur = .{ .dentry = dentry, .mount = cur.mount };
     }
 
-    return try File.open(cur, allocator);
+    return cur;
 }
 
 // =============================================================
