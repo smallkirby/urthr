@@ -2,14 +2,13 @@ pub const console = @import("kernel/console.zig");
 pub const exception = @import("kernel/exception.zig");
 pub const fs = @import("kernel/fs.zig");
 pub const klog = @import("kernel/klog.zig");
-pub const loader = @import("kernel/loader.zig");
 pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
 pub const pcpu = @import("kernel/pcpu.zig");
 pub const rng = @import("kernel/rng.zig");
 pub const sched = @import("kernel/sched.zig");
 pub const smp = @import("kernel/smp.zig");
-pub const thread = @import("kernel/thread.zig");
+pub const task = @import("kernel/task.zig");
 pub const time = @import("kernel/time.zig");
 
 pub const trace = @import("trace.zig");
