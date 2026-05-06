@@ -112,6 +112,18 @@ fn zmain() !void {
     log.info("Initializing filesystem.", .{});
     try urd.fs.init(urd.mem.getGeneralAllocator());
 
+    // Mount rootfs.
+    log.info("Mounting root filesystem.", .{});
+    {
+        const allocator = urd.mem.getGeneralAllocator();
+        const croot = urd.sched.getCurrent().fs.root;
+        const rootfs = try urd.fs.RootFs.init(allocator);
+
+        try urd.fs.mount(croot, rootfs.filesystem(), allocator);
+        try urd.fs.mkdir(croot, "boot", allocator);
+        try urd.fs.mkdir(croot, "dev", allocator);
+    }
+
     if (board.getBlockDevice()) |dev| {
         // List partitions on the block device.
         const partitions = try common.block.partitions.listPartitions(dev, urd.mem.getGeneralAllocator());
@@ -130,7 +142,9 @@ fn zmain() !void {
 
         // Mount the boot filesystem.
         if (try createBootFs(dev)) |fs| {
-            try urd.fs.mount(urd.sched.getCurrent().fs.root, fs, urd.mem.getGeneralAllocator());
+            const mntpnt = try urd.fs.resolve("/boot", urd.mem.getGeneralAllocator());
+            defer mntpnt.dentry.unref();
+            try urd.fs.mount(mntpnt, fs, urd.mem.getGeneralAllocator());
         } else {
             log.warn("No boot filesystem found.", .{});
         }
