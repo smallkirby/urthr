@@ -49,6 +49,6 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const sched = urd.sched;
 const SpinLock = urd.SpinLock;
-const thread = urd.thread;
+const thread = urd.task.thread;
 const Thread = thread.Thread;
 const ThreadList = thread.ThreadList;
