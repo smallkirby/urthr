@@ -50,11 +50,9 @@ jobs:
         run: |
           bash ./scripts/create_disk.bash ./scripts ./sdcard.img
 
-      - name: Install zig
-        run: |
-          curl https://ziglang.org/download/${{env.ZIG_VERSION}}/zig-x86_64-linux-${{env.ZIG_VERSION}}.tar.xz -L -o zig.tar.xz
-          tar -xf zig.tar.xz
-          echo "$(pwd)/zig-x86_64-linux-${{env.ZIG_VERSION}}" >> $GITHUB_PATH
+      - uses: ./.github/actions/setup-zig
+        with:
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Runtime Tests (Raspberry Pi 4)
         run: |
