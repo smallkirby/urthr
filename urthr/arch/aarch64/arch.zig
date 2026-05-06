@@ -67,6 +67,11 @@ pub fn setPerCpuBase(addr: usize) void {
     am.msr(.tpidr_el1, addr);
 }
 
+/// Set system call handler function.
+pub fn setSystemCallHandler(f: anytype) void {
+    svc.setHandler(f);
+}
+
 /// Cache operation type.
 const CacheOp = enum {
     /// Invalidate cache lines.
@@ -155,3 +160,4 @@ comptime {
 
 const am = @import("asm.zig");
 const util = @import("common").util;
+const svc = @import("svc.zig");

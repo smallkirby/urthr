@@ -138,6 +138,10 @@ fn zmain() !void {
         log.warn("No block device found", .{});
     }
 
+    // Initialize syscall subsystem.
+    log.info("Initializing syscall subsystem.", .{});
+    urd.syscall.init();
+
     // Spawn the initial kernel thread.
     log.info("Spawning initial task.", .{});
     _ = try urd.sched.spawn("init", initialTask, .{});
