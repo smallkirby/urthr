@@ -288,15 +288,16 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
         argv,
     );
 
+    // Create user-space page table.
+    const vmm = try urd.task.Vmm.new(ga, urd.mem.getKernelPageTable());
+    errdefer vmm.deinit(ga);
+
     // Initialize thread.
     const fs = getCurrent().fs;
     fs.root.dentry.ref();
     errdefer fs.root.dentry.unref();
     fs.cwd.dentry.ref();
     errdefer fs.cwd.dentry.unref();
-
-    const vmm = try urd.task.Vmm.new(ga, urd.mem.getKernelPageTable());
-    errdefer vmm.deinit(ga);
 
     th.* = .{
         .id = allocateId(),
