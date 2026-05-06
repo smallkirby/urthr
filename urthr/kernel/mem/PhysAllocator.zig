@@ -1,4 +1,4 @@
-//! Manages allocation of physical memory not backed by DRAM.
+//! Implements IoAllocator interface.
 
 const Error = mem.Error;
 
