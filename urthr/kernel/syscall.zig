@@ -3,9 +3,13 @@
 /// List of system calls.
 ///
 /// NOTE that this table is referenced only at comptime to construct runtime constants.
+///
+/// TODO: should be arch-specific.
 const entries = [_]Descriptor{
     // =============================================================
     // POSIX system calls.
+
+    .new("write",       64,     posix.fs.sysWrite),
 
     // =============================================================
     // Debug system calls.
