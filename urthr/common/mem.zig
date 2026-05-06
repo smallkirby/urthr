@@ -48,12 +48,39 @@ pub const Permission = struct {
         .kx = true,
     };
 
+    pub const rw = Permission{
+        .ur = true,
+        .uw = true,
+        .ux = false,
+        .kr = true,
+        .kw = true,
+        .kx = false,
+    };
+
     pub const kernel_rw = Permission{
         .ur = false,
         .uw = false,
         .ux = false,
         .kr = true,
         .kw = true,
+        .kx = false,
+    };
+
+    pub const ro = Permission{
+        .ur = true,
+        .uw = false,
+        .ux = false,
+        .kr = true,
+        .kw = false,
+        .kx = false,
+    };
+
+    pub const user_ro = Permission{
+        .ur = true,
+        .uw = false,
+        .ux = false,
+        .kr = false,
+        .kw = false,
         .kx = false,
     };
 

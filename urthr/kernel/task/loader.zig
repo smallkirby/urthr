@@ -11,8 +11,10 @@ pub const Error = error{
 
 /// Load an ELF executable from the filesystem.
 ///
+/// Returns the entry point address of the loaded executable.
+///
 /// TODO: support dynamic linking.
-pub fn load(th: *Thread, filename: []const u8) Error!void {
+pub fn load(th: *Thread, filename: []const u8) Error!usize {
     const allocator = urd.mem.getGeneralAllocator();
 
     const file = try fs.open(filename, allocator);
@@ -36,7 +38,6 @@ pub fn load(th: *Thread, filename: []const u8) Error!void {
     if (ehdr.type != .EXEC) return Error.InvalidElf;
     if (!ehdr.is_64) return Error.InvalidElf;
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
-    if (ehdr.os_abi != .GNU) return Error.InvalidElf;
 
     // Scan program headers.
     var piter = ehdr.iterateProgramHeadersBuffer(buf);
@@ -62,6 +63,8 @@ pub fn load(th: *Thread, filename: []const u8) Error!void {
         @memset(memory[0..offset_in_memory], 0);
         @memset(segment[phdr.p_filesz..], 0);
     }
+
+    return ehdr.entry;
 }
 
 /// Get the memory permission from the ELF program header.
