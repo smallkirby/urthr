@@ -6,6 +6,7 @@ pub const Mount = @import("fs/Mount.zig");
 
 pub const Fat32 = @import("fs/Fat32.zig");
 pub const RootFs = @import("fs/RootFs.zig");
+pub const DevFs = @import("fs/DevFs.zig");
 
 /// Filesystem-specific errors.
 pub const Error = error{

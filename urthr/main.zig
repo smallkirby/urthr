@@ -152,6 +152,19 @@ fn zmain() !void {
         log.warn("No block device found", .{});
     }
 
+    // Mount devfs at /dev and register devices.
+    log.info("Mounting devfs.", .{});
+    {
+        const allocator = urd.mem.getGeneralAllocator();
+        const devfs = try urd.fs.DevFs.init(allocator);
+        const mntpnt = try urd.fs.resolve("/dev", allocator);
+
+        defer mntpnt.dentry.unref();
+        try urd.fs.mount(mntpnt, devfs.filesystem(), allocator);
+
+        try devfs.registerDevice("console", urd.dev.console.file_ops);
+    }
+
     // Initialize syscall subsystem.
     log.info("Initializing syscall subsystem.", .{});
     urd.syscall.init();
