@@ -28,12 +28,15 @@ pub fn initLocal() Allocator.Error!void {
     // Create the idle thread.
     const th = try allocator.create(Thread);
     errdefer allocator.destroy(th);
+    const vmm = try urd.task.Vmm.new(allocator, urd.mem.getKernelPageTable());
+    errdefer vmm.deinit(allocator);
+
     th.* = .{
         .id = 0,
         .name = "idle", // TODO: should be unique per core.
         .state = .running,
         .sp = undefined,
-        .mm = urd.mem.getKernelPageTable(),
+        .vmm = vmm,
         .fs = undefined, // filled later on fs subsystem initialization.
     };
     pcpu.ptr(&idle).* = th;
@@ -83,7 +86,7 @@ pub fn blockCurrent(caller_lock: *SpinLock) void {
     next.state = .running;
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
+    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
 
     lock.unlock();
     caller_lock.unlock();
@@ -121,7 +124,7 @@ pub fn reschedule() void {
     setCurrent(next);
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
+    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
 
     // Release lock before switching. IRQs remain disabled until restored.
     lock.unlock();
@@ -156,7 +159,7 @@ fn exitCurrent() noreturn {
     next.state = .running;
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.mm.l0, urd.mem.getPageAllocator());
+    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
 
     // Release lock before switching. IRQs remain disabled.
     lock.unlock();
@@ -291,13 +294,17 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     errdefer fs.root.dentry.unref();
     fs.cwd.dentry.ref();
     errdefer fs.cwd.dentry.unref();
+
+    const vmm = try urd.task.Vmm.new(ga, urd.mem.getKernelPageTable());
+    errdefer vmm.deinit(ga);
+
     th.* = .{
         .id = allocateId(),
         .name = try ga.dupe(u8, name),
         .state = .ready,
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
-        .mm = urd.mem.getKernelPageTable(),
+        .vmm = vmm,
         .fs = fs,
     };
 
