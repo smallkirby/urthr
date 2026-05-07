@@ -39,7 +39,7 @@ jobs:
             tar \
             xz-utils
 
-      - uses: ./.github/actions/setup-zig
+      - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
