@@ -1,6 +1,6 @@
 # Zig artifacts
-/.zig-cache
-/zig-out
+.zig-cache
+zig-out
 /docs
 
 # Debug
