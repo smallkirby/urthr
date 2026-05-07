@@ -50,7 +50,7 @@ jobs:
         run: |
           bash ./scripts/create_disk.bash ./scripts ./sdcard.img
 
-      - uses: ./.github/actions/setup-zig
+      - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
