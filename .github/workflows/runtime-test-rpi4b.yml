@@ -46,10 +46,6 @@ jobs:
             dosfstools \
             mtools
 
-      - name: Create SD card image
-        run: |
-          bash ./scripts/create_disk.bash ./scripts ./sdcard.img
-
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -63,4 +59,4 @@ jobs:
             -Dqemu=$QEMU_DIR/bin \
             -Drtt \
             -Drestart \
-            -Dsdin=sdcard.img
+            -Dsdcreate

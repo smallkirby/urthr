@@ -109,11 +109,20 @@ pub fn build(b: *std.Build) !void {
         "Enable specified QEMU verbose log outputs.",
     ) orelse "";
 
-    const sdin = b.option(
+    var sdin = b.option(
         []const u8,
         "sdin",
         "Path to SD card image file for QEMU.",
     ) orelse null;
+    const sdcreate = b.option(
+        bool,
+        "sdcreate",
+        "Create an SD card image file and use it for this run.",
+    ) orelse false;
+    if (sdcreate and sdin != null) {
+        std.log.err("Cannot specify both --sdin and --sdcreate options.", .{});
+        return error.InvalidOption;
+    }
 
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
@@ -413,7 +422,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     // =============================================================
-    // Applications
+    // Applications / BootFS
     // =============================================================
 
     {
@@ -442,9 +451,39 @@ pub fn build(b: *std.Build) !void {
 
             break :blk exe;
         };
-        b.getInstallStep().dependOn(&b.addInstallArtifact(init, .{
-            .dest_dir = .{ .override = .{ .custom = "rootfs/boot/bin" } },
-        }).step);
+        b.installArtifact(init);
+
+        // =============================================================
+        // BootFS
+
+        const bootfs = b.step("bootfs", "Create BootFS image");
+        const apps = [_]*std.Build.Step.Compile{
+            init,
+        };
+
+        // Create bootfs.img from zig-out/bootfs directory.
+        // This Run is executed if any of the apps are update,
+        // while it does not care about other changes in the bootfs directory.
+        const run = b.addSystemCommand(&.{
+            "bash",
+            "scripts/create_disk.bash",
+        });
+        run.addArg("zig-out/bootfs/boot");
+        const img = run.addOutputFileArg("bootfs.img");
+        for (apps) |app| {
+            const artifact = b.addInstallArtifact(app, .{
+                .dest_dir = .{ .override = .{ .custom = "bootfs/boot/bin" } },
+            });
+            run.step.dependOn(&artifact.step);
+            run.addFileInput(artifact.emitted_bin.?);
+        }
+
+        bootfs.dependOn(&b.addInstallFile(img, "bootfs.img").step);
+
+        if (sdcreate) {
+            b.getInstallStep().dependOn(bootfs);
+            sdin = try std.fmt.allocPrint(b.allocator, "{s}/bootfs.img", .{b.install_path});
+        }
     }
 
     // =============================================================
