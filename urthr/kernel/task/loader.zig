@@ -9,6 +9,7 @@ pub const Error = error{
     urd.fs.Error ||
     urd.task.Vmm.Error;
 
+/// Information about the loaded executable.
 pub const LoadInfo = struct {
     /// Entry point address.
     entry: usize,
@@ -26,31 +27,23 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
 
     const file = try fs.open(filename, allocator);
     defer file.unref();
+    if (file.size() < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
 
-    const size = file.path.dentry.inode.size;
-    if (size < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
-
-    // Read entire file.
-    // TODO: should read only headers and loadable segments.
-    const buf = try allocator.alloc(u8, size);
-    defer allocator.free(buf);
-    _ = try file.read(buf);
-
-    // Read ELF header.
-    var ehdr_reader = std.Io.Reader.fixed(buf[0..]);
-    const ehdr = std.elf.Header.read(&ehdr_reader) catch {
-        return error.InvalidElf;
-    };
+    // Create a ELF file reader.
+    var rbuf: [1024]u8 = undefined;
+    var reader = Reader.init(file, &rbuf);
 
     // Validate ELF header.
+    const ehdr = std.elf.Header.read(&reader.interface) catch return error.InvalidElf;
     if (ehdr.type != .EXEC) return Error.InvalidElf;
     if (!ehdr.is_64) return Error.InvalidElf;
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
+    if (ehdr.phentsize != @sizeOf(Elf64_Phdr)) return Error.InvalidElf;
 
     // Scan program headers.
     var brk: usize = 0;
-    var piter = ehdr.iterateProgramHeadersBuffer(buf);
-    while (piter.next() catch return Error.InvalidElf) |phdr| {
+    var iter = PhdrIterator.init(&reader, ehdr);
+    while (try iter.next()) |phdr| {
         if (phdr.p_type == std.elf.PT_INTERP) return Error.NotSupported;
         if (phdr.p_type != std.elf.PT_LOAD) continue;
 
@@ -64,9 +57,12 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
             size_aligned,
             .rw,
         );
+
+        // Read segment data into mapped memory.
         const offset_in_memory = phdr.p_vaddr - va_start_aligned;
         const segment = memory[offset_in_memory..][0..phdr.p_memsz];
-        @memcpy(segment[0..phdr.p_filesz], buf[phdr.p_offset..][0..phdr.p_filesz]);
+        reader.seekTo(phdr.p_offset);
+        reader.interface.readSliceAll(segment[0..phdr.p_filesz]) catch return error.InvalidElf;
 
         // Zero clear the remaining memory.
         @memset(memory[0..offset_in_memory], 0);
@@ -88,6 +84,90 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
         .brk = brk,
     };
 }
+
+/// Implements std.Io.Reader interface for reading ELF files.
+const Reader = struct {
+    /// File to read from.
+    file: *fs.File,
+    /// Current logical position.
+    pos: usize,
+    /// Reader interface.
+    interface: std.Io.Reader,
+
+    const vtable = std.Io.Reader.VTable{
+        .stream = stream,
+    };
+
+    pub fn init(file: *fs.File, buf: []u8) Reader {
+        return .{
+            .file = file,
+            .pos = 0,
+            .interface = .{
+                .vtable = &vtable,
+                .buffer = buf,
+                .seek = 0,
+                .end = 0,
+            },
+        };
+    }
+
+    /// Seek to the given offset in the file.
+    pub fn seekTo(self: *Reader, offset: usize) void {
+        // Discard the buffer and update the position.
+        self.interface.tossBuffered();
+        self.pos = offset;
+    }
+
+    fn stream(reader: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+        const self: *Reader = @alignCast(@fieldParentPtr("interface", reader));
+        const dest = limit.slice(w.writableSliceGreedy(1) catch return error.WriteFailed);
+        const n = self.file.ops.read(
+            self.file,
+            dest,
+            self.pos,
+        ) catch return error.ReadFailed;
+
+        self.pos += n;
+        w.advance(n);
+
+        return if (n != 0) n else error.EndOfStream;
+    }
+};
+
+/// ELF program header iterator.
+const PhdrIterator = struct {
+    /// Current index.
+    index: usize = 0,
+    /// Reader for ELF binary.
+    reader: *Reader,
+    /// ELF header.
+    ehdr: std.elf.Header,
+
+    /// Create a new program header iterator.
+    pub fn init(reader: *Reader, ehdr: std.elf.Header) PhdrIterator {
+        return .{
+            .reader = reader,
+            .ehdr = ehdr,
+        };
+    }
+
+    /// Get a next program header.
+    ///
+    /// Returns null if there is no more program header.
+    pub fn next(self: *PhdrIterator) Error!?std.elf.Elf64_Phdr {
+        if (self.index >= self.ehdr.phnum) return null;
+
+        const phdr_offset: usize = self.ehdr.phoff + self.index * self.ehdr.phentsize;
+        self.reader.seekTo(phdr_offset);
+        const phdr = self.reader.interface.takeStruct(
+            Elf64_Phdr,
+            self.ehdr.endian,
+        ) catch return Error.InvalidElf;
+
+        self.index += 1;
+        return phdr;
+    }
+};
 
 /// Get the memory permission from the ELF program header.
 fn getAttribute(phdr: std.elf.Elf64_Phdr) common.mem.Permission {
