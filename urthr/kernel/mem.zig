@@ -174,6 +174,11 @@ pub fn getInitPageTablePair() arch.mmu.PageTablePair {
     return init_pt;
 }
 
+/// Check if the given address is a user-space address.
+pub fn isUserAddress(va: usize) bool {
+    return vmap.user.start <= va and va < vmap.user.end;
+}
+
 /// End virtual address of kernel image.
 extern const __end: *void;
 
