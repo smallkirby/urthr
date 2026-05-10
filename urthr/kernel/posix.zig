@@ -1,4 +1,5 @@
 pub const fs = @import("posix/fs.zig");
+pub const signal = @import("posix/signal.zig");
 pub const task = @import("posix/task.zig");
 
 pub const ErrorEnum = enum(i64) {
