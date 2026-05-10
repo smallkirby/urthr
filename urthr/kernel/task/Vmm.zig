@@ -13,6 +13,8 @@ pub const Error = error{
 pgtbl: arch.mmu.PageTablePair,
 /// Tree of virtual memory areas.
 tree: VmTree = .{},
+/// Program break.
+brk: usize = 0,
 
 /// Create a new instance.
 pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!*Self {
@@ -97,6 +99,28 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
 
     return pallocator.translateV(pages);
 }
+
+/// Extend the program break to the given address.
+///
+/// Returns the new program break address after extension.
+///
+/// If the given address is less than the current program break, this function does nothing.
+pub fn extendProgramBreak(self: *Self, addr: usize) Error!usize {
+    rtt.expectEqual(0, addr % urd.mem.page_size);
+
+    if (addr <= self.brk) {
+        return self.brk;
+    }
+
+    _ = try self.map(self.brk, addr - self.brk, .rw);
+    self.brk = addr;
+
+    return self.brk;
+}
+
+// =============================================================
+// Internals
+// =============================================================
 
 /// RB tree type of VmArea.
 const VmTree = RbTree(

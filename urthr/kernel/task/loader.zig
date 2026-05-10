@@ -9,12 +9,19 @@ pub const Error = error{
     urd.fs.Error ||
     urd.task.Vmm.Error;
 
+pub const LoadInfo = struct {
+    /// Entry point address.
+    entry: usize,
+    /// Program break.
+    brk: usize,
+};
+
 /// Load an ELF executable from the filesystem.
 ///
 /// Returns the entry point address of the loaded executable.
 ///
 /// TODO: support dynamic linking.
-pub fn load(th: *Thread, filename: []const u8) Error!usize {
+pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
     const allocator = urd.mem.getGeneralAllocator();
 
     const file = try fs.open(filename, allocator);
@@ -41,6 +48,7 @@ pub fn load(th: *Thread, filename: []const u8) Error!usize {
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
 
     // Scan program headers.
+    var brk: usize = 0;
     var piter = ehdr.iterateProgramHeadersBuffer(buf);
     while (piter.next() catch return Error.InvalidElf) |phdr| {
         if (phdr.p_type == std.elf.PT_INTERP) return Error.NotSupported;
@@ -63,9 +71,15 @@ pub fn load(th: *Thread, filename: []const u8) Error!usize {
         // Zero clear the remaining memory.
         @memset(memory[0..offset_in_memory], 0);
         @memset(segment[phdr.p_filesz..], 0);
+
+        // Update program break.
+        brk = @max(brk, va_end_aligned);
     }
 
-    return ehdr.entry;
+    return .{
+        .entry = ehdr.entry,
+        .brk = brk,
+    };
 }
 
 /// Get the memory permission from the ELF program header.

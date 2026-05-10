@@ -11,6 +11,7 @@ const entries = [_]Descriptor{
 
     .new("write",       64,     posix.fs.sysWrite),
     .new("exit_group",  94,     posix.task.sysExitGroup),
+    .new("brk",         214,    posix.task.sysBrk),
 
     // =============================================================
     // Debug system calls.
