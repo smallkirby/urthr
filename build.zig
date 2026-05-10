@@ -413,6 +413,41 @@ pub fn build(b: *std.Build) !void {
     }
 
     // =============================================================
+    // Applications
+    // =============================================================
+
+    {
+        const user_target = b.resolveTargetQuery(.{
+            .cpu_arch = .aarch64,
+            .ofmt = .elf,
+            .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+                .neon,
+                .fp_armv8,
+            }),
+        });
+
+        // =============================================================
+        // init
+
+        const init = blk: {
+            const exe = b.addExecutable(.{
+                .name = "init",
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path("app/init/main.zig"),
+                    .target = user_target,
+                }),
+                .linkage = .static,
+                .use_llvm = true,
+            });
+
+            break :blk exe;
+        };
+        b.getInstallStep().dependOn(&b.addInstallArtifact(init, .{
+            .dest_dir = .{ .override = .{ .custom = "rootfs/boot/bin" } },
+        }).step);
+    }
+
+    // =============================================================
     // Install
     // =============================================================
 

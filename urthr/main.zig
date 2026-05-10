@@ -187,7 +187,11 @@ fn initialTask() !void {
     log.info("Starting networking subsystem.", .{});
     try urd.net.run();
 
-    log.warn("Initiali task reached EOL.", .{});
+    // Load init executable and enter userland.
+    try urd.task.enterUser("/boot/bin/init");
+
+    // Unreachable.
+    log.warn("Initial task reached EOL.", .{});
 }
 
 // =============================================================
