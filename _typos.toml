@@ -28,3 +28,5 @@ tha = "tha"
 rto = "rto"
 # Flate (compression)
 flate = "flate"
+# SME
+sme = "sme"

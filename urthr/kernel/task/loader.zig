@@ -24,6 +24,7 @@ pub fn load(th: *Thread, filename: []const u8) Error!usize {
     if (size < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
 
     // Read entire file.
+    // TODO: should read only headers and loadable segments.
     const buf = try allocator.alloc(u8, size);
     defer allocator.free(buf);
     _ = try file.read(buf);

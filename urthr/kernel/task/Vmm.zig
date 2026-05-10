@@ -49,6 +49,8 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 ///
 /// All pages are mapped using 4KiB pages.
 /// The given address and size must be page-aligned.
+///
+/// TODO: should not allocate physically contiguous pages.
 pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
