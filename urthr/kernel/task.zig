@@ -146,18 +146,18 @@ const StackCreator = struct {
         }
 
         // Construct envp.
-        self.extend(@sizeOf(@TypeOf(endmark)))[0] = endmark;
+        self.extendAs(@TypeOf(endmark)).* = endmark;
         for (envps) |envp| {
             self.extendAs(usize).* = envp;
         }
         // Construct argv.
-        self.extend(@sizeOf(@TypeOf(endmark)))[0] = endmark;
+        self.extendAs(@TypeOf(endmark)).* = endmark;
         for (argvs) |argv| {
             self.extendAs(usize).* = argv;
         }
 
         // Push argc.
-        @memcpy(self.extend(@sizeOf(usize)), std.mem.asBytes(&self.args.items.len));
+        self.extendAs(usize).* = self.args.items.len;
 
         // Deinit resources.
         self.args.deinit(self.allocator);
