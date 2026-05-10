@@ -68,7 +68,8 @@ pub fn enterUser(filename: []const u8) !noreturn {
 pub fn exit(code: i32) noreturn {
     log.debug("Process exiting with code {d}", .{code});
 
-    urd.unimplemented("task.exit");
+    log.err("not implemented: task.exit", .{});
+    urd.eol(0);
 }
 
 /// Constructor for user stack.
