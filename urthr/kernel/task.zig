@@ -20,6 +20,7 @@ pub fn enterUser(filename: []const u8) !noreturn {
     const console = try urd.fs.open("/dev/console", allocator);
     defer console.unref();
     _ = try current.fs.fdtbl.set(1, console);
+    _ = try current.fs.fdtbl.set(2, console);
 
     // Load the executable.
     const ldr_info = try loader.load(current, filename);
