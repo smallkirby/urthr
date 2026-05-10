@@ -130,6 +130,11 @@ pub fn iterator(self: *Self) Error!Iterator {
     };
 }
 
+/// Get the size of this file.
+pub fn size(self: *Self) usize {
+    return self.inode().size;
+}
+
 /// Increment the reference count of this file.
 pub fn ref(self: *Self) void {
     _ = self.refcnt.fetchAdd(1, .acq_rel);
