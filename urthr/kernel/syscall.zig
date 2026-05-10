@@ -10,6 +10,7 @@ const entries = [_]Descriptor{
     // POSIX system calls.
 
     .new("write",       64,     posix.fs.sysWrite),
+    .new("exit_group",  94,     posix.task.sysExitGroup),
 
     // =============================================================
     // Debug system calls.
@@ -66,7 +67,10 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
         arg4,
         arg5,
         arg6,
-    ) else return @intFromEnum(ErrorEnum.nosys);
+    ) else {
+        log.debug("Unhandled syscall: {d}", .{nr});
+        return @intFromEnum(ErrorEnum.nosys);
+    };
 
     return ret.int();
 }
