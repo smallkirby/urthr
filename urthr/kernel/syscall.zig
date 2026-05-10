@@ -12,6 +12,7 @@ const entries = [_]Descriptor{
     .new("write",       64,     posix.fs.sysWrite),
     .new("writev",      66,     posix.fs.sysWritev),
     .new("exit_group",  94,     posix.task.sysExitGroup),
+    .new("gettid",      178,    posix.task.sysGetTid),
     .new("brk",         214,    posix.task.sysBrk),
     .new("mprotect",    226,    posix.task.sysMprotect),
 

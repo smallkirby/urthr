@@ -68,6 +68,12 @@ pub fn sysMprotect(addr: usize, len: usize, prot: Mprot) ReturnType {
     return .success(0);
 }
 
+/// System call: gettid
+pub fn sysGetTid() ReturnType {
+    const current = sched.getCurrent();
+    return .success(@bitCast(@as(u64, current.id)));
+}
+
 // =============================================================
 // Imports
 // =============================================================
