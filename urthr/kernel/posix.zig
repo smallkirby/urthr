@@ -10,6 +10,8 @@ pub const ErrorEnum = enum(i64) {
     nomem = -12,
     /// Invalid argument.
     inval = -22,
+    /// Not a TTY.
+    notty = -25,
     /// Function not implemented.
     nosys = -38,
 };

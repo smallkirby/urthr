@@ -49,6 +49,29 @@ pub fn sysWritev(fd: usize, iov: usize, iovcnt: usize) ReturnType {
     return .success(@bitCast(total));
 }
 
+/// System call: ioctl
+pub fn sysIoctl(fd: usize, request: IoctlRequest, arg: usize) ReturnType {
+    _ = fd;
+    _ = arg;
+
+    switch (request) {
+        // TIOCGWINSZ
+        .tiocgwinsz => {
+            return .err(.notty);
+        },
+
+        // Unrecognized requests.
+        _ => return .err(.inval),
+    }
+}
+
+const IoctlRequest = enum(u64) {
+    /// Get window size.
+    tiocgwinsz = 0x5413,
+
+    _,
+};
+
 // =============================================================
 // Imports
 // =============================================================
