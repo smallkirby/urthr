@@ -19,7 +19,8 @@ zig build run --summary all \
   -Doptimize=Debug \
   -Dboard=rpi4b \
   -Drtt \
-  -Dqemu=$QEMU_DIR
+  -Dqemu=$QEMU_DIR \
+  -Dsdcreate
 ```
 
 ### Raspberry Pi 5
@@ -71,6 +72,7 @@ zig build test --summary all -Doptimize=Debug
 | `serial_boot` | Flag | Generate bootloader and kernel as a separate binary. | `false` |
 | `sdcard` | Path | Path to mounted SD card device. | - |
 | `sdin` | Path | Path to SD card image file to be used by QEMU. | - |
+| `sdcreate` | Flag | Create SD card image and use it in this run. | - |
 | `log_level` | String: `debug`, `info`, `warn`, `error` | Logging level. Output under the logging level is suppressed. | `info` |
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
 | `trace` | String (Comma-separated): `sdhc,net` | Enable trace outputs. | - |

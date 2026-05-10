@@ -19,7 +19,8 @@ if [ ! -f "$out" ]; then
     if=/dev/zero \
     of="$out" \
     bs=$block_size \
-    count=$((2 * 1024 * 1024 * 1024 / block_size))
+    count=$((2 * 1024 * 1024 * 1024 / block_size)) \
+    2>/dev/null
 fi
 
 echo_normal "Creating partition table on $out"
