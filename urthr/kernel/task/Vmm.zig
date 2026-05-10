@@ -47,12 +47,10 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 
 /// Maps the given user-space virtual address.
 ///
-/// Returns a slice to the mapped memory that can be accessed by kernel.
+/// Returns a user slice to the mapped memory.
 ///
 /// All pages are mapped using 4KiB pages.
 /// The given address and size must be page-aligned.
-///
-/// TODO: should not allocate physically contiguous pages.
 pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
@@ -68,23 +66,26 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     }
 
     // Allocate physical pages.
-    const pages = try pallocator.allocBytesP(size);
-    errdefer pallocator.freeBytesP(pages);
+    for (0..size / urd.mem.page_size) |i| {
+        const page = try pallocator.allocPagesP(1);
+        errdefer pallocator.freePagesP(page);
 
-    // Map the pages to the given virtual address.
-    try arch.mmu.map4kb(self.pgtbl, .{
-        .va = vaddr,
-        .pa = @intFromPtr(pages.ptr),
-        .size = size,
-        .perm = perm,
-        .attr = .normal,
-    }, .{ .exact = true }, pallocator);
-    errdefer arch.mmu.unmap4kb(
-        self.pgtbl,
-        vaddr,
-        size,
-        pallocator,
-    ) catch unreachable;
+        // Map the pages to the given virtual address.
+        const va = vaddr + i * urd.mem.page_size;
+        try arch.mmu.map4kb(self.pgtbl, .{
+            .va = va,
+            .pa = @intFromPtr(page.ptr),
+            .size = size,
+            .perm = perm,
+            .attr = .normal,
+        }, .{ .exact = true }, pallocator);
+        errdefer arch.mmu.unmap4kb(
+            self.pgtbl,
+            va,
+            urd.mem.page_size,
+            pallocator,
+        ) catch unreachable;
+    }
 
     // Create a virtual memory area and insert it into the tree.
     // TODO: merge adjacent areas with the same permissions.
@@ -97,7 +98,7 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     };
     self.tree.insert(vma);
 
-    return pallocator.translateV(pages);
+    return @as([*]u8, @ptrFromInt(vaddr))[0..size];
 }
 
 /// Changes permissions for an existing virtual memory range.
