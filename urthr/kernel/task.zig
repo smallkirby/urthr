@@ -22,7 +22,8 @@ pub fn enterUser(filename: []const u8) !noreturn {
     _ = try current.fs.fdtbl.set(1, console);
 
     // Load the executable.
-    const entry = try loader.load(current, filename);
+    const ldr_info = try loader.load(current, filename);
+    current.vmm.brk = ldr_info.brk;
 
     // Prepare user stack.
     const stack = try current.vmm.map(
@@ -43,7 +44,7 @@ pub fn enterUser(filename: []const u8) !noreturn {
     const usp = try scon.finalize();
 
     // Enter userland.
-    arch.thread.enterUserland(entry, usp);
+    arch.thread.enterUserland(ldr_info.entry, usp);
 }
 
 /// Exit the current process with the given exit code.
