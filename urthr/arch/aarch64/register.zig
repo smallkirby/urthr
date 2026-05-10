@@ -40,6 +40,7 @@ pub const SystemReg = enum {
     ttbr1_el1,
 
     sctlr_el1,
+    cpacr_el1,
 
     cntpct_el0,
     cntfrq_el0,
@@ -85,6 +86,7 @@ pub const SystemReg = enum {
             .ttbr0_el1 => Ttbr0El1,
             .ttbr1_el1 => Ttbr1El1,
             .sctlr_el1 => SctlrEl1,
+            .cpacr_el1 => CpacrEl1,
             .cntpct_el0 => Cntpct,
             .cntfrq_el0 => Cntfrq,
             .cntp_ctl_el0 => CntpCtl,
@@ -394,6 +396,7 @@ pub const Esr = packed struct(u64) {
 
     pub const Class = enum(u6) {
         unknown = 0b000000,
+        simd = 0b000111,
         bti = 0b001011,
         illegal_exec_state = 0b001110,
         svc_a32 = 0b010001,
@@ -782,6 +785,34 @@ pub const SctlrEl1 = packed struct(u64) {
     nmi: bool,
     spintmask: bool,
     tidcp: bool,
+};
+
+/// CPACR_EL1.
+///
+/// Architectural Feature Access Control Register EL1.
+pub const CpacrEl1 = packed struct(u64) {
+    /// Reserved.
+    _0: u16 = 0,
+    /// Traps execution at EL1 and EL0 of SVE instructions when the PE is not in Streaming SVE mode.
+    zen: u2,
+    /// Reserved.
+    _18: u2 = 0,
+    /// Traps execution at EL1 and EL0 of instructions that access the Advanced SIMD and FP registers from both Execution states to EL1.
+    fpen: u2,
+    /// Reserved.
+    _22: u2 = 0,
+    /// Traps execution at EL1 and EL0 of SME instructions.
+    smen: u2,
+    /// Reserved.
+    _26: u2 = 0,
+    /// Traps EL0 and EL1 System register accesses to all implemented trace registers from both Execution states to EL1.
+    tta: bool,
+    /// Enable access to POR_EL0.
+    e0poe: bool,
+    /// Reserved.
+    _30: u2 = 0,
+    /// Reserved.
+    _32: u32 = 0,
 };
 
 /// CNTPCT_ELx.
