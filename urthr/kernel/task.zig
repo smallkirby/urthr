@@ -39,7 +39,23 @@ pub fn enterUser(filename: []const u8) !noreturn {
         stack_base,
         allocator,
     );
-    try scon.appendArgv(filename);
+    // Arguments.
+    {
+        try scon.appendArgv(filename);
+    }
+    // Environment variables.
+    {}
+    // Auxiliary vectors.
+    {
+        // AT_RANDOM.
+        var random: [16]u8 = undefined;
+        urd.rng.getRandom(&random);
+        const handle = try scon.appendOpaque(&random);
+        try scon.appendAux(.new(.random, @intFromEnum(handle)));
+
+        // AT_PAGESZ.
+        try scon.appendAux(.new(.pagesz, urd.mem.page_size));
+    }
 
     const usp = try scon.finalize();
 
@@ -64,6 +80,8 @@ const StackCreator = struct {
     args: std.array_list.Aligned([]const u8, null) = .empty,
     /// Auxiliary vectors.
     auxs: std.array_list.Aligned(AuxVector, null) = .empty,
+    /// Opaque data.
+    opq: std.array_list.Aligned([]const u8, null) = .empty,
 
     /// Top of the stack in kernel address space.
     top: usize,
@@ -80,6 +98,9 @@ const StackCreator = struct {
     const endmark: usize = 0;
     /// Stack alignment in bytes.
     const alignment = 16;
+
+    /// Handle to describe opaque data.
+    const OpaqueHandle = enum(u64) { _ };
 
     pub fn init(stack: []const u8, usp: usize, allocator: Allocator) Self {
         return .{
@@ -106,6 +127,14 @@ const StackCreator = struct {
         try self.auxs.append(self.allocator, auxv);
     }
 
+    /// Append an opaque data to the stack.
+    pub fn appendOpaque(self: *Self, data: []const u8) !OpaqueHandle {
+        const handle: OpaqueHandle = @enumFromInt(self.opq.items.len);
+        const dup = try self.allocator.dupe(u8, data);
+        try self.opq.append(self.allocator, dup);
+        return handle;
+    }
+
     /// Finalize the stack.
     ///
     /// Returns the user pointer to the top of the stack.
@@ -116,10 +145,16 @@ const StackCreator = struct {
         defer self.allocator.free(envps);
         var argvs = try self.allocator.alloc(usize, self.args.items.len);
         defer self.allocator.free(argvs);
+        var opqs = try self.allocator.alloc(usize, self.opq.items.len);
+        defer self.allocator.free(opqs);
 
-        // Place auxiliary vectors.
-        for (self.auxs.items) |auxv| {
-            self.extendAs(AuxVector).* = auxv;
+        // Place opaque data.
+        for (0..self.opq.items.len) |i| {
+            const ri = self.opq.items.len - (i + 1);
+            const opq = self.opq.items[ri];
+            const s = self.extend(opq.len);
+            @memcpy(s, opq);
+            opqs[ri] = self.toUserPtr(@intFromPtr(s.ptr));
         }
 
         // Place data of environment variables.
@@ -141,8 +176,15 @@ const StackCreator = struct {
         }
 
         // Ensure alignment.
-        for (0..self.sp % alignment) |_| {
-            self.extend(1)[0] = 0;
+        self.makeAlign(alignment);
+
+        // Place auxiliary vectors.
+        for (0..self.auxs.items.len) |i| {
+            const auxv = self.auxs.items[self.auxs.items.len - (i + 1)];
+            switch (auxv.auxv_type) {
+                .random => self.extendAs(AuxVector).* = .new(.random, opqs[auxv.value]),
+                else => self.extendAs(AuxVector).* = auxv,
+            }
         }
 
         // Construct envp.
@@ -163,6 +205,10 @@ const StackCreator = struct {
         self.args.deinit(self.allocator);
         self.envs.deinit(self.allocator);
         self.auxs.deinit(self.allocator);
+        for (self.opq.items) |data| {
+            self.allocator.free(data);
+        }
+        self.opq.deinit(self.allocator);
 
         return self.toUserPtr(self.sp);
     }
@@ -184,6 +230,13 @@ const StackCreator = struct {
     /// Convert the given stack pointer to a user pointer.
     fn toUserPtr(self: *Self, ptr: usize) usize {
         return self.usp + (ptr - self.top);
+    }
+
+    /// Ensure the stack pointer is aligned to the given alignment.
+    fn makeAlign(self: *Self, algn: usize) void {
+        for (0..self.sp % algn) |_| {
+            self.extend(1)[0] = 0;
+        }
     }
 };
 
