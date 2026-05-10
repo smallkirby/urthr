@@ -74,10 +74,13 @@ _substart:
   msr   SCTLR_EL1, x0
   isb
 
+  // Setup EL1.
+  mov   sp,  x5
+  mov   x19, x4
+  blr   =setupEl1
+
   // Jump to the kernel subcore entry point.
-  mov   sp, x5
-  mov   x0, x4
-  br    x0
+  br    x19
 
 .Lhang:
   wfe

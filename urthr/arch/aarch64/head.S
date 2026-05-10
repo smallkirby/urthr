@@ -66,6 +66,10 @@ _start:
   ldr   x0, =boottime_exception_handlers
   msr   VBAR_EL1, x0
 
+  // Set up EL1.
+  ldr   x0, =setupEl1
+  blr   x0
+
   // Jump to the bootloader or kernel entry point.
   ldr   x0, =kmain
   br    x0
