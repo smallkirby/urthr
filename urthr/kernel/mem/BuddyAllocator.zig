@@ -217,7 +217,7 @@ const FreeList = struct {
 /// Manages free lists of each order for single memory zone.
 const Arena = struct {
     /// Available number of page orders.
-    const avail_orders: usize = 11;
+    const avail_orders: usize = 9;
     /// If the number of free blocks is larger than this threshold, try merge adjacent blocks.
     const merge_threshold: usize = 10;
 
