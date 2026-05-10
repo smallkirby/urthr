@@ -51,6 +51,10 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
         const va_end_aligned = std.mem.alignForward(usize, phdr.p_vaddr + phdr.p_memsz, urd.mem.page_size);
         const size_aligned = va_end_aligned - va_start_aligned;
 
+        // Validate the program header.
+        if (phdr.p_filesz > phdr.p_memsz) return Error.InvalidElf;
+        if (!urd.mem.isUserAddress(va_start_aligned)) return Error.InvalidElf;
+
         // Map the segment (as temporary attributes) and copy file data.
         const memory = try th.vmm.map(
             va_start_aligned,
