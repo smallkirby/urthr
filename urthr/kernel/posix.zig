@@ -8,6 +8,8 @@ pub const ErrorEnum = enum(i64) {
     again = -11,
     /// Cannot allocate memory.
     nomem = -12,
+    /// Invalid argument.
+    inval = -22,
     /// Function not implemented.
     nosys = -38,
 };

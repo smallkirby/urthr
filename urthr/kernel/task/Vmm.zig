@@ -100,6 +100,22 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     return pallocator.translateV(pages);
 }
 
+/// Changes permissions for an existing virtual memory range.
+///
+/// The given address and size must be page-aligned and backed by existing mappings.
+pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!void {
+    rtt.expectEqual(0, vaddr % urd.mem.page_size);
+    rtt.expectEqual(0, size % urd.mem.page_size);
+
+    try arch.mmu.remap4kb(
+        self.pgtbl,
+        vaddr,
+        size,
+        perm,
+        urd.mem.getPageAllocator(),
+    );
+}
+
 /// Extend the program break to the given address.
 ///
 /// Returns the new program break address after extension.

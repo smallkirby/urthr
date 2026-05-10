@@ -117,6 +117,11 @@ pub fn map1gb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: 
     return mapImpl(pt.select(arg.va), arg, .@"1gb", opts, allocator);
 }
 
+/// Changes permissions of an existing VA range using 4KiB pages.
+pub fn remap4kb(pt: PageTablePair, va: usize, size: usize, perm: Permission, allocator: PageAllocator) Error!void {
+    return remapImpl(pt.select(va), va, size, .@"4kb", perm, allocator);
+}
+
 /// Unmaps the VA range using 4KiB pages.
 pub fn unmap4kb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
     return unmapImpl(pt.select(va), va, size, .@"4kb", allocator);
@@ -175,6 +180,25 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
     flush();
 }
 
+fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, allocator: PageAllocator) Error!void {
+    const granule = mg.granule();
+    const level = mg.level();
+
+    if (size % page_size != 0) return error.InvalidArgument;
+    if (va % granule != 0) return error.InvalidArgument;
+    if (size % granule != 0) return error.InvalidArgument;
+
+    for (0..size / granule) |i| {
+        const cur_va = va + i * granule;
+        const desc = try lookupEntry(root._tbl, cur_va, level, allocator);
+        desc.lattr.ap = .from(perm);
+        desc.uattr.pxn = !perm.kx;
+        desc.uattr.uxn = !perm.ux;
+    }
+
+    flush();
+}
+
 fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
@@ -193,6 +217,12 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: Pa
 
 /// Lookup the page descriptor for the given virtual address and invalidate it.
 fn lookupInvalidate(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!void {
+    const desc = try lookupEntry(root, va, level, allocator);
+    desc.valid = false;
+}
+
+/// Lookup an existing page descriptor for the given virtual address.
+fn lookupEntry(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
     var tbl = root;
 
     var cur_level: Level = 0;
@@ -207,7 +237,8 @@ fn lookupInvalidate(root: []TableDesc, va: usize, level: Level, allocator: PageA
 
     const leaf: *PageDesc = @ptrCast(&tbl[getIndex(level, va)]);
     if (!leaf.valid) return error.InvalidMapping;
-    leaf.valid = false;
+
+    return leaf;
 }
 
 /// Enable MMU.
