@@ -58,11 +58,11 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
         const va_end_aligned = std.mem.alignForward(usize, phdr.p_vaddr + phdr.p_memsz, urd.mem.page_size);
         const size_aligned = va_end_aligned - va_start_aligned;
 
-        // Map the segment and copy file data.
+        // Map the segment (as temporary attributes) and copy file data.
         const memory = try th.vmm.map(
             va_start_aligned,
             size_aligned,
-            getAttribute(phdr),
+            .rw,
         );
         const offset_in_memory = phdr.p_vaddr - va_start_aligned;
         const segment = memory[offset_in_memory..][0..phdr.p_memsz];
@@ -71,6 +71,13 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
         // Zero clear the remaining memory.
         @memset(memory[0..offset_in_memory], 0);
         @memset(segment[phdr.p_filesz..], 0);
+
+        // Update attributes.
+        try th.vmm.remap(
+            va_start_aligned,
+            size_aligned,
+            getAttribute(phdr),
+        );
 
         // Update program break.
         brk = @max(brk, va_end_aligned);
