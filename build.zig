@@ -428,6 +428,8 @@ pub fn build(b: *std.Build) !void {
     {
         const user_target = b.resolveTargetQuery(.{
             .cpu_arch = .aarch64,
+            .os_tag = .linux,
+            .abi = .gnu,
             .ofmt = .elf,
             .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
                 .neon,
