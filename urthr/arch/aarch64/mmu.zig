@@ -330,7 +330,7 @@ fn flush() void {
 
 /// Translate the given virtual address to physical address by walking the page tables.
 pub fn translateWalk(pt: PageTable, va: usize, allocator: PageAllocator) ?usize {
-    var tbl = allocator.translateV(pt._tbl);
+    var tbl = pt._tbl;
 
     var cur_level: usize = 0;
     while (cur_level <= 3) : (cur_level += 1) {
