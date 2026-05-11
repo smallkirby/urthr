@@ -15,6 +15,12 @@ pub const LoadInfo = struct {
     entry: usize,
     /// Program break.
     brk: usize,
+    /// Virtual address of program header table (AT_PHDR).
+    phdr_addr: usize,
+    /// Size of one program header entry (AT_PHENT).
+    phdr_entsize: usize,
+    /// Number of program header entries (AT_PHNUM).
+    phdr_num: usize,
 };
 
 /// Load an ELF executable from the filesystem.
@@ -42,9 +48,18 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
 
     // Scan program headers.
     var brk: usize = 0;
+    var phdr_addr: usize = 0;
     var iter = PhdrIterator.init(&reader, ehdr);
     while (try iter.next()) |phdr| {
         if (phdr.p_type == std.elf.PT_INTERP) return Error.NotSupported;
+
+        // Find which PT_LOAD segment contains the phdr table.
+        if (phdr.p_type == std.elf.PT_LOAD and phdr_addr == 0) {
+            if (phdr.p_offset <= ehdr.phoff and ehdr.phoff < phdr.p_offset + phdr.p_filesz) {
+                phdr_addr = phdr.p_vaddr + (ehdr.phoff - phdr.p_offset);
+            }
+        }
+
         if (phdr.p_type != std.elf.PT_LOAD) continue;
 
         const va_start_aligned = std.mem.alignBackward(usize, phdr.p_vaddr, urd.mem.page_size);
@@ -86,6 +101,9 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
     return .{
         .entry = ehdr.entry,
         .brk = brk,
+        .phdr_addr = phdr_addr,
+        .phdr_entsize = ehdr.phentsize,
+        .phdr_num = ehdr.phnum,
     };
 }
 
