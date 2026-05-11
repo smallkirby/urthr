@@ -18,6 +18,7 @@ const entries = [_]Descriptor{
     .new("rt_sigaction",        134,    posix.signal.sysRtSigAction),
     .new("gettid",              178,    posix.task.sysGetTid),
     .new("brk",                 214,    posix.mem.sysBrk),
+    .new("munmap",              215,    posix.mem.sysMunmap),
     .new("mmap",                222,    posix.mem.sysMmap),
     .new("mprotect",            226,    posix.mem.sysMprotect),
 

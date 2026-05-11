@@ -92,6 +92,25 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
     return .success(@bitCast(mapped));
 }
 
+/// System call: munmap
+pub fn sysMunmap(addr: usize, len: usize) ReturnType {
+    const cur = sched.getCurrent();
+
+    if (addr % urd.mem.page_size != 0) {
+        return .err(.inval);
+    }
+    if (len % urd.mem.page_size != 0) {
+        return .err(.inval);
+    }
+
+    cur.vmm.unmap(addr, len) catch |e| switch (e) {
+        error.OutOfMemory => return .err(.nomem),
+        else => return .err(.inval),
+    };
+
+    return .success(0);
+}
+
 /// Memory mapping flags.
 const MmapFlags = packed struct(u32) {
     /// Share changes.
