@@ -9,15 +9,16 @@ const entries = [_]Descriptor{
     // =============================================================
     // POSIX system calls.
 
-    .new("ioctl",           29,     posix.fs.sysIoctl),
-    .new("write",           64,     posix.fs.sysWrite),
-    .new("writev",          66,     posix.fs.sysWritev),
-    .new("exit_group",      94,     posix.task.sysExitGroup),
-    .new("sigaltstack",     132,    posix.signal.sysSigAltStack),
-    .new("rt_sigaction",    134,    posix.signal.sysRtSigAction),
-    .new("gettid",          178,    posix.task.sysGetTid),
-    .new("brk",             214,    posix.task.sysBrk),
-    .new("mprotect",        226,    posix.task.sysMprotect),
+    .new("ioctl",               29,     posix.fs.sysIoctl),
+    .new("write",               64,     posix.fs.sysWrite),
+    .new("writev",              66,     posix.fs.sysWritev),
+    .new("exit_group",          94,     posix.task.sysExitGroup),
+    .new("sched_getaffinity",   123,    posix.sched.sysSchedGetAffinity),
+    .new("sigaltstack",         132,    posix.signal.sysSigAltStack),
+    .new("rt_sigaction",        134,    posix.signal.sysRtSigAction),
+    .new("gettid",              178,    posix.task.sysGetTid),
+    .new("brk",                 214,    posix.task.sysBrk),
+    .new("mprotect",            226,    posix.task.sysMprotect),
 
     // =============================================================
     // Debug system calls.
