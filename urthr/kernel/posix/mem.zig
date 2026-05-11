@@ -78,12 +78,13 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
     }
     _ = offset;
 
-    if (len % urd.mem.page_size != 0) {
+    if (len == 0) {
         return .err(.inval);
     }
+    const aligned_len = std.mem.alignForward(usize, len, urd.mem.page_size);
 
     // Currently, supports only anonymous private mapping without address hint.
-    const mapped = cur.vmm.mapAnon(len, prot.permission()) catch |e| switch (e) {
+    const mapped = cur.vmm.mapAnon(aligned_len, prot.permission()) catch |e| switch (e) {
         error.OutOfMemory => return .err(.nomem),
         else => return .err(.inval),
     };
