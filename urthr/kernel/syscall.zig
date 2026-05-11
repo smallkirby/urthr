@@ -67,6 +67,8 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
         return @intFromEnum(ErrorEnum.nosys);
     }
 
+    trace("call: {d} ({s})", .{ nr, std.enums.tagName(SyscallEnum, @enumFromInt(nr)) orelse "unknown" });
+
     const ret = if (syscall_table[nr]) |handler| handler.f(
         arg1,
         arg2,
@@ -114,6 +116,28 @@ const syscall_table: [num_syscall]?SyscallHandler = blk: {
     }
 
     break :blk table;
+};
+
+/// System call enum.
+///
+/// This enum is constructed at compile time referring to the syscall entries.
+const SyscallEnum = blk: {
+    @setEvalBranchQuota(num_syscall * 4);
+
+    var names: [entries.len][]const u8 = undefined;
+    var values: [entries.len]u64 = undefined;
+
+    for (entries, 0..) |entry, i| {
+        names[i] = entry.name;
+        values[i] = entry.nr;
+    }
+
+    break :blk @Enum(
+        u64,
+        .nonexhaustive,
+        &names,
+        &values,
+    );
 };
 
 // =============================================================
@@ -232,5 +256,6 @@ const std = @import("std");
 const log = std.log.scoped(.syscall);
 const arch = @import("arch").impl;
 const urd = @import("urthr");
+const trace = urd.trace.scoped(.syscall, .syscall);
 const posix = urd.posix;
 const ErrorEnum = posix.ErrorEnum;
