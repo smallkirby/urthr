@@ -4,6 +4,8 @@ pub const signal = @import("posix/signal.zig");
 pub const task = @import("posix/task.zig");
 
 pub const ErrorEnum = enum(i64) {
+    /// Operation not permitted.
+    perm = -1,
     /// Bad file descriptor.
     badf = -9,
     /// Resource temporarily unavailable.

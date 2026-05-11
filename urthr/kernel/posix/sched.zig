@@ -1,6 +1,10 @@
 /// System call: sched_getaffinity
 pub fn sysSchedGetAffinity(pid: usize, size: usize, mask: [*]CpuSet) ReturnType {
-    _ = pid;
+    const cur = sched.getCurrent();
+    const rpid = if (pid == 0) cur.id else pid;
+    if (rpid != cur.id) {
+        return .err(.perm);
+    }
 
     const num_sets = size / @sizeOf(CpuSet);
     if (num_sets == 0) {
@@ -46,4 +50,5 @@ const std = @import("std");
 const common = @import("common");
 const bits = common.bits;
 const urd = @import("urthr");
+const sched = urd.sched;
 const ReturnType = urd.syscall.ReturnType;
