@@ -67,24 +67,52 @@ const Mprot = packed struct(u32) {
 pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, offset: usize) ReturnType {
     const cur = sched.getCurrent();
 
-    if (addr != 0) {
-        return .err(.inval); // Not supported
-    }
     if (fd != -1) {
         return .err(.nosys); // Not supported
     }
     if (!flags.private or !flags.anonymous) {
         return .err(.inval); // Not supported
     }
-    _ = offset;
 
     if (len == 0) {
         return .err(.inval);
     }
-    const aligned_len = std.mem.alignForward(usize, len, urd.mem.page_size);
 
-    // Currently, supports only anonymous private mapping without address hint.
-    const mapped = cur.vmm.mapAnon(aligned_len, prot.permission()) catch |e| switch (e) {
+    const aligned_len = std.mem.alignForward(usize, len, urd.mem.page_size);
+    const perm = prot.permission();
+    _ = offset;
+
+    if (flags.fixed) {
+        if (addr == 0 or addr % urd.mem.page_size != 0) {
+            return .err(.inval);
+        }
+
+        // Unmap overlapping mappings if exists.
+        cur.vmm.unmap(addr, aligned_len) catch {
+            urd.unimplemented("mmap MAP_FIXED for partially overlapping region.");
+        };
+
+        // Map the pages to the exact given virtual address.
+        _ = cur.vmm.map(addr, aligned_len, perm) catch |e| switch (e) {
+            error.OutOfMemory => return .err(.nomem),
+            else => return .err(.inval),
+        };
+
+        return .success(@bitCast(addr));
+    } else {
+        // Use addr as a hint if page-aligned and non-zero.
+        if (addr != 0 and addr % urd.mem.page_size == 0) {
+            if (cur.vmm.map(addr, aligned_len, perm)) |_| {
+                cur.vmm.mmap_hint = addr + aligned_len;
+                return .success(@bitCast(addr));
+            } else |_| {
+                // Fall back to mapping to an arbitrary address.
+            }
+        }
+    }
+
+    // Map to an arbitrary address.
+    const mapped = cur.vmm.mapAnon(aligned_len, perm) catch |e| switch (e) {
         error.OutOfMemory => return .err(.nomem),
         else => return .err(.inval),
     };
