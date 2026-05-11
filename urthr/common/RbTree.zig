@@ -221,7 +221,7 @@ pub fn RbTree(T: type, node_field: []const u8, comptime cmp: anytype, comptime c
 
                 if (next._parent == node) {
                     // Next is the direct right child of node.
-                    fixup_parent = node._parent;
+                    fixup_parent = next;
                     next._left = node._left;
                     next._left.?._parent = next;
                     next._parent = node._parent;
@@ -280,6 +280,7 @@ pub fn RbTree(T: type, node_field: []const u8, comptime cmp: anytype, comptime c
                     } else if (getColor(sibling._right) == .red) {
                         sibling._color = parent._color;
                         parent._color = .black;
+                        sibling._right.?._color = .black;
                         self.rotateLeft(parent);
 
                         break;
@@ -303,6 +304,7 @@ pub fn RbTree(T: type, node_field: []const u8, comptime cmp: anytype, comptime c
                     } else if (getColor(sibling._left) == .red) {
                         sibling._color = parent._color;
                         parent._color = .black;
+                        sibling._left.?._color = .black;
                         self.rotateRight(parent);
 
                         break;
