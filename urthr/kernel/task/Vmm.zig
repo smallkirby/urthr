@@ -15,6 +15,11 @@ pgtbl: arch.mmu.PageTablePair,
 tree: VmTree = .{},
 /// Program break.
 brk: usize = 0,
+/// Next candidate address for anonymous mmap.
+mmap_hint: usize = mmap_base,
+
+/// Base virtual address for anonymous mmap allocations.
+const mmap_base: usize = 0x0000_0040_0000_0000;
 
 /// Create a new instance.
 pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!*Self {
@@ -101,6 +106,19 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     return @as([*]u8, @ptrFromInt(vaddr))[0..size];
 }
 
+/// Maps an anonymous region, choosing the virtual address automatically.
+///
+/// Returns the chosen virtual address.
+pub fn mapAnon(self: *Self, size: usize, perm: Permission) Error!usize {
+    rtt.expectEqual(0, size % urd.mem.page_size);
+
+    const va = self.findFreeRegion(self.mmap_hint, size);
+    _ = try self.map(va, size, perm);
+    self.mmap_hint = va + size;
+
+    return va;
+}
+
 /// Changes permissions for an existing virtual memory range.
 ///
 /// The given address and size must be page-aligned and backed by existing mappings.
@@ -138,6 +156,19 @@ pub fn extendProgramBreak(self: *Self, addr: usize) Error!usize {
 // =============================================================
 // Internals
 // =============================================================
+
+/// Find the first free virtual address region of the given size starting from the given address.
+fn findFreeRegion(self: *Self, start: usize, size: usize) usize {
+    var candidate = start;
+    var it = self.tree.iterator();
+    while (it.next()) |node| {
+        const vma = node.container();
+        if (vma.start + vma.size <= candidate) continue;
+        if (vma.start >= candidate + size) break;
+        candidate = vma.start + vma.size;
+    }
+    return candidate;
+}
 
 /// RB tree type of VmArea.
 const VmTree = RbTree(
