@@ -48,6 +48,11 @@ pub fn enterUser(filename: []const u8) !noreturn {
     {}
     // Auxiliary vectors.
     {
+        // AT_PHDR, AT_PHENT, AT_PHNUM.
+        try scon.appendAux(.new(.phdr, ldr_info.phdr_addr));
+        try scon.appendAux(.new(.phent, ldr_info.phdr_entsize));
+        try scon.appendAux(.new(.phnum, ldr_info.phdr_num));
+
         // AT_RANDOM.
         var random: [16]u8 = undefined;
         urd.rng.getRandom(&random);
