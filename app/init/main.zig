@@ -1,7 +1,14 @@
 //! Experimental init executable.
 
-pub fn main(_: std.process.Init) !void {
+pub fn main(init: std.process.Init) !void {
     log.info("Initial process started.", .{});
+    log.info("----------------------------------", .{});
+
+    log.info("Environment Variables: {d}", .{init.environ_map.count()});
+    var enviter = init.environ_map.iterator();
+    while (enviter.next()) |entry| {
+        log.info("  ENV: {s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
+    }
 }
 
 // =============================================================
