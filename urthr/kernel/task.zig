@@ -5,7 +5,7 @@ pub const thread = @import("task/thread.zig");
 pub const Vmm = @import("task/Vmm.zig");
 
 /// The number of pages allocated for user stack.
-const num_stack_pages = 5;
+const num_stack_pages = 32;
 /// Base address of the user stack.
 const stack_base = 0x7FFF_FF00_0000;
 
