@@ -40,6 +40,5 @@ const atomic = std.atomic;
 const builtin = std.builtin;
 const debug = std.debug;
 const log = std.log.scoped(.panic);
-const format = std.fmt.format;
 const urd = @import("urthr");
 const arch = @import("arch").impl;
