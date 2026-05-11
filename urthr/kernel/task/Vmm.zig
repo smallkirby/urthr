@@ -119,6 +119,87 @@ pub fn mapAnon(self: *Self, size: usize, perm: Permission) Error!usize {
     return va;
 }
 
+/// Unmap the given user-space virtual address range.
+pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
+    rtt.expectEqual(0, vaddr % urd.mem.page_size);
+    rtt.expectEqual(0, size % urd.mem.page_size);
+
+    const pallocator = urd.mem.getPageAllocator();
+    const gallocator = urd.mem.getGeneralAllocator();
+    const unmap_end = vaddr + size;
+
+    // Check if all pages belong to this VMM.
+    for (0..size / urd.mem.page_size) |i| {
+        const va = vaddr + i * urd.mem.page_size;
+        if (self.tree.find(va) == null) {
+            return Error.InvalidArgument;
+        }
+        // TODO: should not translate. Should record VA-PA mapping.
+        _ = arch.mmu.translateWalk(
+            self.pgtbl.select(va),
+            va,
+            pallocator,
+        ) orelse return Error.InvalidArgument;
+    }
+
+    // Free physical pages backing the range.
+    for (0..size / urd.mem.page_size) |i| {
+        const va = vaddr + i * urd.mem.page_size;
+        // TODO: should not translate. Should record VA-PA mapping.
+        const pa = arch.mmu.translateWalk(
+            self.pgtbl.select(va),
+            va,
+            pallocator,
+        ) orelse return Error.InvalidArgument;
+
+        // Free physical pages.
+        pallocator.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
+        // Unmap the page.
+        arch.mmu.unmap4kb(
+            self.pgtbl,
+            va,
+            urd.mem.page_size,
+            pallocator,
+        ) catch {};
+    }
+
+    // Update tree.
+    var scan = vaddr;
+    while (scan < unmap_end) {
+        const node = self.tree.lowerBound(scan) orelse unreachable;
+        const vma = node.container();
+        const vma_end = vma.start + vma.size;
+        rtt.expect(vma.start < unmap_end);
+
+        if (vma.start < scan) {
+            // Trim right of VMA.
+            if (vma_end > unmap_end) {
+                const right = try gallocator.create(VmArea);
+                right.* = .{
+                    .start = unmap_end,
+                    .size = vma_end - unmap_end,
+                    .perm = vma.perm,
+                };
+                self.tree.insert(right);
+            }
+            vma.size = scan - vma.start;
+            scan = vma_end;
+        } else if (vma_end > unmap_end) {
+            // Trim left of VMA.
+            self.tree.delete(vma);
+            vma.start = unmap_end;
+            vma.size = vma_end - unmap_end;
+            self.tree.insert(vma);
+            scan = unmap_end;
+        } else {
+            // VMA is fully contained within the unmap region.
+            scan = vma_end;
+            self.tree.delete(vma);
+            gallocator.destroy(vma);
+        }
+    }
+}
+
 /// Changes permissions for an existing virtual memory range.
 ///
 /// The given address and size must be page-aligned and backed by existing mappings.
