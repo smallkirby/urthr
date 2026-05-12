@@ -97,7 +97,6 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     }
 
     // Create a virtual memory area and insert it into the tree.
-    // TODO: merge adjacent areas with the same permissions.
     const vma = try gallocator.create(VmArea);
     errdefer gallocator.destroy(vma);
     vma.* = .{
@@ -105,7 +104,7 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
         .size = size,
         .perm = perm,
     };
-    self.tree.insert(vma);
+    self.insertToVmTree(vma);
 
     return @as([*]u8, @ptrFromInt(vaddr))[0..size];
 }
@@ -131,8 +130,6 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     rtt.expectEqual(0, size % urd.mem.page_size);
 
     const pallocator = urd.mem.getPageAllocator();
-    const gallocator = urd.mem.getGeneralAllocator();
-    const unmap_end = vaddr + size;
 
     // Free physical pages backing the range.
     for (0..size / urd.mem.page_size) |i| {
@@ -158,47 +155,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     }
 
     // Update tree.
-    var scan = vaddr;
-    while (scan < unmap_end) {
-        const node = self.tree.lowerBound(scan) orelse {
-            // If there's no more VMA, we're done.
-            break;
-        };
-        const vma = node.container();
-        const vma_end = vma.start + vma.size;
-
-        if (vma.start >= unmap_end) {
-            // No more overlapping VMA, we're done.
-            break;
-        }
-
-        if (vma.start < scan) {
-            // Trim right of VMA.
-            if (vma_end > unmap_end) {
-                const right = try gallocator.create(VmArea);
-                right.* = .{
-                    .start = unmap_end,
-                    .size = vma_end - unmap_end,
-                    .perm = vma.perm,
-                };
-                self.tree.insert(right);
-            }
-            vma.size = scan - vma.start;
-            scan = vma_end;
-        } else if (vma_end > unmap_end) {
-            // Trim left of VMA.
-            self.tree.delete(vma);
-            vma.start = unmap_end;
-            vma.size = vma_end - unmap_end;
-            self.tree.insert(vma);
-            scan = unmap_end;
-        } else {
-            // VMA is fully contained within the unmap region.
-            scan = vma_end;
-            self.tree.delete(vma);
-            gallocator.destroy(vma);
-        }
-    }
+    try self.deleteFromVmTree(vaddr, size);
 }
 
 /// Changes permissions for an existing virtual memory range.
@@ -238,6 +195,63 @@ pub fn extendProgramBreak(self: *Self, addr: usize) Error!usize {
 // =============================================================
 // Internals
 // =============================================================
+
+/// Insert a VMA into the tree.
+fn insertToVmTree(self: *Self, vma: *VmArea) void {
+    self.tree.insert(vma);
+
+    // TODO: merge adjacent areas with the same permissions.
+}
+
+/// Delete a VMA from the tree.
+///
+/// If the specified range partially overlaps with existing VMAs, the overlapping VMAs are trimmed accordingly.
+fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
+    const gallocator = urd.mem.getGeneralAllocator();
+    const end = start + size;
+
+    var scan = start;
+    while (scan < end) {
+        const node = self.tree.lowerBound(scan) orelse {
+            // If there's no more VMA, we're done.
+            break;
+        };
+        const vma = node.container();
+        const vma_end = vma.start + vma.size;
+
+        if (vma.start >= end) {
+            // No more overlapping VMA, we're done.
+            break;
+        }
+
+        if (vma.start < scan) {
+            // Trim right of VMA.
+            if (vma_end > end) {
+                const right = try gallocator.create(VmArea);
+                right.* = .{
+                    .start = end,
+                    .size = vma_end - end,
+                    .perm = vma.perm,
+                };
+                self.tree.insert(right);
+            }
+            vma.size = scan - vma.start;
+            scan = vma_end;
+        } else if (vma_end > end) {
+            // Trim left of VMA.
+            self.tree.delete(vma);
+            vma.start = end;
+            vma.size = vma_end - end;
+            self.tree.insert(vma);
+            scan = end;
+        } else {
+            // VMA is fully contained within the unmap region.
+            scan = vma_end;
+            self.tree.delete(vma);
+            gallocator.destroy(vma);
+        }
+    }
+}
 
 /// Find the first free virtual address region of the given size starting from the given address.
 fn findFreeRegion(self: *Self, start: usize, size: usize) usize {
