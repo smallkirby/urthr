@@ -139,6 +139,27 @@ pub fn open(s: []const u8, allocator: Allocator) Error!*File {
     return File.open(path, allocator);
 }
 
+/// Open a file relative to a directory.
+///
+/// TODO: attributes and options.
+pub fn openAt(dir: *const File, s: []const u8, allocator: Allocator) Error!*File {
+    if (std.fs.path.isAbsolute(s)) {
+        return Error.InvalidArgument;
+    }
+    if (dir.getType() != .directory) {
+        return Error.NotDirectory;
+    }
+
+    const abs_path = std.fs.path.join(
+        allocator,
+        &[_][]const u8{ dir.path.dentry.name, s },
+    ) catch return Error.InvalidArgument;
+    defer allocator.free(abs_path);
+
+    const path = try resolvePath(abs_path, allocator);
+    return File.open(path, allocator);
+}
+
 /// Resolve a file path to a `Path`.
 fn resolvePath(s: []const u8, allocator: Allocator) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))
