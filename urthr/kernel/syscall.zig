@@ -10,6 +10,7 @@ const entries = [_]Descriptor{
     // POSIX system calls.
 
     .new("ioctl",               29,     posix.fs.sysIoctl),
+    .new("openat",              56,     posix.fs.sysOpenAt),
     .new("write",               64,     posix.fs.sysWrite),
     .new("writev",              66,     posix.fs.sysWritev),
     .new("exit_group",          94,     posix.task.sysExitGroup),

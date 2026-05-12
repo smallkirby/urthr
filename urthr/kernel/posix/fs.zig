@@ -1,5 +1,44 @@
 //! POSIX compatibility layer for filesystem API.
 
+/// System call: openat
+pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) ReturnType {
+    _ = mode;
+    _ = flags;
+
+    const allocator = urd.mem.getGeneralAllocator();
+    const s = std.mem.span(pathname);
+
+    // Check if pathname is relative or absolute.
+    if (std.fs.path.isAbsolute(s)) {
+        // Absolute path. Ignore directory.
+        const file = urd.fs.open(s, allocator) catch |err| switch (err) {
+            error.InvalidArgument => return .err(.inval),
+            else => return .err(.again),
+        };
+        const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch {
+            return .err(.mfile);
+        };
+        return .success(@bitCast(fd));
+    } else {
+        // Relative path.
+        const cur = sched.getCurrent();
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return .err(.badf);
+        } orelse {
+            return .err(.badf);
+        };
+
+        const file = urd.fs.openAt(dir, s, allocator) catch |err| switch (err) {
+            error.InvalidArgument => return .err(.inval),
+            else => return .err(.again),
+        };
+        const fd = cur.fs.fdtbl.alloc(file) catch {
+            return .err(.mfile);
+        };
+        return .success(@bitCast(fd));
+    }
+}
+
 /// System call: write
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
     const cur = sched.getCurrent();

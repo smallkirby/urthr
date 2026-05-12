@@ -151,8 +151,13 @@ pub fn unref(self: *Self) void {
     }
 }
 
+/// Get the type of this file.
+pub fn getType(self: *const Self) fs.FileType {
+    return self.inode().ftype;
+}
+
 /// Helper function to get the inode associated with this file.
-fn inode(self: *Self) *Inode {
+fn inode(self: *const Self) *Inode {
     return self.path.dentry.inode;
 }
 
