@@ -1,13 +1,17 @@
 //! User-space virtual memory management.
+//!
+//! This struct tracks user-space virtual memory areas and their permission.
+//! It does not tracks the physical pages backing the VMA.
+//! If we want to get the physical pages, we have to traverse the page tables to get the backing physical address.
+//!
+//! Additionally, this struct also records the program memory information such as the program break and heap, which are used for implementing `brk` and `mmap` system calls.
 
 const Self = @This();
 
 pub const Error = error{
     /// The specified virtual memory range is already mapped.
     AlreadyMapped,
-} ||
-    common.mem.PageAllocator.Error ||
-    arch.mmu.Error;
+} || common.mem.PageAllocator.Error || arch.mmu.Error;
 
 /// Page table for this task.
 pgtbl: arch.mmu.PageTablePair,
@@ -120,6 +124,8 @@ pub fn mapAnon(self: *Self, size: usize, perm: Permission) Error!usize {
 }
 
 /// Unmap the given user-space virtual address range.
+///
+/// If some of the specified range is not mapped, no operation is performed for that region.
 pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
@@ -128,29 +134,17 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     const gallocator = urd.mem.getGeneralAllocator();
     const unmap_end = vaddr + size;
 
-    // Check if all pages belong to this VMM.
-    for (0..size / urd.mem.page_size) |i| {
-        const va = vaddr + i * urd.mem.page_size;
-        if (self.tree.find(va) == null) {
-            return Error.InvalidArgument;
-        }
-        // TODO: should not translate. Should record VA-PA mapping.
-        _ = arch.mmu.translateWalk(
-            self.pgtbl.select(va),
-            va,
-            pallocator,
-        ) orelse return Error.InvalidArgument;
-    }
-
     // Free physical pages backing the range.
     for (0..size / urd.mem.page_size) |i| {
         const va = vaddr + i * urd.mem.page_size;
-        // TODO: should not translate. Should record VA-PA mapping.
         const pa = arch.mmu.translateWalk(
             self.pgtbl.select(va),
             va,
             pallocator,
-        ) orelse return Error.InvalidArgument;
+        ) orelse {
+            // If the page is not mapped, skip it.
+            continue;
+        };
 
         // Free physical pages.
         pallocator.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
@@ -166,10 +160,17 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     // Update tree.
     var scan = vaddr;
     while (scan < unmap_end) {
-        const node = self.tree.lowerBound(scan) orelse unreachable;
+        const node = self.tree.lowerBound(scan) orelse {
+            // If there's no more VMA, we're done.
+            break;
+        };
         const vma = node.container();
         const vma_end = vma.start + vma.size;
-        rtt.expect(vma.start < unmap_end);
+
+        if (vma.start >= unmap_end) {
+            // No more overlapping VMA, we're done.
+            break;
+        }
 
         if (vma.start < scan) {
             // Trim right of VMA.
