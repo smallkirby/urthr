@@ -4,10 +4,42 @@ pub fn main(init: std.process.Init) !void {
     log.info("Initial process started.", .{});
     log.info("----------------------------------", .{});
 
-    log.info("Environment Variables: {d}", .{init.environ_map.count()});
-    var enviter = init.environ_map.iterator();
-    while (enviter.next()) |entry| {
-        log.info("  ENV: {s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
+    // Show environment variables.
+    {
+        log.info("Environment Variables: {d}", .{init.environ_map.count()});
+        var enviter = init.environ_map.iterator();
+        while (enviter.next()) |entry| {
+            log.info("  ENV: {s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
+        }
+    }
+
+    // Test /dev/zero
+    {
+        const dzero = try std.Io.Dir.openFileAbsolute(init.io, "/dev/zero", .{});
+        defer dzero.close(init.io);
+
+        var buf: [16]u8 = undefined;
+        var reader = dzero.reader(init.io, &.{});
+        try reader.interface.readSliceAll(&buf);
+
+        var writer = dzero.writer(init.io, &.{});
+        try writer.interface.writeAll(&buf);
+    }
+
+    // Test /dev/null
+    {
+        const dnull = try std.Io.Dir.openFileAbsolute(init.io, "/dev/null", .{});
+        defer dnull.close(init.io);
+
+        var buf: [16]u8 = undefined;
+        var w = std.Io.Writer.fixed(&buf);
+        var reader = dnull.reader(init.io, &.{});
+        if (try reader.interface.streamRemaining(&w) != 0) {
+            return error.UnexpectedNullRead;
+        }
+
+        var writer = dnull.writer(init.io, &.{});
+        try writer.interface.writeAll(&buf);
     }
 }
 
