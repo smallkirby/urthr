@@ -103,6 +103,33 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
     return .success(@bitCast(total));
 }
 
+/// System call: pwritev
+pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
+    const cur = sched.getCurrent();
+    const offset = bits.concat(u64, offset_h, offset_l);
+    const iovs = iov[0..iovcnt];
+
+    const file = cur.fs.fdtbl.get(fd) catch {
+        return .err(.badf);
+    } orelse {
+        return .err(.badf);
+    };
+
+    if (offset != 0) {
+        return .err(.nosys); // TODO: Not implemented.
+    }
+
+    var total: usize = 0;
+    for (iovs) |v| {
+        const n = file.write(v.slice()) catch |err| return switch (err) {
+            else => .err(.again),
+        };
+        total += n;
+    }
+
+    return .success(@bitCast(total));
+}
+
 /// System call: writev
 pub fn sysWritev(fd: usize, iov: usize, iovcnt: usize) ReturnType {
     const cur = sched.getCurrent();
