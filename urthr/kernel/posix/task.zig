@@ -16,7 +16,7 @@ pub fn sysGetUid() ReturnType {
 }
 
 /// System call: prlimit64
-pub fn prlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) ReturnType {
+pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) ReturnType {
     if (pid != 0) {
         return .err(.perm);
     }

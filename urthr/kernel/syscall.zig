@@ -28,7 +28,7 @@ const entries = [_]Descriptor{
     .new("munmap",              215,    posix.mem.sysMunmap),
     .new("mmap",                222,    posix.mem.sysMmap),
     .new("mprotect",            226,    posix.mem.sysMprotect),
-    .new("prlimit64",           261,    posix.task.prlimit64),
+    .new("prlimit64",           261,    posix.task.sysPrlimit64),
 
     // =============================================================
     // Debug system calls.
