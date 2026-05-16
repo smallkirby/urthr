@@ -91,6 +91,14 @@ pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, 
 // Read
 // =============================================================
 
+/// syscall: read
+pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    const out = @as([*]u8, @ptrFromInt(buf));
+    const n = file.read(out[0..count]) catch return .err(.again);
+    return .success(@bitCast(n.len));
+}
+
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const offset = bits.concat(u64, offset_h, offset_l);
