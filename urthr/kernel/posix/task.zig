@@ -9,6 +9,12 @@ pub fn sysGetTid() ReturnType {
     return .success(@bitCast(@as(u64, current.id)));
 }
 
+/// System call: getuid
+pub fn sysGetUid() ReturnType {
+    const current = sched.getCurrent();
+    return .success(@bitCast(@as(u64, current.id)));
+}
+
 /// System call: prlimit64
 pub fn prlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) ReturnType {
     if (pid != 0) {
