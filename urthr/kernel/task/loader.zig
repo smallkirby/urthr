@@ -21,6 +21,8 @@ pub const LoadInfo = struct {
     phdr_entsize: usize,
     /// Number of program header entries (AT_PHNUM).
     phdr_num: usize,
+    /// Thread pointer value.
+    tp: usize,
 };
 
 /// Load an ELF executable from the filesystem.
@@ -46,65 +48,105 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
     if (ehdr.phentsize != @sizeOf(Elf64_Phdr)) return Error.InvalidElf;
 
+    var info = std.mem.zeroInit(LoadInfo, .{
+        .entry = ehdr.entry,
+        .phdr_entsize = ehdr.phentsize,
+        .phdr_num = ehdr.phnum,
+    });
+
     // Scan program headers.
-    var brk: usize = 0;
-    var phdr_addr: usize = 0;
     var iter = PhdrIterator.init(&reader, ehdr);
     while (try iter.next()) |phdr| {
-        if (phdr.p_type == std.elf.PT_INTERP) return Error.NotSupported;
-
         // Find which PT_LOAD segment contains the phdr table.
-        if (phdr.p_type == std.elf.PT_LOAD and phdr_addr == 0) {
+        if (phdr.p_type == std.elf.PT_LOAD and info.phdr_addr == 0) {
             if (phdr.p_offset <= ehdr.phoff and ehdr.phoff < phdr.p_offset + phdr.p_filesz) {
-                phdr_addr = phdr.p_vaddr + (ehdr.phoff - phdr.p_offset);
+                info.phdr_addr = phdr.p_vaddr + (ehdr.phoff - phdr.p_offset);
             }
         }
 
-        if (phdr.p_type != std.elf.PT_LOAD) continue;
+        // Map each segment into memory.
+        switch (phdr.p_type) {
+            std.elf.PT_LOAD => {
+                const end = try mapLoadSegment(phdr, th, &reader);
+                info.brk = @max(info.brk, end);
+            },
 
-        const va_start_aligned = std.mem.alignBackward(usize, phdr.p_vaddr, urd.mem.page_size);
-        const va_end_aligned = std.mem.alignForward(usize, phdr.p_vaddr + phdr.p_memsz, urd.mem.page_size);
-        const size_aligned = va_end_aligned - va_start_aligned;
+            std.elf.PT_TLS => {
+                rtt.expectEqual(0, info.tp);
+                info.tp = try mapTlsSegment(phdr, th);
+            },
 
-        // Validate the program header.
-        if (phdr.p_filesz > phdr.p_memsz) return Error.InvalidElf;
-        if (!urd.mem.isUserAddress(va_start_aligned)) return Error.InvalidElf;
+            std.elf.PT_INTERP => return Error.NotSupported,
 
-        // Map the segment (as temporary attributes) and copy file data.
-        const memory = try th.vmm.map(
-            va_start_aligned,
-            size_aligned,
-            .rw,
-        );
-
-        // Read segment data into mapped memory.
-        const offset_in_memory = phdr.p_vaddr - va_start_aligned;
-        const segment = memory[offset_in_memory..][0..phdr.p_memsz];
-        reader.seekTo(phdr.p_offset);
-        reader.interface.readSliceAll(segment[0..phdr.p_filesz]) catch return error.InvalidElf;
-
-        // Zero clear the remaining memory.
-        @memset(memory[0..offset_in_memory], 0);
-        @memset(segment[phdr.p_filesz..], 0);
-
-        // Update attributes.
-        try th.vmm.remap(
-            va_start_aligned,
-            size_aligned,
-            getAttribute(phdr),
-        );
-
-        // Update program break.
-        brk = @max(brk, va_end_aligned);
+            else => continue,
+        }
     }
 
-    return .{
-        .entry = ehdr.entry,
-        .brk = brk,
-        .phdr_addr = phdr_addr,
-        .phdr_entsize = ehdr.phentsize,
-        .phdr_num = ehdr.phnum,
-    };
+    return info;
+}
+
+/// Maps a PT_LOAD segment of ELF.
+///
+/// Returns the program break after loading the segment.
+fn mapLoadSegment(phdr: std.elf.Elf64_Phdr, th: *Thread, reader: *Reader) Error!usize {
+    const va_start_aligned = std.mem.alignBackward(usize, phdr.p_vaddr, urd.mem.page_size);
+    const va_end_aligned = std.mem.alignForward(usize, phdr.p_vaddr + phdr.p_memsz, urd.mem.page_size);
+    const size_aligned = va_end_aligned - va_start_aligned;
+
+    // Validate the program header.
+    if (phdr.p_filesz > phdr.p_memsz) return Error.InvalidElf;
+    if (!urd.mem.isUserAddress(va_start_aligned)) return Error.InvalidElf;
+
+    // Map the segment (as temporary attributes) and copy file data.
+    const memory = try th.vmm.map(
+        va_start_aligned,
+        size_aligned,
+        .rw,
+    );
+
+    // Read segment data into mapped memory.
+    const offset_in_memory = phdr.p_vaddr - va_start_aligned;
+    const segment = memory[offset_in_memory..][0..phdr.p_memsz];
+    reader.seekTo(phdr.p_offset);
+    reader.interface.readSliceAll(segment[0..phdr.p_filesz]) catch return error.InvalidElf;
+
+    // Zero clear the remaining memory.
+    @memset(memory[0..offset_in_memory], 0);
+    @memset(segment[phdr.p_filesz..], 0);
+
+    // Update attributes.
+    try th.vmm.remap(
+        va_start_aligned,
+        size_aligned,
+        getAttribute(phdr),
+    );
+
+    return va_end_aligned;
+}
+
+/// Maps a PT_TLS segment of ELF to the thread's TLS area.
+///
+/// Returns the thread pointer value.
+fn mapTlsSegment(phdr: std.elf.Elf64_Phdr, th: *Thread) Error!usize {
+    const tcp_size = 16;
+
+    const alignment = @max(phdr.p_align, 1);
+    const data_size = std.mem.alignForward(usize, phdr.p_memsz, alignment);
+    const total_size = std.mem.alignForward(usize, tcp_size + data_size, urd.mem.page_size);
+
+    // Allocate TLS region.
+    const tp_addr = try th.vmm.mapAnon(total_size, .rw);
+    const tp = @as([*]u8, @ptrFromInt(tp_addr))[0..total_size];
+
+    // Copy TLS initialization image from the loaded segment.
+    const src = @as([*]const u8, @ptrFromInt(phdr.p_vaddr))[0..phdr.p_filesz];
+    @memcpy(tp[tcp_size..][0..phdr.p_filesz], src);
+
+    // Zero-clear the remaining memory.
+    @memset(tp[0..tcp_size], 0);
+    @memset(tp[tcp_size + phdr.p_filesz ..], 0);
+
+    return tp_addr;
 }
 
 /// Implements std.Io.Reader interface for reading ELF files.

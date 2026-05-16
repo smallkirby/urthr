@@ -26,6 +26,9 @@ pub fn enterUser(filename: []const u8) !noreturn {
     const ldr_info = try loader.load(current, filename);
     current.vmm.brk = ldr_info.brk;
 
+    // Set thread pointer.
+    arch.thread.setThreadPointer(ldr_info.tp);
+
     // Prepare user stack.
     const stack = try current.vmm.map(
         stack_base,
