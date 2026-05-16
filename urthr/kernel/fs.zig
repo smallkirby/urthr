@@ -196,6 +196,11 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
         cur = .{ .dentry = dentry, .mount = cur.mount };
     }
 
+    // Handle the case where the final path component is itself a mount point.
+    if (cur.dentry.mount) |mnt| {
+        cur = .{ .dentry = mnt.root, .mount = mnt };
+    }
+
     return cur;
 }
 
