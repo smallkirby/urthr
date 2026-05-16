@@ -125,7 +125,7 @@ pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!void {
 ///
 /// Caller must call `path.dentry.unref()` after use.
 pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
-    const path = try resolvePath(s, allocator);
+    const path = try resolvePath(sched.getCurrent().fs.cwd, s, allocator);
     path.dentry.ref();
 
     return path;
@@ -135,37 +135,31 @@ pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
 ///
 /// TODO: attributes and options.
 pub fn open(s: []const u8, allocator: Allocator) Error!*File {
-    const path = try resolvePath(s, allocator);
+    const path = try resolvePath(sched.getCurrent().fs.cwd, s, allocator);
     return File.open(path, allocator);
 }
 
 /// Open a file relative to a directory.
 ///
 /// TODO: attributes and options.
-pub fn openAt(dir: *const File, s: []const u8, allocator: Allocator) Error!*File {
+pub fn openAt(dir: Path, s: []const u8, allocator: Allocator) Error!*File {
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
-    if (dir.getType() != .directory) {
+    if (dir.dentry.inode.ftype != .directory) {
         return Error.NotDirectory;
     }
 
-    const abs_path = std.fs.path.join(
-        allocator,
-        &[_][]const u8{ dir.path.dentry.name, s },
-    ) catch return Error.InvalidArgument;
-    defer allocator.free(abs_path);
-
-    const path = try resolvePath(abs_path, allocator);
+    const path = try resolvePath(dir, s, allocator);
     return File.open(path, allocator);
 }
 
 /// Resolve a file path to a `Path`.
-fn resolvePath(s: []const u8, allocator: Allocator) Error!Path {
+fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))
         sched.getCurrent().fs.root
     else
-        sched.getCurrent().fs.cwd;
+        base;
 
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
