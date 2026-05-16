@@ -177,15 +177,16 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
                         const parent_dentry = mnt.mntpoint.parent orelse mnt.mntpoint;
                         cur = .{ .dentry = parent_dentry, .mount = parent_mnt };
                     } else {
-                        // Reached the root of roof filesystem. Stay here.
+                        // Reached the root of root filesystem. Stay here.
                     }
+                    continue;
                 }
-            } else {
-                cur = .{
-                    .dentry = cur.dentry.parent orelse cur.dentry,
-                    .mount = cur.mount,
-                };
             }
+
+            cur = .{
+                .dentry = cur.dentry.parent orelse cur.dentry,
+                .mount = cur.mount,
+            };
             continue;
         }
 
