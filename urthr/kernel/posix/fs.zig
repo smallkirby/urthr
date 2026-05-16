@@ -397,6 +397,28 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     return .success(0);
 }
 
+/// syscall: getcwd
+pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
+    const allocator = urd.mem.getGeneralAllocator();
+    const cur = sched.getCurrent();
+    const path = urd.fs.getPath(cur.fs.cwd, allocator) catch
+        return .err(.again);
+    defer allocator.free(path);
+
+    const out = @as([*]u8, @ptrFromInt(buf));
+    if (size == 0) {
+        return .err(.inval);
+    }
+    if (path.len + 1 > size) {
+        return .err(.range);
+    }
+
+    @memcpy(out[0..path.len], path);
+    out[path.len] = 0; // null-terminate
+
+    return .success(@bitCast(path.len));
+}
+
 // =============================================================
 // Internal
 // =============================================================
