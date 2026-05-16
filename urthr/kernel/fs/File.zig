@@ -50,7 +50,9 @@ pub const Iterator = struct {
     ///
     /// Caller must call `deinit` on the returned result after use.
     pub fn next(self: *Iterator, allocator: Allocator) Error!?IterResult {
-        return self.file.ops.iterate(self, allocator);
+        const ret = self.file.ops.iterate(self, allocator);
+        self.file.offset = self.offset;
+        return ret;
     }
 };
 
@@ -126,7 +128,7 @@ pub fn iterator(self: *Self) Error!Iterator {
 
     return .{
         .file = self,
-        .offset = 0,
+        .offset = self.offset,
     };
 }
 
