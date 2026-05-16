@@ -174,7 +174,7 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flag
     const stat = Stat{
         .st_dev = 0, // TODO
         .st_ino = file.path.dentry.inode.number,
-        .st_mode = 0, // TODO
+        .st_mode = @bitCast(Mode.from(file)),
         .st_nlink = 1, // TODO
         .st_uid = 0, // TODO
         .st_gid = 0, // TODO
@@ -209,6 +209,74 @@ const Stat = extern struct {
     st_blksize: i64,
     /// Number of 512B blocks allocated.
     st_blocks: i64,
+};
+
+/// File information including file type, access permission, and other special bits.
+const Mode = packed struct(u32) {
+    /// Access permission for others.
+    other: Permission = .rwx,
+    /// Access permission for a group.
+    group: Permission = .rwx,
+    /// Access permission for a user.
+    user: Permission = .rwx,
+    /// Special flags.
+    flags: Flags = .none,
+    /// File type.
+    type: FileType,
+    /// Reserved.
+    _reserved: u16 = 0,
+
+    pub const Flags = packed struct(u3) {
+        /// Sticky bit.
+        sticky: bool,
+        /// Set Group ID.
+        sgid: bool,
+        /// Set User ID.
+        suid: bool,
+
+        pub const none = Flags{ .sticky = false, .sgid = false, .suid = false };
+    };
+
+    pub fn from(f: *const urd.fs.File) Mode {
+        return Mode{
+            .type = switch (f.getType()) {
+                .regular => .regular,
+                .directory => .dir,
+            },
+        };
+    }
+};
+
+/// Access permission for a single target.
+const Permission = packed struct(u3) {
+    read: bool,
+    write: bool,
+    exec: bool,
+
+    pub const ro = Permission{ .read = true, .write = false, .exec = false };
+    pub const rw = Permission{ .read = true, .write = true, .exec = false };
+    pub const rx = Permission{ .read = true, .write = false, .exec = true };
+    pub const rwx = Permission{ .read = true, .write = true, .exec = true };
+};
+
+/// File type.
+const FileType = enum(u4) {
+    /// Named pipe or FIFO.
+    fifo = 1,
+    /// Character special device.
+    char = 2,
+    /// Directory.
+    dir = 4,
+    /// Block special device.
+    blk = 6,
+    /// Regular file.
+    regular = 8,
+    /// Symbolic link.
+    symlink = 10,
+    /// Socket.
+    socket = 12,
+
+    _,
 };
 
 // =============================================================
