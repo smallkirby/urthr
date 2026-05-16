@@ -71,7 +71,7 @@ pub fn enqueue(th: *Thread) void {
 ///
 /// The lock is released before switching.
 /// IRQs remain disabled when the thread resumes.
-pub fn blockCurrent(caller_lock: *SpinLock) void {
+pub fn blockCurrent(caller_lock: ?*SpinLock) void {
     const ie = lock.lockDisableIrq();
 
     // Update the current thread's runtime.
@@ -89,7 +89,7 @@ pub fn blockCurrent(caller_lock: *SpinLock) void {
     arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
 
     lock.unlock();
-    caller_lock.unlock();
+    if (caller_lock) |l| l.unlock();
 
     arch.thread.switchContext(&cur.sp, &next.sp);
 

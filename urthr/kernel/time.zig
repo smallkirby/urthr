@@ -23,6 +23,11 @@ pub fn initLocal() void {
     arch.timer.enable();
     armTimer();
     board.enableIrq(arch.timer.ppi_intid);
+
+    // Register sleep checker as a timer callback.
+    _ = register(sleep_checker_interval_us, &checkSleepers) catch {
+        @panic("Failed to register sleep checker timer callback.");
+    };
 }
 
 /// Register a periodic timer callback.
@@ -74,6 +79,73 @@ pub fn getCurrentTimestamp() Ktimestamp {
 }
 
 // =============================================================
+// Sleep Queue
+// =============================================================
+
+/// Blocks the calling thread until the specified duration has passed.
+pub fn sleepUs(duration_us: u64) void {
+    var entry: SleepEntry = .{
+        .thread = urd.sched.getCurrent(),
+        .deadline_ns = getCurrentTimestamp() + duration_us * std.time.ns_per_us,
+    };
+
+    const ie = qsleep_lock.lockDisableIrq();
+    defer qsleep_lock.unlockRestoreIrq(ie);
+    qsleep.append(&entry);
+
+    urd.sched.blockCurrent(&qsleep_lock);
+}
+
+/// Interval for checking sleeping threads in microseconds.
+const sleep_checker_interval_us: u64 = 10 * std.time.us_per_ms;
+
+/// Queue of sleeping threads.
+var qsleep: SleepEntry.List = .{};
+/// Spin lock to protect the sleep queue.
+var qsleep_lock: SpinLock = .{};
+
+/// Sleep entry for a thread waiting on a timer.
+///
+/// Allocated on the sleeping thread's kernel stack.
+const SleepEntry = struct {
+    /// Sleeping thread waiting on a timer.
+    thread: *Thread,
+    /// Absolute wake-up time in nanoseconds.
+    deadline_ns: u64,
+    /// List head.
+    _head: List.Head = .{},
+
+    /// List type for sleep entries.
+    const List = common.typing.InlineDoublyLinkedList(SleepEntry, "_head");
+};
+
+/// Wake threads whose sleep deadline has passed.
+///
+/// Runs as a timer callback in IRQ context.
+fn checkSleepers() void {
+    const ie = qsleep_lock.lockDisableIrq();
+    defer qsleep_lock.unlockRestoreIrq(ie);
+
+    const now_ns = getCurrentTimestamp();
+    var woke_any = false;
+
+    var iter = qsleep.iter();
+    while (iter.next()) |entry| {
+        if (now_ns >= entry.deadline_ns) {
+            rtt.expectEqual(.blocked, entry.thread.state);
+            rtt.expect(qsleep.len > 0);
+
+            qsleep.remove(entry);
+            urd.sched.enqueue(entry.thread);
+
+            woke_any = true;
+        }
+    }
+
+    if (woke_any) urd.sched.markNeedResched();
+}
+
+// =============================================================
 // Internal
 // =============================================================
 
@@ -117,6 +189,8 @@ fn getCurrentTimestampUs() Ktimestamp {
 
 /// Timer interrupt handler.
 ///
+/// Called in IRQ context.
+///
 /// Re-arms the timer and dispatches all due callbacks.
 fn timerHandler(_: urd.exception.Vector) void {
     armTimer();
@@ -146,5 +220,7 @@ const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const board = @import("board").impl;
 const common = @import("common");
+const rtt = common.rtt;
 const urd = @import("urthr");
 const SpinLock = urd.SpinLock;
+const Thread = urd.task.thread.Thread;
