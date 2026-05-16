@@ -27,6 +27,10 @@ pub fn svc(ctx: *Context) void {
     const arg5 = ctx.x4;
     const arg6 = ctx.x5;
 
+    // Save and restore user stack pointer.
+    const sp_el0 = am.mrsi(.sp_el0);
+    defer am.msr(.sp_el0, @bitCast(sp_el0));
+
     // Dispatch system call.
     const ret = dispatcher(
         nr,
@@ -44,4 +48,5 @@ pub fn svc(ctx: *Context) void {
 // Imports
 // =============================================================
 
+const am = @import("asm.zig");
 const Context = @import("isr.zig").Context;
