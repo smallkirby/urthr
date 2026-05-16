@@ -19,7 +19,7 @@ const Iovec = extern struct {
 // Open
 // =============================================================
 
-/// System call: openat
+/// syscall: openat
 pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) ReturnType {
     _ = mode;
     _ = flags;
@@ -41,7 +41,7 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) R
     return .success(@bitCast(fd));
 }
 
-/// System call: close
+/// syscall: close
 pub fn sysClose(fd: usize) ReturnType {
     sched.getCurrent().fs.fdtbl.close(fd) catch {
         return .err(.badf);
@@ -54,7 +54,7 @@ pub fn sysClose(fd: usize) ReturnType {
 // Write
 // =============================================================
 
-/// System call: write
+/// syscall: write
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
     const cur = sched.getCurrent();
     const file = cur.fs.fdtbl.get(fd) catch {
@@ -71,7 +71,7 @@ pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
     return .success(@bitCast(n));
 }
 
-/// System call: writev
+/// syscall: writev
 pub fn sysWritev(fd: usize, iov: usize, iovcnt: usize) ReturnType {
     const cur = sched.getCurrent();
     const iovs = @as([*]const Iovec, @ptrFromInt(iov))[0..iovcnt];
@@ -92,7 +92,7 @@ pub fn sysWritev(fd: usize, iov: usize, iovcnt: usize) ReturnType {
     return .success(@bitCast(total));
 }
 
-/// System call: pwritev
+/// syscall: pwritev
 pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const cur = sched.getCurrent();
     const offset = bits.concat(u64, offset_h, offset_l);
@@ -123,7 +123,7 @@ pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, 
 // Read
 // =============================================================
 
-/// System call: preadv
+/// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const cur = sched.getCurrent();
     const offset = bits.concat(u64, offset_h, offset_l);
@@ -154,7 +154,7 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 // Stat
 // =============================================================
 
-/// System call: newfstatat
+/// syscall: newfstatat
 pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flags: i32) ReturnType {
     _ = flags; // TODO: should be implemented.
 
@@ -215,7 +215,7 @@ const Stat = extern struct {
 // ioctl
 // =============================================================
 
-/// System call: ioctl
+/// syscall: ioctl
 pub fn sysIoctl(fd: usize, request: IoctlRequest, arg: usize) ReturnType {
     _ = fd;
     _ = arg;
@@ -242,7 +242,7 @@ const IoctlRequest = enum(u64) {
 // chmod
 // =============================================================
 
-/// System call: fchmodat
+/// syscall: fchmodat
 pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType {
     _ = mode; // TODO: should be implemented.
 

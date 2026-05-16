@@ -1,4 +1,4 @@
-/// System call: brk
+/// syscall: brk
 pub fn sysBrk(addr: usize) ReturnType {
     const current = sched.getCurrent();
 
@@ -17,7 +17,7 @@ pub fn sysBrk(addr: usize) ReturnType {
     return .success(@bitCast(new));
 }
 
-/// System call: mprotect
+/// syscall: mprotect
 pub fn sysMprotect(addr: usize, len: usize, prot: Mprot) ReturnType {
     if (addr % urd.mem.page_size != 0) return ReturnType.err(.inval);
 
@@ -63,7 +63,7 @@ const Mprot = packed struct(u32) {
     }
 };
 
-/// System call: mmap
+/// syscall: mmap
 pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, offset: usize) ReturnType {
     const cur = sched.getCurrent();
 
@@ -120,7 +120,7 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
     return .success(@bitCast(mapped));
 }
 
-/// System call: munmap
+/// syscall: munmap
 pub fn sysMunmap(addr: usize, len: usize) ReturnType {
     const cur = sched.getCurrent();
 

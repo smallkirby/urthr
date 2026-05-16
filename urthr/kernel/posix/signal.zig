@@ -1,4 +1,4 @@
-/// System call: sigaltstack
+/// syscall: sigaltstack
 pub fn sysSigAltStack(ss: usize, old_ss: usize) ReturnType {
     _ = ss;
     _ = old_ss;
@@ -8,7 +8,7 @@ pub fn sysSigAltStack(ss: usize, old_ss: usize) ReturnType {
     return .success(0);
 }
 
-/// System call: rt_sigaction
+/// syscall: rt_sigaction
 pub fn sysRtSigAction(signum: i32, act: usize, oldact: usize, sigsetsize: usize) ReturnType {
     _ = signum;
     _ = act;
