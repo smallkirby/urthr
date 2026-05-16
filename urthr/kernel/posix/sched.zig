@@ -1,4 +1,4 @@
-/// System call: sched_getaffinity
+/// syscall: sched_getaffinity
 pub fn sysSchedGetAffinity(pid: usize, size: usize, mask: [*]CpuSet) ReturnType {
     const cur = sched.getCurrent();
     const rpid = if (pid == 0) cur.id else pid;

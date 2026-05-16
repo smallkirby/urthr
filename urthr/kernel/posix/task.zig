@@ -1,21 +1,21 @@
-/// System call: exit_group
+/// syscall: exit_group
 pub fn sysExitGroup(code: i32) ReturnType {
     task.exit(code);
 }
 
-/// System call: gettid
+/// syscall: gettid
 pub fn sysGetTid() ReturnType {
     const current = sched.getCurrent();
     return .success(@bitCast(@as(u64, current.id)));
 }
 
-/// System call: getuid
+/// syscall: getuid
 pub fn sysGetUid() ReturnType {
     const current = sched.getCurrent();
     return .success(@bitCast(@as(u64, current.id)));
 }
 
-/// System call: prlimit64
+/// syscall: prlimit64
 pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) ReturnType {
     if (pid != 0) {
         return .err(.perm);
@@ -29,7 +29,7 @@ pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) R
     return .success(0);
 }
 
-/// System call: clock_nanosleep
+/// syscall: clock_nanosleep
 pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Timespec, rmtp: *allowzero Timespec) ReturnType {
     if (std.enums.tagName(@TypeOf(clock), clock) == null) {
         return .err(.inval);
