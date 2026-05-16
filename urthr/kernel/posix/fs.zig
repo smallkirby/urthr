@@ -438,6 +438,31 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType 
 }
 
 // =============================================================
+// CWD
+// =============================================================
+
+/// syscall: chdir
+pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
+    const allocator = urd.mem.getGeneralAllocator();
+    const s = std.mem.span(pathname);
+
+    const cur = sched.getCurrent();
+    const path = urd.fs.resolve(s, allocator) catch |err| return switch (err) {
+        error.InvalidArgument => .err(.inval),
+        error.NotDirectory => .err(.notdir),
+        error.NotFound => .err(.noent),
+        else => .err(.again),
+    };
+
+    if (path.dentry.inode.ftype != .directory) {
+        return .err(.notdir);
+    }
+    cur.fs.cwd = path;
+
+    return .success(0);
+}
+
+// =============================================================
 // Internal
 // =============================================================/
 
