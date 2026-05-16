@@ -59,4 +59,5 @@ jobs:
             -Dqemu=$QEMU_DIR/bin \
             -Drtt \
             -Drestart \
-            -Dsdcreate
+            -Dsdcreate \
+            -Didle_watchdog=10
