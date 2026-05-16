@@ -27,16 +27,10 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) R
     const allocator = urd.mem.getGeneralAllocator();
     const s = std.mem.span(pathname);
 
-    const file = openFileAt(dirfd, s, allocator) catch |err| return switch (err) {
-        urd.fs.Error.InvalidArgument => .err(.inval),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotFound => .err(.noent),
-        error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
-    const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch {
+    const file = openFileAt(dirfd, s, allocator) catch |err|
+        return mapOpenError(err);
+    const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
         return .err(.mfile);
-    };
 
     return .success(@bitCast(fd));
 }
@@ -56,37 +50,20 @@ pub fn sysClose(fd: usize) ReturnType {
 
 /// syscall: write
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
-    const cur = sched.getCurrent();
-    const file = cur.fs.fdtbl.get(fd) catch {
-        return .err(.badf);
-    } orelse {
-        return .err(.badf);
-    };
-
+    const file = getFile(fd) catch return .err(.badf);
     const out = @as([*]const u8, @ptrFromInt(buf));
-
-    const n = file.write(out[0..count]) catch |err| return switch (err) {
-        else => .err(.again),
-    };
+    const n = file.write(out[0..count]) catch return .err(.again);
     return .success(@bitCast(n));
 }
 
 /// syscall: writev
-pub fn sysWritev(fd: usize, iov: usize, iovcnt: usize) ReturnType {
-    const cur = sched.getCurrent();
-    const iovs = @as([*]const Iovec, @ptrFromInt(iov))[0..iovcnt];
-
-    const file = cur.fs.fdtbl.get(fd) catch {
-        return .err(.badf);
-    } orelse {
-        return .err(.badf);
-    };
+pub fn sysWritev(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
+    const iovs = iov[0..iovcnt];
+    const file = getFile(fd) catch return .err(.badf);
 
     var total: usize = 0;
     for (iovs) |v| {
-        total += file.write(v.slice()) catch |err| return switch (err) {
-            else => .err(.again),
-        };
+        total += file.write(v.slice()) catch return .err(.again);
     }
 
     return .success(@bitCast(total));
@@ -94,26 +71,17 @@ pub fn sysWritev(fd: usize, iov: usize, iovcnt: usize) ReturnType {
 
 /// syscall: pwritev
 pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
-    const cur = sched.getCurrent();
     const offset = bits.concat(u64, offset_h, offset_l);
-    const iovs = iov[0..iovcnt];
-
-    const file = cur.fs.fdtbl.get(fd) catch {
-        return .err(.badf);
-    } orelse {
-        return .err(.badf);
-    };
-
     if (offset != 0) {
         return .err(.nosys); // TODO: Not implemented.
     }
 
+    const file = getFile(fd) catch return .err(.badf);
+    const iovs = iov[0..iovcnt];
+
     var total: usize = 0;
     for (iovs) |v| {
-        const n = file.write(v.slice()) catch |err| return switch (err) {
-            else => .err(.again),
-        };
-        total += n;
+        total += file.write(v.slice()) catch return .err(.again);
     }
 
     return .success(@bitCast(total));
@@ -125,25 +93,17 @@ pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, 
 
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
-    const cur = sched.getCurrent();
     const offset = bits.concat(u64, offset_h, offset_l);
-    const iovs = iov[0..iovcnt];
-
-    const file = cur.fs.fdtbl.get(fd) catch {
-        return .err(.badf);
-    } orelse {
-        return .err(.badf);
-    };
-
     if (offset != 0) {
         return .err(.nosys); // TODO: Not implemented.
     }
 
+    const file = getFile(fd) catch return .err(.badf);
+    const iovs = iov[0..iovcnt];
+
     var total: usize = 0;
     for (iovs) |v| {
-        const r = file.read(v.slice()) catch |err| return switch (err) {
-            else => .err(.again),
-        };
+        const r = file.read(v.slice()) catch return .err(.again);
         total += r.len;
     }
 
@@ -161,17 +121,10 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flag
     const allocator = urd.mem.getGeneralAllocator();
     const s = std.mem.span(pathname);
 
-    // Check if pathname is relative or absolute.
-    const E = urd.fs.Error;
-    const file = openFileAt(dirfd, s, allocator) catch |err| return switch (err) {
-        E.InvalidArgument => .err(.inval),
-        E.NotDirectory => .err(.notdir),
-        E.NotFound => .err(.noent),
-        error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
+    const file = openFileAt(dirfd, s, allocator) catch |err|
+        return mapOpenError(err);
 
-    const stat = Stat{
+    statbuf.* = .{
         .st_dev = 0, // TODO
         .st_ino = file.path.dentry.inode.number,
         .st_mode = @bitCast(Mode.from(file)),
@@ -183,7 +136,6 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flag
         .st_blksize = 512,
         .st_blocks = @intCast(file.size() / 512),
     };
-    statbuf.* = stat;
 
     return .success(0);
 }
@@ -237,13 +189,8 @@ const Mode = packed struct(u32) {
         pub const none = Flags{ .sticky = false, .sgid = false, .suid = false };
     };
 
-    pub fn from(f: *const urd.fs.File) Mode {
-        return Mode{
-            .type = switch (f.getType()) {
-                .regular => .regular,
-                .directory => .dir,
-            },
-        };
+    pub fn from(file: *const urd.fs.File) Mode {
+        return Mode{ .type = .from(file.getType()) };
     }
 };
 
@@ -277,6 +224,14 @@ const FileType = enum(u4) {
     socket = 12,
 
     _,
+
+    /// Convert from Urthr FileType.
+    pub fn from(ftype: urd.fs.FileType) FileType {
+        return switch (ftype) {
+            .regular => .regular,
+            .directory => .dir,
+        };
+    }
 };
 
 // =============================================================
@@ -286,24 +241,15 @@ const FileType = enum(u4) {
 /// syscall: getdents64
 pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
     const allocator = urd.mem.getGeneralAllocator();
-    const cur = sched.getCurrent();
-    const file = cur.fs.fdtbl.get(fd) catch {
-        return .err(.badf);
-    } orelse {
-        return .err(.badf);
-    };
+    const file = getFile(fd) catch return .err(.badf);
     if (file.getType() != .directory) {
         return .err(.notdir);
     }
 
     var consumed: usize = 0;
-    var iter = file.iterator() catch |err| return switch (err) {
-        else => .err(.again),
-    };
+    var iter = file.iterator() catch return .err(.again);
     while (true) {
-        const ent = (iter.next(allocator) catch |err| return switch (err) {
-            else => .err(.again),
-        }) orelse break;
+        const ent = (iter.next(allocator) catch return .err(.again)) orelse break;
         defer ent.deinit(allocator);
 
         const dent_size = DirEnt64.calcSize(ent.name);
@@ -311,16 +257,11 @@ pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
             break;
         }
 
-        const ptr = ents + consumed;
-        const ftype: FileType = switch (ent.type) {
-            .regular => .regular,
-            .directory => .dir,
-        };
         DirEnt64.createCopy(
             ent.inum,
-            ftype,
+            .from(ent.type),
             ent.name,
-            ptr[0..dent_size],
+            ents[consumed..][0..dent_size],
         );
         consumed += dent_size;
     }
@@ -425,14 +366,8 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType 
     const allocator = urd.mem.getGeneralAllocator();
     const s = std.mem.span(pathname);
 
-    // We try to open the file, but we don't operate on the file itself for now.
-    _ = openFileAt(dirfd, s, allocator) catch |err| return switch (err) {
-        urd.fs.Error.InvalidArgument => .err(.inval),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotFound => .err(.noent),
-        error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
+    _ = openFileAt(dirfd, s, allocator) catch |err|
+        return mapOpenError(err);
 
     return .success(0);
 }
@@ -464,8 +399,27 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
 
 // =============================================================
 // Internal
-// =============================================================/
+// =============================================================
 
+/// Convert open-related error to syscall return type.
+fn mapOpenError(err: anyerror) ReturnType {
+    return switch (err) {
+        urd.fs.Error.InvalidArgument => .err(.inval),
+        urd.fs.Error.NotDirectory => .err(.notdir),
+        urd.fs.Error.NotFound => .err(.noent),
+        error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+}
+
+/// Get a file from the given file descriptor.
+fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
+    const cur = sched.getCurrent();
+    const file = cur.fs.fdtbl.get(fd) catch return error.BadFileDescriptor;
+    return file orelse error.BadFileDescriptor;
+}
+
+/// Open a file at the specified path relative to the given directory file descriptor.
 fn openFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     // Check if pathname is relative or absolute.
     if (std.fs.path.isAbsolute(pathname)) {
