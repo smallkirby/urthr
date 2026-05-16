@@ -9,6 +9,7 @@ const entries = [_]Descriptor{
     // =============================================================
     // POSIX system calls.
 
+    .new("getcwd",              17,     posix.fs.sysGetCwd),
     .new("ioctl",               29,     posix.fs.sysIoctl),
     .new("chdir",               49,     posix.fs.sysChdir),
     .new("fchmodat",            53,     posix.fs.sysFchmodAt),

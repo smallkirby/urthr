@@ -131,6 +131,56 @@ pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
     return path;
 }
 
+/// Build the absolute path string for a given Path.
+///
+/// Caller must free the returned slice after use.
+pub fn getPath(path: Path, allocator: Allocator) Error![]u8 {
+    var components: std.ArrayList([]const u8) = .empty;
+    defer components.deinit(allocator);
+
+    var cur_dentry = path.dentry;
+    var cur_mount = path.mount;
+
+    while (true) {
+        try components.append(allocator, cur_dentry.name);
+
+        if (cur_mount) |mnt| {
+            if (cur_dentry == mnt.root) {
+                if (mnt.parent) |parent_mnt| {
+                    // Cross mount boundary upward.
+                    cur_dentry = mnt.mntpoint;
+                    cur_mount = parent_mnt;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        cur_dentry = cur_dentry.parent orelse break;
+    }
+
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+
+    try buf.append(allocator, '/');
+
+    // Iterate conmponents in reverse.
+    var i = components.items.len;
+    while (i > 0) {
+        i -= 1;
+        const name = components.items[i];
+        if (name.len == 0) continue;
+        try buf.appendSlice(allocator, name);
+        try buf.append(allocator, '/');
+    }
+
+    // Remove trailing slash unless the path is root.
+    if (buf.items.len > 1) _ = buf.pop();
+
+    return buf.toOwnedSlice(allocator);
+}
+
 /// Open a file at the specified path.
 ///
 /// TODO: attributes and options.

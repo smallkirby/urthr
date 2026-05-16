@@ -23,6 +23,8 @@ pub const ErrorEnum = enum(i64) {
     mfile = -24,
     /// Not a TTY.
     notty = -25,
+    /// Result too large.
+    range = -34,
     /// Function not implemented.
     nosys = -38,
 };
