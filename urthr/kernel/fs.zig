@@ -168,7 +168,26 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
     var iter = ComponentIterator.init(s);
     while (iter.next()) |c| {
         if (std.mem.eql(u8, ".", c.name)) continue;
-        if (std.mem.eql(u8, "..", c.name)) urd.unimplemented("fs: ..");
+
+        if (std.mem.eql(u8, "..", c.name)) {
+            if (cur.mount) |mnt| {
+                if (cur.dentry == mnt.root) {
+                    // At the root of a mount.
+                    if (mnt.parent) |parent_mnt| {
+                        const parent_dentry = mnt.mntpoint.parent orelse mnt.mntpoint;
+                        cur = .{ .dentry = parent_dentry, .mount = parent_mnt };
+                    } else {
+                        // Reached the root of roof filesystem. Stay here.
+                    }
+                }
+            } else {
+                cur = .{
+                    .dentry = cur.dentry.parent orelse cur.dentry,
+                    .mount = cur.mount,
+                };
+            }
+            continue;
+        }
 
         // Check if the current dentry is a mount point.
         if (cur.dentry.mount) |mnt| {
