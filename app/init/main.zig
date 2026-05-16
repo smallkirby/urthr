@@ -14,6 +14,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // Test /dev/zero
+    log.info("Testing /dev/zero.", .{});
     {
         const dzero = try std.Io.Dir.openFileAbsolute(init.io, "/dev/zero", .{});
         defer dzero.close(init.io);
@@ -27,6 +28,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // Test /dev/null
+    log.info("Testing /dev/null.", .{});
     {
         const dnull = try std.Io.Dir.openFileAbsolute(init.io, "/dev/null", .{});
         defer dnull.close(init.io);
@@ -40,6 +42,14 @@ pub fn main(init: std.process.Init) !void {
 
         var writer = dnull.writer(init.io, &.{});
         try writer.interface.writeAll(&buf);
+    }
+
+    log.info("Testing sleep.", .{});
+    {
+        for (0..3) |i| {
+            try std.Io.sleep(init.io, .fromSeconds(1), .awake);
+            log.info("  {d}/3", .{i + 1});
+        }
     }
 }
 
