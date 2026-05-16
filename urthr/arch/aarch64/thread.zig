@@ -88,6 +88,11 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
 /// Switch context from the old thread to the new thread.
 pub extern fn switchContext(old: *usize, new: *const usize) callconv(.c) void;
 
+/// Set the thread pointer (TPIDR_EL0) for TLS.
+pub fn setThreadPointer(tp: usize) void {
+    am.msr(.tpidr_el0, tp);
+}
+
 /// Drop from EL1 to EL0 and start executing at the given user PC with the given user SP.
 ///
 /// Does not return.
@@ -109,5 +114,6 @@ fn trampoline() callconv(.naked) noreturn {
 // =============================================================
 
 const std = @import("std");
+const am = @import("asm.zig");
 const regs = @import("register.zig");
 const IsrContext = @import("isr.zig").Context;

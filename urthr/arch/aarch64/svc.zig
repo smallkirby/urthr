@@ -31,6 +31,10 @@ pub fn svc(ctx: *Context) void {
     const sp_el0 = am.mrsi(.sp_el0);
     defer am.msr(.sp_el0, @bitCast(sp_el0));
 
+    // Save and restore user thread pointer.
+    const tpidr_el0 = am.mrsi(.tpidr_el0);
+    defer am.msr(.tpidr_el0, @bitCast(tpidr_el0));
+
     // Dispatch system call.
     const ret = dispatcher(
         nr,
