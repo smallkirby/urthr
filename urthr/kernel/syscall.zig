@@ -13,6 +13,7 @@ const entries = [_]Descriptor{
     .new("fchmodat",            53,     posix.fs.sysFchmodAt),
     .new("openat",              56,     posix.fs.sysOpenAt),
     .new("close",               57,     posix.fs.sysClose),
+    .new("getdents64",          61,     posix.fs.sysGetDents64),
     .new("write",               64,     posix.fs.sysWrite),
     .new("writev",              66,     posix.fs.sysWritev),
     .new("preadv",              69,     posix.fs.sysPreadv),

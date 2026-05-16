@@ -280,6 +280,114 @@ const FileType = enum(u4) {
 };
 
 // =============================================================
+// getdents
+// =============================================================
+
+/// syscall: getdents64
+pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
+    const allocator = urd.mem.getGeneralAllocator();
+    const cur = sched.getCurrent();
+    const file = cur.fs.fdtbl.get(fd) catch {
+        return .err(.badf);
+    } orelse {
+        return .err(.badf);
+    };
+    if (file.getType() != .directory) {
+        return .err(.notdir);
+    }
+
+    var consumed: usize = 0;
+    var iter = file.iterator() catch |err| return switch (err) {
+        else => .err(.again),
+    };
+    while (true) {
+        const ent = (iter.next(allocator) catch |err| return switch (err) {
+            else => .err(.again),
+        }) orelse break;
+        defer ent.deinit(allocator);
+
+        const dent_size = DirEnt64.calcSize(ent.name);
+        if (count - consumed < dent_size) {
+            break;
+        }
+
+        const ptr = ents + consumed;
+        const ftype: FileType = switch (ent.type) {
+            .regular => .regular,
+            .directory => .dir,
+        };
+        DirEnt64.createCopy(
+            ent.inum,
+            ftype,
+            ent.name,
+            ptr[0..dent_size],
+        );
+        consumed += dent_size;
+    }
+
+    return .success(@bitCast(consumed));
+}
+
+/// Linux-compatible linux_dirent64 structure.
+///
+/// This structure has variable length described by `reclen` field.
+const DirEnt64 = extern struct {
+    const Self = @This();
+
+    /// Inode number.
+    inum: u64,
+    /// Filesystem-specific value.
+    spec: u64 = 0,
+    /// Size of this structure.
+    reclen: u16,
+    /// File type (type-erased).
+    type: u8 align(1),
+    /// Filename starts here.
+    __name_start: void = {},
+
+    /// Size in bytes of the fixed-size part of this structure.
+    const struct_size = @offsetOf(Self, "__name_start");
+    /// Type of `reclen` field.
+    const ReclenType = @FieldType(DirEnt64, "reclen");
+
+    /// Calculate the entire structure size that has the specified name.
+    ///
+    /// - `name`: Name of the file. Must NOT be null-terminated.
+    pub fn calcSize(name: []const u8) ReclenType {
+        rtt.expect(0 != name[name.len - 1]);
+        return @intCast(struct_size + name.len + 1); // +1 for null-termination.
+    }
+
+    /// Create a new DirEnt64 instance with the given name in the buffer.
+    pub fn createCopy(inum: urd.fs.Inode.Number, ftype: FileType, name: []const u8, buf: []u8) void {
+        const size = calcSize(name);
+        rtt.expectEqual(size, buf.len);
+
+        // Copy fixed-size part.
+        const dirent = Self{
+            .inum = inum,
+            .reclen = size,
+            .type = @intFromEnum(ftype),
+        };
+        var cur: [*]u8 = buf.ptr;
+        @memcpy(cur[0..struct_size], std.mem.asBytes(&dirent)[0..struct_size]);
+        cur += struct_size;
+
+        // Copy name part.
+        @memcpy(cur[0..name.len], name);
+        cur[name.len] = 0; // null-terminate
+    }
+
+    comptime {
+        urd.comptimeAssert(
+            19 == struct_size,
+            "Size of DirEnt64: Expected 19, but got {d}",
+            .{struct_size},
+        );
+    }
+};
+
+// =============================================================
 // ioctl
 // =============================================================
 
@@ -363,6 +471,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
+const rtt = common.rtt;
 const urd = @import("urthr");
 const sched = urd.sched;
 const ReturnType = urd.syscall.ReturnType;
