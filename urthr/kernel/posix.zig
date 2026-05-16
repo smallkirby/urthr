@@ -7,12 +7,16 @@ pub const task = @import("posix/task.zig");
 pub const ErrorEnum = enum(i64) {
     /// Operation not permitted.
     perm = -1,
+    /// No such file or directory.
+    noent = -2,
     /// Bad file descriptor.
     badf = -9,
     /// Resource temporarily unavailable.
     again = -11,
     /// Cannot allocate memory.
     nomem = -12,
+    /// Not a directory.
+    notdir = -20,
     /// Invalid argument.
     inval = -22,
     /// Too many open files.

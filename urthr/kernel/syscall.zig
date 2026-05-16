@@ -17,6 +17,7 @@ const entries = [_]Descriptor{
     .new("writev",              66,     posix.fs.sysWritev),
     .new("preadv",              69,     posix.fs.sysPreadv),
     .new("pwritev",             70,     posix.fs.sysPwritev),
+    .new("newfstatat",          79,     posix.fs.sysNewFstatAt),
     .new("exit_group",          94,     posix.task.sysExitGroup),
     .new("clock_nanosleep",     115,    posix.task.sysClockNanoSleep),
     .new("sched_getaffinity",   123,    posix.sched.sysSchedGetAffinity),
