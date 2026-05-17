@@ -248,6 +248,20 @@ pub fn build(b: *std.Build) !void {
     };
     b.installArtifact(srboot);
 
+    const mkfont = blk: {
+        const exe = b.addExecutable(.{
+            .name = "mkfont",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/mkfont/main.zig"),
+                .target = tools_target,
+                .optimize = optimize,
+            }),
+        });
+
+        break :blk exe;
+    };
+    b.installArtifact(mkfont);
+
     // =============================================================
     // Preprocess
     // =============================================================
@@ -278,6 +292,24 @@ pub fn build(b: *std.Build) !void {
         "wyrd.ld",
         &.{const_header},
     );
+
+    // =============================================================
+    // Font
+    // =============================================================
+
+    const font8x16 = blk: {
+        const run = b.addRunArtifact(mkfont);
+        run.addArg("--input");
+        run.addFileArg(b.path("tools/mkfont/font_8x16.txt"));
+        run.addArg("--output");
+        break :blk run.addOutputFileArg("font8x16.zig");
+    };
+
+    {
+        common_module.addAnonymousImport("font8x16", .{
+            .root_source_file = font8x16,
+        });
+    }
 
     // =============================================================
     // Urthr Executable
