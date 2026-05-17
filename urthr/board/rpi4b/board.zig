@@ -97,6 +97,13 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         );
         rdd.vcmbox.setBase(base + memmap.mbox_offset);
     }
+
+    // Framebuffer
+    {
+        rdd.fb.init(mm.io, mm.page) catch |err| {
+            log.err("framebuffer initialization failed: {t}", .{err});
+        };
+    }
 }
 
 /// Prepare for waking up secondary cores.
@@ -288,6 +295,7 @@ const console = struct {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.rpi4b);
 const arch = @import("arch").impl;
 const options = @import("options");
 const common = @import("common");
