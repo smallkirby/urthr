@@ -86,6 +86,17 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
         rdd.pcie.init(mm.page);
     }
 
+    // Mailbox.
+    {
+        const base = try mm.io.reserveAndRemap(
+            "VideoCore mailbox",
+            memmap.mbox.start,
+            memmap.mbox.size(),
+            null,
+        );
+        rdd.vcmbox.setBase(base + memmap.mbox_offset);
+    }
+
     // RP1.
     log.info("Initializing RP1.", .{});
     {
@@ -138,6 +149,16 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
             50_000_000, // 50 MHz PLL base clock
             mm.page,
         );
+    }
+
+    // Framebuffer.
+    {
+        rdd.fb.init(mm.io, mm.page) catch |err| {
+            log.err("framebuffer initialization failed: {t}", .{err});
+        };
+        urd.console.addBackend(rdd.fb.getConsole()) catch |err| {
+            log.warn("failed to add console backend: {t}", .{err});
+        };
     }
 
     // Ethernet.
