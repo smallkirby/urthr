@@ -13,6 +13,9 @@ var fb = std.mem.zeroInit(FrameBuffer(u32), .{
     .height = height,
 });
 
+/// Text console backed by the framebuffer.
+var console: common.FbConsole = undefined;
+
 // =============================================================
 // API
 // =============================================================
@@ -113,14 +116,24 @@ pub fn init(io: IoAllocator, page: PageAllocator) Error!void {
     fb.phys = fb_phys;
     fb.base = try io.ioremap(fb_phys, fb_size);
     fb.pitch = pitch;
+
+    // Create a framebuffer console.
+    console = common.FbConsole.init(
+        fb.base,
+        fb.pitch,
+        fb.width,
+        fb.height,
+    );
 }
 
-/// Fill rows [y_start, y_end) of the framebuffer with a single 32-bit RGBX color.
-pub fn fillRows(y_start: u32, y_end: u32, color: u32) void {
-    fb.fillRows(y_start, y_end, color);
+/// Get a Console wrapping the framebuffer.
+pub fn getConsole() common.Console {
+    return console.interface();
 }
 
 fn FrameBuffer(Color: type) type {
+    _ = Color;
+
     return struct {
         const Self = @This();
 
@@ -135,17 +148,6 @@ fn FrameBuffer(Color: type) type {
         base: usize,
         /// Number of bytes per scanline.
         pitch: u32,
-
-        /// Fill rows [y_start, y_end) with a single color.
-        pub fn fillRows(self: *Self, y_start: u32, y_end: u32, color: Color) void {
-            const stride = self.pitch / @sizeOf(Color);
-            const pixels: [*]volatile Color = @ptrFromInt(self.base);
-            for (y_start..y_end) |y| {
-                for (0..self.width) |x| {
-                    pixels[y * stride + x] = color;
-                }
-            }
-        }
     };
 }
 
