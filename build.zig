@@ -613,6 +613,25 @@ pub fn build(b: *std.Build) !void {
         },
         optimize,
     );
+
+    // =============================================================
+    // Docs
+    // =============================================================
+
+    const urthr_docs = b.addInstallDirectory(.{
+        .source_dir = urthr.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs/urthr",
+    });
+    const wyrd_docs = b.addInstallDirectory(.{
+        .source_dir = wyrd.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs/wyrd",
+    });
+
+    const docs = b.step("docs", "Generate documentation");
+    docs.dependOn(&urthr_docs.step);
+    docs.dependOn(&wyrd_docs.step);
 }
 
 /// Create a new preprocess "Run" and return its artifact.
