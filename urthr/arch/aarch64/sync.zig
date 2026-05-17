@@ -45,6 +45,33 @@ pub fn cleanAllDataCacheByLevel(comptime info: CacheInfo, comptime level: u3) vo
     asm volatile ("dsb sy");
 }
 
+/// Clean a data cache line to PoC.
+pub fn cleanDataCacheLine(addr: usize) void {
+    asm volatile ("dc cvac, %[addr]"
+        :
+        : [addr] "r" (addr),
+        : .{ .memory = true });
+    asm volatile ("dsb sy");
+}
+
+/// Invalidate a data cache line to PoC.
+pub fn invalidateDataCacheLine(addr: usize) void {
+    asm volatile ("dc ivac, %[addr]"
+        :
+        : [addr] "r" (addr),
+        : .{ .memory = true });
+    asm volatile ("dsb sy");
+}
+
+/// Clean and invalidate a data cache line to PoC.
+pub fn cleanAndInvalidateDataCacheLine(addr: usize) void {
+    asm volatile ("dc civac, %[addr]"
+        :
+        : [addr] "r" (addr),
+        : .{ .memory = true });
+    asm volatile ("dsb sy");
+}
+
 // =============================================================
 // Imports
 // =============================================================
