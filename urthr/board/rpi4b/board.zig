@@ -103,6 +103,9 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         rdd.fb.init(mm.io, mm.page) catch |err| {
             log.err("framebuffer initialization failed: {t}", .{err});
         };
+        urd.console.addBackend(rdd.fb.getConsole()) catch |err| {
+            log.warn("failed to add console backend: {}", .{err});
+        };
     }
 }
 
