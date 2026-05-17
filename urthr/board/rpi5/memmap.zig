@@ -84,6 +84,15 @@ pub const pci = Range{
     .end = 0x0010_0013_0000,
 };
 
+/// ARM-to-VideoCore Mailbox.
+pub const mbox = Range{
+    .start = 0x0010_7C01_3000,
+    .end = 0x0010_7C01_4000,
+};
+
+/// Offset of the mailbox registers within the mbox page.
+pub const mbox_offset = 0x880;
+
 /// SD Host Controller.
 pub const sd = Range{
     .start = 0x0010_00FF_F000,
