@@ -297,6 +297,8 @@ const Arena = struct {
 
         // Ensure that the freelist is not empty.
         if (free_list.isEmpty()) {
+            if (order == avail_orders - 1) return;
+
             self.splitRecursive(order + 1);
             rtt.expectEqual(false, free_list.isEmpty());
         }
