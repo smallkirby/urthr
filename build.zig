@@ -109,6 +109,12 @@ pub fn build(b: *std.Build) !void {
         "Enable specified QEMU verbose log outputs.",
     ) orelse "";
 
+    const enable_graphic = b.option(
+        bool,
+        "graphic",
+        "Enable graphical display window in QEMU.",
+    ) orelse false;
+
     var sdin = b.option(
         []const u8,
         "sdin",
@@ -520,7 +526,7 @@ pub fn build(b: *std.Build) !void {
         const qemu = Qemu{
             .qemu = qemu_bin,
             .machine = board_type,
-            .graphic = .none,
+            .graphic = if (enable_graphic) .display else .none,
             .memory = "2G",
             .kernel = b.fmt(
                 "{s}/bin/{s}",
@@ -659,7 +665,7 @@ const Qemu = struct {
     /// Machine type.
     machine: board.BoardType,
     /// Graphics mode.
-    graphic: enum { none },
+    graphic: enum { none, display },
     /// Memory size.
     memory: []const u8,
     /// Kernel path.
@@ -712,9 +718,10 @@ const Qemu = struct {
             "-kernel",
             self.kernel,
         });
-        try args.appendSlice(allocator, &.{switch (self.graphic) {
-            .none => "-nographic",
-        }});
+        switch (self.graphic) {
+            .none => try args.appendSlice(allocator, &.{"-nographic"}),
+            .display => try args.appendSlice(allocator, &.{ "-display", "gtk" }),
+        }
         try args.appendSlice(allocator, &.{
             "-no-reboot",
         });
