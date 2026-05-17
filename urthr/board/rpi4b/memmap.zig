@@ -64,6 +64,15 @@ pub const cpu_spintable = 0xD8;
 /// Base address of peripheral registers.
 pub const peri_base = 0xFE00_0000;
 
+/// ARM-to-VideoCore Mailbox.
+pub const mbox = Range{
+    .start = peri_base + 0x0000_B000,
+    .end = peri_base + 0x0000_C000,
+};
+
+/// Offset of the mailbox registers within the mbox page.
+pub const mbox_offset = 0x880;
+
 /// Power management block.
 pub const pm = Range{
     .start = peri_base + 0x0010_0000,
