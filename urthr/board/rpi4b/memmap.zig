@@ -4,9 +4,17 @@
 
 /// Available DRAM regions.
 pub const drams = [_]Range{
-    // 2 GiB
+    // 960 MiB
     .{
         .start = 0x0000_0000,
+        .end = 0x3C00_0000,
+    },
+
+    // This gap is reserved for VideoCore in QEMU-emulated raspi4b. //
+
+    // 1 GiB
+    .{
+        .start = 0x4000_0000,
         .end = 0x8000_0000,
     },
 };
