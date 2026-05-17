@@ -86,6 +86,17 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
             mm.page,
         );
     }
+
+    // Mailbox.
+    {
+        const base = try mm.io.reserveAndRemap(
+            "VCMBOX",
+            memmap.mbox.start,
+            memmap.mbox.size(),
+            null,
+        );
+        rdd.vcmbox.setBase(base + memmap.mbox_offset);
+    }
 }
 
 /// Prepare for waking up secondary cores.
