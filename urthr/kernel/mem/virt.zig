@@ -12,6 +12,35 @@ const vbase = vmap.vmem.start;
 /// End of the virtual address space managed by this allocator.
 const vend = vmap.vmem.end;
 
+/// Allocate a virtual memory area with the given size.
+///
+/// Note that allocated virtual memory is not backed by physical memory.
+pub fn allocateVirtualArea(size: usize) Error!*VmArea {
+    rtt.expectEqual(0, size % urd.mem.page_size);
+
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    // Calculate the start address to assign.
+    const start = if (area_list.max()) |max| max.container().end else vbase;
+    const end = start + size;
+    if (end >= vend) {
+        return Error.OutOfVirtualMemory;
+    }
+
+    // Construct the virtual area node.
+    const area = try mem.bin.create(VmArea);
+    area.* = .{
+        .start = start,
+        .end = end,
+        .rbnode = .init,
+        .vmtree = .{},
+    };
+    area_list.insert(area);
+
+    return area;
+}
+
 /// Single virtual-physical memory mapping descriptor.
 ///
 /// The descriptor represents a relationship between a virtual address range and a physical address range.
@@ -109,33 +138,6 @@ const VmArea = struct {
         return .eq;
     }
 };
-
-/// Allocate a virtual memory area with the given size.
-pub fn allocate(size: usize) Error!*VmArea {
-    rtt.expectEqual(0, size % common.mem.size_4kib);
-
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
-
-    // Calculate the start address to assign.
-    const start = if (area_list.max()) |max| max.container().end else vbase;
-    const end = start + size;
-    if (end >= vend) {
-        return Error.OutOfVirtualMemory;
-    }
-
-    // Construct the virtual area node.
-    const area = try mem.bin.create(VmArea);
-    area.* = .{
-        .start = start,
-        .end = end,
-        .rbnode = .init,
-        .vmtree = .{},
-    };
-    area_list.insert(area);
-
-    return area;
-}
 
 // =============================================================
 // Imports
