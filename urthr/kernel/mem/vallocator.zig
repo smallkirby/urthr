@@ -137,8 +137,6 @@ pub fn allocate(size: usize) Error!*VmArea {
     return area;
 }
 
-const pallocator = urd.mem.getPageAllocator;
-
 // =============================================================
 // Imports
 // =============================================================

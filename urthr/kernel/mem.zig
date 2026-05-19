@@ -2,6 +2,8 @@ pub const Error = common.mem.Error;
 
 /// Allocator implementing `std.mem.Allocator` interface.
 pub const bin = bin_impl.interface();
+/// Allocator implementing `urthr.common.mem.PageAllocator` interface.
+pub const page = buddy_impl.interface();
 pub const vallocator = @import("mem/vallocator.zig");
 pub const vmap = @import("mem/vmemmap.zig");
 
@@ -15,8 +17,6 @@ pub const size_4kib = common.mem.size_4kib;
 pub const size_2mib = common.mem.size_2mib;
 pub const size_1gib = common.mem.size_1gib;
 
-/// Buddy allocator instance.
-var buddy_allocator: BuddyAllocator = undefined;
 /// VM allocator instance.
 var phys_allocator: PhysAllocator = undefined;
 /// Init task's page table.
@@ -91,14 +91,14 @@ pub fn initAllocators() void {
         // Early allocator region
         boot.getUsedRegion(),
     };
-    buddy_allocator.init(&avails, &reserveds, log.debug);
+    buddy_impl.init(&avails, &reserveds, log.debug);
 
     // Update page table virtual address.
-    init_pt.l0.?._tbl = buddy_allocator.interface().translateV(init_pt.l0.?._tbl);
-    init_pt.l1.?._tbl = buddy_allocator.interface().translateV(init_pt.l1.?._tbl);
+    init_pt.l0.?._tbl = page.translateV(init_pt.l0.?._tbl);
+    init_pt.l1.?._tbl = page.translateV(init_pt.l1.?._tbl);
 
     // Bin allocator.
-    bin_impl.init(getPageAllocator());
+    bin_impl.init(page);
 
     // I/O allocator.
     phys_allocator.init();
@@ -135,11 +135,6 @@ pub fn remapBoard() Error!void {
     try board.remap(getIoAllocator());
 }
 
-/// Get the page allocator.
-pub fn getPageAllocator() PageAllocator {
-    return buddy_allocator.interface();
-}
-
 /// Get the VM allocator.
 pub fn getIoAllocator() IoAllocator {
     return phys_allocator.interface();
@@ -150,7 +145,7 @@ pub fn getAllocators() MemoryManager {
     return MemoryManager{
         .general = bin,
         .io = getIoAllocator(),
-        .page = getPageAllocator(),
+        .page = page,
     };
 }
 
@@ -226,7 +221,7 @@ pub const boot = struct {
 
 test {
     _ = bin_impl;
-    _ = BuddyAllocator;
+    _ = buddy_impl;
 }
 
 // =============================================================
@@ -249,5 +244,5 @@ const Range = common.Range;
 const urd = @import("urthr");
 const pmap = board.memmap;
 const bin_impl = @import("mem/bin.zig");
-const BuddyAllocator = @import("mem/BuddyAllocator.zig");
+const buddy_impl = @import("mem/page.zig");
 const PhysAllocator = @import("mem/PhysAllocator.zig");

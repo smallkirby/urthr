@@ -157,7 +157,6 @@ fn compareResources(a: *Resource, b: *Resource) std.math.Order {
 /// Returns the size of mapped range in bytes.
 fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
     const pt = mem.getKernelPageTable();
-    const allocator = mem.getPageAllocator();
 
     // Map using 1GiB pages if possible.
     if (isMappableAs(virt, phys, max, common.mem.size_1gib)) {
@@ -168,7 +167,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, .{}, allocator);
+        }, .{}, mem.page);
         return map_size;
     }
 
@@ -184,7 +183,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, .{}, allocator);
+        }, .{}, mem.page);
         return map_size;
     }
 
@@ -200,14 +199,14 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .size = map_size,
             .perm = .kernel_rw,
             .attr = .device,
-        }, .{}, allocator);
+        }, .{}, mem.page);
         return map_size;
     }
 }
 
 fn unmapPage(virt: Virt, max: usize) Error!usize {
     const pt = mem.getInitPageTablePair();
-    const allocator = mem.getPageAllocator();
+    const allocator = mem.page;
 
     // Unmap using 1GiB pages if possible.
     if (isMappableAs(virt, 0, max, common.mem.size_1gib)) {
@@ -242,11 +241,6 @@ fn isMappableAs(virt: Virt, phys: Phys, size: usize, page_size: usize) bool {
     return util.isAligned(virt, page_size) and
         util.isAligned(phys, page_size) and
         size >= page_size;
-}
-
-/// Get a page allocator.
-fn pallocator() PageAllocator {
-    return urd.mem.getPageAllocator();
 }
 
 // =============================================================

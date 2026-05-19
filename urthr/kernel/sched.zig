@@ -86,7 +86,7 @@ pub fn blockCurrent(caller_lock: ?*SpinLock) void {
     next.state = .running;
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
+    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
 
     lock.unlock();
     if (caller_lock) |l| l.unlock();
@@ -124,7 +124,7 @@ pub fn reschedule() void {
     setCurrent(next);
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
+    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
 
     // Release lock before switching. IRQs remain disabled until restored.
     lock.unlock();
@@ -159,7 +159,7 @@ fn exitCurrent() noreturn {
     next.state = .running;
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.getPageAllocator());
+    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
 
     // Release lock before switching. IRQs remain disabled.
     lock.unlock();
@@ -264,8 +264,6 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
-    const pa = urd.mem.getPageAllocator();
-
     const th = try urd.mem.bin.create(Thread);
     errdefer urd.mem.bin.destroy(th);
 
@@ -279,8 +277,8 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
 
     // Initialize stack.
     const stack_size = thread.default_stack_size;
-    const stack = try pa.allocPagesV(stack_size / page_size);
-    errdefer pa.freePagesV(stack);
+    const stack = try urd.mem.page.allocPagesV(stack_size / page_size);
+    errdefer urd.mem.page.freePagesV(stack);
     const sp = arch.thread.initStack(
         stack,
         &Wrapper.function,
