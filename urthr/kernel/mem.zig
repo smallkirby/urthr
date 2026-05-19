@@ -6,7 +6,8 @@ pub const bin = bin_impl.interface();
 pub const page = buddy_impl.interface();
 /// Allocator implementing `common.mem.IoAllocator` interface.
 pub const phys = phys_impl.interface();
-pub const vallocator = @import("mem/vallocator.zig");
+/// Virtual memory allocator.
+pub const virt = @import("mem/virt.zig");
 pub const vmap = @import("mem/vmemmap.zig");
 
 /// Virtual address type.
