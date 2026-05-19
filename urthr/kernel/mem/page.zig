@@ -31,6 +31,12 @@ const page_shift = 12;
 /// Page size mask.
 const page_mask = page_size - 1;
 
+/// PageAllocator interface.
+pub const interface = PageAllocator{
+    .ptr = &.{},
+    .vtable = &vtable,
+};
+
 /// Initialize buddy allocator.
 ///
 /// - `avail`     : Memory region that the allocator can use.
@@ -92,14 +98,6 @@ pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.Log
 
     // Runtime test.
     rttTestBuddyAllocator();
-}
-
-/// Get the PageAllocator interface.
-pub fn interface() PageAllocator {
-    return .{
-        .ptr = &.{},
-        .vtable = &vtable,
-    };
 }
 
 /// Manages free lists of each order for single memory zone.
@@ -487,7 +485,7 @@ const TestingAllocatedNode = TestingAllocatedList.Node;
 fn rttTestBuddyAllocator() void {
     if (!urd.enable_rtt) return;
 
-    const allocator = interface();
+    const allocator = interface;
 
     // Allocate 3 pages (from 2-th freelist) and check the alignment.
     {

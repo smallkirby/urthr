@@ -1,11 +1,11 @@
 pub const Error = common.mem.Error;
 
 /// Allocator implementing `std.mem.Allocator` interface.
-pub const bin = bin_impl.interface();
+pub const bin = bin_impl.interface;
 /// Allocator implementing `common.mem.PageAllocator` interface.
-pub const page = buddy_impl.interface();
+pub const page = buddy_impl.interface;
 /// Allocator implementing `common.mem.IoAllocator` interface.
-pub const phys = phys_impl.interface();
+pub const phys = phys_impl.interface;
 /// Virtual memory allocator.
 pub const virt = @import("mem/virt.zig");
 pub const vmap = @import("mem/vmemmap.zig");
@@ -133,7 +133,7 @@ pub fn initResources() Error!void {
 
 /// Remap the I/O memory regions of the board.
 pub fn remapBoard() Error!void {
-    try board.remap(phys_impl.interface());
+    try board.remap(phys_impl.interface);
 }
 
 /// Get the kernel page table.
@@ -198,7 +198,7 @@ pub const boot = struct {
 
     /// Get `PageAllocator` interface.
     pub fn interface() PageAllocator {
-        return impl.interface();
+        return impl.interface;
     }
 };
 

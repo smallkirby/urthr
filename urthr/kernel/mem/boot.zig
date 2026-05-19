@@ -16,6 +16,12 @@ var buffer: []u8 = undefined;
 /// Tracks the next free offset in the buffer.
 var next: usize = undefined;
 
+/// PageAllocator interface.
+pub const interface = PageAllocator{
+    .ptr = &.{},
+    .vtable = &vtable,
+};
+
 /// vtable implementing PageAllocator interface.
 const vtable = PageAllocator.Vtable{
     .allocPages = allocPages,
@@ -28,14 +34,6 @@ const vtable = PageAllocator.Vtable{
 pub fn init(buf: []u8) void {
     buffer = buf;
     next = 0;
-}
-
-/// Get the PageAllocator interface.
-pub fn interface() PageAllocator {
-    return .{
-        .ptr = &.{},
-        .vtable = &vtable,
-    };
 }
 
 /// Get the region already allocated by the allocator.
