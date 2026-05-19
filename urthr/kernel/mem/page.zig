@@ -1,12 +1,13 @@
-const Self = @This();
+//! Buddy Allocator singleton.
+//!
+//! Implements `PageAllocator` interface.
 
-pub const BuddyAllocator = Self;
 pub const Error = PageAllocator.Error;
 
 /// Spin lock for this allocator.
-lock: SpinLock,
+var lock: SpinLock = .{};
 /// Arena.
-arena: Arena,
+var arena: Arena = undefined;
 
 /// Vtable for PageAllocator interface.
 const vtable = PageAllocator.Vtable{
@@ -38,11 +39,8 @@ const page_mask = page_size - 1;
 /// `reserveds` may be not sorted, but must not overlap each other.
 ///
 /// All arguments are in physical addresses.
-pub fn init(self: *Self, avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.LogFn) void {
-    self.* = .{
-        .lock = SpinLock{},
-        .arena = Arena.new(),
-    };
+pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.LogFn) void {
+    arena = Arena.new();
 
     // Sort `reserveds` by the starting address.
     {
@@ -77,29 +75,29 @@ pub fn init(self: *Self, avails: []const Range, reserveds: []Range, comptime log
 
             const cur_size = reserved_start - cur;
             if (cur_size != 0) {
-                self.arena.addRegion(cur, cur + cur_size);
+                arena.addRegion(cur, cur + cur_size);
             }
             cur = reserved_end;
         }
 
         if (cur != end) {
-            self.arena.addRegion(cur, end);
+            arena.addRegion(cur, end);
         }
     }
 
     // Debug print stats.
     if (log_fn) |f| {
-        self.debugPrintStatistics(f);
+        debugPrintStatistics(f);
     }
 
     // Runtime test.
-    rttTestBuddyAllocator(self);
+    rttTestBuddyAllocator();
 }
 
 /// Get the PageAllocator interface.
-pub fn interface(self: *Self) PageAllocator {
+pub fn interface() PageAllocator {
     return .{
-        .ptr = self,
+        .ptr = &.{},
         .vtable = &vtable,
     };
 }
@@ -416,25 +414,23 @@ fn phys2virt(paddr: usize) usize {
 // Interface
 // =============================================================
 
-fn allocPages(ctx: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-    self.lock.lock();
-    defer self.lock.unlock();
+fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
+    lock.lock();
+    defer lock.unlock();
 
-    const vpages = try self.arena.allocPages(num_pages);
+    const vpages = try arena.allocPages(num_pages);
     const pptr: [*]u8 = @ptrFromInt(virt2phys(@intFromPtr(vpages.ptr)));
     return @alignCast(pptr[0..vpages.len]);
 }
 
-fn freePages(ctx: *anyopaque, pages: []u8) void {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-    self.lock.lock();
-    defer self.lock.unlock();
+fn freePages(_: *anyopaque, pages: []u8) void {
+    lock.lock();
+    defer lock.unlock();
 
     const vptr: [*]u8 = @ptrFromInt(phys2virt(@intFromPtr(pages.ptr)));
     const vpages: []align(page_size) u8 = @alignCast(vptr[0..pages.len]);
 
-    self.arena.freePages(vpages);
+    arena.freePages(vpages);
 }
 
 fn virt2physInterface(_: *const anyopaque, vaddr: usize) usize {
@@ -450,9 +446,8 @@ fn phys2virtInterface(_: *const anyopaque, paddr: usize) usize {
 // =============================================================
 
 // Debug print the statistics of managed regions.
-fn debugPrintStatistics(self: *Self, comptime log_fn: urd.LogFn) void {
+fn debugPrintStatistics(comptime log_fn: urd.LogFn) void {
     log_fn("Statistics of Buddy Allocator's initial state:", .{});
-    const arena = &self.arena;
     log_fn(
         "{s: <7}                   Used / Total",
         .{"Normal"},
@@ -489,11 +484,10 @@ const TestingAllocatedList = DoublyLinkedList;
 const TestingAllocatedNode = TestingAllocatedList.Node;
 
 /// Runtime test for BuddyAllocator.
-fn rttTestBuddyAllocator(buddy_allocator: *Self) void {
+fn rttTestBuddyAllocator() void {
     if (!urd.enable_rtt) return;
 
-    const allocator = buddy_allocator.interface();
-    const arena = &buddy_allocator.arena;
+    const allocator = interface();
 
     // Allocate 3 pages (from 2-th freelist) and check the alignment.
     {

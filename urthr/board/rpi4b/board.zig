@@ -127,7 +127,7 @@ pub fn prepareSubcoreWakeup() urd.mem.Error!void {
             .attr = .normal,
         },
         .{},
-        urd.mem.getPageAllocator(),
+        urd.mem.page,
     );
 }
 
@@ -142,7 +142,7 @@ pub fn deinitSubcoreWakeup() void {
         urd.mem.getInitPageTablePair(),
         kentry,
         kentry,
-        urd.mem.getPageAllocator(),
+        urd.mem.page,
     ) catch {};
 }
 

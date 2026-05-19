@@ -33,7 +33,7 @@ pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!
     errdefer allocator.destroy(vmm);
 
     const upgtbl = arch.mmu.createPageTable(
-        urd.mem.getPageAllocator(),
+        urd.mem.page,
     ) catch return error.OutOfMemory;
 
     vmm.* = .{
@@ -64,8 +64,6 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
 
-    const pallocator = urd.mem.getPageAllocator();
-
     // Check if the given virtual memory range is already mapped.
     if (self.tree.lowerBound(vaddr)) |node| {
         if (node.container().start < vaddr + size) {
@@ -75,8 +73,8 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
 
     // Allocate physical pages.
     for (0..size / urd.mem.page_size) |i| {
-        const page = try pallocator.allocPagesP(1);
-        errdefer pallocator.freePagesP(page);
+        const page = try urd.mem.page.allocPagesP(1);
+        errdefer urd.mem.page.freePagesP(page);
 
         // Map the pages to the given virtual address.
         const va = vaddr + i * urd.mem.page_size;
@@ -86,12 +84,12 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
             .size = size,
             .perm = perm,
             .attr = .normal,
-        }, .{ .exact = true }, pallocator);
+        }, .{ .exact = true }, urd.mem.page);
         errdefer arch.mmu.unmap4kb(
             self.pgtbl,
             va,
             urd.mem.page_size,
-            pallocator,
+            urd.mem.page,
         ) catch unreachable;
     }
 
@@ -128,28 +126,26 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
 
-    const pallocator = urd.mem.getPageAllocator();
-
     // Free physical pages backing the range.
     for (0..size / urd.mem.page_size) |i| {
         const va = vaddr + i * urd.mem.page_size;
         const pa = arch.mmu.translateWalk(
             self.pgtbl.select(va),
             va,
-            pallocator,
+            urd.mem.page,
         ) orelse {
             // If the page is not mapped, skip it.
             continue;
         };
 
         // Free physical pages.
-        pallocator.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
+        urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
         // Unmap the page.
         arch.mmu.unmap4kb(
             self.pgtbl,
             va,
             urd.mem.page_size,
-            pallocator,
+            urd.mem.page,
         ) catch {};
     }
 
@@ -169,7 +165,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
         vaddr,
         size,
         perm,
-        urd.mem.getPageAllocator(),
+        urd.mem.page,
     );
 }
 

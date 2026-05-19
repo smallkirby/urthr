@@ -12,7 +12,7 @@ var idmap = [_]u64{0} ** board.num_cpus;
 ///
 /// Wakes up all secondary cores.
 pub fn init() urd.mem.Error!void {
-    const allocator = urd.mem.getPageAllocator();
+    const allocator = urd.mem.page;
 
     // Initialize the CPU ID mapping.
     idmap[0] = arch.getCoreId();

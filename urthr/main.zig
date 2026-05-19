@@ -74,7 +74,7 @@ fn zmain() !void {
 
     // Initialize per-CPU data.
     log.info("Initializing per-CPU data.", .{});
-    try urd.pcpu.globalInit(urd.mem.getPageAllocator());
+    try urd.pcpu.globalInit(urd.mem.page);
     urd.pcpu.localInit(0);
 
     // Initialize networking stack.
