@@ -1,4 +1,6 @@
-//! Boot-time fixed allocator implementation.
+//! Boot-time fixed allocator singleton.
+//!
+//! Implements `PageAllocator` interface.
 //!
 //! Urthr uses this allocator only during early boot.
 //! Urthr reserves few MiB of memory as a buffer to be managed by this allocator.
@@ -9,12 +11,10 @@
 //! Note that this allocator works on physical addresses only.
 //!
 
-const Self = @This();
-
 /// Region managed by the fixed allocator.
-buffer: []u8,
-/// Traks the next free offset in the buffer.
-next: usize,
+var buffer: []u8 = undefined;
+/// Tracks the next free offset in the buffer.
+var next: usize = undefined;
 
 /// vtable implementing PageAllocator interface.
 const vtable = PageAllocator.Vtable{
@@ -25,43 +25,39 @@ const vtable = PageAllocator.Vtable{
 };
 
 /// Initialize the allocator.
-pub fn init(self: *Self, buffer: []u8) void {
-    self.* = .{
-        .buffer = buffer,
-        .next = 0,
-    };
+pub fn init(buf: []u8) void {
+    buffer = buf;
+    next = 0;
 }
 
 /// Get the PageAllocator interface.
-pub fn interface(self: *Self) PageAllocator {
+pub fn interface() PageAllocator {
     return .{
-        .ptr = self,
+        .ptr = &.{},
         .vtable = &vtable,
     };
 }
 
 /// Get the region already allocated by the allocator.
-pub fn getUsedRegion(self: *const Self) Range {
+pub fn getUsedRegion() Range {
     return Range{
-        .start = @intFromPtr(self.buffer.ptr),
-        .end = @intFromPtr(self.buffer.ptr) + self.next * page_size,
+        .start = @intFromPtr(buffer.ptr),
+        .end = @intFromPtr(buffer.ptr) + next * page_size,
     };
 }
 
-fn remaining(self: *const Self) usize {
-    return self.buffer.len - self.next * page_size;
+fn remaining() usize {
+    return buffer.len - next * page_size;
 }
 
-fn allocPages(ctx: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-
+fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
     const size = num_pages * page_size;
-    if (self.remaining() < size) {
+    if (remaining() < size) {
         return Error.OutOfMemory;
     }
 
-    const addr = self.buffer[self.next * page_size .. self.next * page_size + size];
-    self.next += num_pages;
+    const addr = buffer[next * page_size .. next * page_size + size];
+    next += num_pages;
 
     return @alignCast(addr);
 }

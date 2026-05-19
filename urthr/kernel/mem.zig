@@ -26,7 +26,7 @@ var init_pt: arch.mmu.PageTablePair = .{};
 ///
 /// This kernel creates new MMU mapping.
 pub fn init() Error!void {
-    const allocator = urd.boot.getAllocator().interface();
+    const allocator = boot.interface();
 
     // Allocate kernel root page table and init task's user page table.
     init_pt = try arch.mmu.createPageTablePair(allocator);
@@ -89,7 +89,7 @@ pub fn initAllocators() void {
             .end = pmap.kernel + kernelSize(),
         },
         // Early allocator region
-        urd.boot.getAllocator().getUsedRegion(),
+        boot.getUsedRegion(),
     };
     buddy_allocator.init(&avails, &reserveds, log.debug);
 
@@ -190,6 +190,35 @@ fn kernelSize() usize {
 pub fn debugPrintResources(logger: anytype) void {
     phys_allocator.debugPrintResources(logger);
 }
+
+// =============================================================
+// Boot
+// =============================================================
+
+/// APIs for early boot stage.
+pub const boot = struct {
+    const impl = @import("mem/boot.zig");
+
+    /// Initialize the early page allocator.
+    ///
+    /// The buffer is reserved for early boot use only.
+    ///
+    /// This region should not overlap with the region reserved by Wyrd.
+    pub fn init(start: usize, size: usize) void {
+        const ptr: [*]u8 = @ptrFromInt(start);
+        impl.init(ptr[0..size]);
+    }
+
+    /// Get the region used by the early page allocator.
+    pub fn getUsedRegion() Range {
+        return impl.getUsedRegion();
+    }
+
+    /// Get `PageAllocator` interface.
+    pub fn interface() PageAllocator {
+        return impl.interface();
+    }
+};
 
 // =============================================================
 // Tests

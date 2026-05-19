@@ -39,7 +39,7 @@ export fn kmain() callconv(.c) noreturn {
         .start = board.memmap.loader,
         .end = board.memmap.loader + boot_worksize,
     };
-    urd.boot.initAllocator(pa_reserved.start, pa_reserved.size());
+    urd.mem.boot.init(pa_reserved.start, pa_reserved.size());
     log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
 
     zmain() catch |err| {
