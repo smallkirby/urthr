@@ -156,12 +156,11 @@ pub fn deinitSubcoreWakeup() void {
 /// - stack: Virtual address of the stack pointer.
 pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
     // Map the spin table page.
-    const io = urd.mem.getIoAllocator();
-    const page = try io.ioremap(
+    const page = try urd.mem.phys.ioremap(
         std.mem.alignBackward(usize, memmap.cpu_spintable, urd.mem.page_size),
         urd.mem.page_size,
     );
-    defer io.iounmap(page, urd.mem.page_size) catch {};
+    defer urd.mem.phys.iounmap(page, urd.mem.page_size) catch {};
     const spintable = page + (memmap.cpu_spintable % urd.mem.page_size);
 
     // Wakeup the core.

@@ -2,8 +2,10 @@ pub const Error = common.mem.Error;
 
 /// Allocator implementing `std.mem.Allocator` interface.
 pub const bin = bin_impl.interface();
-/// Allocator implementing `urthr.common.mem.PageAllocator` interface.
+/// Allocator implementing `common.mem.PageAllocator` interface.
 pub const page = buddy_impl.interface();
+/// Allocator implementing `common.mem.IoAllocator` interface.
+pub const phys = phys_impl.interface();
 pub const vallocator = @import("mem/vallocator.zig");
 pub const vmap = @import("mem/vmemmap.zig");
 
@@ -17,8 +19,6 @@ pub const size_4kib = common.mem.size_4kib;
 pub const size_2mib = common.mem.size_2mib;
 pub const size_1gib = common.mem.size_1gib;
 
-/// VM allocator instance.
-var phys_allocator: PhysAllocator = undefined;
 /// Init task's page table.
 var init_pt: arch.mmu.PageTablePair = .{};
 
@@ -101,14 +101,14 @@ pub fn initAllocators() void {
     bin_impl.init(page);
 
     // I/O allocator.
-    phys_allocator.init();
+    phys_impl.init();
 
     // Now then, boot allocator is no longer needed.
 }
 
 /// Initialize memory resources.
 pub fn initResources() Error!void {
-    const allocator = getIoAllocator();
+    const allocator = phys;
 
     // DRAM
     for (pmap.drams, 0..) |dram, i| {
@@ -132,19 +132,14 @@ pub fn initResources() Error!void {
 
 /// Remap the I/O memory regions of the board.
 pub fn remapBoard() Error!void {
-    try board.remap(getIoAllocator());
-}
-
-/// Get the VM allocator.
-pub fn getIoAllocator() IoAllocator {
-    return phys_allocator.interface();
+    try board.remap(phys_impl.interface());
 }
 
 /// Get the set of memory allocators.
 pub fn getAllocators() MemoryManager {
     return MemoryManager{
         .general = bin,
-        .io = getIoAllocator(),
+        .io = phys,
         .page = page,
     };
 }
@@ -183,7 +178,7 @@ fn kernelSize() usize {
 
 /// Print all resources to the given logger for debug.
 pub fn debugPrintResources(logger: anytype) void {
-    phys_allocator.debugPrintResources(logger);
+    phys_impl.debugPrintResources(logger);
 }
 
 // =============================================================
@@ -245,4 +240,4 @@ const urd = @import("urthr");
 const pmap = board.memmap;
 const bin_impl = @import("mem/bin.zig");
 const buddy_impl = @import("mem/page.zig");
-const PhysAllocator = @import("mem/PhysAllocator.zig");
+const phys_impl = @import("mem/phys.zig");

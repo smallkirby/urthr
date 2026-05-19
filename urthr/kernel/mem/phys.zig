@@ -1,15 +1,13 @@
-//! Implements IoAllocator interface.
+//! Implements `common.mem.IoAllocator` interface.
 
 const Error = mem.Error;
 
-const Self = @This();
-
 /// Spin lock.
-_lock: urd.SpinLock = .{},
+var _lock: urd.SpinLock = .{};
 /// List of memory resources.
 ///
 /// This list must be sorted by the start address of the memory resources.
-_resources: ResourceList = .{},
+var _resources: ResourceList = .{};
 
 /// Vtable for IoAllocator interface.
 const vtable = IoAllocator.Vtable{
@@ -18,17 +16,13 @@ const vtable = IoAllocator.Vtable{
     .reserve = reserve,
 };
 
-/// Initialize a VmAllocator instance.
-pub fn init(self: *Self) void {
-    self.* = .{
-        ._lock = .{},
-    };
-}
+/// Initialize a `IoAllocator` instance.
+pub fn init() void {}
 
 /// Get the IoAllocator interface.
-pub fn interface(self: *Self) IoAllocator {
+pub fn interface() IoAllocator {
     return IoAllocator{
-        .ptr = self,
+        .ptr = &.{},
         .vtable = &vtable,
     };
 }
@@ -40,13 +34,12 @@ pub fn interface(self: *Self) IoAllocator {
 /// Map the given physical I/O memory region into the virtual address space.
 ///
 /// Caller must ensure that the given physical address range is reserved before calling this function.
-fn ioremap(ctx: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
+fn ioremap(_: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
     rtt.expect(util.isAligned(size, common.mem.size_4kib));
     rtt.expect(util.isAligned(phys, common.mem.size_4kib));
 
-    const self: *Self = @ptrCast(@alignCast(ctx));
-    const ie = self._lock.lockDisableIrq();
-    defer self._lock.unlockRestoreIrq(ie);
+    const ie = _lock.lockDisableIrq();
+    defer _lock.unlockRestoreIrq(ie);
 
     // Allocate a virtual memory area.
     const vm_area = try mem.vallocator.allocate(size);
@@ -64,12 +57,11 @@ fn ioremap(ctx: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
     return vm_area.start;
 }
 
-fn iounmap(ctx: *anyopaque, virt: usize, size: usize) IoAllocator.Error!void {
+fn iounmap(_: *anyopaque, virt: usize, size: usize) IoAllocator.Error!void {
     rtt.expect(util.isAligned(size, common.mem.size_4kib));
 
-    const self: *Self = @ptrCast(@alignCast(ctx));
-    const ie = self._lock.lockDisableIrq();
-    defer self._lock.unlockRestoreIrq(ie);
+    const ie = _lock.lockDisableIrq();
+    defer _lock.unlockRestoreIrq(ie);
 
     var remaining = size;
     while (remaining > 0) {
@@ -83,8 +75,7 @@ fn iounmap(ctx: *anyopaque, virt: usize, size: usize) IoAllocator.Error!void {
 /// Reserve a physical memory range as a resource.
 ///
 /// If `parent` is given, the new resource is created as a child of the parent resource.
-fn reserve(ctx: *anyopaque, name: []const u8, start: usize, size: usize, parent: ?*Resource) Error!*Resource {
-    const self: *Self = @ptrCast(@alignCast(ctx));
+fn reserve(_: *anyopaque, name: []const u8, start: usize, size: usize, parent: ?*Resource) Error!*Resource {
     const end = start + size;
 
     if (!util.isAligned(start, common.mem.size_4kib)) {
@@ -117,7 +108,7 @@ fn reserve(ctx: *anyopaque, name: []const u8, start: usize, size: usize, parent:
         break :blk child;
     } else blk: {
         // Check for overlapping with existing resources.
-        var current = self._resources.first;
+        var current = _resources.first;
         while (current) |res| : (current = res.list_head.next) {
             if (res.phys < end and start < res.phys + res.size) {
                 return Error.NotAvailable;
@@ -131,12 +122,12 @@ fn reserve(ctx: *anyopaque, name: []const u8, start: usize, size: usize, parent:
             .phys = start,
             .size = size,
         };
-        self._resources.insertSorted(resource, compareResources);
+        _resources.insertSorted(resource, compareResources);
 
         break :blk resource;
     };
 
-    self.rttResourcesSorted();
+    rttResourcesSorted();
 
     return resource;
 }
@@ -248,8 +239,8 @@ fn isMappableAs(virt: Virt, phys: Phys, size: usize, page_size: usize) bool {
 // =============================================================
 
 /// Print all resources to the given logger for debug.
-pub fn debugPrintResources(self: *const Self, logger: anytype) void {
-    var current = self._resources.first;
+pub fn debugPrintResources(logger: anytype) void {
+    var current = _resources.first;
     while (current) |res| : (current = res.list_head.next) {
         logger("{X:0>12}-{X:0>12}    : {s}", .{
             res.phys,
@@ -272,7 +263,7 @@ pub fn debugPrintResources(self: *const Self, logger: anytype) void {
 // Tests
 // =============================================================
 
-fn rttResourcesSorted(self: *Self) void {
+fn rttResourcesSorted() void {
     if (!urd.enable_rtt) return;
 
     const S = struct {
@@ -286,7 +277,7 @@ fn rttResourcesSorted(self: *Self) void {
         }
     };
 
-    S.f(self._resources);
+    S.f(_resources);
 }
 
 // =============================================================
