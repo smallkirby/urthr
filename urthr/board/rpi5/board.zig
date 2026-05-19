@@ -61,10 +61,10 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
+pub fn initPeripherals() (mem.Error || net.Error)!void {
     // Interrupt controller.
     {
-        arch.gicv2.setBase(try mm.io.reserveAndRemap(
+        arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
             "GIC",
             memmap.gic.start,
             memmap.gic.size(),
@@ -76,19 +76,19 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     // PCIe.
     log.info("Initializing PCIe controller.", .{});
     {
-        const pci = try mm.io.reserveAndRemap(
+        const pci = try urd.mem.phys.reserveAndRemap(
             "PCIe",
             memmap.pci.start,
             memmap.pci.size(),
             null,
         );
         rdd.pcie.setBase(pci);
-        rdd.pcie.init(mm.page);
+        rdd.pcie.init(urd.mem.page);
     }
 
     // Mailbox.
     {
-        const base = try mm.io.reserveAndRemap(
+        const base = try urd.mem.phys.reserveAndRemap(
             "VideoCore mailbox",
             memmap.mbox.start,
             memmap.mbox.size(),
@@ -100,7 +100,7 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     // RP1.
     log.info("Initializing RP1.", .{});
     {
-        try rdd.rp1.init(mm.io);
+        try rdd.rp1.init(urd.mem.phys);
     }
 
     // GPIO.
@@ -123,7 +123,7 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     // RNG.
     log.info("Initializing RNG.", .{});
     {
-        const rng = try mm.io.reserveAndRemap(
+        const rng = try urd.mem.phys.reserveAndRemap(
             "rng",
             memmap.rng.start,
             memmap.rng.size(),
@@ -137,7 +137,7 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
     // SDHC.
     log.info("Initializing SDHC.", .{});
     {
-        const sdbase = try mm.io.reserveAndRemap(
+        const sdbase = try urd.mem.phys.reserveAndRemap(
             "SDHC",
             memmap.sd.start,
             memmap.sd.size(),
@@ -147,13 +147,13 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
         dd.sdhc.setBase(sdbase);
         dd.sdhc.init(
             50_000_000, // 50 MHz PLL base clock
-            mm.page,
+            urd.mem.page,
         );
     }
 
     // Framebuffer.
     {
-        rdd.fb.init(mm.io, mm.page) catch |err| {
+        rdd.fb.init(urd.mem.phys, urd.mem.page) catch |err| {
             log.err("framebuffer initialization failed: {t}", .{err});
         };
         urd.console.addBackend(rdd.fb.getConsole()) catch |err| {
@@ -173,7 +173,7 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
         const gemdev = try dd.net.Gem.new(
             rdd.rp1.getEthrBase(),
             gem_mac,
-            mm.general,
+            urd.mem.bin,
             rdd.pcie.getDmaAllocator(),
         );
         urd.net.registerDevice(gemdev);
@@ -188,7 +188,7 @@ pub fn initPeripherals(mm: MemoryManager) (mem.Error || net.Error)!void {
         const iface = try urd.net.ip.Interface.create(
             net.ip.IpAddr.comptimeParse("0.0.0.0"),
             net.ip.IpAddr.comptimeParse("0.0.0.0"),
-            mm.general,
+            urd.mem.bin,
         );
         try gemdev.appendInterface(iface);
     }
@@ -367,7 +367,6 @@ const arch = @import("arch").impl;
 const common = @import("common");
 const mem = common.mem;
 const Console = common.Console;
-const MemoryManager = mem.MemoryManager;
 const IoAllocator = mem.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");

@@ -60,10 +60,10 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 }
 
 /// Initialize peripherals.
-pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
+pub fn initPeripherals() mem.Error!void {
     // Interrupt controller.
     {
-        arch.gicv2.setBase(try mm.io.reserveAndRemap(
+        arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
             "GIC",
             map.gic.start,
             map.gic.size(),
@@ -74,7 +74,7 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
 
     // SDHC
     {
-        const base = try mm.io.reserveAndRemap(
+        const base = try urd.mem.phys.reserveAndRemap(
             "SDHC",
             memmap.sdhost.start,
             memmap.sdhost.size(),
@@ -83,13 +83,13 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         dd.sdhc.setBase(base);
         dd.sdhc.init(
             50_000_000, // 50 MHz
-            mm.page,
+            urd.mem.page,
         );
     }
 
     // Mailbox.
     {
-        const base = try mm.io.reserveAndRemap(
+        const base = try urd.mem.phys.reserveAndRemap(
             "VCMBOX",
             memmap.mbox.start,
             memmap.mbox.size(),
@@ -100,7 +100,7 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
 
     // Framebuffer
     {
-        rdd.fb.init(mm.io, mm.page) catch |err| {
+        rdd.fb.init(urd.mem.phys, urd.mem.page) catch |err| {
             log.err("framebuffer initialization failed: {t}", .{err});
         };
         urd.console.addBackend(rdd.fb.getConsole()) catch |err| {
@@ -306,7 +306,6 @@ const mem = common.mem;
 const rtt = common.rtt;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
-const MemoryManager = common.mem.MemoryManager;
 const urd = @import("urthr");
 const dd = @import("dd");
 const map = @import("memmap.zig");

@@ -83,7 +83,7 @@ fn zmain() !void {
 
     // Initialize peripherals.
     log.info("Initializing peripherals.", .{});
-    try board.initPeripherals(urd.mem.getAllocators());
+    try board.initPeripherals();
     log.debug("Memory Map:", .{});
     urd.mem.debugPrintResources(log.debug);
 
