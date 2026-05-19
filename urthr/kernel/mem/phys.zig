@@ -40,7 +40,7 @@ fn ioremap(_: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
     defer _lock.unlockRestoreIrq(ie);
 
     // Allocate a virtual memory area.
-    const vm_area = try mem.virt.allocate(size);
+    const vm_area = try mem.virt.allocateVirtualArea(size);
 
     // Map the physical address to the allocated virtual memory range,
     // using as large pages as possible.
