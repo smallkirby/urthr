@@ -125,7 +125,7 @@ pub fn allocate(size: usize) Error!*VmArea {
     }
 
     // Construct the virtual area node.
-    const area = try gallocator().create(VmArea);
+    const area = try mem.bin.create(VmArea);
     area.* = .{
         .start = start,
         .end = end,
@@ -137,7 +137,6 @@ pub fn allocate(size: usize) Error!*VmArea {
     return area;
 }
 
-const gallocator = urd.mem.getGeneralAllocator;
 const pallocator = urd.mem.getPageAllocator;
 
 // =============================================================

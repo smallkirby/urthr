@@ -1,12 +1,13 @@
-const Self = @This();
-const BinAllocator = Self;
+//! BinAllocator instance.
+//!
+//! Implements std.mem.Allocator interface.
 
 /// Backing page allocator.
-page_allocator: PageAllocator,
+var page_allocator: PageAllocator = undefined;
 /// Heads of the chunk lists.
-list_heads: [bin_sizes.len]ChunkMetaPointer,
+var list_heads: [bin_sizes.len]ChunkMetaPointer = undefined;
 /// Spin lock.
-lock: SpinLock,
+var lock: SpinLock = .{};
 
 const vtable = Allocator.VTable{
     .alloc = allocate,
@@ -37,24 +38,21 @@ const ChunkMetaNode = extern struct {
 const ChunkMetaPointer = ?*ChunkMetaNode;
 
 /// Initialize the BinAllocator.
-pub fn init(self: *Self, page_allocator: PageAllocator) void {
-    self.* = .{
-        .page_allocator = page_allocator,
-        .list_heads = undefined,
-        .lock = SpinLock{},
-    };
-    @memset(self.list_heads[0..self.list_heads.len], null);
+pub fn init(pagea: PageAllocator) void {
+    page_allocator = pagea;
+    @memset(list_heads[0..list_heads.len], null);
 }
 
 /// Get the Allocator interface.
-pub fn interface(self: *Self) Allocator {
+pub fn interface() Allocator {
     return Allocator{
-        .ptr = self,
+        .ptr = &.{},
         .vtable = &vtable,
     };
 }
 
 /// Get the bin index for the given size.
+///
 /// If the size exceeds the largest bin size, return null.
 fn binIndex(size: usize) ?usize {
     for (bin_sizes, 0..) |bin_size, i| {
@@ -65,32 +63,32 @@ fn binIndex(size: usize) ?usize {
     return null;
 }
 
-fn allocFromBin(self: *Self, bin_index: usize) ?[*]u8 {
-    const mask = self.lock.lockDisableIrq();
-    defer self.lock.unlockRestoreIrq(mask);
+fn allocFromBin(bin_index: usize) ?[*]u8 {
+    const mask = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(mask);
 
-    if (self.list_heads[bin_index] == null) {
-        initBinPage(self, bin_index) orelse return null;
+    if (list_heads[bin_index] == null) {
+        initBinPage(bin_index) orelse return null;
     }
-    return @ptrCast(pop(&self.list_heads[bin_index]));
+    return @ptrCast(pop(&list_heads[bin_index]));
 }
 
-fn freeToBin(self: *Self, bin_index: usize, ptr: [*]u8) void {
-    const mask = self.lock.lockDisableIrq();
-    defer self.lock.unlockRestoreIrq(mask);
+fn freeToBin(bin_index: usize, ptr: [*]u8) void {
+    const mask = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(mask);
 
     const chunk: *ChunkMetaNode = @ptrCast(@alignCast(ptr));
-    push(&self.list_heads[bin_index], chunk);
+    push(&list_heads[bin_index], chunk);
 }
 
-fn initBinPage(self: *Self, bin_index: usize) ?void {
-    const new_page = self.page_allocator.allocPagesV(1) catch return null;
+fn initBinPage(bin_index: usize) ?void {
+    const new_page = page_allocator.allocPagesV(1) catch return null;
     const bin_size = bin_sizes[bin_index];
 
     var i: usize = common.mem.size_4kib / bin_size - 1;
     while (true) : (i -= 1) {
         const chunk: *ChunkMetaNode = @ptrFromInt(@intFromPtr(new_page.ptr) + i * bin_size);
-        push(&self.list_heads[bin_index], chunk);
+        push(&list_heads[bin_index], chunk);
 
         if (i == 0) break;
     }
@@ -115,14 +113,12 @@ fn pop(list_head: *ChunkMetaPointer) *ChunkMetaNode {
     }
 }
 
-fn allocate(ctx: *anyopaque, n: usize, log2_align: std.mem.Alignment, _: usize) ?[*]u8 {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-
+fn allocate(_: *anyopaque, n: usize, log2_align: std.mem.Alignment, _: usize) ?[*]u8 {
     const ptr_align = log2_align.toByteUnits();
     const bin_index = binIndex(@max(ptr_align, n));
 
     if (bin_index) |index| {
-        return self.allocFromBin(index);
+        return allocFromBin(index);
     } else {
         // Requested size including alignment exceeds a 4KiB page size.
         // Zig's Allocator does not assume an align larger than a page size.
@@ -130,21 +126,19 @@ fn allocate(ctx: *anyopaque, n: usize, log2_align: std.mem.Alignment, _: usize) 
         const num_pages = std.math.divCeil(usize, n, common.mem.size_4kib) catch {
             @panic("BinAllocator: Unexpected division.");
         };
-        const ret = self.page_allocator.allocPagesV(num_pages) catch return null;
+        const ret = page_allocator.allocPagesV(num_pages) catch return null;
         return @ptrCast(ret.ptr);
     }
 }
 
-fn free(ctx: *anyopaque, slice: []u8, log2_align: Alignment, _: usize) void {
-    const self: *Self = @ptrCast(@alignCast(ctx));
-
+fn free(_: *anyopaque, slice: []u8, log2_align: Alignment, _: usize) void {
     const ptr_align = log2_align.toByteUnits();
     const bin_index = binIndex(@max(ptr_align, slice.len));
 
     if (bin_index) |index| {
-        self.freeToBin(index, @ptrCast(slice.ptr));
+        freeToBin(index, @ptrCast(slice.ptr));
     } else {
-        self.page_allocator.freePagesV(slice);
+        page_allocator.freePagesV(slice);
     }
 }
 
@@ -216,14 +210,9 @@ test {
 }
 
 fn getTestingAllocator() Allocator {
-    var bin_allocator_instance // we don't want an error check
-    = std.heap.page_allocator.create(Self) catch unreachable;
-    bin_allocator_instance.init(test_page_allocator.allocator());
+    init(test_page_allocator.allocator());
 
-    return Allocator{
-        .ptr = bin_allocator_instance,
-        .vtable = &vtable,
-    };
+    return interface();
 }
 
 test "allocation order" {

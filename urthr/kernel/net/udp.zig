@@ -67,7 +67,7 @@ fn inputImpl(
 fn output(src: Endpoint, dest: Endpoint, data: []const u8) net.Error!void {
     var nbuf = try net.NetBuffer.init(
         @sizeOf(Header) + data.len,
-        urd.mem.getGeneralAllocator(),
+        urd.mem.bin,
     );
     errdefer nbuf.deinit();
 
@@ -266,7 +266,7 @@ const Socket = struct {
     ///
     /// Given `data` is copied and can be freed by the caller.
     fn push(self: *Socket, remote: Endpoint, data: []const u8) Allocator.Error!void {
-        const allocator = urd.mem.getGeneralAllocator();
+        const allocator = urd.mem.bin;
         const entry = try allocator.create(PendingEntry);
         errdefer allocator.destroy(entry);
 
@@ -291,7 +291,7 @@ const Socket = struct {
 
     /// Free given pending entry data.
     fn free(_: *Socket, entry: *const PendingEntry) void {
-        const allocator = urd.mem.getGeneralAllocator();
+        const allocator = urd.mem.bin;
         allocator.free(entry.data);
         allocator.destroy(entry);
     }
@@ -338,7 +338,7 @@ const SocketTable = struct {
         defer self.lock.unlockRestoreIrq(ie);
 
         // Free pending data.
-        const allocator = urd.mem.getGeneralAllocator();
+        const allocator = urd.mem.bin;
         var iter = sock.pending_data.first;
         while (iter) |node| : (iter = node.next) {
             const pending: *const PendingEntry = @fieldParentPtr("_node", node);

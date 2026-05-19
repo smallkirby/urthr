@@ -31,7 +31,7 @@ pub const LoadInfo = struct {
 ///
 /// TODO: support dynamic linking.
 pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
 
     const file = try fs.open(filename, allocator);
     defer file.unref();

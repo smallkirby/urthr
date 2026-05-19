@@ -37,7 +37,7 @@ pub fn initLocal() void {
 ///
 /// Returns an ID that can be used to unregister the callback.
 pub fn register(interval_us: u64, callback: *const fn () void) Allocator.Error!Id {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const entry = try allocator.create(Entry);
     errdefer allocator.destroy(entry);
 
@@ -57,7 +57,7 @@ pub fn register(interval_us: u64, callback: *const fn () void) Allocator.Error!I
 
 /// Unregister a previously registered timer callback.
 pub fn unregister(id: Id) void {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 

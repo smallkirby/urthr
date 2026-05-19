@@ -41,7 +41,7 @@ fn inputImpl(dev: *net.Device, data: []const u8) net.Error!void {
         .request => {
             var nbuf = try NetBuffer.init(
                 @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
-                urd.mem.getGeneralAllocator(),
+                urd.mem.bin,
             );
             errdefer nbuf.deinit();
 
@@ -81,7 +81,7 @@ pub fn request(iface: *net.Interface, ip: IpAddr) net.Error!void {
 
     var nbuf = try NetBuffer.init(
         @sizeOf(GenericHeader) + @sizeOf(AddrInfoMacIp),
-        urd.mem.getGeneralAllocator(),
+        urd.mem.bin,
     );
     errdefer nbuf.deinit();
 

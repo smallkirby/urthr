@@ -1,5 +1,7 @@
 pub const Error = common.mem.Error;
 
+/// Allocator implementing `std.mem.Allocator` interface.
+pub const bin = bin_impl.interface();
 pub const vallocator = @import("mem/vallocator.zig");
 pub const vmap = @import("mem/vmemmap.zig");
 
@@ -15,8 +17,6 @@ pub const size_1gib = common.mem.size_1gib;
 
 /// Buddy allocator instance.
 var buddy_allocator: BuddyAllocator = undefined;
-/// Bin allocator instance.
-var bin_allocator: BinAllocator = undefined;
 /// VM allocator instance.
 var phys_allocator: PhysAllocator = undefined;
 /// Init task's page table.
@@ -98,7 +98,7 @@ pub fn initAllocators() void {
     init_pt.l1.?._tbl = buddy_allocator.interface().translateV(init_pt.l1.?._tbl);
 
     // Bin allocator.
-    bin_allocator.init(getPageAllocator());
+    bin_impl.init(getPageAllocator());
 
     // I/O allocator.
     phys_allocator.init();
@@ -140,11 +140,6 @@ pub fn getPageAllocator() PageAllocator {
     return buddy_allocator.interface();
 }
 
-/// Get the general-purpose allocator.
-pub fn getGeneralAllocator() Allocator {
-    return bin_allocator.interface();
-}
-
 /// Get the VM allocator.
 pub fn getIoAllocator() IoAllocator {
     return phys_allocator.interface();
@@ -153,7 +148,7 @@ pub fn getIoAllocator() IoAllocator {
 /// Get the set of memory allocators.
 pub fn getAllocators() MemoryManager {
     return MemoryManager{
-        .general = getGeneralAllocator(),
+        .general = bin,
         .io = getIoAllocator(),
         .page = getPageAllocator(),
     };
@@ -201,7 +196,7 @@ pub fn debugPrintResources(logger: anytype) void {
 // =============================================================
 
 test {
-    _ = BinAllocator;
+    _ = bin_impl;
     _ = BuddyAllocator;
 }
 
@@ -224,6 +219,6 @@ const IoAllocator = common.mem.IoAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
 const pmap = board.memmap;
-const BinAllocator = @import("mem/BinAllocator.zig");
+const bin_impl = @import("mem/bin.zig");
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
 const PhysAllocator = @import("mem/PhysAllocator.zig");

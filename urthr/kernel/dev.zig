@@ -16,7 +16,7 @@ const staticdevs = StaticDevices(&.{
 
 /// Initialize devfs.
 pub fn init() fs.Error!void {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const cur = sched.getCurrent();
     rtt.expectEqual(0, cur.id);
 

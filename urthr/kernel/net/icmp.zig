@@ -47,7 +47,7 @@ fn inputImpl(
 pub fn output(src: IpAddr, dest: IpAddr, msg: Message) net.Error!void {
     var nbuf = try NetBuffer.init(
         msg.len(),
-        urd.mem.getGeneralAllocator(),
+        urd.mem.bin,
     );
     errdefer nbuf.deinit();
 
