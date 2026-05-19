@@ -136,15 +136,6 @@ pub fn remapBoard() Error!void {
     try board.remap(phys_impl.interface());
 }
 
-/// Get the set of memory allocators.
-pub fn getAllocators() MemoryManager {
-    return MemoryManager{
-        .general = bin,
-        .io = phys,
-        .page = page,
-    };
-}
-
 /// Get the kernel page table.
 ///
 /// The returned table pair does not contain the user page table.

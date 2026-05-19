@@ -17,9 +17,6 @@ var virtio_blk_dev: ?dd.VirtioBlk = null;
 /// Virtio RNG device instance.
 var virtio_rng_dev: ?dd.VirtioRng = null;
 
-/// Memory maanager instance.
-var gmm: common.mem.MemoryManager = undefined;
-
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -47,16 +44,16 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
+pub fn initPeripherals() mem.Error!void {
     // Interrupt controller.
     {
-        const gicd = try mm.io.reserveAndRemap(
+        const gicd = try urd.mem.phys.reserveAndRemap(
             "GICD",
             memmap.gicd.start,
             memmap.gicd.size(),
             null,
         );
-        const gicr = try mm.io.reserveAndRemap(
+        const gicr = try urd.mem.phys.reserveAndRemap(
             "GICR",
             memmap.gicr.start,
             memmap.gicr.size(),
@@ -71,7 +68,7 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         const virtio_size = dd.virtio.mmio_space_size;
 
         // Scan for virtio-blk device.
-        const virtio_base = try mm.io.reserveAndRemap(
+        const virtio_base = try urd.mem.phys.reserveAndRemap(
             "virtio",
             memmap.virtio.start,
             util.roundup(memmap.virtio.size(), common.mem.size_4kib),
@@ -82,9 +79,11 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         for (0..(memmap.virtio.size() / virtio_size)) |i| {
             const base = virtio_base + i * virtio_size;
 
-            virtio_blk_dev = dd.VirtioBlk.init(base, mm.page, mm.general) catch {
-                continue;
-            };
+            virtio_blk_dev = dd.VirtioBlk.init(
+                base,
+                urd.mem.page,
+                urd.mem.bin,
+            ) catch continue;
 
             log.info("Found virtio-blk device#{d}", .{i});
             break;
@@ -94,16 +93,16 @@ pub fn initPeripherals(mm: MemoryManager) mem.Error!void {
         for (0..(memmap.virtio.size() / virtio_size)) |i| {
             const base = virtio_base + i * virtio_size;
 
-            virtio_rng_dev = dd.VirtioRng.init(base, mm.page, mm.general) catch {
-                continue;
-            };
+            virtio_rng_dev = dd.VirtioRng.init(
+                base,
+                urd.mem.page,
+                urd.mem.bin,
+            ) catch continue;
 
             log.info("Found virtio-rng device#{d}", .{i});
             break;
         }
     }
-
-    gmm = mm;
 }
 
 /// Prepare for waking up secondary cores.
@@ -163,7 +162,7 @@ pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
 pub fn getRandom(buf: []u8) void {
     rtt.expect(virtio_rng_dev != null);
 
-    const random = virtio_rng_dev.?.read(buf.len, gmm.page) catch {
+    const random = virtio_rng_dev.?.read(buf.len, urd.mem.page) catch {
         @panic("Failed to read from virtio RNG device.");
     };
     @memcpy(buf, random);
@@ -291,7 +290,6 @@ const mem = common.mem;
 const rtt = common.rtt;
 const util = common.util;
 const Console = common.Console;
-const MemoryManager = common.mem.MemoryManager;
 const IoAllocator = mem.IoAllocator;
 const PageAllocator = mem.PageAllocator;
 const urd = @import("urthr");

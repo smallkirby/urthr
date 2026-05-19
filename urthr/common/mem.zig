@@ -106,16 +106,6 @@ pub const Attribute = enum {
     normal,
 };
 
-/// Set of memory allocators.
-pub const MemoryManager = struct {
-    /// General purpose allocator.
-    general: std.mem.Allocator,
-    /// I/O memory allocator.
-    io: IoAllocator,
-    /// Page allocator.
-    page: PageAllocator,
-};
-
 // =============================================================
 // Imports
 // =============================================================
