@@ -224,7 +224,6 @@ const common = @import("common");
 const rtt = common.rtt;
 const units = common.units;
 const util = common.util;
-const MemoryManager = common.mem.MemoryManager;
 const PageAllocator = common.mem.PageAllocator;
 const IoAllocator = common.mem.IoAllocator;
 const Range = common.Range;
