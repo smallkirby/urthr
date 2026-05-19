@@ -14,7 +14,7 @@ const stack_base = 0x7FFF_FF00_0000;
 /// This function does not return on success.
 pub fn enterUser(filename: []const u8) !noreturn {
     const current = sched.getCurrent();
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
 
     // Initialize stdout.
     const console = try urd.fs.open("/dev/console", allocator);

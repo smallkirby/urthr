@@ -24,7 +24,7 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) R
     _ = mode;
     _ = flags;
 
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
     const file = openFileAt(dirfd, s, allocator) catch |err|
@@ -126,7 +126,7 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flags: i32) ReturnType {
     _ = flags; // TODO: should be implemented.
 
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
     const file = openFileAt(dirfd, s, allocator) catch |err|
@@ -248,7 +248,7 @@ const FileType = enum(u4) {
 
 /// syscall: getdents64
 pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const file = getFile(fd) catch return .err(.badf);
     if (file.getType() != .directory) {
         return .err(.notdir);
@@ -371,7 +371,7 @@ const IoctlRequest = enum(u64) {
 pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType {
     _ = mode; // TODO: should be implemented.
 
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
     _ = openFileAt(dirfd, s, allocator) catch |err|
@@ -386,7 +386,7 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType 
 
 /// syscall: chdir
 pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
     const cur = sched.getCurrent();
@@ -407,7 +407,7 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
 
 /// syscall: getcwd
 pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const cur = sched.getCurrent();
     const path = urd.fs.getPath(cur.fs.cwd, allocator) catch
         return .err(.again);

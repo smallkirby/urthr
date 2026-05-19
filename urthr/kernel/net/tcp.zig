@@ -360,7 +360,7 @@ fn outputSegment(
 ) net.Error!void {
     var nbuf = try net.NetBuffer.init(
         @sizeOf(Header) + data.len,
-        urd.mem.getGeneralAllocator(),
+        urd.mem.bin,
     );
     errdefer nbuf.deinit();
 
@@ -706,7 +706,7 @@ const SocketTable = struct {
             if (s.state == .free) {
                 s.* = std.mem.zeroInit(Socket, .{
                     .state = .closed,
-                    .buf = try urd.mem.getGeneralAllocator().alloc(u8, buf_size),
+                    .buf = try urd.mem.bin.alloc(u8, buf_size),
                 });
 
                 return s;
@@ -718,7 +718,7 @@ const SocketTable = struct {
     ///
     /// If a thread is waiting for the socket, wake it up.
     fn release(_: *Self, socket: *Socket) void {
-        const allocator = urd.mem.getGeneralAllocator();
+        const allocator = urd.mem.bin;
 
         // Notify the waiting thread if any to unblock it.
         _ = socket.wq.wake();
@@ -858,7 +858,7 @@ const Socket = struct {
 
     /// Push the segment to the retransmission queue.
     pub fn rtpush(self: *Socket, seq: u32, flags: Flags, data: []const u8) Allocator.Error!void {
-        const allocator = urd.mem.getGeneralAllocator();
+        const allocator = urd.mem.bin;
         const entry = try allocator.create(RetransmitEntry);
         errdefer allocator.destroy(entry);
 
@@ -892,7 +892,7 @@ const Socket = struct {
                 break;
             }
 
-            const allocator = urd.mem.getGeneralAllocator();
+            const allocator = urd.mem.bin;
             self.rq.remove(node);
             allocator.free(entry.data);
             allocator.destroy(entry);

@@ -104,7 +104,7 @@ fn reserve(ctx: *anyopaque, name: []const u8, start: usize, size: usize, parent:
         }
 
         // Create the child resource.
-        const child = try gallocator().create(Resource);
+        const child = try mem.bin.create(Resource);
         child.* = .{
             .name = name,
             .phys = start,
@@ -125,7 +125,7 @@ fn reserve(ctx: *anyopaque, name: []const u8, start: usize, size: usize, parent:
         }
 
         // Create the resource.
-        const resource = try gallocator().create(Resource);
+        const resource = try mem.bin.create(Resource);
         resource.* = .{
             .name = name,
             .phys = start,
@@ -242,11 +242,6 @@ fn isMappableAs(virt: Virt, phys: Phys, size: usize, page_size: usize) bool {
     return util.isAligned(virt, page_size) and
         util.isAligned(phys, page_size) and
         size >= page_size;
-}
-
-/// Get a general-purpose allocator.
-fn gallocator() Allocator {
-    return urd.mem.getGeneralAllocator();
 }
 
 /// Get a page allocator.

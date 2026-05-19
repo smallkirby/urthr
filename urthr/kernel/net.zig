@@ -73,7 +73,7 @@ pub const Protocol = enum(u16) {
 
 /// Initialize network subsystem.
 pub fn init() Allocator.Error!void {
-    try arp.cache.init(urd.mem.getGeneralAllocator());
+    try arp.cache.init(urd.mem.bin);
     try tcp.init();
 }
 

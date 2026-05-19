@@ -53,7 +53,7 @@ pub fn query(iface: *const net.Interface) net.Error!QueryResult {
 /// Send DHCPDISCOVER message on all interfaces to acquire an IP address.
 fn discover(sock: usize, entry: *const QueryEntry) net.Error!void {
     // Allocate a buffer.
-    var nbuf = try net.NetBuffer.init(512, urd.mem.getGeneralAllocator());
+    var nbuf = try net.NetBuffer.init(512, urd.mem.bin);
     defer nbuf.deinit();
     nbuf.reserve(@sizeOf(Message));
 
@@ -96,7 +96,7 @@ fn discover(sock: usize, entry: *const QueryEntry) net.Error!void {
 /// Send DHCPREQUEST message to request the offered IP address.
 fn request(sock: usize, entry: *const QueryEntry, offer: QueryResult) net.Error!void {
     // Allocate a buffer.
-    var nbuf = try net.NetBuffer.init(512, urd.mem.getGeneralAllocator());
+    var nbuf = try net.NetBuffer.init(512, urd.mem.bin);
     defer nbuf.deinit();
     nbuf.reserve(@sizeOf(Message));
 

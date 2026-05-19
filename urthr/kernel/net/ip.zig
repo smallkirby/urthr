@@ -298,7 +298,7 @@ pub fn output(src: IpAddr, dest: IpAddr, prot: Protocol, buf: *NetBuffer) net.Er
     io.write(.checksum, net.util.calcChecksum(hdr[0..@sizeOf(Header)]));
 
     // Resolve the destination hardware address.
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const hwaddr = try allocator.alloc(u8, device.addr_len);
     defer allocator.free(hwaddr);
     @memset(hwaddr, 0);
@@ -359,7 +359,7 @@ pub fn routeAdd(network: IpAddr, netmask: IpAddr, gateway: IpAddr, iface: *net.I
     rtt.expectEqual(.ipv4, iface.family);
     const ipif = Interface.downcast(iface);
 
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
     const route = try allocator.create(Route);
     errdefer allocator.destroy(route);
 

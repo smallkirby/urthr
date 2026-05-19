@@ -65,7 +65,6 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     rtt.expectEqual(0, size % urd.mem.page_size);
 
     const pallocator = urd.mem.getPageAllocator();
-    const gallocator = urd.mem.getGeneralAllocator();
 
     // Check if the given virtual memory range is already mapped.
     if (self.tree.lowerBound(vaddr)) |node| {
@@ -97,8 +96,8 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
     }
 
     // Create a virtual memory area and insert it into the tree.
-    const vma = try gallocator.create(VmArea);
-    errdefer gallocator.destroy(vma);
+    const vma = try urd.mem.bin.create(VmArea);
+    errdefer urd.mem.bin.destroy(vma);
     vma.* = .{
         .start = vaddr,
         .size = size,
@@ -207,7 +206,6 @@ fn insertToVmTree(self: *Self, vma: *VmArea) void {
 ///
 /// If the specified range partially overlaps with existing VMAs, the overlapping VMAs are trimmed accordingly.
 fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
-    const gallocator = urd.mem.getGeneralAllocator();
     const end = start + size;
 
     var scan = start;
@@ -227,7 +225,7 @@ fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
         if (vma.start < scan) {
             // Trim right of VMA.
             if (vma_end > end) {
-                const right = try gallocator.create(VmArea);
+                const right = try urd.mem.bin.create(VmArea);
                 right.* = .{
                     .start = end,
                     .size = vma_end - end,
@@ -248,7 +246,7 @@ fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
             // VMA is fully contained within the unmap region.
             scan = vma_end;
             self.tree.delete(vma);
-            gallocator.destroy(vma);
+            urd.mem.bin.destroy(vma);
         }
     }
 }

@@ -23,7 +23,7 @@ pub const Error = error{
 ///
 /// Currently running context is set to the idle thread.
 pub fn initLocal() Allocator.Error!void {
-    const allocator = urd.mem.getGeneralAllocator();
+    const allocator = urd.mem.bin;
 
     // Create the idle thread.
     const th = try allocator.create(Thread);
@@ -264,15 +264,14 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
-    const ga = urd.mem.getGeneralAllocator();
     const pa = urd.mem.getPageAllocator();
 
-    const th = try ga.create(Thread);
-    errdefer ga.destroy(th);
+    const th = try urd.mem.bin.create(Thread);
+    errdefer urd.mem.bin.destroy(th);
 
     // Copy arguments.
-    const argv = try ga.create(@TypeOf(args));
-    errdefer ga.destroy(argv);
+    const argv = try urd.mem.bin.create(@TypeOf(args));
+    errdefer urd.mem.bin.destroy(argv);
     argv.* = args;
 
     // Define thread wrapper function.
@@ -289,8 +288,8 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     );
 
     // Create user-space page table.
-    const vmm = try urd.task.Vmm.new(ga, urd.mem.getKernelPageTable());
-    errdefer vmm.deinit(ga);
+    const vmm = try urd.task.Vmm.new(urd.mem.bin, urd.mem.getKernelPageTable());
+    errdefer vmm.deinit(urd.mem.bin);
 
     // Initialize thread.
     var fs = getCurrent().fs;
@@ -302,7 +301,7 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
 
     th.* = .{
         .id = allocateId(),
-        .name = try ga.dupe(u8, name),
+        .name = try urd.mem.bin.dupe(u8, name),
         .state = .ready,
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
@@ -324,7 +323,7 @@ fn ThreadFuncWrapper(comptime f: anytype, ArgType: type) type {
             callThreadFunction(f, argv.*);
 
             // Destroy arguments.
-            urd.mem.getGeneralAllocator().destroy(argv);
+            urd.mem.bin.destroy(argv);
 
             // Exit thread.
             exitCurrent();
