@@ -37,20 +37,17 @@ const ChunkMetaNode = extern struct {
 };
 const ChunkMetaPointer = ?*ChunkMetaNode;
 
+/// Allocator interface.
+pub const interface = Allocator{
+    .ptr = &.{},
+    .vtable = &vtable,
+};
+
 /// Initialize the BinAllocator.
 pub fn init(pagea: PageAllocator) void {
     page_allocator = pagea;
     @memset(list_heads[0..list_heads.len], null);
 }
-
-/// Get the Allocator interface.
-pub fn interface() Allocator {
-    return Allocator{
-        .ptr = &.{},
-        .vtable = &vtable,
-    };
-}
-
 /// Get the bin index for the given size.
 ///
 /// If the size exceeds the largest bin size, return null.
@@ -212,7 +209,7 @@ test {
 fn getTestingAllocator() Allocator {
     init(test_page_allocator.allocator());
 
-    return interface();
+    return interface;
 }
 
 test "allocation order" {

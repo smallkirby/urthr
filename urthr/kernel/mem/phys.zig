@@ -19,13 +19,11 @@ const vtable = IoAllocator.Vtable{
 /// Initialize a `IoAllocator` instance.
 pub fn init() void {}
 
-/// Get the IoAllocator interface.
-pub fn interface() IoAllocator {
-    return IoAllocator{
-        .ptr = &.{},
-        .vtable = &vtable,
-    };
-}
+/// IoAllocator interface.
+pub const interface: IoAllocator = .{
+    .ptr = &.{},
+    .vtable = &vtable,
+};
 
 // =============================================================
 // Interface Implementation
