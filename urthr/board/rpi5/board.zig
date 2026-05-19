@@ -61,7 +61,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals() (mem.Error || net.Error)!void {
+pub fn initPeripherals() (common.mem.Error || net.Error)!void {
     // Interrupt controller.
     {
         arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
@@ -365,9 +365,8 @@ const log = std.log.scoped(.rpi5);
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
-const mem = common.mem;
 const Console = common.Console;
-const IoAllocator = mem.IoAllocator;
+const IoAllocator = common.mem.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");
 const sync = @import("sync.zig");

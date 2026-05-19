@@ -60,7 +60,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 }
 
 /// Initialize peripherals.
-pub fn initPeripherals() mem.Error!void {
+pub fn initPeripherals() common.mem.Error!void {
     // Interrupt controller.
     {
         arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
@@ -302,7 +302,6 @@ const arch = @import("arch").impl;
 const options = @import("options");
 const common = @import("common");
 const bits = common.bits;
-const mem = common.mem;
 const rtt = common.rtt;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;

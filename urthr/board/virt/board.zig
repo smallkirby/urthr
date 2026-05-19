@@ -44,7 +44,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals() mem.Error!void {
+pub fn initPeripherals() common.mem.Error!void {
     // Interrupt controller.
     {
         const gicd = try urd.mem.phys.reserveAndRemap(
@@ -286,11 +286,10 @@ const std = @import("std");
 const log = std.log.scoped(.virt);
 const arch = @import("arch").impl;
 const common = @import("common");
-const mem = common.mem;
 const rtt = common.rtt;
 const util = common.util;
 const Console = common.Console;
-const IoAllocator = mem.IoAllocator;
-const PageAllocator = mem.PageAllocator;
+const IoAllocator = common.mem.IoAllocator;
+const PageAllocator = common.mem.PageAllocator;
 const urd = @import("urthr");
 const dd = @import("dd");
