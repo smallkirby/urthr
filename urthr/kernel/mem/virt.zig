@@ -81,6 +81,64 @@ pub fn findVirtualArea(vaddr: Virt) ?*VmArea {
     return if (area_list.find(vaddr)) |node| node.container() else null;
 }
 
+/// Allocate virtually contiguous, physically non-contiguous memory of the given size.
+///
+/// Each page is backed by an independently allocated physical page.
+pub fn valloc(size: usize) Error![]u8 {
+    const aligned_size = std.mem.alignForward(usize, size, mem.page_size);
+
+    const area = try allocateVirtualArea(aligned_size);
+    errdefer releaseArea(area);
+
+    const pt = mem.getKernelPageTable();
+    for (0..aligned_size / mem.page_size) |i| {
+        const vaddr = area.start + i * mem.page_size;
+        const page = try mem.page.allocPagesP(1);
+        const paddr: Phys = @intFromPtr(page.ptr);
+        errdefer mem.page.freePagesP(page);
+
+        try arch.mmu.map4kb(pt, .{
+            .va = vaddr,
+            .pa = paddr,
+            .size = mem.page_size,
+            .perm = .kernel_rw,
+            .attr = .normal,
+        }, .{}, mem.page);
+        errdefer arch.mmu.unmap4kb(
+            pt,
+            vaddr,
+            mem.page_size,
+            mem.page,
+        ) catch {};
+
+        const vms = try mem.bin.create(VmStruct);
+        vms.* = .{
+            .virt = vaddr,
+            .phys = paddr,
+            .size = mem.page_size,
+            .area = area,
+            .rbnode = .init,
+        };
+        area.vmtree.insert(vms);
+    }
+
+    area._status = .mapped;
+    return @as([*]u8, @ptrFromInt(area.start))[0..size];
+}
+
+/// Free memory allocated by `valloc()`.
+///
+/// The caller must pass the exact slice returned by `valloc()`.
+pub fn vfree(memory: []u8) void {
+    const vaddr = @intFromPtr(memory.ptr);
+    const area = findVirtualArea(vaddr) orelse
+        @panic("vfree: tried to free unallocated memory");
+
+    rtt.expectEqual(area.start, vaddr);
+
+    releaseArea(area);
+}
+
 /// Delete the given virtual memory area from the used list and connect it to the free list.
 fn freeArea(area: *VmArea) void {
     rtt.expect(lock.isLocked());
@@ -89,6 +147,26 @@ fn freeArea(area: *VmArea) void {
     area._status = .not_mapped;
     area.rbnode = .init;
     free_list.insert(area);
+}
+
+/// Unmap and free all physical pages in the area, then return it to the free list.
+fn releaseArea(area: *VmArea) void {
+    const pt = mem.getKernelPageTable();
+    var it = area.vmtree.iterator();
+    while (it.next()) |node| {
+        const vms = node.container();
+        arch.mmu.unmap4kb(
+            pt,
+            vms.virt,
+            vms.size,
+            mem.page,
+        ) catch {};
+        mem.page.freePagesP(@as([*]u8, @ptrFromInt(vms.phys))[0..vms.size]);
+        area.vmtree.delete(vms);
+        mem.bin.destroy(vms);
+    }
+
+    freeVirtualArea(area);
 }
 
 // =============================================================
