@@ -31,9 +31,7 @@ pub const LoadInfo = struct {
 ///
 /// TODO: support dynamic linking.
 pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
-    const allocator = urd.mem.bin;
-
-    const file = try fs.open(filename, allocator);
+    const file = try fs.open(filename, urd.mem.bin);
     defer file.unref();
     if (file.size() < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
 
@@ -42,7 +40,7 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
     var reader = Reader.init(file, &rbuf);
 
     // Validate ELF header.
-    const ehdr = std.elf.Header.read(&reader.interface) catch return error.InvalidElf;
+    const ehdr = std.elf.Header.read(&reader.interface) catch return Error.InvalidElf;
     if (ehdr.type != .EXEC) return Error.InvalidElf;
     if (!ehdr.is_64) return Error.InvalidElf;
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
