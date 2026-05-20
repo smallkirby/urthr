@@ -62,7 +62,7 @@ fn zmain() !void {
 
     // Initialize page allocator.
     log.info("Initializing allocators.", .{});
-    urd.mem.initAllocators();
+    try urd.mem.initAllocators();
 
     // Initialize memory resources.
     log.info("Initializing memory resources.", .{});

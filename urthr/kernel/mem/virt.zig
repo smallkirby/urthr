@@ -6,11 +6,21 @@ pub const Error = mem.Error;
 var lock = SpinLock{};
 /// All allocated virtual memory areas.
 var area_list: VmArea.Tree = .{};
+/// Free virtual memory areas available for use.
+var free_list: VmArea.Tree = .{};
 
-/// Start of the virtual address space managed by this allocator.
-const vbase = vmap.vmem.start;
-/// End of the virtual address space managed by this allocator.
-const vend = vmap.vmem.end;
+/// Initialize the virtual memory allocator.
+///
+/// Must be called before any call to the allocator functions.
+pub fn init() Error!void {
+    const init_area = try mem.bin.create(VmArea);
+    init_area.* = .{
+        .start = vmap.vmem.start,
+        .end = vmap.vmem.end,
+        .vmtree = .{},
+    };
+    free_list.insert(init_area);
+}
 
 /// Allocate a virtual memory area with the given size.
 ///
@@ -21,25 +31,69 @@ pub fn allocateVirtualArea(size: usize) Error!*VmArea {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
-    // Calculate the start address to assign.
-    const start = if (area_list.max()) |max| max.container().end else vbase;
-    const end = start + size;
-    if (end >= vend) {
-        return Error.OutOfVirtualMemory;
-    }
+    var it = free_list.iterator();
+    while (it.next()) |node| {
+        const free_area = node.container();
+        const free_size = free_area.end - free_area.start;
 
-    // Construct the virtual area node.
-    const area = try mem.bin.create(VmArea);
-    area.* = .{
-        .start = start,
-        .end = end,
-        .rbnode = .init,
-        .vmtree = .{},
-    };
-    area_list.insert(area);
+        if (free_size == size) {
+            free_list.delete(free_area);
+            free_area.rbnode = .init;
+            area_list.insert(free_area);
+            return free_area;
+        } else if (free_size > size) {
+            const area = try mem.bin.create(VmArea);
+            area.* = .{
+                .start = free_area.start,
+                .end = free_area.start + size,
+                .vmtree = .{},
+            };
+            area_list.insert(area);
 
-    return area;
+            // Changing the start address does not change the order of the free area in the tree.
+            free_area.start += size;
+
+            return area;
+        }
+    } else return Error.OutOfVirtualMemory;
 }
+
+/// Returns a virtual memory area for reuse.
+///
+/// The caller must ensure that all physical mappings within the area
+/// have been removed before calling this function.
+pub fn freeVirtualArea(area: *VmArea) void {
+    rtt.expectEqual(null, area.vmtree.root);
+
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    freeArea(area);
+}
+
+/// Find the virtual memory area that contains the given virtual address.
+///
+/// Returns null if no area contains the address.
+pub fn findVirtualArea(vaddr: Virt) ?*VmArea {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    return if (area_list.find(vaddr)) |node| node.container() else null;
+}
+
+/// Delete the given virtual memory area from the used list and connect it to the free list.
+fn freeArea(area: *VmArea) void {
+    rtt.expect(lock.isLocked());
+
+    area_list.delete(area);
+    area._status = .not_mapped;
+    area.rbnode = .init;
+    free_list.insert(area);
+}
+
+// =============================================================
+// Internals
+// =============================================================
 
 /// Single virtual-physical memory mapping descriptor.
 ///
@@ -95,7 +149,7 @@ const VmArea = struct {
     /// End virtual address of this area.
     end: usize,
     /// List node.
-    rbnode: Tree.Node,
+    rbnode: Tree.Node = .init,
     /// VmStruct list for this area.
     vmtree: VmStruct.Tree,
     /// Status of the area.

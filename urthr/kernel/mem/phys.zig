@@ -55,19 +55,27 @@ fn ioremap(_: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
     return vm_area.start;
 }
 
+/// Unmap the given virtual address range and free the corresponding virtual memory area.
 fn iounmap(_: *anyopaque, virt: usize, size: usize) IoAllocator.Error!void {
     rtt.expect(util.isAligned(size, common.mem.size_4kib));
 
     const ie = _lock.lockDisableIrq();
     defer _lock.unlockRestoreIrq(ie);
 
+    // Unmap physical memory.
     var remaining = size;
     while (remaining > 0) {
         const v = virt + (size - remaining);
         remaining -= try unmapPage(v, remaining);
     }
 
-    // TODO: free the virtual memory area.
+    // Free virtual memory area.
+    if (mem.virt.findVirtualArea(virt)) |area| {
+        rtt.expectEqual(area.start, virt);
+        rtt.expectEqual(area.end, virt + size);
+
+        mem.virt.freeVirtualArea(area);
+    }
 }
 
 /// Reserve a physical memory range as a resource.
