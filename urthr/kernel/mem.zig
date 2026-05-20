@@ -80,7 +80,7 @@ pub fn init() Error!void {
 }
 
 /// Initialize allocators.
-pub fn initAllocators() void {
+pub fn initAllocators() Error!void {
     // Page allocator.
     const avails = board.memmap.drams;
     var reserveds = [_]Range{
@@ -103,6 +103,9 @@ pub fn initAllocators() void {
 
     // I/O allocator.
     phys_impl.init();
+
+    // Virtual memory allocator.
+    try virt.init();
 
     // Now then, boot allocator is no longer needed.
 }
