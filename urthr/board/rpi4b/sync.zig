@@ -23,9 +23,34 @@ pub fn cleanAllDataCache() void {
     arch.sync.cleanAllDataCacheByLevel(l2_cache, 1);
 }
 
+/// Clean the data to PoC.
+pub fn cleanData(buf: []const u8) void {
+    const line_size = 64;
+    const start = @intFromPtr(buf.ptr);
+    const end = start + buf.len;
+
+    var addr = std.mem.alignBackward(usize, start, line_size);
+    while (addr < end) : (addr += line_size) {
+        arch.sync.cleanDataCacheLine(addr);
+    }
+}
+
+/// Invalidate the data from PoC.
+pub fn invalidateData(buf: []const u8) void {
+    const line_size = 64;
+    const start = @intFromPtr(buf.ptr);
+    const end = start + buf.len;
+
+    var addr = std.mem.alignBackward(usize, start, line_size);
+    while (addr < end) : (addr += line_size) {
+        arch.sync.invalidateDataCacheLine(addr);
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
+const std = @import("std");
 const arch = @import("arch").impl;
 const CacheInfo = arch.sync.CacheInfo;
