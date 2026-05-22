@@ -95,8 +95,14 @@ pub fn init(io: IoAllocator, page: PageAllocator) Error!void {
         b.finalize();
     }
 
+    // Flush the message buffer.
+    sync.cleanData(buf);
+
     // Send the message to VideoCore and wait for the response.
     vcmbox.call(.prop2vc, msg_phys);
+
+    // Invalidate cache lines.
+    sync.invalidateData(buf);
 
     if (msg[1] != 0x8000_0000) {
         log.err("mailbox call failed: response=0x{X}", .{msg[1]});
@@ -113,8 +119,12 @@ pub fn init(io: IoAllocator, page: PageAllocator) Error!void {
         return Error.MailboxError;
     }
 
+    const aligned_phys = std.mem.alignBackward(usize, fb_phys, urd.mem.page_size);
+    const aligned_size = std.mem.alignForward(usize, fb_size, urd.mem.page_size);
+    const aligned_offset = fb_phys - aligned_phys;
+
     fb.phys = fb_phys;
-    fb.base = try io.ioremap(fb_phys, fb_size);
+    fb.base = try io.ioremap(aligned_phys, aligned_size) + aligned_offset;
     fb.pitch = pitch;
 
     // Create a framebuffer console.
@@ -214,4 +224,6 @@ const common = @import("common");
 const rtt = common.rtt;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
+const urd = @import("urthr");
+const sync = @import("../sync.zig");
 const vcmbox = @import("vcmbox.zig");
