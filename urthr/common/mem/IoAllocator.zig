@@ -43,7 +43,7 @@ pub const Vtable = struct {
     /// Caller must ensure that the given physical address range is reserved before calling this function.
     ///
     /// This function can map the memory using any size of pages.
-    ioremap: *const fn (ctx: *anyopaque, paddr: usize, size: usize) Error!usize,
+    ioremap: *const fn (ctx: *anyopaque, paddr: usize, size: usize, attr: Attribute) Error!usize,
 
     /// Unmap the given virtual memory region.
     iounmap: *const fn (ctx: *anyopaque, virt: usize, size: usize) Error!void,
@@ -60,8 +60,8 @@ pub fn reserve(self: Self, name: []const u8, phys: usize, size: usize, parent: ?
 }
 
 /// Map the given physical I/O memory region into the virtual address space.
-pub fn ioremap(self: Self, paddr: usize, size: usize) Error!usize {
-    return self.vtable.ioremap(self.ptr, paddr, size);
+pub fn ioremap(self: Self, paddr: usize, size: usize, attr: Attribute) Error!usize {
+    return self.vtable.ioremap(self.ptr, paddr, size, attr);
 }
 
 /// Unmap the given virtual memory region.
@@ -70,12 +70,12 @@ pub fn iounmap(self: Self, virt: usize, size: usize) Error!void {
 }
 
 /// Reserve the given physical I/O memory region and map it to virtual address space.
-pub fn reserveAndRemap(self: Self, name: []const u8, paddr: usize, size: usize, parent: ?*Resource) Error!usize {
+pub fn reserveAndRemap(self: Self, name: []const u8, paddr: usize, size: usize, parent: ?*Resource, attr: Attribute) Error!usize {
     // Reserve the physical memory region first.
     _ = try self.reserve(name, paddr, size, parent);
 
     // Then, map it to virtual address space.
-    return self.ioremap(paddr, size);
+    return self.ioremap(paddr, size, attr);
 }
 
 // =============================================================
@@ -83,4 +83,5 @@ pub fn reserveAndRemap(self: Self, name: []const u8, paddr: usize, size: usize, 
 // =============================================================
 
 const common = @import("common");
+const Attribute = common.mem.Attribute;
 const InlineDoublyLinkedList = common.typing.InlineDoublyLinkedList;

@@ -44,6 +44,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pl011.start,
         memmap.pl011.size(),
         null,
+        .device,
     ));
     try allocator.iounmap(memmap.pl011.start, memmap.pl011.size());
 
@@ -53,6 +54,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pm.start,
         memmap.pm.size(),
         null,
+        .device,
     ));
     try allocator.iounmap(memmap.pm.start, memmap.pm.size());
 }
@@ -69,6 +71,7 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
             memmap.gic.start,
             memmap.gic.size(),
             null,
+            .device,
         ));
         arch.gicv2.initGlobal();
     }
@@ -81,6 +84,7 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
             memmap.pci.start,
             memmap.pci.size(),
             null,
+            .device,
         );
         rdd.pcie.setBase(pci);
         rdd.pcie.init(urd.mem.page);
@@ -93,6 +97,7 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
             memmap.mbox.start,
             memmap.mbox.size(),
             null,
+            .device,
         );
         rdd.vcmbox.setBase(base + memmap.mbox_offset);
     }
@@ -128,6 +133,7 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
             memmap.rng.start,
             memmap.rng.size(),
             null,
+            .device,
         );
 
         rdd.rng.setBase(rng);
@@ -142,6 +148,7 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
             memmap.sd.start,
             memmap.sd.size(),
             null,
+            .device,
         );
 
         dd.sdhc.setBase(sdbase);

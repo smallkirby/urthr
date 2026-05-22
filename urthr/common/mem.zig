@@ -104,6 +104,10 @@ pub const Attribute = enum {
     ///
     /// The memory is cacheable.
     normal,
+    /// Normal memory, but write combining is allowed.
+    ///
+    /// The memory is non-cacheable, but write combining is allowed.
+    normal_wc,
 };
 
 // =============================================================

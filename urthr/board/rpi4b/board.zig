@@ -38,6 +38,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         map.gpio.start,
         map.gpio.size(),
         null,
+        .device,
     ));
 
     // PL011 UART.
@@ -46,6 +47,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         map.pl011.start,
         map.pl011.size(),
         null,
+        .device,
     ));
     try allocator.iounmap(map.pl011.start, map.pl011.size());
 
@@ -55,6 +57,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pm.start,
         memmap.pm.size(),
         null,
+        .device,
     ));
     try allocator.iounmap(memmap.pm.start, memmap.pm.size());
 }
@@ -68,6 +71,7 @@ pub fn initPeripherals() common.mem.Error!void {
             map.gic.start,
             map.gic.size(),
             null,
+            .device,
         ));
         arch.gicv2.initGlobal();
     }
@@ -79,6 +83,7 @@ pub fn initPeripherals() common.mem.Error!void {
             memmap.sdhost.start,
             memmap.sdhost.size(),
             null,
+            .device,
         );
         dd.sdhc.setBase(base);
         dd.sdhc.init(
@@ -94,6 +99,7 @@ pub fn initPeripherals() common.mem.Error!void {
             memmap.mbox.start,
             memmap.mbox.size(),
             null,
+            .device,
         );
         rdd.vcmbox.setBase(base + memmap.mbox_offset);
     }
@@ -159,6 +165,7 @@ pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
     const page = try urd.mem.phys.ioremap(
         std.mem.alignBackward(usize, memmap.cpu_spintable, urd.mem.page_size),
         urd.mem.page_size,
+        .normal,
     );
     defer urd.mem.phys.iounmap(page, urd.mem.page_size) catch {};
     const spintable = page + (memmap.cpu_spintable % urd.mem.page_size);
