@@ -1,9 +1,10 @@
 pub const clk = @import("dd/clk.zig");
 pub const ether = @import("dd/ether.zig");
-pub const fb = @import("dd/fb.zig");
 pub const gpio = @import("dd/gpio.zig");
 pub const pcie = @import("dd/pcie.zig");
 pub const pm = @import("dd/pm.zig");
 pub const rng = @import("dd/rng.zig");
 pub const rp1 = @import("dd/rp1.zig");
 pub const vcmbox = @import("dd/vcmbox.zig");
+
+pub const FrameBuffer = @import("dd/fb.zig").FrameBuffer(1920, 1080);
