@@ -134,7 +134,11 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             const aligned_offset = fb_phys - aligned_phys;
 
             fb.phys = fb_phys;
-            fb.base = try io.ioremap(aligned_phys, aligned_size) + aligned_offset;
+            fb.base = try io.ioremap(
+                aligned_phys,
+                aligned_size,
+                .device,
+            ) + aligned_offset;
             fb.pitch = pitch;
 
             // Create a framebuffer console.

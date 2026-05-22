@@ -36,6 +36,7 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
         memmap.pl011.start,
         memmap.pl011.size(),
         null,
+        .device,
     ));
     try allocator.iounmap(memmap.pl011.start, memmap.pl011.size());
 }
@@ -52,12 +53,14 @@ pub fn initPeripherals() common.mem.Error!void {
             memmap.gicd.start,
             memmap.gicd.size(),
             null,
+            .device,
         );
         const gicr = try urd.mem.phys.reserveAndRemap(
             "GICR",
             memmap.gicr.start,
             memmap.gicr.size(),
             null,
+            .device,
         );
         arch.gicv3.setBase(gicd, gicr);
         arch.gicv3.initGlobal();
@@ -73,6 +76,7 @@ pub fn initPeripherals() common.mem.Error!void {
             memmap.virtio.start,
             util.roundup(memmap.virtio.size(), common.mem.size_4kib),
             null,
+            .device,
         );
 
         // virtio-blk

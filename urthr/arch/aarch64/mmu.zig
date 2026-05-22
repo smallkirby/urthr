@@ -270,6 +270,7 @@ pub fn enable(pt: PageTablePair, allocator: PageAllocator) void {
     const mair = std.mem.zeroInit(regs.Mair, .{
         .attr0 = 0b0000_0000, // Device-nGnRnE
         .attr1 = 0b1111_1111, // Normal: Outer Write-Back Write-Allocate, Inner Write-Back Write-Allocate
+        .attr2 = 0b0100_0100, // Normal Non-cacheable
     });
     am.msr(.mair_el1, mair);
 
@@ -430,6 +431,7 @@ fn getAttrIndex(attr: Attribute) u3 {
     return switch (attr) {
         .device => 0,
         .normal => 1,
+        .normal_wc => 2,
     };
 }
 

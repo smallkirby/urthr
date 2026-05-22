@@ -210,14 +210,17 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     vperi = try allocator.ioremap(
         res_peri.phys,
         res_peri.size,
+        .device,
     );
     vsram = try allocator.ioremap(
         res_sram.phys,
         res_sram.size,
+        .device,
     );
     vmsix = try allocator.ioremap(
         res_msix.phys,
         res_msix.size,
+        .device,
     );
 
     // Set RP1 module base.
@@ -420,6 +423,7 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
         const mip0_base = try allocator.ioremap(
             mip0_range.axi,
             mip0_range.size,
+            .device,
         );
         // TODO: deallocate the I/O region.
         // defer allocator.iounmap(mip0_base, mip0_range.size);

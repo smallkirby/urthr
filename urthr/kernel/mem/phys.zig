@@ -32,7 +32,7 @@ pub const interface: IoAllocator = .{
 /// Map the given physical I/O memory region into the virtual address space.
 ///
 /// Caller must ensure that the given physical address range is reserved before calling this function.
-fn ioremap(_: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
+fn ioremap(_: *anyopaque, phys: usize, size: usize, attr: Attribute) IoAllocator.Error!usize {
     rtt.expect(util.isAligned(size, common.mem.size_4kib));
     rtt.expect(util.isAligned(phys, common.mem.size_4kib));
 
@@ -49,7 +49,7 @@ fn ioremap(_: *anyopaque, phys: usize, size: usize) IoAllocator.Error!usize {
         const v = vm_area.start + (size - remaining);
         const p = phys + (size - remaining);
 
-        remaining -= try mapPage(v, p, remaining);
+        remaining -= try mapPage(v, p, remaining, attr);
     }
 
     return vm_area.start;
@@ -152,7 +152,7 @@ fn compareResources(a: *Resource, b: *Resource) std.math.Order {
 /// Map a given virtual address to a physical address.
 ///
 /// Returns the size of mapped range in bytes.
-fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
+fn mapPage(virt: Virt, phys: Phys, max: usize, attr: Attribute) Error!usize {
     const pt = mem.getKernelPageTable();
 
     // Map using 1GiB pages if possible.
@@ -163,7 +163,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .va = virt,
             .size = map_size,
             .perm = .kernel_rw,
-            .attr = .device,
+            .attr = attr,
         }, .{}, mem.page);
         return map_size;
     }
@@ -179,7 +179,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .va = virt,
             .size = map_size,
             .perm = .kernel_rw,
-            .attr = .device,
+            .attr = attr,
         }, .{}, mem.page);
         return map_size;
     }
@@ -195,7 +195,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize) Error!usize {
             .va = virt,
             .size = map_size,
             .perm = .kernel_rw,
-            .attr = .device,
+            .attr = attr,
         }, .{}, mem.page);
         return map_size;
     }
@@ -299,6 +299,7 @@ const mem = urd.mem;
 const Virt = mem.Virt;
 const Phys = mem.Phys;
 const common = @import("common");
+const Attribute = common.mem.Attribute;
 const IoAllocator = common.mem.IoAllocator;
 const Resource = IoAllocator.Resource;
 const ResourceList = IoAllocator.ResourceList;
