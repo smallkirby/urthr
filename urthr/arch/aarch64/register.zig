@@ -1,111 +1,111 @@
-/// System registers.
-pub const SystemReg = enum {
-    elr_el1,
-    elr_el2,
-    elr_el3,
+//! ARM Aarch64 system registers module.
+//!
+//! ref. Arm® Architecture Reference Manual for A-profile architecture (ARM DDI 0487K.a)
 
-    hcr_el2,
+/// comptime-only register definitions.
+const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
+    // =============================================================
+    // Special-purpose Registers
 
-    daif,
+    .{ .elr_el1, Elr },
+    .{ .elr_el2, Elr },
+    .{ .elr_el3, Elr },
+    .{ .daif, Daif },
+    .{ .sp_el0, Sp },
+    .{ .sp_el1, Sp },
+    .{ .sp_el2, Sp },
+    .{ .sp_el3, Sp },
+    .{ .spsr_el1, Spsr },
+    .{ .spsr_el2, Spsr },
+    .{ .spsr_el3, Spsr },
 
-    sp_el0,
-    sp_el1,
-    sp_el2,
-    sp_el3,
+    // =============================================================
+    // General System Control Registers.
 
-    spsr_el1,
-    spsr_el2,
-    spsr_el3,
+    .{ .hcr_el2, HcrEl2 },
+    .{ .vbar_el1, Vbar },
+    .{ .vbar_el2, Vbar },
+    .{ .vbar_el3, Vbar },
+    .{ .esr_el1, Esr },
+    .{ .esr_el2, Esr },
+    .{ .esr_el3, Esr },
+    .{ .tcr_el1, Tcr },
+    .{ .tcr_el2, Tcr },
+    .{ .id_aa64mmfr0_el1, IdAa64Mmfr0 },
+    .{ .far_el1, Far },
+    .{ .far_el2, Far },
+    .{ .far_el3, Far },
+    .{ .pfar_el1, Pfar },
+    .{ .mair_el1, Mair },
+    .{ .ttbr0_el1, Ttbr0El1 },
+    .{ .ttbr1_el1, Ttbr1El1 },
+    .{ .sctlr_el1, SctlrEl1 },
+    .{ .cpacr_el1, CpacrEl1 },
+    .{ .mpidr_el1, Mpidr },
+    .{ .tpidr_el0, Tpidr },
+    .{ .tpidr_el1, Tpidr },
 
-    vbar_el1,
-    vbar_el2,
-    vbar_el3,
+    // =============================================================
+    // Generic Timer Registers.
 
-    esr_el1,
-    esr_el2,
-    esr_el3,
+    .{ .cntpct_el0, Cntpct },
+    .{ .cntfrq_el0, Cntfrq },
+    .{ .cntp_ctl_el0, CntpCtl },
+    .{ .cntp_tval_el0, CntpTval },
 
-    tcr_el2,
-    tcr_el1,
+    // =============================================================
+    // GIC Registers.
 
-    id_aa64mmfr0_el1,
-
-    far_el1,
-    far_el2,
-    far_el3,
-    pfar_el1,
-
-    mair_el1,
-    ttbr0_el1,
-    ttbr1_el1,
-
-    sctlr_el1,
-    cpacr_el1,
-
-    cntpct_el0,
-    cntfrq_el0,
-    cntp_ctl_el0,
-    cntp_tval_el0,
-
-    mpidr_el1,
-    tpidr_el0,
-    tpidr_el1,
-
-    icc_ctlr_el1,
-    icc_sre_el1,
-    icc_sre_el2,
-    icc_sre_el3,
-    icc_pmr_el1,
-    icc_bpr0_el1,
-    icc_bpr1_el1,
-    icc_igrpen1_el1,
-    icc_iar1_el1,
-    icc_dir_el1,
-    icc_eoir1_el1,
-    icc_sgi1r_el1,
-
-    /// Get the string representation of the system register.
-    pub fn str(comptime self: SystemReg) []const u8 {
-        return @tagName(self);
-    }
-
-    /// Get the type of the system register.
-    pub fn Type(comptime self: SystemReg) type {
-        return switch (self) {
-            .elr_el1, .elr_el2, .elr_el3 => Elr,
-            .hcr_el2 => HcrEl2,
-            .daif => Daif,
-            .sp_el0, .sp_el1, .sp_el2, .sp_el3 => Sp,
-            .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
-            .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
-            .esr_el1, .esr_el2, .esr_el3 => Esr,
-            .tcr_el2, .tcr_el1 => Tcr,
-            .id_aa64mmfr0_el1 => IdAa64Mmfr0,
-            .far_el1, .far_el2, .far_el3 => Far,
-            .pfar_el1 => Pfar,
-            .mair_el1 => Mair,
-            .ttbr0_el1 => Ttbr0El1,
-            .ttbr1_el1 => Ttbr1El1,
-            .sctlr_el1 => SctlrEl1,
-            .cpacr_el1 => CpacrEl1,
-            .cntpct_el0 => Cntpct,
-            .cntfrq_el0 => Cntfrq,
-            .cntp_ctl_el0 => CntpCtl,
-            .cntp_tval_el0 => CntpTval,
-            .mpidr_el1 => Mpidr,
-            .tpidr_el0, .tpidr_el1 => Tpidr,
-            .icc_ctlr_el1 => IccCtlr,
-            .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
-            .icc_pmr_el1 => IccPmr,
-            .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
-            .icc_igrpen1_el1 => IccIgrpen1El1,
-            .icc_iar1_el1 => IccIar1El1,
-            .icc_dir_el1 => IccDirEl1,
-            .icc_eoir1_el1 => IccEoir1El1,
-            .icc_sgi1r_el1 => IccSgi1r,
-        };
-    }
+    .{ .icc_ctlr_el1, IccCtlr },
+    .{ .icc_sre_el1, IccSre },
+    .{ .icc_sre_el2, IccSre },
+    .{ .icc_sre_el3, IccSre },
+    .{ .icc_pmr_el1, IccPmr },
+    .{ .icc_bpr0_el1, IccBpr },
+    .{ .icc_bpr1_el1, IccBpr },
+    .{ .icc_igrpen1_el1, IccIgrpen1El1 },
+    .{ .icc_iar1_el1, IccIar1El1 },
+    .{ .icc_dir_el1, IccDirEl1 },
+    .{ .icc_eoir1_el1, IccEoir1El1 },
+    .{ .icc_sgi1r_el1, IccSgi1r },
 };
+
+// =============================================================
+// API
+// =============================================================
+
+/// System register enum.
+pub const SystemReg = blk: {
+    var names: [definitions.len][]const u8 = undefined;
+    var values: [definitions.len]u64 = undefined;
+
+    for (definitions, 0..) |entry, i| {
+        names[i] = @tagName(entry.@"0");
+        values[i] = i;
+    }
+
+    break :blk @Enum(
+        u64,
+        .exhaustive,
+        &names,
+        &values,
+    );
+};
+
+/// Get the corresponding type of a system register enum.
+pub fn Type(comptime s: SystemReg) type {
+    for (definitions) |d| {
+        if (d.@"0" == s) {
+            return d.@"1";
+        }
+    }
+
+    unreachable;
+}
+
+// =============================================================
+// Register Definitions
+// =============================================================
 
 /// ELR_ELx.
 ///
@@ -1053,3 +1053,9 @@ pub const IccSgi1r = packed struct(u64) {
         };
     }
 };
+
+// =============================================================
+// Imports
+// =============================================================
+
+const std = @import("std");

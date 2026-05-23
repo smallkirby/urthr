@@ -23,11 +23,11 @@ pub fn isb() void {
     asm volatile ("isb");
 }
 
-pub fn mrs(comptime reg: SystemReg) reg.Type() {
+pub fn mrs(comptime reg: SystemReg) regs.Type(reg) {
     return @bitCast(asm volatile (std.fmt.comptimePrint(
             \\mrs %[ret], {s}
-        , .{reg.str()})
-        : [ret] "=r" (-> switch (@sizeOf(reg.Type())) {
+        , .{@tagName(reg)})
+        : [ret] "=r" (-> switch (@sizeOf(regs.Type(reg))) {
             4 => u32,
             8 => u64,
             else => @compileError("Unsupported system register size."),
@@ -37,16 +37,16 @@ pub fn mrs(comptime reg: SystemReg) reg.Type() {
 
 /// Read a system register and return integer value.
 pub fn mrsi(comptime reg: SystemReg) u64 {
-    const IntR = std.meta.Int(.unsigned, @bitSizeOf(reg.Type()));
+    const IntR = std.meta.Int(.unsigned, @bitSizeOf(regs.Type(reg)));
     return @as(IntR, @bitCast(mrs(reg)));
 }
 
-pub fn msr(comptime reg: SystemReg, value: reg.Type()) void {
+pub fn msr(comptime reg: SystemReg, value: regs.Type(reg)) void {
     asm volatile (std.fmt.comptimePrint(
             \\msr {s}, %[value]
-        , .{reg.str()})
+        , .{@tagName(reg)})
         :
-        : [value] "r" (@as(switch (@sizeOf(reg.Type())) {
+        : [value] "r" (@as(switch (@sizeOf(regs.Type(reg))) {
             4 => u32,
             8 => u64,
             else => @compileError("Unsupported system register size."),
