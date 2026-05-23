@@ -141,16 +141,21 @@ pub fn setBase(base: usize) void {
 /// Initialize the DMA controller.
 pub fn init() mem.Error!void {
     // Create control blocks for each DMA channel.
-    for (0..num_channels) |i| switch (cbs[i]) {
-        .normal => |*cb| {
-            cb.* = try mem.page.create(ndma.ControlBlock);
-            cb.*.* = std.mem.zeroes(ndma.ControlBlock);
-        },
-        inline else => |*cb| {
-            cb.* = try mem.page.create(dma4.ControlBlock);
-            cb.*.* = std.mem.zeroes(dma4.ControlBlock);
-        },
-    };
+    for (0..cbs.len) |i| {
+        if (i <= max_ndmachan_index) {
+            const cb = try mem.page.create(ndma.ControlBlock);
+            cb.* = std.mem.zeroes(ndma.ControlBlock);
+            cbs[i] = .{ .normal = cb };
+        } else if (i <= max_ldmachan_index) {
+            const cb = try mem.page.create(dma4.ControlBlock);
+            cb.* = std.mem.zeroes(dma4.ControlBlock);
+            cbs[i] = .{ .light = cb };
+        } else {
+            const cb = try mem.page.create(dma4.ControlBlock);
+            cb.* = std.mem.zeroes(dma4.ControlBlock);
+            cbs[i] = .{ .dma4 = cb };
+        }
+    }
 }
 
 /// Setup a DMA channel.
