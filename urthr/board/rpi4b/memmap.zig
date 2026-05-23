@@ -64,6 +64,12 @@ pub const cpu_spintable = 0xD8;
 /// Base address of peripheral registers.
 pub const peri_base = 0xFE00_0000;
 
+/// DMA controller.
+pub const dma = Range{
+    .start = peri_base + 0x0000_7000,
+    .end = peri_base + 0x0000_8000,
+};
+
 /// ARM-to-VideoCore Mailbox.
 pub const mbox = Range{
     .start = peri_base + 0x0000_B000,
