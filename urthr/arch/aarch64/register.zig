@@ -3,14 +3,16 @@
 //! ref. Arm® Architecture Reference Manual for A-profile architecture (ARM DDI 0487K.a)
 
 /// comptime-only register definitions.
+///
+/// Entries must be sorted in alphabetical order in each group.
 const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     // =============================================================
     // Special-purpose Registers
 
+    .{ .daif, Daif },
     .{ .elr_el1, Elr },
     .{ .elr_el2, Elr },
     .{ .elr_el3, Elr },
-    .{ .daif, Daif },
     .{ .sp_el0, Sp },
     .{ .sp_el1, Sp },
     .{ .sp_el2, Sp },
@@ -22,52 +24,52 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     // =============================================================
     // General System Control Registers.
 
-    .{ .hcr_el2, HcrEl2 },
-    .{ .vbar_el1, Vbar },
-    .{ .vbar_el2, Vbar },
-    .{ .vbar_el3, Vbar },
+    .{ .cpacr_el1, CpacrEl1 },
     .{ .esr_el1, Esr },
     .{ .esr_el2, Esr },
     .{ .esr_el3, Esr },
-    .{ .tcr_el1, Tcr },
-    .{ .tcr_el2, Tcr },
-    .{ .id_aa64mmfr0_el1, IdAa64Mmfr0 },
     .{ .far_el1, Far },
     .{ .far_el2, Far },
     .{ .far_el3, Far },
-    .{ .pfar_el1, Pfar },
+    .{ .hcr_el2, HcrEl2 },
+    .{ .id_aa64mmfr0_el1, IdAa64Mmfr0 },
     .{ .mair_el1, Mair },
-    .{ .ttbr0_el1, Ttbr0El1 },
-    .{ .ttbr1_el1, Ttbr1El1 },
-    .{ .sctlr_el1, SctlrEl1 },
-    .{ .cpacr_el1, CpacrEl1 },
     .{ .mpidr_el1, Mpidr },
+    .{ .pfar_el1, Pfar },
+    .{ .sctlr_el1, SctlrEl1 },
+    .{ .tcr_el1, Tcr },
+    .{ .tcr_el2, Tcr },
     .{ .tpidr_el0, Tpidr },
     .{ .tpidr_el1, Tpidr },
+    .{ .ttbr0_el1, Ttbr0El1 },
+    .{ .ttbr1_el1, Ttbr1El1 },
+    .{ .vbar_el1, Vbar },
+    .{ .vbar_el2, Vbar },
+    .{ .vbar_el3, Vbar },
 
     // =============================================================
     // Generic Timer Registers.
 
-    .{ .cntpct_el0, Cntpct },
     .{ .cntfrq_el0, Cntfrq },
     .{ .cntp_ctl_el0, CntpCtl },
     .{ .cntp_tval_el0, CntpTval },
+    .{ .cntpct_el0, Cntpct },
 
     // =============================================================
     // GIC Registers.
 
+    .{ .icc_bpr0_el1, IccBpr },
+    .{ .icc_bpr1_el1, IccBpr },
     .{ .icc_ctlr_el1, IccCtlr },
+    .{ .icc_dir_el1, IccDirEl1 },
+    .{ .icc_eoir1_el1, IccEoir1El1 },
+    .{ .icc_iar1_el1, IccIar1El1 },
+    .{ .icc_igrpen1_el1, IccIgrpen1El1 },
+    .{ .icc_pmr_el1, IccPmr },
+    .{ .icc_sgi1r_el1, IccSgi1r },
     .{ .icc_sre_el1, IccSre },
     .{ .icc_sre_el2, IccSre },
     .{ .icc_sre_el3, IccSre },
-    .{ .icc_pmr_el1, IccPmr },
-    .{ .icc_bpr0_el1, IccBpr },
-    .{ .icc_bpr1_el1, IccBpr },
-    .{ .icc_igrpen1_el1, IccIgrpen1El1 },
-    .{ .icc_iar1_el1, IccIar1El1 },
-    .{ .icc_dir_el1, IccDirEl1 },
-    .{ .icc_eoir1_el1, IccEoir1El1 },
-    .{ .icc_sgi1r_el1, IccSgi1r },
 };
 
 // =============================================================
@@ -104,8 +106,25 @@ pub fn Type(comptime s: SystemReg) type {
 }
 
 // =============================================================
-// Register Definitions
-// =============================================================
+// Special-purpose Registers
+
+/// DAIF.
+///
+/// Interrupt Mask Bits.
+pub const Daif = packed struct(u64) {
+    /// Reserved.
+    _0: u6 = 0,
+    /// FIQ mask bit.
+    f: bool,
+    /// IRQ mask bit.
+    i: bool,
+    /// SError exception mask bit.
+    a: bool,
+    /// Watchpoint, Breakpoint, and Software Step exceptions mask bit.
+    d: bool,
+    /// Reserved.
+    _10: u54 = 0,
+};
 
 /// ELR_ELx.
 ///
@@ -118,6 +137,263 @@ pub const Elr = packed struct(u64) {
 /// SP_ELx.
 pub const Sp = packed struct(u64) {
     /// Stack pointer.
+    addr: u64,
+};
+
+/// SPSR_ELx.
+///
+/// Saved Program Status Register.
+pub const Spsr = packed struct(u64) {
+    /// Aarch64 Exception level and selected Stack Pointer.
+    ///
+    /// - 0b0000: EL0
+    /// - 0b0100: EL1 using SP_EL0 (ELt)
+    /// - 0b0101: EL1 using SP_EL1 (EL1h)
+    /// - 0b1000: EL2 using SP_EL0 (EL2t)
+    /// - 0b1001: EL2 using SP_EL1 (EL2h)
+    m_elsp: enum(u4) {
+        el0 = 0b0000,
+        el1t = 0b0100,
+        el1h = 0b0101,
+        el2t = 0b1000,
+        el2h = 0b1001,
+    },
+    /// Execution state.
+    m_es: u1,
+    /// Reserved.
+    _5: u1 = 0,
+    /// FIQ interrupt mask.
+    f: bool,
+    /// IRQ interrupt mask.
+    i: bool,
+    /// SError exception mask.
+    a: bool,
+    /// Debug exception mask.
+    d: bool,
+    /// When FEAT_BTI is implemented, Branch Type Indicator.
+    btype: u2,
+    /// When FEAT_SSBS is implemented, Speculative Store Bypass.
+    ssbs: bool,
+    /// When FEAT_NMI is implemented, All IRQ or FIQ interrupts mask.
+    allint: bool,
+    /// Reserved.
+    _14: u6 = 0,
+    /// Illegal Execution state.
+    il: bool,
+    /// Software Step.
+    ss: bool,
+    /// When FEAT_PAN is implemented, Privileged Access Never.
+    pan: bool,
+    /// When FEAT_UAO is implemented, User Access Override.
+    uao: bool,
+    /// When FEAT_DIT is implemented, Data Independent Timing.
+    dit: bool,
+    /// When FEAT_MTE is implemented, Tag Check Override.
+    tco: bool,
+    /// Reserved.
+    _26: u2 = 0,
+    /// Overflow Condition flag.
+    v: bool,
+    /// Carry Condition flag.
+    c: bool,
+    /// Zero Condition flag.
+    z: bool,
+    /// Negative Condition flag.
+    n: bool,
+    /// When FEAT_EBEP is implemented PMU exception mask bit.
+    pm: bool,
+    /// When FEAT_SEBEP is implemented, PMU exception pending bit.
+    ppend: bool,
+    /// When FEAT_GCS is implemented, Exception return state lock.
+    exlock: bool,
+    /// Reserved.
+    _35: u29 = 0,
+};
+
+// =============================================================
+// General System Control Registers.
+
+/// CPACR_EL1.
+///
+/// Architectural Feature Access Control Register EL1.
+pub const CpacrEl1 = packed struct(u64) {
+    /// Reserved.
+    _0: u16 = 0,
+    /// Traps execution at EL1 and EL0 of SVE instructions when the PE is not in Streaming SVE mode.
+    zen: u2,
+    /// Reserved.
+    _18: u2 = 0,
+    /// Traps execution at EL1 and EL0 of instructions that access the Advanced SIMD and FP registers from both Execution states to EL1.
+    fpen: u2,
+    /// Reserved.
+    _22: u2 = 0,
+    /// Traps execution at EL1 and EL0 of SME instructions.
+    smen: u2,
+    /// Reserved.
+    _26: u2 = 0,
+    /// Traps EL0 and EL1 System register accesses to all implemented trace registers from both Execution states to EL1.
+    tta: bool,
+    /// Enable access to POR_EL0.
+    e0poe: bool,
+    /// Reserved.
+    _30: u2 = 0,
+    /// Reserved.
+    _32: u32 = 0,
+};
+
+/// ESR_ELx.
+///
+/// Exception Syndrome Register.
+/// Holds syndrome information for an exception taken to ELx.
+pub const Esr = packed struct(u64) {
+    /// Instruction Specific Syndrome.
+    iss: u25,
+    /// Instruction Length for synchronous exceptions.
+    il: Length,
+    /// Exception class.
+    ec: Class,
+    /// Instruction Specific Syndrome.
+    iss2: u24,
+    /// Reserved.
+    _56: u8 = 0,
+
+    pub const Class = enum(u6) {
+        unknown = 0b000000,
+        simd = 0b000111,
+        bti = 0b001011,
+        illegal_exec_state = 0b001110,
+        svc_a32 = 0b010001,
+        hvc_a32 = 0b010010,
+        smc_a32 = 0b010011,
+        svc_a64 = 0b010101,
+        hvc_a64 = 0b010110,
+        smc_a64 = 0b010111,
+        iabort_lower = 0b100000,
+        iabort_cur = 0b100001,
+        pc_align = 0b100010,
+        dabort_lower = 0b100100,
+        dabort_cur = 0b100101,
+        sp_align = 0b100110,
+
+        _,
+    };
+
+    pub const Length = enum(u1) {
+        len16 = 0,
+        len32 = 1,
+    };
+
+    /// Instruction Fault Status Code.
+    ///
+    /// ISS[5:0] when EC is `.iabort_lower` or `iabort_cur`.
+    pub const Ifsc = enum(u6) {
+        addr_size_lvl0 = 0b000000,
+        addr_size_lvl1 = 0b000001,
+        addr_size_lvl2 = 0b000010,
+        addr_size_lvl3 = 0b000011,
+
+        trans_lv0 = 0b000100,
+        trans_lv1 = 0b000101,
+        trans_lv2 = 0b000110,
+        trans_lv3 = 0b000111,
+
+        af_lv1 = 0b001001,
+        af_lv2 = 0b001010,
+        af_lv3 = 0b001011,
+        af_lv0 = 0b001000,
+
+        perm_lv0 = 0b001100,
+        perm_lv1 = 0b001101,
+        perm_lv2 = 0b001110,
+        perm_lv3 = 0b001111,
+
+        _,
+    };
+
+    /// ISS encoding for Data Abort.
+    pub const IssDabort = packed struct(u25) {
+        /// Data Fault Status Code.
+        dfsc: Dfsc,
+        /// Write not Read,
+        ///
+        /// Indicates whether a synchronous abort was caused by an instruction writing to a memory location,
+        /// or by an instruction reading from a memory location.
+        wnr: enum(u1) {
+            read = 0,
+            write = 1,
+        },
+        /// Stage 1 Page Table Walk.
+        ///
+        /// For a stage 2 fault, indicates whether the fault was a stage 2 fault on an access made for a stage 1 translation table walk.
+        /// Otherwise, reserved.
+        s1ptw: u1,
+        /// Cache maintenance.
+        cm: u1,
+        /// External abort type.
+        /// Otherwise, fixed to 0.
+        ea: u1,
+        /// FAR not Valid when a synchronous Externnal abort.
+        fnv: bool,
+        ///
+        lst_set: u2,
+        ///
+        vncr: u1,
+        ///
+        ar_pfv: u1,
+        /// When ISV is set, Sixty Four bit general-purpose register transfer.
+        /// Width of the register accessed by the instruction is 64-bit.
+        sf_fnp: bool,
+        /// If ISV is set, Syndrome Register Transfer.
+        /// The register number of the Wt/Xt/Rt operand of the faulting instruction.
+        srt_wu: u5,
+        ///
+        sse_toplevel: u1,
+        /// When ISV is set, Syndrome Access Size.
+        ///
+        /// Indicates the size of the access attempted by the faulting operation.
+        sas: enum(u2) {
+            byte = 0b00,
+            halfword = 0b01,
+            word = 0b10,
+            doubleword = 0b11,
+        },
+        /// Instruction Syndrome Valid.
+        ///
+        /// Indicates whether the syndrome information in ISS[23:14] is valid.
+        isv: bool,
+    };
+
+    /// Data Abort Fault Status Code.
+    pub const Dfsc = enum(u6) {
+        addr_size_lvl0 = 0b000000,
+        addr_size_lvl1 = 0b000001,
+        addr_size_lvl2 = 0b000010,
+        addr_size_lvl3 = 0b000011,
+
+        trans_lvl0 = 0b000100,
+        trans_lvl1 = 0b000101,
+        trans_lvl2 = 0b000110,
+        trans_lvl3 = 0b000111,
+
+        af_lvl0 = 0b001000,
+        af_lvl1 = 0b001001,
+        af_lvl2 = 0b001010,
+        af_lvl3 = 0b001011,
+
+        perm_lvl0 = 0b001100,
+        perm_lvl1 = 0b001101,
+        perm_lvl2 = 0b001110,
+        perm_lvl3 = 0b001111,
+
+        _,
+    };
+};
+
+/// FAR_ELx.
+///
+/// Fault Address Register.
+pub const Far = packed struct(u64) {
+    /// Fault address.
     addr: u64,
 };
 
@@ -282,249 +558,179 @@ pub const HcrEl2 = packed struct(u64) {
     twedel: u4,
 };
 
-/// DAIF.
+/// ID_AA64MMFR0_ELn.
 ///
-/// Interrupt Mask Bits.
-pub const Daif = packed struct(u64) {
+/// Aarch64 Memory Model Feature Register 0.
+/// Provides information about the implemented memory model and memory management support.
+pub const IdAa64Mmfr0 = packed struct(u64) {
+    /// Physical Address range supported.
+    parange: PaRange,
+    /// Number of ASID bits.
+    asidbits: u4,
+    /// BigEnd.
+    bigend: u4,
+    /// SNSMem.
+    snsmem: u4,
+    /// BigEndEL0.
+    bigendel0: u4,
+    /// TGran16.
+    tgran16: u4,
+    /// TGran64.
+    tgran64: u4,
+    /// TGran4.
+    tgran4: u4,
+    /// TGran16_2
+    tgran16_2: u4,
+    /// TGran64_2
+    tgran64_2: u4,
+    /// TGran4_2
+    tgran4_2: u4,
+    /// ExS.
+    exs: u4,
     /// Reserved.
-    _0: u6 = 0,
-    /// FIQ mask bit.
-    f: bool,
-    /// IRQ mask bit.
-    i: bool,
-    /// SError exception mask bit.
-    a: bool,
-    /// Watchpoint, Breakpoint, and Software Step exceptions mask bit.
-    d: bool,
-    /// Reserved.
-    _10: u54 = 0,
+    _48: u8 = 0,
+    /// FGT.
+    fgt: u4,
+    /// ECV.
+    ecv: u4,
+
+    /// Physical Address range.
+    const PaRange = enum(u4) {
+        /// 32 bits, 4GB
+        bits_32 = 0b0000,
+        /// 36 bits, 64GB
+        bits_36 = 0b0001,
+        /// 40 bits, 1TB
+        bits_40 = 0b0010,
+        /// 42 bits, 4TB
+        bits_42 = 0b0011,
+        /// 44 bits, 16TB
+        bits_44 = 0b0100,
+        /// 48 bits, 256TB
+        bits_48 = 0b0101,
+        /// 52 bits, 1PB
+        bits_52 = 0b0110,
+        /// 56 bits, 64PB
+        bits_56 = 0b1111,
+    };
 };
 
-/// SPSR_ELx.
+/// MAIR_ELx.
 ///
-/// Saved Program Status Register.
-pub const Spsr = packed struct(u64) {
-    /// Aarch64 Exception level and selected Stack Pointer.
-    ///
-    /// - 0b0000: EL0
-    /// - 0b0100: EL1 using SP_EL0 (ELt)
-    /// - 0b0101: EL1 using SP_EL1 (EL1h)
-    /// - 0b1000: EL2 using SP_EL0 (EL2t)
-    /// - 0b1001: EL2 using SP_EL1 (EL2h)
-    m_elsp: enum(u4) {
-        el0 = 0b0000,
-        el1t = 0b0100,
-        el1h = 0b0101,
-        el2t = 0b1000,
-        el2h = 0b1001,
-    },
-    /// Execution state.
-    m_es: u1,
-    /// Reserved.
-    _5: u1 = 0,
-    /// FIQ interrupt mask.
-    f: bool,
-    /// IRQ interrupt mask.
-    i: bool,
-    /// SError exception mask.
-    a: bool,
-    /// Debug exception mask.
-    d: bool,
-    /// When FEAT_BTI is implemented, Branch Type Indicator.
-    btype: u2,
-    /// When FEAT_SSBS is implemented, Speculative Store Bypass.
-    ssbs: bool,
-    /// When FEAT_NMI is implemented, All IRQ or FIQ interrupts mask.
-    allint: bool,
-    /// Reserved.
-    _14: u6 = 0,
-    /// Illegal Execution state.
-    il: bool,
-    /// Software Step.
-    ss: bool,
-    /// When FEAT_PAN is implemented, Privileged Access Never.
-    pan: bool,
-    /// When FEAT_UAO is implemented, User Access Override.
-    uao: bool,
-    /// When FEAT_DIT is implemented, Data Independent Timing.
-    dit: bool,
-    /// When FEAT_MTE is implemented, Tag Check Override.
-    tco: bool,
-    /// Reserved.
-    _26: u2 = 0,
-    /// Overflow Condition flag.
-    v: bool,
-    /// Carry Condition flag.
-    c: bool,
-    /// Zero Condition flag.
-    z: bool,
-    /// Negative Condition flag.
-    n: bool,
-    /// When FEAT_EBEP is implemented PMU exception mask bit.
-    pm: bool,
-    /// When FEAT_SEBEP is implemented, PMU exception pending bit.
-    ppend: bool,
-    /// When FEAT_GCS is implemented, Exception return state lock.
-    exlock: bool,
-    /// Reserved.
-    _35: u29 = 0,
+/// Memory Attribute Indirection Register.
+pub const Mair = packed struct(u64) {
+    attr0: u8,
+    attr1: u8,
+    attr2: u8,
+    attr3: u8,
+    attr4: u8,
+    attr5: u8,
+    attr6: u8,
+    attr7: u8,
 };
 
-/// VBAR_ELx.
+/// MPIDR_EL1.
 ///
-/// Vector Base Address Register.
-/// Holds the vector base address for any exception that is taken to ELx.
-pub const Vbar = packed struct(u64) {
-    /// Vector base address.
+/// Multiprocessor Affinity Register.
+pub const Mpidr = packed struct(u64) {
+    /// Affinity level 0.
+    aff0: u8,
+    /// Affinity level 1.
+    aff1: u8,
+    /// Affinity level 2.
+    aff2: u8,
+    /// Whether the lowest level of affinity consists of logical PEs.
+    mt: bool,
+    /// Reserved.
+    _25: u5 = 0,
+    /// Uniprocessor system.
+    u: bool,
+    /// Reserved.
+    _31: u1 = 1,
+    /// Affinity level 3.
+    aff3: u8,
+    /// Reserved.
+    _40: u24 = 0,
+};
+
+/// PFAR_ELx.
+///
+/// Physical Fault Address Register.
+pub const Pfar = packed struct(u64) {
+    /// Physical fault address.
     addr: u64,
 };
 
-/// ESR_ELx.
+/// SCTLR_EL1.
 ///
-/// Exception Syndrome Register.
-/// Holds syndrome information for an exception taken to ELx.
-pub const Esr = packed struct(u64) {
-    /// Instruction Specific Syndrome.
-    iss: u25,
-    /// Instruction Length for synchronous exceptions.
-    il: Length,
-    /// Exception class.
-    ec: Class,
-    /// Instruction Specific Syndrome.
-    iss2: u24,
-    /// Reserved.
-    _56: u8 = 0,
+/// System Control Register EL1.
+pub const SctlrEl1 = packed struct(u64) {
+    m: bool,
+    a: bool,
+    c: bool,
+    sa: bool,
+    sa0: bool,
+    cp15ben: bool,
+    naa: bool,
+    itd: bool,
 
-    pub const Class = enum(u6) {
-        unknown = 0b000000,
-        simd = 0b000111,
-        bti = 0b001011,
-        illegal_exec_state = 0b001110,
-        svc_a32 = 0b010001,
-        hvc_a32 = 0b010010,
-        smc_a32 = 0b010011,
-        svc_a64 = 0b010101,
-        hvc_a64 = 0b010110,
-        smc_a64 = 0b010111,
-        iabort_lower = 0b100000,
-        iabort_cur = 0b100001,
-        pc_align = 0b100010,
-        dabort_lower = 0b100100,
-        dabort_cur = 0b100101,
-        sp_align = 0b100110,
+    sed: bool,
+    uma: bool,
+    enrctx: bool,
+    eos: bool,
+    i: bool,
+    endb: bool,
+    dze: bool,
+    uct: bool,
 
-        _,
-    };
+    ntwi: bool,
+    _17: u1 = 0,
+    ntwe: bool,
+    wxn: bool,
+    tscxt: bool,
+    iesb: bool,
+    eis: bool,
+    span: bool,
 
-    pub const Length = enum(u1) {
-        len16 = 0,
-        len32 = 1,
-    };
+    e0e: bool,
+    ee: bool,
+    uci: bool,
+    enda: bool,
+    ntlsmd: bool,
+    lsmaoe: bool,
+    enib: bool,
+    enia: bool,
 
-    /// Instruction Fault Status Code.
-    ///
-    /// ISS[5:0] when EC is `.iabort_lower` or `iabort_cur`.
-    pub const Ifsc = enum(u6) {
-        addr_size_lvl0 = 0b000000,
-        addr_size_lvl1 = 0b000001,
-        addr_size_lvl2 = 0b000010,
-        addr_size_lvl3 = 0b000011,
+    cmow: bool,
+    mscen: bool,
+    _34: u1 = 0,
+    bt0: bool,
+    bt1: bool,
+    itfsb: bool,
+    tcf0: u2,
 
-        trans_lv0 = 0b000100,
-        trans_lv1 = 0b000101,
-        trans_lv2 = 0b000110,
-        trans_lv3 = 0b000111,
+    tcf: u2,
+    ata0: bool,
+    ata: bool,
+    dssbs: bool,
+    tweden: bool,
+    twedel: u4,
 
-        af_lv1 = 0b001001,
-        af_lv2 = 0b001010,
-        af_lv3 = 0b001011,
-        af_lv0 = 0b001000,
+    tmt0: bool,
+    tmt: bool,
+    tme0: bool,
+    tme: bool,
+    enasr: bool,
+    enas0: bool,
 
-        perm_lv0 = 0b001100,
-        perm_lv1 = 0b001101,
-        perm_lv2 = 0b001110,
-        perm_lv3 = 0b001111,
-
-        _,
-    };
-
-    /// ISS encoding for Data Abort.
-    pub const IssDabort = packed struct(u25) {
-        /// Data Fault Status Code.
-        dfsc: Dfsc,
-        /// Write not Read,
-        ///
-        /// Indicates whether a synchronous abort was caused by an instruction writing to a memory location,
-        /// or by an instruction reading from a memory location.
-        wnr: enum(u1) {
-            read = 0,
-            write = 1,
-        },
-        /// Stage 1 Page Table Walk.
-        ///
-        /// For a stage 2 fault, indicates whether the fault was a stage 2 fault on an access made for a stage 1 translation table walk.
-        /// Otherwise, reserved.
-        s1ptw: u1,
-        /// Cache maintenance.
-        cm: u1,
-        /// External abort type.
-        /// Otherwise, fixed to 0.
-        ea: u1,
-        /// FAR not Valid when a synchronous Externnal abort.
-        fnv: bool,
-        ///
-        lst_set: u2,
-        ///
-        vncr: u1,
-        ///
-        ar_pfv: u1,
-        /// When ISV is set, Sixty Four bit general-purpose register transfer.
-        /// Width of the register accessed by the instruction is 64-bit.
-        sf_fnp: bool,
-        /// If ISV is set, Syndrome Register Transfer.
-        /// The register number of the Wt/Xt/Rt operand of the faulting instruction.
-        srt_wu: u5,
-        ///
-        sse_toplevel: u1,
-        /// When ISV is set, Syndrome Access Size.
-        ///
-        /// Indicates the size of the access attempted by the faulting operation.
-        sas: enum(u2) {
-            byte = 0b00,
-            halfword = 0b01,
-            word = 0b10,
-            doubleword = 0b11,
-        },
-        /// Instruction Syndrome Valid.
-        ///
-        /// Indicates whether the syndrome information in ISS[23:14] is valid.
-        isv: bool,
-    };
-
-    /// Data Abort Fault Status Code.
-    pub const Dfsc = enum(u6) {
-        addr_size_lvl0 = 0b000000,
-        addr_size_lvl1 = 0b000001,
-        addr_size_lvl2 = 0b000010,
-        addr_size_lvl3 = 0b000011,
-
-        trans_lvl0 = 0b000100,
-        trans_lvl1 = 0b000101,
-        trans_lvl2 = 0b000110,
-        trans_lvl3 = 0b000111,
-
-        af_lvl0 = 0b001000,
-        af_lvl1 = 0b001001,
-        af_lvl2 = 0b001010,
-        af_lvl3 = 0b001011,
-
-        perm_lvl0 = 0b001100,
-        perm_lvl1 = 0b001101,
-        perm_lvl2 = 0b001110,
-        perm_lvl3 = 0b001111,
-
-        _,
-    };
+    enals: bool,
+    epan: bool,
+    tcso0: bool,
+    tcso: bool,
+    entp2: bool,
+    nmi: bool,
+    spintmask: bool,
+    tidcp: bool,
 };
 
 /// TCR_ELx.
@@ -609,92 +815,10 @@ pub const Tcr = packed struct(u64) {
     };
 };
 
-/// ID_AA64MMFR0_ELn.
+/// TPIDR_EL<n>.
 ///
-/// Aarch64 Memory Model Feature Register 0.
-/// Provides information about the implemented memory model and memory management support.
-pub const IdAa64Mmfr0 = packed struct(u64) {
-    /// Physical Address range supported.
-    parange: PaRange,
-    /// Number of ASID bits.
-    asidbits: u4,
-    /// BigEnd.
-    bigend: u4,
-    /// SNSMem.
-    snsmem: u4,
-    /// BigEndEL0.
-    bigendel0: u4,
-    /// TGran16.
-    tgran16: u4,
-    /// TGran64.
-    tgran64: u4,
-    /// TGran4.
-    tgran4: u4,
-    /// TGran16_2
-    tgran16_2: u4,
-    /// TGran64_2
-    tgran64_2: u4,
-    /// TGran4_2
-    tgran4_2: u4,
-    /// ExS.
-    exs: u4,
-    /// Reserved.
-    _48: u8 = 0,
-    /// FGT.
-    fgt: u4,
-    /// ECV.
-    ecv: u4,
-
-    /// Physical Address range.
-    const PaRange = enum(u4) {
-        /// 32 bits, 4GB
-        bits_32 = 0b0000,
-        /// 36 bits, 64GB
-        bits_36 = 0b0001,
-        /// 40 bits, 1TB
-        bits_40 = 0b0010,
-        /// 42 bits, 4TB
-        bits_42 = 0b0011,
-        /// 44 bits, 16TB
-        bits_44 = 0b0100,
-        /// 48 bits, 256TB
-        bits_48 = 0b0101,
-        /// 52 bits, 1PB
-        bits_52 = 0b0110,
-        /// 56 bits, 64PB
-        bits_56 = 0b1111,
-    };
-};
-
-/// FAR_ELx.
-///
-/// Fault Address Register.
-pub const Far = packed struct(u64) {
-    /// Fault address.
-    addr: u64,
-};
-
-/// PFAR_ELx.
-///
-/// Physical Fault Address Register.
-pub const Pfar = packed struct(u64) {
-    /// Physical fault address.
-    addr: u64,
-};
-
-/// MAIR_ELx.
-///
-/// Memory Attribute Indirection Register.
-pub const Mair = packed struct(u64) {
-    attr0: u8,
-    attr1: u8,
-    attr2: u8,
-    attr3: u8,
-    attr4: u8,
-    attr5: u8,
-    attr6: u8,
-    attr7: u8,
-};
+/// Thread ID Register.
+pub const Tpidr = u64;
 
 /// TTBR0_EL1.
 ///
@@ -716,102 +840,24 @@ pub const Ttbr1El1 = packed struct(u64) {
     asid: u16,
 };
 
-/// SCTLR_EL1.
+/// VBAR_ELx.
 ///
-/// System Control Register EL1.
-pub const SctlrEl1 = packed struct(u64) {
-    m: bool,
-    a: bool,
-    c: bool,
-    sa: bool,
-    sa0: bool,
-    cp15ben: bool,
-    naa: bool,
-    itd: bool,
-
-    sed: bool,
-    uma: bool,
-    enrctx: bool,
-    eos: bool,
-    i: bool,
-    endb: bool,
-    dze: bool,
-    uct: bool,
-
-    ntwi: bool,
-    _17: u1 = 0,
-    ntwe: bool,
-    wxn: bool,
-    tscxt: bool,
-    iesb: bool,
-    eis: bool,
-    span: bool,
-
-    e0e: bool,
-    ee: bool,
-    uci: bool,
-    enda: bool,
-    ntlsmd: bool,
-    lsmaoe: bool,
-    enib: bool,
-    enia: bool,
-
-    cmow: bool,
-    mscen: bool,
-    _34: u1 = 0,
-    bt0: bool,
-    bt1: bool,
-    itfsb: bool,
-    tcf0: u2,
-
-    tcf: u2,
-    ata0: bool,
-    ata: bool,
-    dssbs: bool,
-    tweden: bool,
-    twedel: u4,
-
-    tmt0: bool,
-    tmt: bool,
-    tme0: bool,
-    tme: bool,
-    enasr: bool,
-    enas0: bool,
-
-    enals: bool,
-    epan: bool,
-    tcso0: bool,
-    tcso: bool,
-    entp2: bool,
-    nmi: bool,
-    spintmask: bool,
-    tidcp: bool,
+/// Vector Base Address Register.
+/// Holds the vector base address for any exception that is taken to ELx.
+pub const Vbar = packed struct(u64) {
+    /// Vector base address.
+    addr: u64,
 };
 
-/// CPACR_EL1.
+// =============================================================
+// Generic Timer Registers.
+
+/// CNTFRQ_EL0.
 ///
-/// Architectural Feature Access Control Register EL1.
-pub const CpacrEl1 = packed struct(u64) {
-    /// Reserved.
-    _0: u16 = 0,
-    /// Traps execution at EL1 and EL0 of SVE instructions when the PE is not in Streaming SVE mode.
-    zen: u2,
-    /// Reserved.
-    _18: u2 = 0,
-    /// Traps execution at EL1 and EL0 of instructions that access the Advanced SIMD and FP registers from both Execution states to EL1.
-    fpen: u2,
-    /// Reserved.
-    _22: u2 = 0,
-    /// Traps execution at EL1 and EL0 of SME instructions.
-    smen: u2,
-    /// Reserved.
-    _26: u2 = 0,
-    /// Traps EL0 and EL1 System register accesses to all implemented trace registers from both Execution states to EL1.
-    tta: bool,
-    /// Enable access to POR_EL0.
-    e0poe: bool,
-    /// Reserved.
-    _30: u2 = 0,
+/// Counter-timer Frequency Register.
+pub const Cntfrq = packed struct(u64) {
+    /// Timer frequency.
+    freq: u32,
     /// Reserved.
     _32: u32 = 0,
 };
@@ -822,16 +868,6 @@ pub const CpacrEl1 = packed struct(u64) {
 pub const Cntpct = packed struct(u64) {
     /// Physical count value.
     value: u64,
-};
-
-/// CNTFRQ_EL0.
-///
-/// Counter-timer Frequency Register.
-pub const Cntfrq = packed struct(u64) {
-    /// Timer frequency.
-    freq: u32,
-    /// Reserved.
-    _32: u32 = 0,
 };
 
 /// CNTP_CTL_EL0.
@@ -858,34 +894,18 @@ pub const CntpTval = packed struct(u64) {
     _32: u32 = 0,
 };
 
-/// MPIDR_EL1.
-///
-/// Multiprocessor Affinity Register.
-pub const Mpidr = packed struct(u64) {
-    /// Affinity level 0.
-    aff0: u8,
-    /// Affinity level 1.
-    aff1: u8,
-    /// Affinity level 2.
-    aff2: u8,
-    /// Whether the lowest level of affinity consists of logical PEs.
-    mt: bool,
-    /// Reserved.
-    _25: u5 = 0,
-    /// Uniprocessor system.
-    u: bool,
-    /// Reserved.
-    _31: u1 = 1,
-    /// Affinity level 3.
-    aff3: u8,
-    /// Reserved.
-    _40: u24 = 0,
-};
+// =============================================================
+// GIC Registers.
 
-/// TPIDR_EL<n>.
+/// ICC_BPRn_EL1. (n = 0,1)
 ///
-/// Thread ID Register.
-pub const Tpidr = u64;
+/// Interrupt Controller Binary Point Register n.
+pub const IccBpr = packed struct(u64) {
+    /// Binary point.
+    bpr: u3,
+    /// Reserved.
+    _3: u61 = 0,
+};
 
 /// ICC_CTLR_EL1.
 ///
@@ -928,63 +948,6 @@ pub const IccCtlr = packed struct(u64) {
     };
 };
 
-/// ICC_SRE_ELx.
-///
-/// Interrupt Controller System Register Enable Register.
-pub const IccSre = packed struct(u64) {
-    /// System Register Enable.
-    sre: bool,
-    /// Disable FIQ bypass.
-    dfb: bool,
-    /// Disable IRQ bypass.
-    dib: bool,
-    /// Enables lower Exception level access to ICC_SRE_ELx.
-    enable: bool,
-    /// Reserved.
-    _4: u60 = 0,
-};
-
-/// ICC_PMR_EL1.
-///
-/// Interrupt Controller Interrupt Priority Mask Register.
-pub const IccPmr = packed struct(u64) {
-    /// Priority mask.
-    priority: u8,
-    /// Reserved.
-    _8: u56 = 0,
-};
-
-/// ICC_BPRn_EL1. (n = 0,1)
-///
-/// Interrupt Controller Binary Point Register n.
-pub const IccBpr = packed struct(u64) {
-    /// Binary point.
-    bpr: u3,
-    /// Reserved.
-    _3: u61 = 0,
-};
-
-/// ICC_IGRPEN1_EL1.
-///
-/// Interrupt Controller Interrupt Group 1 Enable Register.
-pub const IccIgrpen1El1 = packed struct(u64) {
-    /// Enable Group 0 interrupts.
-    enable: bool,
-    /// Reserved.
-    _1: u63 = 0,
-};
-
-/// ICC_IAR1_EL1
-///
-/// The PE reads this register to obtain the INTID of the signaled Group 1 interrupt.
-/// This read acts as an acknowledge for the interrupt.
-pub const IccIar1El1 = packed struct(u64) {
-    /// The INTID of the signaled interrupt.
-    intid: u24,
-    /// Reserved.
-    _24: u40 = 0,
-};
-
 /// ICC_DIR1_EL1.
 ///
 /// Interrupt Controller Deactivate Interrupt Register.
@@ -1006,6 +969,37 @@ pub const IccEoir1El1 = packed struct(u64) {
     intid: u24,
     /// Reserved.
     _24: u40 = 0,
+};
+
+/// ICC_IAR1_EL1
+///
+/// The PE reads this register to obtain the INTID of the signaled Group 1 interrupt.
+/// This read acts as an acknowledge for the interrupt.
+pub const IccIar1El1 = packed struct(u64) {
+    /// The INTID of the signaled interrupt.
+    intid: u24,
+    /// Reserved.
+    _24: u40 = 0,
+};
+
+/// ICC_IGRPEN1_EL1.
+///
+/// Interrupt Controller Interrupt Group 1 Enable Register.
+pub const IccIgrpen1El1 = packed struct(u64) {
+    /// Enable Group 0 interrupts.
+    enable: bool,
+    /// Reserved.
+    _1: u63 = 0,
+};
+
+/// ICC_PMR_EL1.
+///
+/// Interrupt Controller Interrupt Priority Mask Register.
+pub const IccPmr = packed struct(u64) {
+    /// Priority mask.
+    priority: u8,
+    /// Reserved.
+    _8: u56 = 0,
 };
 
 /// ICC_SGI1R_EL1.
@@ -1054,8 +1048,18 @@ pub const IccSgi1r = packed struct(u64) {
     }
 };
 
-// =============================================================
-// Imports
-// =============================================================
-
-const std = @import("std");
+/// ICC_SRE_ELx.
+///
+/// Interrupt Controller System Register Enable Register.
+pub const IccSre = packed struct(u64) {
+    /// System Register Enable.
+    sre: bool,
+    /// Disable FIQ bypass.
+    dfb: bool,
+    /// Disable IRQ bypass.
+    dib: bool,
+    /// Enables lower Exception level access to ICC_SRE_ELx.
+    enable: bool,
+    /// Reserved.
+    _4: u60 = 0,
+};
