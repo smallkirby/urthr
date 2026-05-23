@@ -108,7 +108,7 @@ fn drawGlyph(self: *Self, col: u32, row: u32, ch: u8) void {
     const x0 = col * font.glyph_width;
     const y0 = row * font.glyph_height;
     const stride = self.pitch / @sizeOf(u32);
-    const pixels: [*]volatile u32 = @ptrFromInt(self.base);
+    const pixels: [*]u32 = @ptrFromInt(self.base);
 
     for (glyph, 0..) |row_bytes, dy| {
         var mask: u8 = 0x80;
@@ -154,7 +154,7 @@ fn scrollUp(self: *Self) void {
 fn clearRow(self: *Self, text_row: u32) void {
     const stride = self.pitch / @sizeOf(u32);
     const y0 = text_row * font.glyph_height;
-    const pixels: [*]volatile u32 = @ptrFromInt(self.base);
+    const pixels: [*]u32 = @ptrFromInt(self.base);
     for (0..font.glyph_height) |dy| {
         for (0..self.width) |dx| {
             pixels[(y0 + dy) * stride + dx] = self.bg;
@@ -165,7 +165,7 @@ fn clearRow(self: *Self, text_row: u32) void {
 /// Clear the entire framebuffer by filling it with background color.
 fn clear(self: *Self) void {
     const total = (self.pitch / @sizeOf(u32)) * self.height;
-    const pixels: [*]volatile u32 = @ptrFromInt(self.base);
+    const pixels: [*]u32 = @ptrFromInt(self.base);
     for (0..total) |i| {
         pixels[i] = self.bg;
     }
