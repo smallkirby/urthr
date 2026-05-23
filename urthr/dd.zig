@@ -3,7 +3,6 @@
 //! Drivers don't know about the board layout and cannot rely on any board-specific information.
 
 pub const fake_rng = @import("dd/fake_rng.zig");
-pub const gpio = @import("dd/gpio.zig");
 pub const net = @import("dd/net.zig");
 pub const pci = @import("dd/pci.zig");
 pub const pl011 = @import("dd/pl011.zig");
@@ -17,6 +16,5 @@ pub const VirtioRng = @import("dd/VirtioRng.zig");
 // =============================================================
 
 test {
-    _ = gpio;
     _ = pl011;
 }
