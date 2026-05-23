@@ -343,16 +343,25 @@ const DirEnt64 = extern struct {
 /// syscall: ioctl
 pub fn sysIoctl(fd: usize, request: IoctlRequest, arg: usize) ReturnType {
     _ = fd;
-    _ = arg;
 
     switch (request) {
         // TIOCGWINSZ
         .tiocgwinsz => {
-            return .err(.notty);
+            const ret: *IoctlWinSize = @ptrFromInt(arg);
+            ret.* = .{
+                .row = 25,
+                .col = 80,
+                .xpixel = 0,
+                .ypixel = 0,
+            }; // TODO: dummy value
+            return .success(0);
         },
 
         // Unrecognized requests.
-        _ => return .err(.inval),
+        _ => {
+            log.warn("Unrecognized ioctl request: {d}", .{@intFromEnum(request)});
+            return .err(.inval);
+        },
     }
 }
 
@@ -361,6 +370,17 @@ const IoctlRequest = enum(u64) {
     tiocgwinsz = 0x5413,
 
     _,
+};
+
+const IoctlWinSize = extern struct {
+    /// Row count.
+    row: u16,
+    /// Column count.
+    col: u16,
+    /// Pixel width.
+    xpixel: u16,
+    /// Pixel height.
+    ypixel: u16,
 };
 
 // =============================================================
@@ -477,6 +497,7 @@ fn openFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{B
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.pxfs);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
