@@ -838,6 +838,17 @@ const Qemu = struct {
             else => {},
         }
 
+        // Default peripherals
+        switch (self.machine) {
+            .virt => try args.appendSlice(allocator, &.{
+                "-device",
+                "nec-usb-xhci,id=xhci",
+                "-device",
+                "usb-kbd",
+            }),
+            else => {},
+        }
+
         // Enable verbose logs.
         var logiter = std.mem.splitAny(u8, self.verbose_logs, ",");
         while (logiter.next()) |log| {
