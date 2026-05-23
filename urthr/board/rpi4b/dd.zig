@@ -1,4 +1,5 @@
 pub const dma = @import("dd/dma.zig");
+pub const gpio = @import("dd/gpio.zig");
 pub const pm = @import("dd/pm.zig");
 pub const vcmbox = @import("../rpi5/dd/vcmbox.zig");
 

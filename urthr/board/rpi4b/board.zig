@@ -18,12 +18,12 @@ var exception_handler: ?ExceptionHandler = null;
 /// Expects all virtual address range is identity-mapped.
 pub fn boot() void {
     // Setup GPIO.
-    dd.gpio.setBase(map.gpio.start);
+    rdd.gpio.setBase(map.gpio.start);
 
     // Setup PL011 UART.
     dd.pl011.setBase(map.pl011.start);
-    dd.gpio.selectAltFn(14, .alt0); // TXD0
-    dd.gpio.selectAltFn(15, .alt0); // RXD0
+    rdd.gpio.selectAltFn(14, .alt0); // TXD0
+    rdd.gpio.selectAltFn(15, .alt0); // RXD0
     dd.pl011.init(48_000_000, 921_600); // 48 MHz, 921600 bps
 
     // Setup PM.
@@ -33,7 +33,7 @@ pub fn boot() void {
 /// Map new I/O memory regions.
 pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
     // GPIO
-    dd.gpio.setBase(try allocator.reserveAndRemap(
+    rdd.gpio.setBase(try allocator.reserveAndRemap(
         "GPIO",
         map.gpio.start,
         map.gpio.size(),
