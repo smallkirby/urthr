@@ -160,7 +160,11 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
 
     // Framebuffer.
     {
-        rdd.FrameBuffer.init(urd.mem.phys, urd.mem.page) catch |err| {
+        rdd.FrameBuffer.init(
+            urd.mem.phys,
+            urd.mem.page,
+            .{ .memcpy = null },
+        ) catch |err| {
             log.err("framebuffer initialization failed: {t}", .{err});
         };
         urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
