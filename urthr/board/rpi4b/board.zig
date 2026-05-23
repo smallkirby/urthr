@@ -76,6 +76,18 @@ pub fn initPeripherals() common.mem.Error!void {
         arch.gicv2.initGlobal();
     }
 
+    // DMA
+    {
+        rdd.dma.setBase(try urd.mem.phys.reserveAndRemap(
+            "DMA",
+            memmap.dma.start,
+            memmap.dma.size(),
+            null,
+            .device,
+        ));
+        try rdd.dma.init();
+    }
+
     // SDHC
     {
         const base = try urd.mem.phys.reserveAndRemap(
