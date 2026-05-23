@@ -65,7 +65,7 @@ var capm = dd.pci.PcieCap{};
 const dma_offset: usize = 0x10_0000_0000;
 
 /// DMA allocator instance.
-var dma_allocator: DmaAllocatorImpl = undefined;
+var dma_allocator: dd.pci.DmaAllocatorImpl = undefined;
 
 // =============================================================
 // API
@@ -97,7 +97,7 @@ pub fn init(page_allocator: PageAllocator) void {
     });
 
     // Instantiate DMA allocator.
-    dma_allocator = DmaAllocatorImpl.new(page_allocator);
+    dma_allocator = .new(page_allocator);
 }
 
 /// Setup outbound address translation.
@@ -207,7 +207,7 @@ pub fn getConfIoType1() dd.pci.ConfIo(dd.pci.HeaderType1) {
 
 /// Get the DMA allocator that can be used to transfer data over PCIe.
 pub fn getDmaAllocator() DmaAllocator {
-    return dma_allocator.interface();
+    return dma_allocator.interface(dma_offset);
 }
 
 /// Reset the PCIe controller.
@@ -440,57 +440,6 @@ const MdioAddr = packed struct(u32) {
         read = 0,
         write = 1,
     };
-};
-
-// =============================================================
-// DMA allocator
-// =============================================================
-
-const DmaAllocatorImpl = struct {
-    const Self = @This();
-
-    page_allocator: PageAllocator,
-
-    const vtable = DmaAllocator.Vtable{
-        .allocPages = Self.allocPages,
-        .freePages = Self.freePages,
-        .virt2phys = Self.virt2phys,
-        .phys2virt = Self.phys2virt,
-    };
-
-    /// Create a new allocator implementing DmaAllocator interface.
-    pub fn new(page_allocator: PageAllocator) Self {
-        return .{ .page_allocator = page_allocator };
-    }
-
-    /// Get the DmaAllocator interface.
-    pub fn interface(self: *Self) DmaAllocator {
-        return DmaAllocator{
-            .ptr = @ptrCast(self),
-            .vtable = &Self.vtable,
-            .offset = dma_offset,
-        };
-    }
-
-    fn allocPages(ctx: *anyopaque, num_pages: usize) DmaAllocator.Error![]align(DmaAllocator.page_size) u8 {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        return self.page_allocator.allocPagesP(num_pages);
-    }
-
-    fn freePages(ctx: *anyopaque, slice: []u8) void {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        self.page_allocator.freePagesP(slice);
-    }
-
-    fn virt2phys(ctx: *const anyopaque, vaddr: usize) usize {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        return self.page_allocator.translateP(vaddr);
-    }
-
-    fn phys2virt(ctx: *const anyopaque, paddr: usize) usize {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        return self.page_allocator.translateV(paddr);
-    }
 };
 
 // =============================================================
