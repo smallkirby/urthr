@@ -186,6 +186,9 @@ pub fn setupChannel(chan: usize) void {
 pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
     rtt.expect(chan <= num_channels);
 
+    // Wait for any previous transfer on this channel to complete.
+    waitChannelIdle(chan);
+
     // Setup control block.
     switch (cbs[chan]) {
         .normal => |cb| {
@@ -270,6 +273,28 @@ pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
                 .qos = 15,
                 .panic_qos = 15,
             }));
+        },
+    }
+}
+
+/// Wait until the channel is idle.
+///
+/// Safe to call even when no transfer is in progress.
+fn waitChannelIdle(chan: usize) void {
+    switch (dmas[chan]) {
+        .normal => |*dma| {
+            while (dma.read(ndma.Cs).active) {
+                // Wait until the channel is idle.
+            }
+            // Clear the END flag.
+            dma.modify(ndma.Cs, .{ .end = true });
+        },
+        inline else => |*dma| {
+            while (dma.read(dma4.Cs).active) {
+                // Wait until the channel is idle.
+            }
+            // Clear the END flag.
+            dma.modify(dma4.Cs, .{ .end = true });
         },
     }
 }
