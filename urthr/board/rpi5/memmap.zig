@@ -52,6 +52,12 @@ comptime {
 // Peripherals
 // =============================================================
 
+/// DMA controller.
+pub const dma = Range{
+    .start = 0x0010_0001_0000,
+    .end = 0x0010_0001_1000,
+};
+
 /// PL011 UART (debug port)
 pub const pl011 = Range{
     .start = 0x0010_7D00_1000,
