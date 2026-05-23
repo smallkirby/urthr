@@ -4,8 +4,20 @@
 
 const Self = @This();
 
+/// Optional functions for framebuffer implementations.
+pub const VTable = struct {
+    /// DMA-accelerated memcpy.
+    ///
+    /// - `dst`: Destination physical address.
+    /// - `src`: Source physical address.
+    /// - `len`: Length in bytes.
+    memcpy: ?*const fn (dst: usize, src: usize, len: usize) void,
+};
+
 /// Virtual base address of the pixel buffer.
 base: usize,
+/// Physical base address of the pixel buffer.
+phys_base: usize,
 /// Bytes per scanline.
 pitch: u32,
 /// Framebuffer width in pixels.
@@ -27,24 +39,33 @@ fg: u32,
 /// Background color (RGBX8888).
 bg: u32,
 
+/// VTable.
+fbvtable: VTable,
+
 /// Initialize the framebuffer console.
 ///
 /// - `base`: Base virtual address of the pixel buffer.
+/// - `phys`: Base physical address of the pixel buffer.
 /// - `pitch`: Bytes per scanline.
 /// - `width`: Framebuffer width in pixels.
 /// - `height`: Framebuffer height in pixels.
-pub fn init(base: usize, pitch: u32, width: u32, height: u32) Self {
+pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, vt: VTable) Self {
     var self = Self{
         .base = base,
         .pitch = pitch,
         .width = width,
         .height = height,
+
         .col = 0,
         .row = 0,
         .cols = width / font.glyph_width,
         .rows = height / font.glyph_height,
+
         .fg = 0xFF0000FF,
         .bg = 0x00000000,
+
+        .fbvtable = vt,
+        .phys_base = phys orelse 0,
     };
 
     self.clear();
@@ -140,12 +161,18 @@ fn scrollUp(self: *Self) void {
     const total_pixels = stride * self.height;
     const copy_count = total_pixels - row_pixels;
 
-    const p: [*]u32 = @ptrFromInt(self.base);
-    std.mem.copyForwards(
-        u32,
-        p[0..copy_count],
-        p[row_pixels .. row_pixels + copy_count],
-    );
+    if (self.fbvtable.memcpy) |memcpy| {
+        const len = copy_count * @sizeOf(u32);
+        const src = self.phys_base + row_pixels * @sizeOf(u32);
+        memcpy(self.phys_base, src, len);
+    } else {
+        const p: [*]u32 = @ptrFromInt(self.base);
+        std.mem.copyForwards(
+            u32,
+            p[0..copy_count],
+            p[row_pixels .. row_pixels + copy_count],
+        );
+    }
 
     self.clearRow(self.rows - 1);
 }

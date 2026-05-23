@@ -25,14 +25,14 @@ pub fn FrameBuffer(width: usize, height: usize) type {
         });
 
         /// Text console backed by the framebuffer.
-        var console: common.FbConsole = undefined;
+        var console: FbConsole = undefined;
 
         // =============================================================
         // API
         // =============================================================
 
         /// Initialize the framebuffer.
-        pub fn init(io: IoAllocator, page: PageAllocator) Error!void {
+        pub fn init(io: IoAllocator, page: PageAllocator, vt: FbConsole.VTable) Error!void {
             const buf = try page.allocPagesV(1);
             defer page.freePagesV(buf);
 
@@ -142,11 +142,13 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             fb.pitch = pitch;
 
             // Create a framebuffer console.
-            console = common.FbConsole.init(
+            console = FbConsole.init(
                 fb.base,
+                fb.phys,
                 fb.pitch,
                 fb.width,
                 fb.height,
+                vt,
             );
         }
 
@@ -220,6 +222,7 @@ const common = @import("common");
 const rtt = common.rtt;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
+const FbConsole = common.FbConsole;
 const urd = @import("urthr");
 const sync = @import("../sync.zig");
 const vcmbox = @import("vcmbox.zig");

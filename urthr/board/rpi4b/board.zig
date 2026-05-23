@@ -118,9 +118,16 @@ pub fn initPeripherals() common.mem.Error!void {
 
     // Framebuffer
     {
-        rdd.FrameBuffer.init(urd.mem.phys, urd.mem.page) catch |err| {
+        rdd.dma.setupChannel(memcpy_dma_chan);
+
+        rdd.FrameBuffer.init(
+            urd.mem.phys,
+            urd.mem.page,
+            .{ .memcpy = dmaMemcpy },
+        ) catch |err| {
             log.err("framebuffer initialization failed: {t}", .{err});
         };
+
         urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
             log.warn("failed to add console backend: {}", .{err});
         };
@@ -310,6 +317,18 @@ const console = struct {
         return dd.pl011.flush();
     }
 };
+
+// =============================================================
+// Internals
+// =============================================================
+
+/// DMA channel used for memcpy.
+const memcpy_dma_chan = 0;
+
+/// DMA-accelerated memcpy.
+fn dmaMemcpy(dst: usize, src: usize, len: usize) void {
+    rdd.dma.memcpy(memcpy_dma_chan, src, dst, len);
+}
 
 // =============================================================
 // Imports
