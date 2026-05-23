@@ -209,8 +209,8 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
 
         // TODO: should we create an interface here?
         const iface = try urd.net.ip.Interface.create(
-            net.ip.IpAddr.comptimeParse("0.0.0.0"),
-            net.ip.IpAddr.comptimeParse("0.0.0.0"),
+            .comptimeParse("0.0.0.0"),
+            .comptimeParse("0.0.0.0"),
             urd.mem.bin,
         );
         try gemdev.appendInterface(iface);
