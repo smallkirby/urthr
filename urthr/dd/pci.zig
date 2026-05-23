@@ -56,12 +56,12 @@ pub const PcieCap = mmio.Module(.{ .size = u32 }, &.{
 // API
 // =============================================================
 
-/// Data type for function number.
-const FunctionNum = u3;
-/// Data type for device number.
-const DeviceNum = u5;
 /// Data type for bus number.
-const BusNum = u8;
+pub const BusNum = u8;
+/// Data type for device number.
+pub const DeviceNum = u5;
+/// Data type for function number.
+pub const FunctionNum = u3;
 
 /// I/O interface for PCI Configuration Space.
 pub fn ConfIo(Module: type) type {
@@ -146,8 +146,8 @@ pub fn ConfIo(Module: type) type {
             base: usize,
 
             /// Prepare to read from or write to the address at the given offset and return the effective address.
-            fn prepareIo(_: Self, roffset: usize, b: BusNum, d: DeviceNum, f: FunctionNum) usize {
-                return bits.concatMany(u28, .{ b, d, f, @as(u12, @intCast(roffset)) });
+            fn prepareIo(self: Self, roffset: usize, b: BusNum, d: DeviceNum, f: FunctionNum) usize {
+                return self.base + bits.concatMany(u28, .{ b, d, f, @as(u12, @intCast(roffset)) });
             }
         };
 
@@ -174,6 +174,74 @@ pub fn ConfIo(Module: type) type {
             }
         };
     };
+}
+
+/// PCI device found during bus scan.
+pub const ScanResult = struct {
+    /// Bus number.
+    bus: BusNum,
+    /// Device number.
+    device: DeviceNum,
+    /// Function number.
+    function: FunctionNum,
+    /// Vendor ID.
+    vendor_id: u16,
+    /// Device ID.
+    device_id: u16,
+    /// Base class.
+    class: u8,
+    /// Subclass.
+    subclass: u8,
+};
+
+/// Scan the PCIe bus and return found devices.
+///
+/// Scan stops when output buffer is full.
+pub fn scanBus(confio: anytype, bus: BusNum, out: []ScanResult) []const ScanResult {
+    var n: usize = 0;
+
+    for (0..std.math.maxInt(DeviceNum)) |d| d_block: {
+        const device: DeviceNum = @intCast(d);
+
+        for (0..std.math.maxInt(FunctionNum)) |f| f_block: {
+            const function: FunctionNum = @intCast(f);
+
+            var io = confio;
+            io.setAddress(bus, device, function);
+
+            const vd = io.read(HeaderVendorDevice);
+            if (vd.vendor_id == 0xFFFF) {
+                if (f == 0) break :f_block; // Device not present
+                continue;
+            }
+
+            const rc = io.read(HeaderRevClass);
+            out[n] = .{
+                .bus = bus,
+                .device = device,
+                .function = function,
+                .vendor_id = vd.vendor_id,
+                .device_id = vd.device_id,
+                .class = rc.base_class,
+                .subclass = rc.sub_class,
+            };
+
+            n += 1;
+            if (n >= out.len) {
+                break :d_block;
+            }
+
+            // Skip remaining functions if not multi-function device.
+            if (f == 0) {
+                const ht = io.read(HeaderBistLatCacheLine);
+                if (ht.header_type & 0x80 == 0) {
+                    break :f_block;
+                }
+            }
+        }
+    }
+
+    return out[0..n];
 }
 
 /// BAR information.
@@ -821,6 +889,58 @@ pub const LinkControlStatus2 = packed struct(u32) {
         /// 32.0 GT/s
         speed_32_0_gt = 5,
     };
+};
+
+// =============================================================
+// DMA Allocator
+// =============================================================
+
+/// Implements `common.mem.DmaAllocator` using a page allocator.
+///
+/// Handles the transition between virtual and bus addresses.
+pub const DmaAllocatorImpl = struct {
+    const Self = @This();
+
+    page_allocator: common.mem.PageAllocator,
+
+    const vtable = common.mem.DmaAllocator.Vtable{
+        .allocPages = Self.allocPages,
+        .freePages = Self.freePages,
+        .virt2phys = Self.virt2phys,
+        .phys2virt = Self.phys2virt,
+    };
+
+    pub fn new(page_allocator: common.mem.PageAllocator) Self {
+        return .{ .page_allocator = page_allocator };
+    }
+
+    pub fn interface(self: *Self, offset: usize) common.mem.DmaAllocator {
+        return common.mem.DmaAllocator{
+            .ptr = @ptrCast(self),
+            .vtable = &Self.vtable,
+            .offset = offset,
+        };
+    }
+
+    fn allocPages(ctx: *anyopaque, num_pages: usize) common.mem.DmaAllocator.Error![]align(common.mem.DmaAllocator.page_size) u8 {
+        const self: *const Self = @ptrCast(@alignCast(ctx));
+        return self.page_allocator.allocPagesP(num_pages);
+    }
+
+    fn freePages(ctx: *anyopaque, slice: []u8) void {
+        const self: *const Self = @ptrCast(@alignCast(ctx));
+        self.page_allocator.freePagesP(slice);
+    }
+
+    fn virt2phys(ctx: *const anyopaque, vaddr: usize) usize {
+        const self: *const Self = @ptrCast(@alignCast(ctx));
+        return self.page_allocator.translateP(vaddr);
+    }
+
+    fn phys2virt(ctx: *const anyopaque, paddr: usize) usize {
+        const self: *const Self = @ptrCast(@alignCast(ctx));
+        return self.page_allocator.translateV(paddr);
+    }
 };
 
 // =============================================================

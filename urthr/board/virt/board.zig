@@ -66,6 +66,19 @@ pub fn initPeripherals() common.mem.Error!void {
         arch.gicv3.initGlobal();
     }
 
+    // PCIe ECAM.
+    {
+        const pci = try urd.mem.phys.reserveAndRemap(
+            "PCIe ECAM",
+            memmap.pci.start,
+            memmap.pci.size(),
+            null,
+            .device,
+        );
+        rdd.pcie.setBase(pci);
+        rdd.pcie.init(urd.mem.page);
+    }
+
     // virtio
     {
         const virtio_size = dd.virtio.mmio_space_size;
@@ -297,3 +310,4 @@ const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const urd = @import("urthr");
 const dd = @import("dd");
+const rdd = @import("dd.zig");
