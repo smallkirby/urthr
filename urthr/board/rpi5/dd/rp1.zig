@@ -28,6 +28,8 @@ var rp1 = mmio.Module(.{ .size = void }, &.{
     .{ 0x0010_0000, mmio.Marker(.eth) },
     .{ 0x0010_4000, mmio.Marker(.eth_cfg) },
     .{ 0x0010_8000, mmio.Marker(.pcie) },
+    .{ 0x0020_0000, mmio.Marker(.usbhost0) },
+    .{ 0x0030_0000, mmio.Marker(.usbhost1) },
     .{ 0x0018_0000, mmio.Marker(.sdio0) },
     .{ 0x0018_4000, mmio.Marker(.sdio1) },
     .{ 0x0040_0000, mmio.Marker(.end) },
@@ -278,6 +280,16 @@ pub fn getEthrCfgBase() usize {
     return rp1.getMarkerAddress(.eth_cfg);
 }
 
+/// Get the base address of usbhost0 registers.
+pub fn getUsbHost0Base() usize {
+    return rp1.getMarkerAddress(.usbhost0);
+}
+
+/// Get the base address of usbhost1 registers.
+pub fn getUsbHost1Base() usize {
+    return rp1.getMarkerAddress(.usbhost1);
+}
+
 /// Get the IRQ number of RP1 peripherals.
 pub fn getIrqNumber(irq: MsiIrq) u16 {
     return @intFromEnum(irq) + mip0_spi_offset + spi_offset;
@@ -348,6 +360,18 @@ fn mapPeris(allocator: IoAllocator, root: *IoAllocator.Resource) IoAllocator.Err
     _ = try allocator.reserve(
         "eth_cfg",
         root.phys + rp1.getMarkerOffset(.eth_cfg),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "usbhost0",
+        root.phys + rp1.getMarkerOffset(.usbhost0),
+        0x0000_4000,
+        root,
+    );
+    _ = try allocator.reserve(
+        "usbhost1",
+        root.phys + rp1.getMarkerOffset(.usbhost1),
         0x0000_4000,
         root,
     );
