@@ -109,10 +109,10 @@ var vmsix: usize = undefined;
 /// Initialize RP1 controller.
 pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     const host = pcie.interface();
-    const addr = dd.pci.DevAddr{ .bus = 1 };
+    const io = host.getIo(.{ .bus = 1 });
 
     // Read configuration header.
-    const header_vendor_dev = host.readReg(dd.pci.HeaderType0, addr, dd.pci.HeaderVendorDevice);
+    const header_vendor_dev = io.readReg(dd.pci.HeaderType0, dd.pci.HeaderVendorDevice);
     log.info(
         "RP1 Vendor ID: 0x{X:0>4}, Device ID: 0x{X:0>4}",
         .{ header_vendor_dev.vendor_id, header_vendor_dev.device_id },
@@ -120,7 +120,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     rtt.expectEqual(0x1DE4, header_vendor_dev.vendor_id);
     rtt.expectEqual(0x0001, header_vendor_dev.device_id);
 
-    const class = host.readReg(dd.pci.HeaderType0, addr, dd.pci.HeaderRevClass);
+    const class = io.readReg(dd.pci.HeaderType0, dd.pci.HeaderRevClass);
     log.info(
         "RP1 Class Code: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}",
         .{ class.base_class, class.sub_class, class.prog_if, class.revision_id },
@@ -128,30 +128,30 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
 
     // Configure BARs.
     var bars_buffer: [6]dd.pci.BarInfo = undefined;
-    var bars = dd.pci.parseBars(host, addr, &bars_buffer);
+    var bars = io.parseBars(&bars_buffer);
     for (bars) |bar| {
         switch (bar.index) {
             0 => {
                 // MSI-X table and PBA
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(msix_range.pci, host, addr);
+                io.setBarAddress(bar, msix_range.pci);
             },
             1 => {
                 // Peripherals
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(peri_range.pci, host, addr);
+                io.setBarAddress(bar, peri_range.pci);
             },
             2 => {
                 // Shared SRAM
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(sram_range.pci, host, addr);
+                io.setBarAddress(bar, sram_range.pci);
             },
             else => {},
         }
     }
 
     // Print configured BARs.
-    bars = dd.pci.parseBars(host, addr, &bars_buffer);
+    bars = io.parseBars(&bars_buffer);
     for (bars) |bar| {
         log.info(
             "BAR{}: 0x{X:0>8} - 0x{X:0>8} ({t})",
@@ -182,7 +182,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     );
 
     // Set configuration header.
-    host.modifyReg(dd.pci.HeaderType0, addr, dd.pci.HeaderCommandStatus, .{
+    io.modifyReg(dd.pci.HeaderType0, dd.pci.HeaderCommandStatus, .{
         .memory_space_enable = true,
         .bus_master_enable = true,
         .interrupt_disable = false,
