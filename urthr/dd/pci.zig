@@ -324,8 +324,8 @@ fn Io(Module: type) type {
                     self.write(bar_offset, value);
                     self.write(bar_offset + 4, next_value);
 
-                    const mask64 = bits.concat(u64, next_mask, mask & 0xFFF_FFF0);
-                    const addr64 = bits.concat(u64, next_value, value & 0xFFF_FFF0) & mask64;
+                    const mask64 = bits.concat(u64, next_mask, mask & 0xFFFF_FFF0);
+                    const addr64 = bits.concat(u64, next_value, value & 0xFFFF_FFF0) & mask64;
 
                     buf.* = .{
                         .index = i,
