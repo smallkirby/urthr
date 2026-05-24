@@ -10,14 +10,16 @@ pub const Error = error{
 } || mem.Error;
 
 /// Capability registers module.
-capability: Capability,
+capability: regs.Capability,
 /// Operational registers module.
-operational: Operational,
+operational: regs.Operational,
 /// Runtime registers module.
-runtime: Runtime,
+runtime: regs.Runtime,
 
 /// Command Ring.
 cring: rings.Ring,
+/// Event Ring.
+ering: rings.EventRing,
 
 /// xHC PCI class code.
 const class = pci.ClassCode{
@@ -105,19 +107,19 @@ pub fn initMmio(base: usize) Error!*Self {
         self.capability.setBase(base + 0);
 
         // Operational registers.
-        const cap_info = self.capability.read(CapInfo);
+        const cap_info = self.capability.read(regs.CapInfo);
         self.operational.setBase(base + cap_info.cap_length);
 
         // Runtime registers.
-        const rts_off = self.capability.read(RtsOffset).value;
+        const rts_off = self.capability.read(regs.RtsOffset).value;
         self.runtime.setBase(base + rts_off & ~@as(u64, 0x1F));
     }
     log.debug("xHC capability register  @ 0x{X}", .{self.capability.base});
     log.debug("xHC operational register @ 0x{X}", .{self.operational.base});
     log.debug("xHC runtime register     @ 0x{X}", .{self.runtime.base});
-    log.debug("xHC version              : 0x{X}", .{self.capability.read(CapInfo).hci_version});
-    log.debug("xHC max slots            : {}", .{self.capability.read(StructureParam1).maxslots});
-    log.debug("xHC max ports            : {}", .{self.capability.read(StructureParam1).maxports});
+    log.debug("xHC version              : 0x{X}", .{self.capability.read(regs.CapInfo).hci_version});
+    log.debug("xHC max slots            : {}", .{self.capability.read(regs.StructureParam1).maxslots});
+    log.debug("xHC max ports            : {}", .{self.capability.read(regs.StructureParam1).maxports});
 
     return self;
 }
@@ -125,7 +127,7 @@ pub fn initMmio(base: usize) Error!*Self {
 /// Reset the controller.
 pub fn reset(self: *Self) Error!void {
     // Stop xHC.
-    self.operational.modify(CommandRegister, .{
+    self.operational.modify(regs.CommandRegister, .{
         .inte = false,
         .hsee = false,
         .ewe = false,
@@ -133,22 +135,22 @@ pub fn reset(self: *Self) Error!void {
     });
 
     // Wait until xHC stops.
-    while (self.operational.read(StatusRegister).hch == false) {
+    while (self.operational.read(regs.StatusRegister).hch == false) {
         std.atomic.spinLoopHint();
     }
 
     // Reset xHC.
-    self.operational.modify(CommandRegister, .{
+    self.operational.modify(regs.CommandRegister, .{
         .hc_rst = true,
     });
 
     // Wait until reset is complete.
-    while (self.operational.read(CommandRegister).hc_rst) {
+    while (self.operational.read(regs.CommandRegister).hc_rst) {
         std.atomic.spinLoopHint();
     }
 
     // Wait until the controller is ready.
-    while (self.operational.read(StatusRegister).cnr) {
+    while (self.operational.read(regs.StatusRegister).cnr) {
         std.atomic.spinLoopHint();
     }
 }
@@ -157,6 +159,8 @@ pub fn reset(self: *Self) Error!void {
 pub fn setup(self: *Self) Error!void {
     // Initialize rings.
     try self.initRings();
+
+    // TODO
 }
 
 // =============================================================
@@ -168,221 +172,29 @@ fn initRings(self: *Self) Error!void {
 
     // Init Command Ring.
     self.cring = try rings.Ring.new(num_trbs_per_ring, mem.page);
-    self.operational.write(Crcr0, Crcr0{
+    self.operational.write(regs.Crcr0, regs.Crcr0{
         .rcs = self.cring.pcs,
         .cs = false,
         .ca = false,
-        .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> @bitOffsetOf(Crcr0, "crp")),
+        .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> @bitOffsetOf(regs.Crcr0, "crp")),
     });
-    self.operational.write(Crcr1, Crcr1{
+    self.operational.write(regs.Crcr1, regs.Crcr1{
         .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> 32),
     });
 
     // Init Event Ring for the primary Interrupter.
-    // TODO
+    const irs0 = self.getIrsAt(0);
+    self.ering = try rings.EventRing.new(irs0, mem.page);
+    self.ering.init();
 }
 
-// =============================================================
-// Registers
-// =============================================================
-
-// =============================================================
-// xHCI Capability Registers
-
-const Capability = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, CapInfo },
-    .{ 0x04, StructureParam1 },
-    .{ 0x08, StructureParam2 },
-    .{ 0x0C, StructureParam3 },
-    .{ 0x10, CapParam1 },
-    .{ 0x14, DbOffset },
-    .{ 0x18, RtsOffset },
-    .{ 0x1C, CapParam2 },
-});
-
-const CapInfo = packed struct(u32) {
-    /// Offset from register base to the Operational Register Space.
-    cap_length: u8,
-    /// Reserved
-    _8: u8 = 0,
-    /// BCD encoding of the xHCI spec revision number supported by this HC.
-    hci_version: u16,
-};
-
-/// HCSPARAMS1
-const StructureParam1 = packed struct(u32) {
-    /// Number of device slots.
-    maxslots: u8,
-    /// Number of interrupters.
-    maxintrs: u11,
-    /// Reserved.
-    _19: u5 = 0,
-    /// Number of ports.
-    maxports: u8,
-};
-
-const StructureParam2 = packed struct(u32) {
-    value: u32,
-};
-
-const StructureParam3 = packed struct(u32) {
-    value: u32,
-};
-
-/// HCCPARAMS1
-const CapParam1 = packed struct(u32) {
-    /// Unimplemented
-    _0: u16 = 0,
-    /// xHCI Extended Capabilities Pointer.
-    xecp: u16,
-};
-
-const DbOffset = packed struct(u32) {
-    value: u32,
-};
-
-const RtsOffset = packed struct(u32) {
-    value: u32,
-};
-
-const CapParam2 = packed struct(u32) {
-    value: u32,
-};
-
-// =============================================================
-// xHC Operational Registers
-
-const Operational = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, CommandRegister },
-    .{ 0x04, StatusRegister },
-    .{ 0x08, PageSize },
-    .{ 0x18, Crcr0 },
-    .{ 0x1C, Crcr1 },
-    .{ 0x50, ConfigureRegister },
-    .{ 0x400, mmio.Marker(.port_set) },
-});
-
-/// USB Command Register. (USBCMD)
-const CommandRegister = packed struct(u32) {
-    /// Run/Stop.
-    /// When set to 1, the xHC proceeds with execution of the schedule.
-    /// When set to 0, the xHC completes the current transaction and halts.
-    rs: bool,
-    /// Host Controller Reset.
-    hc_rst: bool,
-    /// Interrupt Enable.
-    inte: bool,
-    /// Host System Error Enable,
-    hsee: bool,
-    /// Reserved
-    _4: u3 = 0,
-    /// Light Host Controller Reset.
-    lhcrst: bool,
-    /// Controller Save State.
-    css: bool,
-    /// Controller Restore State.
-    crs: bool,
-    /// Enable Wrap Event.
-    ewe: bool,
-    /// Enable U3 MFINDEX Stop.
-    u3s: bool,
-    /// Reserved.
-    _12: u1 = 0,
-    /// CEM Enable.
-    cme: bool,
-    /// Extended TBC Enable.
-    ete: bool,
-    /// Extended TBC TRB Status Enable.
-    tsc_en: bool,
-    /// VTIO Enable.
-    vtioe: bool,
-    /// Reserved.
-    _17: u15 = 0,
-};
-
-/// USB Status Register. (USBSTS)
-const StatusRegister = packed struct(u32) {
-    /// HCHalted.
-    hch: bool,
-    /// Reserved.
-    _1: u1 = 0,
-    /// Host System Error.
-    hse: bool,
-    /// Event Interrupt.
-    eint: bool,
-    /// Port Change Detect.
-    pcd: bool,
-    /// Reserved.
-    _5: u3 = 0,
-    /// Save State Status.
-    sss: bool,
-    /// Restore State Status.
-    rss: bool,
-    /// Save/Restore Error.
-    sre: bool,
-    /// Controller Not Ready.
-    cnr: bool,
-    /// Host Controller Error.
-    hce: bool,
-    /// Reserved.
-    _13: u19 = 0,
-};
-
-const PageSize = packed struct(u32) {
-    value: u32,
-};
-
-/// Lower 32 bits of Command Ring Control Register.
-const Crcr0 = packed struct(u32) {
-    /// Ring Cycle State.
-    ///
-    /// Indicates the xHC Consumer Cycle State (CCS).
-    /// Write is ignored if CRR is set.
-    rcs: u1,
-    /// Command Stop.
-    ///
-    /// Writing 1 shall stop the operation of the Command Ring after the completion of the currently executing command.
-    cs: bool,
-    /// Command Abort.
-    ///
-    /// Writing 1 shall immediately terminate the currently executing command.
-    ca: bool,
-    /// Command Ring Running. (read-only)
-    crr: bool = undefined,
-    /// Reserved.
-    _4: u2 = 0,
-    /// Command Ring Pointer, lower 32 bits.
-    crp: u26,
-};
-
-/// Upper 32 bits of Command Ring Control Register.
-const Crcr1 = packed struct(u32) {
-    /// Command Ring Pointer, upper 32 bits.
-    crp: u32,
-};
-
-/// Runtime xHC configuration register. (CONFIG)
-const ConfigureRegister = packed struct(u32) {
-    /// Number of Device Slots Enabled.
-    max_slots_en: u8,
-    /// U3 Entry Enable.
-    u3e: bool,
-    /// Configuration Information Enable.
-    cie: bool,
-    /// Reserved.
-    _10: u22 = 0,
-};
-
-// =============================================================
-// xHCI Runtime Registers
-
-const Runtime = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, MfIndex },
-});
-
-const MfIndex = packed struct(u32) {
-    value: u32,
-};
+/// Get the address of Interrupter Register Set (IRS) at the given index.
+fn getIrsAt(self: *Self, index: usize) regs.Interrupter {
+    const rt_size = 32;
+    const irs_size = 32;
+    const addr = self.runtime.base + rt_size + index * irs_size;
+    return .new(addr);
+}
 
 // =============================================================
 // Imports
@@ -400,6 +212,7 @@ const pci = dd.pci;
 const urd = @import("urthr");
 const mem = urd.mem;
 
+const regs = @import("registers.zig");
 const rings = @import("ring.zig");
 const trbs = @import("trb.zig");
 const Trb = trbs.Trb;
