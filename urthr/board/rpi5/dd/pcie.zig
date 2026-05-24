@@ -58,11 +58,14 @@ var pcie = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x9000, mmio.Marker(.config_address) },
 }){};
 
+/// Offset added to AXI addresses to represent DMA addresses.
+const dma_offset: usize = 0x10_0000_0000;
+
 /// Capability Structure module.
 var capm = dd.pci.PcieCap{};
 
-/// Offset added to AXI addresses to represent DMA addresses.
-const dma_offset: usize = 0x10_0000_0000;
+/// Host instance singleton.
+var host: BrcmHost = .{};
 
 /// DMA allocator instance.
 var dma_allocator: dd.pci.DmaAllocatorImpl = undefined;
@@ -100,6 +103,45 @@ pub fn init(page_allocator: PageAllocator) void {
     dma_allocator = .new(page_allocator);
 }
 
+/// Get `Host` interface.
+pub fn interface() dd.pci.Host {
+    return host.interface();
+}
+
+// =============================================================
+// Internals
+// =============================================================
+
+/// Implements `pcie.Host` interface.
+const BrcmHost = struct {
+    const vtable = dd.pci.Host.Vtable{
+        .readConf = readConfImpl,
+        .writeConf = writeConfImpl,
+        .getDmaAllocator = getDmaAllocatorImpl,
+    };
+
+    /// Get `Host` interface.
+    pub fn interface(self: *BrcmHost) dd.pci.Host {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    fn readConfImpl(_: *anyopaque, addr: dd.pci.DevAddr, offset: u12) u32 {
+        @as(*volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_address))).* =
+            bits.concatMany(u32, .{ @as(u4, 0), addr.bus, addr.device, addr.function, @as(u12, 0) });
+        return @as(*const volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_data) + offset)).*;
+    }
+
+    fn writeConfImpl(_: *anyopaque, addr: dd.pci.DevAddr, offset: u12, value: u32) void {
+        @as(*volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_address))).* =
+            bits.concatMany(u32, .{ @as(u4, 0), addr.bus, addr.device, addr.function, @as(u12, 0) });
+        @as(*volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_data) + offset)).* = value;
+    }
+
+    fn getDmaAllocatorImpl(_: *anyopaque) DmaAllocator {
+        return dma_allocator.interface(dma_offset);
+    }
+};
+
 /// Setup outbound address translation.
 pub fn setOutTranslation(axi: usize, pci: usize, size: usize, comptime win: usize) void {
     rtt.expectEqual(0, axi % units.mib);
@@ -133,7 +175,7 @@ pub fn setOutTranslation(axi: usize, pci: usize, size: usize, comptime win: usiz
 }
 
 /// Setup inbound address translation.
-pub fn setInTranslation(pci_addr: u64, cpu_addr: u64, size: u64, comptime bar: usize) void {
+pub fn setInTranslation(pci: u64, cpu_addr: u64, size: u64, comptime bar: usize) void {
     const size_encoded = encodeIbarSize(size);
 
     // Configure RC BAR
@@ -145,10 +187,10 @@ pub fn setInTranslation(pci_addr: u64, cpu_addr: u64, size: u64, comptime bar: u
 
         pcie.writeIndexed(BarLow, idx, 8, BarLow{
             .size = size_encoded,
-            .pci_offset_lo = @intCast((pci_addr >> 12) & 0xFFFFF),
+            .pci_offset_lo = @intCast((pci >> 12) & 0xFFFFF),
         });
         pcie.writeIndexed(BarHigh, idx, 8, BarHigh{
-            .pci_offset_hi = @intCast(pci_addr >> 32),
+            .pci_offset_hi = @intCast(pci >> 32),
         });
     }
 
@@ -187,22 +229,6 @@ fn encodeIbarSize(size: u64) u5 {
     }
 
     @panic("Invalid inbound BAR size");
-}
-
-/// Get the configuration space I/O interface for Type 0 headers.
-pub fn getConfIoType0() dd.pci.ConfIo(dd.pci.HeaderType0) {
-    return dd.pci.ConfIo(dd.pci.HeaderType0){ .method = .{ .brcm = .{
-        .data_base = pcie.getMarkerAddress(.config_data),
-        .address_base = pcie.getMarkerAddress(.config_address),
-    } } };
-}
-
-/// Get the configuration space I/O interface for Type 1 headers.
-pub fn getConfIoType1() dd.pci.ConfIo(dd.pci.HeaderType1) {
-    return dd.pci.ConfIo(dd.pci.HeaderType1){ .method = .{ .brcm = .{
-        .data_base = pcie.getMarkerAddress(.config_data),
-        .address_base = pcie.getMarkerAddress(.config_address),
-    } } };
 }
 
 /// Get the DMA allocator that can be used to transfer data over PCIe.
