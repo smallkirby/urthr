@@ -74,6 +74,17 @@ pub fn allocBytesP(self: Self, size: usize) Error![]u8 {
     return pages[0..size];
 }
 
+/// Allocate an array of `n` items of the type `T`.
+///
+/// Returns a slice representing the allocated memory region.
+///
+/// The first item of the slice is guaranteed to be page-aligned, but the rest of the items may not be.
+pub fn alloc(self: Self, T: type, n: usize) Error![]T {
+    const aligned_size = std.mem.alignForward(usize, @sizeOf(T) * n, common.mem.size_4kib);
+    const pages = try self.allocPagesV(aligned_size / common.mem.size_4kib);
+    return @as([*]T, @ptrCast(pages.ptr))[0..n];
+}
+
 /// Allocate and construct an instance of the given type.
 ///
 /// The object is ensured to be page-aligned.
@@ -123,6 +134,15 @@ pub fn freeBytesV(self: Self, slice: []u8) void {
     return self.freePagesV(pages);
 }
 
+/// Free the given objects allocated by `alloc()`.
+pub fn free(self: Self, slice: anytype) void {
+    const info = @typeInfo(@TypeOf(slice)).pointer;
+    comptime std.debug.assert(info.size == .slice);
+    const bytes: []u8 = @as([*]u8, @ptrCast(slice.ptr))[0 .. slice.len * @sizeOf(info.child)];
+    if (bytes.len == 0) return;
+    return self.freeBytesV(bytes);
+}
+
 /// Destroy the given object allocated by `create()`.
 pub fn destroy(self: Self, ptr: anytype) void {
     const info = @typeInfo(@TypeOf(ptr)).pointer;
@@ -152,6 +172,18 @@ pub fn translateP(self: Self, vobj: anytype) @TypeOf(vobj) {
     };
 }
 
+/// Convert the given virtual pointer to physical address.
+pub fn translateIntP(self: Self, vobj: anytype) usize {
+    return switch (@typeInfo(@TypeOf(vobj))) {
+        .pointer => |p| switch (p.size) {
+            .one, .many, .c => self.vtable.virt2phys(self.ptr, @intFromPtr(vobj)),
+            .slice => self.vtable.virt2phys(self.ptr, @intFromPtr(vobj.ptr)),
+        },
+        .int => self.vtable.virt2phys(self.ptr, vobj),
+        else => @compileError("Unsupported type."),
+    };
+}
+
 /// Convert the given physical slice to virtual slice.
 pub fn translateV(self: Self, pobj: anytype) @TypeOf(pobj) {
     return switch (@typeInfo(@TypeOf(pobj))) {
@@ -167,6 +199,18 @@ pub fn translateV(self: Self, pobj: anytype) @TypeOf(pobj) {
             },
         },
         .int => return self.vtable.phys2virt(self.ptr, pobj),
+        else => @compileError("Unsupported type."),
+    };
+}
+
+/// Convert the given physical pointer to virtual address.
+pub fn translateIntV(self: Self, pobj: usize) usize {
+    return switch (@typeInfo(@TypeOf(pobj))) {
+        .pointer => |p| switch (p.size) {
+            .one, .many, .c => self.vtable.phys2virt(self.ptr, @intFromPtr(pobj)),
+            .slice => self.vtable.phys2virt(self.ptr, @intFromPtr(pobj.ptr)),
+        },
+        .int => self.vtable.phys2virt(self.ptr, pobj),
         else => @compileError("Unsupported type."),
     };
 }
