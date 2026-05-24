@@ -24,7 +24,7 @@ const class = pci.ClassCode{
 };
 
 /// Initialize the PCI device as an xHC controller.
-pub fn init(hc: pci.Host, addr: pci.DevAddr) Error!*Self {
+pub fn initPci(hc: pci.Host, addr: pci.DevAddr) Error!*Self {
     const io = hc.getTypedIo(addr, pci.HeaderType0);
 
     const self = try mem.bin.create(Self);
@@ -87,6 +87,15 @@ pub fn init(hc: pci.Host, addr: pci.DevAddr) Error!*Self {
     };
     log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
 
+    return initMmio(base);
+}
+
+/// Initialize the xHC controller mapped to the given base address.
+pub fn initMmio(base: usize) Error!*Self {
+    const self = try mem.bin.create(Self);
+    errdefer mem.bin.destroy(self);
+    self.* = std.mem.zeroes(Self);
+
     // Initialize registers.
     {
         // Capability registers.
@@ -112,16 +121,12 @@ pub fn init(hc: pci.Host, addr: pci.DevAddr) Error!*Self {
 
 /// Reset the controller.
 pub fn reset(self: *Self) Error!void {
-    // Check if xHC is halted.
-    if (self.operational.read(StatusRegister).hch == false) {
-        return Error.InvalidState;
-    }
-
     // Stop xHC.
     self.operational.modify(CommandRegister, .{
         .inte = false,
         .hsee = false,
         .ewe = false,
+        .rs = false,
     });
 
     // Wait until xHC stops.
