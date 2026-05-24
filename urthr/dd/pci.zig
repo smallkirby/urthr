@@ -118,10 +118,10 @@ pub const Host = struct {
     pub fn scan(self: Self, bus: BusNum, out: []ScanResult) []const ScanResult {
         var n: usize = 0;
 
-        for (0..std.math.maxInt(DeviceNum)) |d| d_block: {
+        for (0..std.math.maxInt(DeviceNum) + 1) |d| d_block: {
             const device: DeviceNum = @intCast(d);
 
-            for (0..std.math.maxInt(FunctionNum)) |f| f_block: {
+            for (0..std.math.maxInt(FunctionNum) + 1) |f| f_block: {
                 const function: FunctionNum = @intCast(f);
                 const addr = DevAddr{ .bus = bus, .device = device, .function = function };
                 const io = self.getTypedIo(addr, HeaderType0);
