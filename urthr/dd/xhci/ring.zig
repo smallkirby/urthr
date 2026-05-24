@@ -1,7 +1,14 @@
 /// Ring that can be used both for Command Ring and Transfer Ring.
 ///
-/// - Command Ring is used by software to pass device and HC related command to the xHC.
-/// - Transfer Ring is used by software to schedule work items for a single USB Endpoint.
+/// #### Command Ring
+///
+/// Used by software to pass device and HC related command to the xHC.
+///
+///
+/// #### Transfer Ring
+///
+/// Used by software to schedule work items for a single USB Endpoint.
+///
 pub const Ring = struct {
     /// Buffers for TRB.
     trbs: []volatile Trb,
@@ -47,7 +54,7 @@ pub const Ring = struct {
     }
 };
 
-/// Event Ring that is used by the xHC to pass command completion and async events to software.
+/// Event Ring used by the xHC to pass command completion and async events to software.
 pub const EventRing = struct {
     /// Number of Event Ring Segment.
     ///
@@ -88,7 +95,8 @@ pub const EventRing = struct {
 
         // Initialize ERST entries.
         for (self.erst, 0..) |*erst, i| {
-            erst.* = .from(self.trbs[i * num_trbs_per_segment .. (i + 1) * num_trbs_per_segment]);
+            const start = i * num_trbs_per_segment;
+            erst.* = .from(self.trbs[start .. start + num_trbs_per_segment]);
         }
 
         // Set the Event Ring Segment Table.
@@ -96,7 +104,7 @@ pub const EventRing = struct {
         self.interrupter.write(regs.Erstsz, @as(u32, @intCast(self.erst.len)));
         self.interrupter.write(regs.Erstba, erst_phys);
         self.interrupter.modify(regs.Erdp, .{
-            .erdp = @as(u60, @truncate(mem.page.translateIntP(self.trbs.ptr) >> @bitOffsetOf(regs.Erdp, "erdp"))),
+            .erdp = toErdpPhys(self.trbs),
         });
 
         // Set the CCS to 1.
@@ -122,7 +130,7 @@ pub const EventRing = struct {
         }
 
         self.interrupter.modify(regs.Erdp, .{
-            .erdp = mem.page.translateIntP(&self.trbs[self.dequeue]) >> @bitOffsetOf(regs.Erdp, "erdp"),
+            .erdp = toErdpPhys(&self.trbs[self.dequeue]),
         });
 
         return trb;
@@ -148,6 +156,15 @@ const ErstEntry = packed struct(u128) {
         };
     }
 };
+
+// =============================================================
+// Utility
+// =============================================================
+
+/// Convert a pointer to the u60 ERDP field value.
+inline fn toErdpPhys(virt: anytype) u60 {
+    return @truncate(mem.page.translateIntP(virt) >> @bitOffsetOf(regs.Erdp, "erdp"));
+}
 
 // =============================================================
 // Imports
