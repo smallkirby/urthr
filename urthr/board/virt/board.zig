@@ -75,8 +75,8 @@ pub fn initPeripherals() common.mem.Error!void {
             null,
             .device,
         );
-        rdd.pcie.setBase(pci);
-        rdd.pcie.init(urd.mem.page);
+
+        _ = pci;
     }
 
     // virtio
@@ -310,4 +310,3 @@ const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const urd = @import("urthr");
 const dd = @import("dd");
-const rdd = @import("dd.zig");
