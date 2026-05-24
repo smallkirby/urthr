@@ -48,18 +48,14 @@ pub const Ring = struct {
     }
 
     /// Push a Link TRB and reset the cursor.
-    fn rotate(self: *Ring) void {
-        rtt.expect(self.index == self.trbs.len - 1);
-        var link = trbs.LinkTrb.new(self.trbs);
-        _ = self.copyToTail(@ptrCast(&link));
-        self.pcs +%= 1;
-        self.index = 0;
+    fn rotate(_: *Ring) void {
+        urd.unimplemented("Ring.rotate");
     }
 
     /// Deinitialize the Ring and free the backing memory.
     pub fn deinit(self: *Ring, allocator: PageAllocator) void {
-        self.trbs = undefined;
         allocator.free(self.trbs);
+        self.trbs = undefined;
     }
 };
 
@@ -134,10 +130,10 @@ pub const EventRing = struct {
             return null;
         }
 
-        const next_trb: *volatile Trb = if (@intFromPtr(trb) >= @intFromPtr(&self.trbs[self.trbs.len - 1]))
-            &self.trbs[0]
-        else
-            @ptrFromInt(@intFromPtr(trb) + @sizeOf(Trb));
+        const next_trb: *volatile Trb = if (@intFromPtr(trb) >= @intFromPtr(&self.trbs[self.trbs.len - 1])) blk: {
+            self.pcs = !self.pcs;
+            break :blk &self.trbs[0];
+        } else @ptrFromInt(@intFromPtr(trb) + @sizeOf(Trb));
 
         self.interrupter.modify(regs.Erdp, .{
             .erdp = mem.page.translateIntP(next_trb) >> @bitOffsetOf(regs.Erdp, "erdp"),
@@ -151,7 +147,7 @@ pub const EventRing = struct {
 ///
 /// ERST is used to define multi-segment Event Rings,
 /// which enables runtime expansion and shrinking of the Event Ring.
-pub const ErstEntry = packed struct(u128) {
+const ErstEntry = packed struct(u128) {
     /// Base address of the Event Ring Segment.
     ring_segment_base: u64,
     /// Number of TRBs in the Event Ring Segment.

@@ -32,10 +32,6 @@ const class = pci.ClassCode{
 pub fn initPci(hc: pci.Host, addr: pci.DevAddr) Error!*Self {
     const io = hc.getTypedIo(addr, pci.HeaderType0);
 
-    const self = try mem.bin.create(Self);
-    errdefer mem.bin.destroy(self);
-    self.* = std.mem.zeroes(Self);
-
     // Check if it's an xHCI controller.
     {
         const rc = io.readReg(pci.HeaderRevClass);
@@ -112,7 +108,7 @@ pub fn initMmio(base: usize) Error!*Self {
 
         // Runtime registers.
         const rts_off = self.capability.read(regs.RtsOffset).value;
-        self.runtime.setBase(base + rts_off & ~@as(u64, 0x1F));
+        self.runtime.setBase(base + (rts_off & ~@as(u64, 0x1F)));
     }
     log.debug("xHC capability register  @ 0x{X}", .{self.capability.base});
     log.debug("xHC operational register @ 0x{X}", .{self.operational.base});
