@@ -109,10 +109,10 @@ var vmsix: usize = undefined;
 /// Initialize RP1 controller.
 pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     const host = pcie.interface();
-    const io = host.getIo(.{ .bus = 1 });
+    const io = host.getTypedIo(.{ .bus = 1 }, dd.pci.HeaderType0);
 
     // Read configuration header.
-    const header_vendor_dev = io.readReg(dd.pci.HeaderType0, dd.pci.HeaderVendorDevice);
+    const header_vendor_dev = io.readReg(dd.pci.HeaderVendorDevice);
     log.info(
         "RP1 Vendor ID: 0x{X:0>4}, Device ID: 0x{X:0>4}",
         .{ header_vendor_dev.vendor_id, header_vendor_dev.device_id },
@@ -120,7 +120,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     rtt.expectEqual(0x1DE4, header_vendor_dev.vendor_id);
     rtt.expectEqual(0x0001, header_vendor_dev.device_id);
 
-    const class = io.readReg(dd.pci.HeaderType0, dd.pci.HeaderRevClass);
+    const class = io.readReg(dd.pci.HeaderRevClass);
     log.info(
         "RP1 Class Code: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}",
         .{ class.base_class, class.sub_class, class.prog_if, class.revision_id },
@@ -182,7 +182,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     );
 
     // Set configuration header.
-    io.modifyReg(dd.pci.HeaderType0, dd.pci.HeaderCommandStatus, .{
+    io.modifyReg(dd.pci.HeaderCommandStatus, .{
         .memory_space_enable = true,
         .bus_master_enable = true,
         .interrupt_disable = false,
