@@ -176,6 +176,7 @@ pub fn build(b: *std.Build) !void {
     {
         dd_module.addImport("common", common_module);
         dd_module.addImport("arch", arch_module);
+        dd_module.addImport("dd", dd_module);
         dd_module.addImport("urthr", urthr_module);
         dd_module.addImport("options", options_module);
     }
