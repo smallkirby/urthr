@@ -16,6 +16,9 @@ operational: Operational,
 /// Runtime registers module.
 runtime: Runtime,
 
+/// Command Ring.
+cring: rings.Ring,
+
 /// xHC PCI class code.
 const class = pci.ClassCode{
     .base = 0x0C,
@@ -150,6 +153,35 @@ pub fn reset(self: *Self) Error!void {
     }
 }
 
+/// Setup necessary internal structure.
+pub fn setup(self: *Self) Error!void {
+    // Initialize rings.
+    try self.initRings();
+}
+
+// =============================================================
+// Internals
+// =============================================================
+
+fn initRings(self: *Self) Error!void {
+    const num_trbs_per_ring = mem.page_size / @sizeOf(Trb);
+
+    // Init Command Ring.
+    self.cring = try rings.Ring.new(num_trbs_per_ring, mem.page);
+    self.operational.write(Crcr0, Crcr0{
+        .rcs = self.cring.pcs,
+        .cs = false,
+        .ca = false,
+        .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> @bitOffsetOf(Crcr0, "crp")),
+    });
+    self.operational.write(Crcr1, Crcr1{
+        .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> 32),
+    });
+
+    // Init Event Ring for the primary Interrupter.
+    // TODO
+}
+
 // =============================================================
 // Registers
 // =============================================================
@@ -224,53 +256,11 @@ const Operational = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, CommandRegister },
     .{ 0x04, StatusRegister },
     .{ 0x08, PageSize },
+    .{ 0x18, Crcr0 },
+    .{ 0x1C, Crcr1 },
     .{ 0x50, ConfigureRegister },
     .{ 0x400, mmio.Marker(.port_set) },
 });
-
-const PageSize = packed struct(u32) {
-    value: u32,
-};
-
-/// USB Status Register. (USBSTS)
-const StatusRegister = packed struct(u32) {
-    /// HCHalted.
-    hch: bool,
-    /// Reserved.
-    _1: u1 = 0,
-    /// Host System Error.
-    hse: bool,
-    /// Event Interrupt.
-    eint: bool,
-    /// Port Change Detect.
-    pcd: bool,
-    /// Reserved.
-    _5: u3 = 0,
-    /// Save State Status.
-    sss: bool,
-    /// Restore State Status.
-    rss: bool,
-    /// Save/Restore Error.
-    sre: bool,
-    /// Controller Not Ready.
-    cnr: bool,
-    /// Host Controller Error.
-    hce: bool,
-    /// Reserved.
-    _13: u19 = 0,
-};
-
-/// Runtime xHC configuration register. (CONFIG)
-const ConfigureRegister = packed struct(u32) {
-    /// Number of Device Slots Enabled.
-    max_slots_en: u8,
-    /// U3 Entry Enable.
-    u3e: bool,
-    /// Configuration Information Enable.
-    cie: bool,
-    /// Reserved.
-    _10: u22 = 0,
-};
 
 /// USB Command Register. (USBCMD)
 const CommandRegister = packed struct(u32) {
@@ -310,6 +300,79 @@ const CommandRegister = packed struct(u32) {
     _17: u15 = 0,
 };
 
+/// USB Status Register. (USBSTS)
+const StatusRegister = packed struct(u32) {
+    /// HCHalted.
+    hch: bool,
+    /// Reserved.
+    _1: u1 = 0,
+    /// Host System Error.
+    hse: bool,
+    /// Event Interrupt.
+    eint: bool,
+    /// Port Change Detect.
+    pcd: bool,
+    /// Reserved.
+    _5: u3 = 0,
+    /// Save State Status.
+    sss: bool,
+    /// Restore State Status.
+    rss: bool,
+    /// Save/Restore Error.
+    sre: bool,
+    /// Controller Not Ready.
+    cnr: bool,
+    /// Host Controller Error.
+    hce: bool,
+    /// Reserved.
+    _13: u19 = 0,
+};
+
+const PageSize = packed struct(u32) {
+    value: u32,
+};
+
+/// Lower 32 bits of Command Ring Control Register.
+const Crcr0 = packed struct(u32) {
+    /// Ring Cycle State.
+    ///
+    /// Indicates the xHC Consumer Cycle State (CCS).
+    /// Write is ignored if CRR is set.
+    rcs: u1,
+    /// Command Stop.
+    ///
+    /// Writing 1 shall stop the operation of the Command Ring after the completion of the currently executing command.
+    cs: bool,
+    /// Command Abort.
+    ///
+    /// Writing 1 shall immediately terminate the currently executing command.
+    ca: bool,
+    /// Command Ring Running. (read-only)
+    crr: bool = undefined,
+    /// Reserved.
+    _4: u2 = 0,
+    /// Command Ring Pointer, lower 32 bits.
+    crp: u26,
+};
+
+/// Upper 32 bits of Command Ring Control Register.
+const Crcr1 = packed struct(u32) {
+    /// Command Ring Pointer, upper 32 bits.
+    crp: u32,
+};
+
+/// Runtime xHC configuration register. (CONFIG)
+const ConfigureRegister = packed struct(u32) {
+    /// Number of Device Slots Enabled.
+    max_slots_en: u8,
+    /// U3 Entry Enable.
+    u3e: bool,
+    /// Configuration Information Enable.
+    cie: bool,
+    /// Reserved.
+    _10: u22 = 0,
+};
+
 // =============================================================
 // xHCI Runtime Registers
 
@@ -336,3 +399,7 @@ const dd = @import("dd");
 const pci = dd.pci;
 const urd = @import("urthr");
 const mem = urd.mem;
+
+const rings = @import("ring.zig");
+const trbs = @import("trb.zig");
+const Trb = trbs.Trb;
