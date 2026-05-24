@@ -3,6 +3,8 @@
 // =============================================================
 
 /// PCI Header Type 1.
+///
+/// For bridges and switches.
 pub const HeaderType1 = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, HeaderVendorDevice },
     .{ 0x04, HeaderCommandStatus },
@@ -25,6 +27,8 @@ pub const HeaderType1 = mmio.Module(.{ .size = u32 }, &.{
 });
 
 /// PCI Header Type 0.
+///
+/// For regular endpoint devices.
 pub const HeaderType0 = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, HeaderVendorDevice },
     .{ 0x04, HeaderCommandStatus },
@@ -53,7 +57,7 @@ pub const PcieCap = mmio.Module(.{ .size = u32 }, &.{
 });
 
 // =============================================================
-// API
+// PCIe Host Controller Interface
 // =============================================================
 
 /// Data type for bus number.
@@ -63,118 +67,188 @@ pub const DeviceNum = u5;
 /// Data type for function number.
 pub const FunctionNum = u3;
 
-/// I/O interface for PCI Configuration Space.
-pub fn ConfIo(Module: type) type {
-    return struct {
-        const Wrapper = @This();
+/// PCIe device address.
+pub const DevAddr = struct {
+    /// Bus number.
+    bus: BusNum = 0,
+    /// Device number.
+    device: DeviceNum = 0,
+    /// Function number.
+    function: FunctionNum = 0,
+};
 
-        /// Access method for Configuration Space.
-        method: Method,
+/// PCIe host controller.
+///
+/// Implemented by board-specific PCIe host controller drivers.
+pub const Host = struct {
+    /// Type-erased pointer to host controller implementation.
+    ptr: *anyopaque,
+    /// Methods necessary to implement.
+    vtable: *const Vtable,
 
-        /// Target bus number.
-        bus: BusNum = 0,
-        /// Target device number.
-        device: DeviceNum = 0,
-        /// Target function number.
-        function: FunctionNum = 0,
-
-        pub const Method = union(enum) {
-            /// Enhanced Configuration Access Mechanism (ECAM).
-            ecam: EcamIo,
-            /// Broadcom STB-specific access method.
-            brcm: BrcmIo,
-        };
-
-        /// Set the target address.
-        pub fn setAddress(self: *Wrapper, bus: BusNum, device: DeviceNum, function: FunctionNum) void {
-            self.bus = bus;
-            self.device = device;
-            self.function = function;
-        }
-
-        /// Read from the specified register type.
-        pub fn read(self: Wrapper, T: type) T {
-            const roffset, _ = Module.getRegister(T);
-            return self.readAt(roffset, T);
-        }
-
-        /// Read a field at the given offset as type T.
-        pub fn readAt(self: Wrapper, offset: usize, T: type) T {
-            _, const register = Module.getRegister(T);
-
-            const target = switch (self.method) {
-                inline else => |m| m.prepareIo(offset, self.bus, self.device, self.function),
-            };
-
-            return register.read(target);
-        }
-
-        /// Read raw integer at the given offset.
-        pub fn readRawAt(self: Wrapper, offset: usize, T: type) T {
-            const target = switch (self.method) {
-                inline else => |m| m.prepareIo(offset, self.bus, self.device, self.function),
-            };
-
-            return @as(*const volatile T, @ptrFromInt(target)).*;
-        }
-
-        /// Write raw integer at the given offset.
-        pub fn writeRawAt(self: Wrapper, offset: usize, value: u32) void {
-            const target = switch (self.method) {
-                inline else => |m| m.prepareIo(offset, self.bus, self.device, self.function),
-            };
-
-            @as(*volatile u32, @ptrFromInt(target)).* = value;
-        }
-
-        /// Read modify write the register at the given address.
-        pub fn modify(self: Wrapper, T: type, value: anytype) void {
-            const roffset, const register = Module.getRegister(T);
-
-            const target = switch (self.method) {
-                inline else => |m| m.prepareIo(roffset, self.bus, self.device, self.function),
-            };
-
-            register.modify(target, value);
-        }
-
-        /// ECAM access method.
-        const EcamIo = struct {
-            const Self = @This();
-
-            /// Base address of PCI Configuration Space.
-            base: usize,
-
-            /// Prepare to read from or write to the address at the given offset and return the effective address.
-            fn prepareIo(self: Self, roffset: usize, b: BusNum, d: DeviceNum, f: FunctionNum) usize {
-                return self.base + bits.concatMany(u28, .{ b, d, f, @as(u12, @intCast(roffset)) });
-            }
-        };
-
-        /// Broadcom STB -specific access method.
-        const BrcmIo = struct {
-            const Self = @This();
-
-            /// Base address of configuration address.
-            address_base: usize,
-            /// Base address of configuration data.
-            data_base: usize,
-
-            const AddrReg = mmio.Register(u32, u32);
-
-            /// Prepare to read from or write to the address at the given offset and return the effective address.
-            fn prepareIo(self: Self, roffset: usize, b: BusNum, d: DeviceNum, f: FunctionNum) usize {
-                // Set target configuration address.
-                AddrReg.write(
-                    self.address_base,
-                    bits.concatMany(u32, .{ @as(u4, 0), b, d, f, @as(u12, 0) }),
-                );
-
-                return self.data_base + roffset;
-            }
-        };
+    pub const Vtable = struct {
+        /// Read a u32 from configuration space.
+        readConf: *const fn (ctx: *anyopaque, addr: DevAddr, offset: u12) u32,
+        /// Write a u32 to configuration space.
+        writeConf: *const fn (ctx: *anyopaque, addr: DevAddr, offset: u12, value: u32) void,
+        /// Get the DMA allocator for PCIe devices.
+        getDmaAllocator: *const fn (ctx: *anyopaque) common.mem.DmaAllocator,
     };
-}
+
+    // =========================================================
+    // Raw access
+
+    /// Read a word at the given offset from PCIe configuration space.
+    pub fn read(self: Host, addr: DevAddr, offset: u12) u32 {
+        return self.vtable.readConf(self.ptr, addr, offset);
+    }
+
+    /// Write a word at the given offset to PCIe configuration space.
+    pub fn write(self: Host, addr: DevAddr, offset: u12, value: u32) void {
+        self.vtable.writeConf(self.ptr, addr, offset, value);
+    }
+
+    pub fn getDmaAllocator(self: Host) common.mem.DmaAllocator {
+        return self.vtable.getDmaAllocator(self.ptr);
+    }
+
+    // =========================================================
+    // Typed raw access
+
+    /// Read a register `T` at the given offset from PCIe configuration space.
+    pub fn readAs(self: Host, addr: DevAddr, offset: u12, comptime T: type) T {
+        return @bitCast(self.read(addr, offset));
+    }
+
+    /// Read-modify-write the config space at `offset` using fields of `value`.
+    pub fn modifyAs(self: Host, addr: DevAddr, offset: u12, comptime T: type, value: anytype) void {
+        var current: T = @bitCast(self.read(addr, offset));
+        inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field|
+            @field(current, field.name) = @field(value, field.name);
+        self.write(addr, offset, @bitCast(current));
+    }
+
+    // =========================================================
+    // Typed access with Module
+
+    /// Read a register `T` whose offset is determined by `Module`.
+    pub fn readReg(self: Host, comptime Module: type, addr: DevAddr, comptime T: type) T {
+        const offset, _ = Module.getRegister(T);
+        return @bitCast(self.read(addr, @intCast(offset)));
+    }
+
+    /// Read-modify-write a register `T` whose offset is determined by `Module`.
+    pub fn modifyReg(self: Host, comptime Module: type, addr: DevAddr, comptime T: type, value: anytype) void {
+        const offset, _ = Module.getRegister(T);
+        self.modifyAs(addr, @intCast(offset), T, value);
+    }
+
+    // =========================================================
+    // Higher-level operations
+
+    /// Scan the PCIe bus for devices.
+    ///
+    /// Scan stops when output buffer is full.
+    pub fn scan(self: Host, bus: BusNum, out: []ScanResult) []const ScanResult {
+        var n: usize = 0;
+
+        for (0..std.math.maxInt(DeviceNum)) |d| d_block: {
+            const device: DeviceNum = @intCast(d);
+
+            for (0..std.math.maxInt(FunctionNum)) |f| f_block: {
+                const function: FunctionNum = @intCast(f);
+                const addr = DevAddr{ .bus = bus, .device = device, .function = function };
+
+                const vd = self.readReg(HeaderType0, addr, HeaderVendorDevice);
+                if (vd.vendor_id == 0xFFFF) {
+                    if (f == 0) break :f_block;
+                    continue;
+                }
+
+                const rc = self.readReg(HeaderType0, addr, HeaderRevClass);
+                out[n] = .{
+                    .bus = bus,
+                    .device = device,
+                    .function = function,
+                    .vendor_id = vd.vendor_id,
+                    .device_id = vd.device_id,
+                    .class = rc.base_class,
+                    .subclass = rc.sub_class,
+                };
+
+                n += 1;
+                if (n >= out.len) break :d_block;
+
+                if (f == 0) {
+                    const ht = self.readReg(HeaderType0, addr, HeaderBistLatCacheLine);
+                    if (ht.header_type & 0x80 == 0) break :f_block;
+                }
+            }
+        }
+
+        return out[0..n];
+    }
+};
+
+/// Generic ECAM-based PCIe host controller.
+///
+/// Implements `Host` interface.
+pub const EcamHost = struct {
+    const Self = @This();
+
+    /// Base virtual address of the ECAM region.
+    base: usize,
+    /// DMA allocator for PCIe devices.
+    dma: DmaAllocatorImpl,
+
+    const vtable = Host.Vtable{
+        .readConf = readConfImpl,
+        .writeConf = writeConfImpl,
+        .getDmaAllocator = getDmaAllocatorImpl,
+    };
+
+    /// Initialize the ECAM host controller.
+    pub fn init(base: usize, page_allocator: PageAllocator) Self {
+        return .{
+            .base = base,
+            .dma = .new(page_allocator),
+        };
+    }
+
+    /// Get `Host` interface.
+    pub fn interface(self: *Self) Host {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    fn readConfImpl(ctx: *anyopaque, addr: DevAddr, offset: u12) u32 {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        return @as(*const volatile u32, @ptrFromInt(self.address(addr, offset))).*;
+    }
+
+    fn writeConfImpl(ctx: *anyopaque, addr: DevAddr, offset: u12, value: u32) void {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        @as(*volatile u32, @ptrFromInt(self.address(addr, offset))).* = value;
+    }
+
+    fn getDmaAllocatorImpl(ctx: *anyopaque) common.mem.DmaAllocator {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        return self.dma.interface(0);
+    }
+
+    /// Construct the physical address for the given device address.
+    inline fn address(self: Self, addr: DevAddr, offset: u12) usize {
+        return self.base + bits.concatMany(u28, .{
+            addr.bus,
+            addr.device,
+            addr.function,
+            offset,
+        });
+    }
+};
+
+// =============================================================
+// API
+// =============================================================
 
 /// PCI device found during bus scan.
 pub const ScanResult = struct {
@@ -193,56 +267,6 @@ pub const ScanResult = struct {
     /// Subclass.
     subclass: u8,
 };
-
-/// Scan the PCIe bus and return found devices.
-///
-/// Scan stops when output buffer is full.
-pub fn scanBus(confio: anytype, bus: BusNum, out: []ScanResult) []const ScanResult {
-    var n: usize = 0;
-
-    for (0..std.math.maxInt(DeviceNum)) |d| d_block: {
-        const device: DeviceNum = @intCast(d);
-
-        for (0..std.math.maxInt(FunctionNum)) |f| f_block: {
-            const function: FunctionNum = @intCast(f);
-
-            var io = confio;
-            io.setAddress(bus, device, function);
-
-            const vd = io.read(HeaderVendorDevice);
-            if (vd.vendor_id == 0xFFFF) {
-                if (f == 0) break :f_block; // Device not present
-                continue;
-            }
-
-            const rc = io.read(HeaderRevClass);
-            out[n] = .{
-                .bus = bus,
-                .device = device,
-                .function = function,
-                .vendor_id = vd.vendor_id,
-                .device_id = vd.device_id,
-                .class = rc.base_class,
-                .subclass = rc.sub_class,
-            };
-
-            n += 1;
-            if (n >= out.len) {
-                break :d_block;
-            }
-
-            // Skip remaining functions if not multi-function device.
-            if (f == 0) {
-                const ht = io.read(HeaderBistLatCacheLine);
-                if (ht.header_type & 0x80 == 0) {
-                    break :f_block;
-                }
-            }
-        }
-    }
-
-    return out[0..n];
-}
 
 /// BAR information.
 pub const BarInfo = struct {
@@ -263,7 +287,7 @@ pub const BarInfo = struct {
     /// Set the address of the BAR.
     ///
     /// This function actually writes to the BAR register.
-    pub fn setAddress(self: BarInfo, addr: u64, confio: anytype) void {
+    pub fn setAddress(self: BarInfo, addr: u64, host: Host, daddr: DevAddr) void {
         rtt.expectEqual(0, addr & ~self.address_mask);
 
         const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
@@ -273,10 +297,9 @@ pub const BarInfo = struct {
                 @panic("I/O BAR setting not implemented.");
             },
             .mem32 => {
-                const bar_offset = bar_base + self.index * @sizeOf(HeaderBar0);
-                const value = confio.readRawAt(bar_offset, u32);
-                const new = @as(u32, @intCast(addr)) | (value & 0xF);
-                confio.writeRawAt(bar_offset, new);
+                const bar_offset: u12 = @intCast(bar_base + self.index * @sizeOf(HeaderBar0));
+                const value = host.read(daddr, bar_offset);
+                host.write(daddr, bar_offset, @as(u32, @intCast(addr)) | (value & 0xF));
             },
             .mem64 => {
                 @panic("64-bit BAR setting not implemented.");
@@ -295,10 +318,8 @@ pub const BarType = enum {
     mem64,
 };
 
-/// Parse BARs.
-///
-/// `confio` must be configured to access the target device's configuration space beforehand.
-pub fn parseBars(confio: anytype, out: []BarInfo) []const BarInfo {
+/// Parse BARs of the device specified by the given device address.
+pub fn parseBars(host: Host, addr: DevAddr, out: []BarInfo) []const BarInfo {
     const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
 
     var out_idx: usize = 0;
@@ -309,16 +330,16 @@ pub fn parseBars(confio: anytype, out: []BarInfo) []const BarInfo {
             continue;
         }
 
-        const bar_offset = bar_base + i * @sizeOf(HeaderBar0);
-        const value = confio.readRawAt(bar_offset, u32);
+        const bar_offset: u12 = @intCast(bar_base + i * @sizeOf(HeaderBar0));
+        const value = host.read(addr, bar_offset);
 
         // Test if BAR is implemented.
-        confio.writeRawAt(bar_offset, 0xFFFF_FFFF);
-        if (confio.readRawAt(bar_offset, u32) == 0) {
+        host.write(addr, bar_offset, 0xFFFF_FFFF);
+        if (host.read(addr, bar_offset) == 0) {
             // Unimplemented BAR.
             continue;
         }
-        confio.writeRawAt(bar_offset, value);
+        host.write(addr, bar_offset, value);
 
         if (bits.isset(value, 0)) {
             // I/O space BAR.
@@ -331,9 +352,9 @@ pub fn parseBars(confio: anytype, out: []BarInfo) []const BarInfo {
             out_idx += 1;
         } else if (bits.extract(u2, value, 1) == 0x0) {
             // Memory space BAR (32-bit).
-            confio.writeRawAt(bar_offset, 0xFFFF_FFFF);
-            const mask = confio.readRawAt(bar_offset, u32);
-            confio.writeRawAt(bar_offset, value);
+            host.write(addr, bar_offset, 0xFFFF_FFFF);
+            const mask = host.read(addr, bar_offset);
+            host.write(addr, bar_offset, value);
 
             buf.* = .{
                 .index = i,
@@ -344,13 +365,13 @@ pub fn parseBars(confio: anytype, out: []BarInfo) []const BarInfo {
             out_idx += 1;
         } else if (bits.extract(u2, value, 1) == 0x2) {
             // Memory space BAR (64-bit).
-            const next_value = confio.readRawAt(bar_offset + 4, u32);
-            confio.writeRawAt(bar_offset, 0xFFFF_FFFF);
-            confio.writeRawAt(bar_offset + 4, 0xFFFF_FFFF);
-            const mask = confio.readRawAt(bar_offset, u32);
-            const next_mask = confio.readRawAt(bar_offset + 4, u32);
-            confio.writeRawAt(bar_offset, value);
-            confio.writeRawAt(bar_offset + 4, next_value);
+            const next_value = host.read(addr, bar_offset + 4);
+            host.write(addr, bar_offset, 0xFFFF_FFFF);
+            host.write(addr, bar_offset + 4, 0xFFFF_FFFF);
+            const mask = host.read(addr, bar_offset);
+            const next_mask = host.read(addr, bar_offset + 4);
+            host.write(addr, bar_offset, value);
+            host.write(addr, bar_offset + 4, next_value);
 
             const mask64 = bits.concat(u64, next_mask, mask);
             const addr64 = bits.concat(u64, next_value, value) & mask64;
@@ -401,13 +422,13 @@ pub const CapHeader = packed struct(u32) {
 /// Find a capability by ID in the configuration space.
 ///
 /// Returns the offset of the capability, or null if not found.
-pub fn findCapability(confio: anytype, cap_id: CapId) ?u8 {
-    const status = confio.read(HeaderCommandStatus);
+pub fn findCapability(host: Host, addr: DevAddr, cap_id: CapId) ?u8 {
+    const status = host.readReg(HeaderType0, addr, HeaderCommandStatus);
     if (!status.capabilities_list) return null;
 
-    var offset = confio.read(HeaderCapPtr).cap_ptr;
+    var offset = host.readReg(HeaderType0, addr, HeaderCapPtr).cap_ptr;
     while (offset != 0) {
-        const header = confio.readRawAt(offset, CapHeader);
+        const header = host.readAs(addr, offset, CapHeader);
         if (header.id == cap_id) {
             return offset;
         }
@@ -484,12 +505,12 @@ pub const MsixConfig = struct {
 /// Parse MSI-X configuration.
 ///
 /// Returns null if MSI-X capability is not found.
-pub fn parseMsixConfig(confio: anytype) ?MsixConfig {
-    const offset = findCapability(confio, .msix) orelse return null;
+pub fn parseMsixConfig(host: Host, addr: DevAddr) ?MsixConfig {
+    const offset = findCapability(host, addr, .msix) orelse return null;
 
-    const cap = confio.readRawAt(offset + 0, MsixCap);
-    const tbloff = confio.readRawAt(offset + 4, MsixTableOffset);
-    const pbaoff = confio.readRawAt(offset + 8, MsixPbaOffset);
+    const cap = host.readAs(addr, offset + 0, MsixCap);
+    const tbloff = host.readAs(addr, offset + 4, MsixTableOffset);
+    const pbaoff = host.readAs(addr, offset + 8, MsixPbaOffset);
 
     return .{
         .cap_offset = offset,
@@ -502,17 +523,17 @@ pub fn parseMsixConfig(confio: anytype) ?MsixConfig {
 }
 
 /// Enable MSI-X for the device.
-pub fn enableMsix(confio: anytype, cap_offset: u8) void {
-    const val = confio.readRawAt(cap_offset, u32);
+pub fn enableMsix(host: Host, addr: DevAddr, cap_offset: u8) void {
+    const val = host.read(addr, cap_offset);
     // Set MSI-X Enable bit (bit 31), clear Function Mask (bit 30).
-    confio.writeRawAt(cap_offset, (val | (1 << 31)) & ~@as(u32, 1 << 30));
+    host.write(addr, cap_offset, (val | (1 << 31)) & ~@as(u32, 1 << 30));
 }
 
 /// Disable MSI-X for the device.
-pub fn disableMsix(confio: anytype, cap_offset: u8) void {
-    const val = confio.readRawAt(cap_offset, u32);
+pub fn disableMsix(host: Host, addr: DevAddr, cap_offset: u8) void {
+    const val = host.read(addr, cap_offset);
     // Clear MSI-X Enable bit (bit 31).
-    confio.writeRawAt(cap_offset, val & ~@as(u32, 1 << 31));
+    host.write(addr, cap_offset, val & ~@as(u32, 1 << 31));
 }
 
 /// Setter for MSI-X Table entry.
@@ -901,7 +922,7 @@ pub const LinkControlStatus2 = packed struct(u32) {
 pub const DmaAllocatorImpl = struct {
     const Self = @This();
 
-    page_allocator: common.mem.PageAllocator,
+    page_allocator: PageAllocator,
 
     const vtable = common.mem.DmaAllocator.Vtable{
         .allocPages = Self.allocPages,
@@ -910,7 +931,7 @@ pub const DmaAllocatorImpl = struct {
         .phys2virt = Self.phys2virt,
     };
 
-    pub fn new(page_allocator: common.mem.PageAllocator) Self {
+    pub fn new(page_allocator: PageAllocator) Self {
         return .{ .page_allocator = page_allocator };
     }
 
@@ -950,6 +971,7 @@ pub const DmaAllocatorImpl = struct {
 const std = @import("std");
 const log = std.log.scoped(.pci);
 const common = @import("common");
+const PageAllocator = common.mem.PageAllocator;
 const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;

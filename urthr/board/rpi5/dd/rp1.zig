@@ -108,11 +108,11 @@ var vmsix: usize = undefined;
 
 /// Initialize RP1 controller.
 pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
-    var confio = pcie.getConfIoType0();
-    confio.setAddress(1, 0, 0);
+    const host = pcie.interface();
+    const addr = dd.pci.DevAddr{ .bus = 1 };
 
     // Read configuration header.
-    const header_vendor_dev = confio.read(dd.pci.HeaderVendorDevice);
+    const header_vendor_dev = host.readReg(dd.pci.HeaderType0, addr, dd.pci.HeaderVendorDevice);
     log.info(
         "RP1 Vendor ID: 0x{X:0>4}, Device ID: 0x{X:0>4}",
         .{ header_vendor_dev.vendor_id, header_vendor_dev.device_id },
@@ -120,7 +120,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     rtt.expectEqual(0x1DE4, header_vendor_dev.vendor_id);
     rtt.expectEqual(0x0001, header_vendor_dev.device_id);
 
-    const class = confio.read(dd.pci.HeaderRevClass);
+    const class = host.readReg(dd.pci.HeaderType0, addr, dd.pci.HeaderRevClass);
     log.info(
         "RP1 Class Code: {X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}",
         .{ class.base_class, class.sub_class, class.prog_if, class.revision_id },
@@ -128,30 +128,30 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
 
     // Configure BARs.
     var bars_buffer: [6]dd.pci.BarInfo = undefined;
-    var bars = dd.pci.parseBars(confio, &bars_buffer);
+    var bars = dd.pci.parseBars(host, addr, &bars_buffer);
     for (bars) |bar| {
         switch (bar.index) {
             0 => {
                 // MSI-X table and PBA
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(msix_range.pci, confio);
+                bar.setAddress(msix_range.pci, host, addr);
             },
             1 => {
                 // Peripherals
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(peri_range.pci, confio);
+                bar.setAddress(peri_range.pci, host, addr);
             },
             2 => {
                 // Shared SRAM
                 rtt.expectEqual(.mem32, bar.type);
-                bar.setAddress(sram_range.pci, confio);
+                bar.setAddress(sram_range.pci, host, addr);
             },
             else => {},
         }
     }
 
     // Print configured BARs.
-    bars = dd.pci.parseBars(confio, &bars_buffer);
+    bars = dd.pci.parseBars(host, addr, &bars_buffer);
     for (bars) |bar| {
         log.info(
             "BAR{}: 0x{X:0>8} - 0x{X:0>8} ({t})",
@@ -182,7 +182,7 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     );
 
     // Set configuration header.
-    confio.modify(dd.pci.HeaderCommandStatus, .{
+    host.modifyReg(dd.pci.HeaderType0, addr, dd.pci.HeaderCommandStatus, .{
         .memory_space_enable = true,
         .bus_master_enable = true,
         .interrupt_disable = false,
@@ -406,11 +406,11 @@ const MsixCfg = packed struct(u32) {
 
 /// Setup MSI-X.
 fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
-    var confio = pcie.getConfIoType0();
-    confio.setAddress(1, 0, 0);
+    const host = pcie.interface();
+    const addr = dd.pci.DevAddr{ .bus = 1 };
 
     // Check for MSI-X capability.
-    const msix = dd.pci.parseMsixConfig(confio) orelse
+    const msix = dd.pci.parseMsixConfig(host, addr) orelse
         @panic("RP1 does not support MSI-X");
 
     log.debug("MSI-X table: size={d}, BAR={d}", .{
@@ -463,7 +463,7 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
     }
 
     // Enable global.
-    dd.pci.enableMsix(confio, msix.cap_offset);
+    dd.pci.enableMsix(host, addr, msix.cap_offset);
 }
 
 /// Set MSI-X configuration register.
