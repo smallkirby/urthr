@@ -11,7 +11,7 @@ pub const Ring = struct {
     index: usize = 0,
 
     /// Initialize a new Ring.
-    pub fn new(comptime size: usize, allocator: PageAllocator) mem.Error!Ring {
+    pub fn new(size: usize, allocator: PageAllocator) mem.Error!Ring {
         const buf = try allocator.alloc(Trb, size);
         errdefer allocator.free(buf);
         for (buf) |*e| e.* = std.mem.zeroes(Trb);
@@ -20,31 +20,19 @@ pub const Ring = struct {
     }
 
     /// Enqueue a TRB to the Ring.
-    ///
-    /// CRB of the TRB is properly set.
-    /// TRB is copied, so the argument can be located in the stack.
-    pub fn push(self: *Ring, trb: *Trb) *const Trb {
-        // Copy the TRB to the tail of the Ring.
-        const ret = self.copyToTail(trb);
+    pub fn push(self: *Ring, value: Trb) *const Trb {
+        var trb = value;
+        trb.cycle = self.pcs;
 
-        // Increment cursor.
+        const ret: *const Trb = @ptrCast(@volatileCast(&self.trbs[self.index]));
+        ret.* = trb;
+
         self.index += 1;
         if (self.index == self.trbs.len - 1) {
             self.rotate();
         }
 
         return ret;
-    }
-
-    /// Copy a TRB to the tail of the Ring pointed to by the index.
-    fn copyToTail(self: *Ring, trb: *Trb) *const Trb {
-        // Set the cycle bit.
-        trb.cycle = self.pcs;
-
-        // Copy the TRB.
-        self.trbs[self.index] = trb.*;
-
-        return @ptrCast(@volatileCast(&self.trbs[self.index]));
     }
 
     /// Push a Link TRB and reset the cursor.
@@ -70,8 +58,10 @@ pub const EventRing = struct {
 
     /// Buffers for TRB.
     trbs: []volatile Trb,
-    /// Producer Cycle State.
-    pcs: u1 = 1,
+    /// Consumer Cycle State.
+    ccs: u1 = 1,
+    /// Dequeue index into TRBs.
+    dequeue: usize = 0,
     /// Event Ring Segment Table.
     erst: []ErstEntry,
     /// Interrupter module.
@@ -86,6 +76,7 @@ pub const EventRing = struct {
         const erst = try allocator.alloc(ErstEntry, num_ers);
         return .{
             .trbs = buf,
+            .dequeue = 0,
             .erst = erst,
             .interrupter = irs,
         };
@@ -108,35 +99,30 @@ pub const EventRing = struct {
             .erdp = @as(u60, @truncate(mem.page.translateIntP(self.trbs.ptr) >> @bitOffsetOf(regs.Erdp, "erdp"))),
         });
 
-        // Set the PCS to 1.
-        self.pcs = 1;
+        // Set the CCS to 1.
+        self.ccs = 1;
     }
 
-    /// Check if more than one event is queued in the Event Ring.
+    /// Check if an event is queued in the Event Ring.
     pub fn hasEvent(self: *const EventRing) bool {
-        return self.poke().cycle == self.pcs;
+        return self.trbs[self.dequeue].cycle == self.ccs;
     }
 
-    /// Get the TRB pointed to by the Interrupter's dequeue pointer.
-    pub fn poke(self: *const EventRing) *volatile Trb {
-        const erdp = self.interrupter.read(regs.Erdp);
-        return @ptrFromInt(mem.page.translateInt(erdp.erdp << @bitOffsetOf(regs.Erdp, "erdp")));
-    }
-
-    /// Get the next event TRB if exists and increment the dequeue pointer.
+    /// Get the next event TRB if exists and advance the dequeue pointer.
     pub fn next(self: *EventRing) ?*volatile Trb {
-        const trb = self.poke();
-        if (trb.cycle != self.pcs) {
+        if (!self.hasEvent()) {
             return null;
         }
+        const trb = &self.trbs[self.dequeue];
 
-        const next_trb: *volatile Trb = if (@intFromPtr(trb) >= @intFromPtr(&self.trbs[self.trbs.len - 1])) blk: {
-            self.pcs +%= 1;
-            break :blk &self.trbs[0];
-        } else @ptrFromInt(@intFromPtr(trb) + @sizeOf(Trb));
+        self.dequeue += 1;
+        if (self.dequeue == self.trbs.len) {
+            self.dequeue = 0;
+            self.ccs +%= 1;
+        }
 
         self.interrupter.modify(regs.Erdp, .{
-            .erdp = mem.page.translateIntP(next_trb) >> @bitOffsetOf(regs.Erdp, "erdp"),
+            .erdp = mem.page.translateIntP(&self.trbs[self.dequeue]) >> @bitOffsetOf(regs.Erdp, "erdp"),
         });
 
         return trb;
