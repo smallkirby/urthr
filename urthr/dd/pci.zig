@@ -81,6 +81,8 @@ pub const DevAddr = struct {
 ///
 /// Implemented by board-specific PCIe host controller drivers.
 pub const Host = struct {
+    const Self = @This();
+
     /// Type-erased pointer to host controller implementation.
     ptr: *anyopaque,
     /// Methods necessary to implement.
@@ -95,61 +97,20 @@ pub const Host = struct {
         getDmaAllocator: *const fn (ctx: *anyopaque) common.mem.DmaAllocator,
     };
 
-    // =========================================================
-    // Raw access
-
-    /// Read a word at the given offset from PCIe configuration space.
-    pub fn read(self: Host, addr: DevAddr, offset: u12) u32 {
-        return self.vtable.readConf(self.ptr, addr, offset);
-    }
-
-    /// Write a word at the given offset to PCIe configuration space.
-    pub fn write(self: Host, addr: DevAddr, offset: u12, value: u32) void {
-        self.vtable.writeConf(self.ptr, addr, offset, value);
-    }
-
-    pub fn getDmaAllocator(self: Host) common.mem.DmaAllocator {
+    /// Get the DMA allocator for PCIe devices.
+    pub fn getDmaAllocator(self: Self) common.mem.DmaAllocator {
         return self.vtable.getDmaAllocator(self.ptr);
     }
 
-    // =========================================================
-    // Typed raw access
-
-    /// Read a register `T` at the given offset from PCIe configuration space.
-    pub fn readAs(self: Host, addr: DevAddr, offset: u12, comptime T: type) T {
-        return @bitCast(self.read(addr, offset));
+    /// Get a configuration space accessor for the given device.
+    pub fn getIo(self: Self, addr: DevAddr) Io {
+        return .{ .host = self, .addr = addr };
     }
-
-    /// Read-modify-write the config space at `offset` using fields of `value`.
-    pub fn modifyAs(self: Host, addr: DevAddr, offset: u12, comptime T: type, value: anytype) void {
-        var current: T = @bitCast(self.read(addr, offset));
-        inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field|
-            @field(current, field.name) = @field(value, field.name);
-        self.write(addr, offset, @bitCast(current));
-    }
-
-    // =========================================================
-    // Typed access with Module
-
-    /// Read a register `T` whose offset is determined by `Module`.
-    pub fn readReg(self: Host, comptime Module: type, addr: DevAddr, comptime T: type) T {
-        const offset, _ = Module.getRegister(T);
-        return @bitCast(self.read(addr, @intCast(offset)));
-    }
-
-    /// Read-modify-write a register `T` whose offset is determined by `Module`.
-    pub fn modifyReg(self: Host, comptime Module: type, addr: DevAddr, comptime T: type, value: anytype) void {
-        const offset, _ = Module.getRegister(T);
-        self.modifyAs(addr, @intCast(offset), T, value);
-    }
-
-    // =========================================================
-    // Higher-level operations
 
     /// Scan the PCIe bus for devices.
     ///
     /// Scan stops when output buffer is full.
-    pub fn scan(self: Host, bus: BusNum, out: []ScanResult) []const ScanResult {
+    pub fn scan(self: Self, bus: BusNum, out: []ScanResult) []const ScanResult {
         var n: usize = 0;
 
         for (0..std.math.maxInt(DeviceNum)) |d| d_block: {
@@ -158,14 +119,15 @@ pub const Host = struct {
             for (0..std.math.maxInt(FunctionNum)) |f| f_block: {
                 const function: FunctionNum = @intCast(f);
                 const addr = DevAddr{ .bus = bus, .device = device, .function = function };
+                const io = self.getIo(addr);
 
-                const vd = self.readReg(HeaderType0, addr, HeaderVendorDevice);
+                const vd = io.readReg(HeaderType0, HeaderVendorDevice);
                 if (vd.vendor_id == 0xFFFF) {
                     if (f == 0) break :f_block;
                     continue;
                 }
 
-                const rc = self.readReg(HeaderType0, addr, HeaderRevClass);
+                const rc = io.readReg(HeaderType0, HeaderRevClass);
                 out[n] = .{
                     .bus = bus,
                     .device = device,
@@ -180,7 +142,7 @@ pub const Host = struct {
                 if (n >= out.len) break :d_block;
 
                 if (f == 0) {
-                    const ht = self.readReg(HeaderType0, addr, HeaderBistLatCacheLine);
+                    const ht = io.readReg(HeaderType0, HeaderBistLatCacheLine);
                     if (ht.header_type & 0x80 == 0) break :f_block;
                 }
             }
@@ -246,9 +208,161 @@ pub const EcamHost = struct {
     }
 };
 
-// =============================================================
-// API
-// =============================================================
+/// Configuration space reader and writer for single PCIe device.
+pub const Io = struct {
+    const Self = @This();
+
+    /// Host controller interface.
+    host: Host,
+    /// Target device address.
+    addr: DevAddr,
+
+    // =========================================================
+    // Raw access
+
+    /// Read a word at the given offset from PCIe configuration space.
+    pub fn read(self: Self, offset: u12) u32 {
+        return self.host.vtable.readConf(self.host.ptr, self.addr, offset);
+    }
+
+    /// Write a word at the given offset to PCIe configuration space.
+    pub fn write(self: Self, offset: u12, value: u32) void {
+        self.host.vtable.writeConf(self.host.ptr, self.addr, offset, value);
+    }
+
+    // =========================================================
+    // Typed raw access
+
+    /// Read a register `T` at the given offset from PCIe configuration space.
+    pub fn readAs(self: Self, offset: u12, comptime T: type) T {
+        return @bitCast(self.read(offset));
+    }
+
+    /// Read-modify-write the config space at `offset` using fields of `value`.
+    pub fn modifyAs(self: Self, offset: u12, comptime T: type, value: anytype) void {
+        var current: T = @bitCast(self.read(offset));
+        inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field|
+            @field(current, field.name) = @field(value, field.name);
+        self.write(offset, @bitCast(current));
+    }
+
+    // =========================================================
+    // Typed access with Module
+
+    /// Read a register `T` whose offset is determined by `Module`.
+    pub fn readReg(self: Self, comptime Module: type, comptime T: type) T {
+        const offset, _ = Module.getRegister(T);
+        return @bitCast(self.read(@intCast(offset)));
+    }
+
+    /// Read-modify-write a register `T` whose offset is determined by `Module`.
+    pub fn modifyReg(self: Self, comptime Module: type, comptime T: type, value: anytype) void {
+        const offset, _ = Module.getRegister(T);
+        self.modifyAs(@intCast(offset), T, value);
+    }
+
+    // =============================================================
+    // BAR
+
+    /// Parse BARs of the device.
+    pub fn parseBars(self: Self, out: []BarInfo) []const BarInfo {
+        const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
+
+        var out_idx: usize = 0;
+        var skip: bool = false;
+        for (out, 0..) |*buf, i| {
+            if (skip) {
+                skip = false;
+                continue;
+            }
+
+            const bar_offset: u12 = @intCast(bar_base + i * @sizeOf(HeaderBar0));
+            const value = self.read(bar_offset);
+
+            // Test if BAR is implemented.
+            self.write(bar_offset, 0xFFFF_FFFF);
+            if (self.read(bar_offset) == 0) {
+                // Unimplemented BAR.
+                continue;
+            }
+            self.write(bar_offset, value);
+
+            if (bits.isset(value, 0)) {
+                // I/O space BAR.
+                buf.* = .{
+                    .index = i,
+                    .type = .io,
+                    .address = value & 0xFFFF_FFFC,
+                    .address_mask = 0,
+                };
+                out_idx += 1;
+            } else if (bits.extract(u2, value, 1) == 0x0) {
+                // Memory space BAR (32-bit).
+                self.write(bar_offset, 0xFFFF_FFFF);
+                const mask = self.read(bar_offset);
+                self.write(bar_offset, value);
+
+                buf.* = .{
+                    .index = i,
+                    .type = .mem32,
+                    .address = value & mask,
+                    .address_mask = bits.concat(u64, @as(u32, 0xFFFF_FFFF), mask),
+                };
+                out_idx += 1;
+            } else if (bits.extract(u2, value, 1) == 0x2) {
+                // Memory space BAR (64-bit).
+                const next_value = self.read(bar_offset + 4);
+                self.write(bar_offset, 0xFFFF_FFFF);
+                self.write(bar_offset + 4, 0xFFFF_FFFF);
+                const mask = self.read(bar_offset);
+                const next_mask = self.read(bar_offset + 4);
+                self.write(bar_offset, value);
+                self.write(bar_offset + 4, next_value);
+
+                const mask64 = bits.concat(u64, next_mask, mask);
+                const addr64 = bits.concat(u64, next_value, value) & mask64;
+
+                buf.* = .{
+                    .index = i,
+                    .type = .mem64,
+                    .address = addr64,
+                    .address_mask = mask64,
+                };
+
+                out_idx += 1;
+                skip = true;
+            } else {
+                // Unrecognized BAR type.
+                break;
+            }
+        }
+
+        return out[0..out_idx];
+    }
+
+    /// Set the address of the BAR.
+    ///
+    /// This function actually writes to the BAR register.
+    pub fn setBarAddress(self: Self, bar: BarInfo, addr: u64) void {
+        rtt.expectEqual(0, addr & ~bar.address_mask);
+
+        const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
+
+        switch (bar.type) {
+            .io => {
+                @panic("I/O BAR setting not implemented.");
+            },
+            .mem32 => {
+                const bar_offset: u12 = @intCast(bar_base + bar.index * @sizeOf(HeaderBar0));
+                const value = self.read(bar_offset);
+                self.write(bar_offset, @as(u32, @intCast(addr)) | (value & 0xF));
+            },
+            .mem64 => {
+                @panic("64-bit BAR setting not implemented.");
+            },
+        }
+    }
+};
 
 /// PCI device found during bus scan.
 pub const ScanResult = struct {
@@ -283,29 +397,6 @@ pub const BarInfo = struct {
     pub fn size(self: BarInfo) u64 {
         return ~self.address_mask + 1;
     }
-
-    /// Set the address of the BAR.
-    ///
-    /// This function actually writes to the BAR register.
-    pub fn setAddress(self: BarInfo, addr: u64, host: Host, daddr: DevAddr) void {
-        rtt.expectEqual(0, addr & ~self.address_mask);
-
-        const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
-
-        switch (self.type) {
-            .io => {
-                @panic("I/O BAR setting not implemented.");
-            },
-            .mem32 => {
-                const bar_offset: u12 = @intCast(bar_base + self.index * @sizeOf(HeaderBar0));
-                const value = host.read(daddr, bar_offset);
-                host.write(daddr, bar_offset, @as(u32, @intCast(addr)) | (value & 0xF));
-            },
-            .mem64 => {
-                @panic("64-bit BAR setting not implemented.");
-            },
-        }
-    }
 };
 
 /// Type of BAR.
@@ -317,82 +408,6 @@ pub const BarType = enum {
     /// Memory space BAR (64-bit).
     mem64,
 };
-
-/// Parse BARs of the device specified by the given device address.
-pub fn parseBars(host: Host, addr: DevAddr, out: []BarInfo) []const BarInfo {
-    const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
-
-    var out_idx: usize = 0;
-    var skip: bool = false;
-    for (out, 0..) |*buf, i| {
-        if (skip) {
-            skip = false;
-            continue;
-        }
-
-        const bar_offset: u12 = @intCast(bar_base + i * @sizeOf(HeaderBar0));
-        const value = host.read(addr, bar_offset);
-
-        // Test if BAR is implemented.
-        host.write(addr, bar_offset, 0xFFFF_FFFF);
-        if (host.read(addr, bar_offset) == 0) {
-            // Unimplemented BAR.
-            continue;
-        }
-        host.write(addr, bar_offset, value);
-
-        if (bits.isset(value, 0)) {
-            // I/O space BAR.
-            buf.* = .{
-                .index = i,
-                .type = .io,
-                .address = value & 0xFFFF_FFFC,
-                .address_mask = 0,
-            };
-            out_idx += 1;
-        } else if (bits.extract(u2, value, 1) == 0x0) {
-            // Memory space BAR (32-bit).
-            host.write(addr, bar_offset, 0xFFFF_FFFF);
-            const mask = host.read(addr, bar_offset);
-            host.write(addr, bar_offset, value);
-
-            buf.* = .{
-                .index = i,
-                .type = .mem32,
-                .address = value & mask,
-                .address_mask = bits.concat(u64, @as(u32, 0xFFFF_FFFF), mask),
-            };
-            out_idx += 1;
-        } else if (bits.extract(u2, value, 1) == 0x2) {
-            // Memory space BAR (64-bit).
-            const next_value = host.read(addr, bar_offset + 4);
-            host.write(addr, bar_offset, 0xFFFF_FFFF);
-            host.write(addr, bar_offset + 4, 0xFFFF_FFFF);
-            const mask = host.read(addr, bar_offset);
-            const next_mask = host.read(addr, bar_offset + 4);
-            host.write(addr, bar_offset, value);
-            host.write(addr, bar_offset + 4, next_value);
-
-            const mask64 = bits.concat(u64, next_mask, mask);
-            const addr64 = bits.concat(u64, next_value, value) & mask64;
-
-            buf.* = .{
-                .index = i,
-                .type = .mem64,
-                .address = addr64,
-                .address_mask = mask64,
-            };
-
-            out_idx += 1;
-            skip = true;
-        } else {
-            // Unrecognized BAR type.
-            break;
-        }
-    }
-
-    return out[0..out_idx];
-}
 
 // =============================================================
 // Capability API
@@ -423,12 +438,13 @@ pub const CapHeader = packed struct(u32) {
 ///
 /// Returns the offset of the capability, or null if not found.
 pub fn findCapability(host: Host, addr: DevAddr, cap_id: CapId) ?u8 {
-    const status = host.readReg(HeaderType0, addr, HeaderCommandStatus);
+    const io = host.getIo(addr);
+    const status = io.readReg(HeaderType0, HeaderCommandStatus);
     if (!status.capabilities_list) return null;
 
-    var offset = host.readReg(HeaderType0, addr, HeaderCapPtr).cap_ptr;
+    var offset = io.readReg(HeaderType0, HeaderCapPtr).cap_ptr;
     while (offset != 0) {
-        const header = host.readAs(addr, offset, CapHeader);
+        const header = io.readAs(offset, CapHeader);
         if (header.id == cap_id) {
             return offset;
         }
@@ -507,10 +523,11 @@ pub const MsixConfig = struct {
 /// Returns null if MSI-X capability is not found.
 pub fn parseMsixConfig(host: Host, addr: DevAddr) ?MsixConfig {
     const offset = findCapability(host, addr, .msix) orelse return null;
+    const io = host.getIo(addr);
 
-    const cap = host.readAs(addr, offset + 0, MsixCap);
-    const tbloff = host.readAs(addr, offset + 4, MsixTableOffset);
-    const pbaoff = host.readAs(addr, offset + 8, MsixPbaOffset);
+    const cap = io.readAs(offset + 0, MsixCap);
+    const tbloff = io.readAs(offset + 4, MsixTableOffset);
+    const pbaoff = io.readAs(offset + 8, MsixPbaOffset);
 
     return .{
         .cap_offset = offset,
@@ -524,16 +541,18 @@ pub fn parseMsixConfig(host: Host, addr: DevAddr) ?MsixConfig {
 
 /// Enable MSI-X for the device.
 pub fn enableMsix(host: Host, addr: DevAddr, cap_offset: u8) void {
-    const val = host.read(addr, cap_offset);
+    const io = host.getIo(addr);
+    const val = io.read(cap_offset);
     // Set MSI-X Enable bit (bit 31), clear Function Mask (bit 30).
-    host.write(addr, cap_offset, (val | (1 << 31)) & ~@as(u32, 1 << 30));
+    io.write(cap_offset, (val | (1 << 31)) & ~@as(u32, 1 << 30));
 }
 
 /// Disable MSI-X for the device.
 pub fn disableMsix(host: Host, addr: DevAddr, cap_offset: u8) void {
-    const val = host.read(addr, cap_offset);
+    const io = host.getIo(addr);
+    const val = io.read(cap_offset);
     // Clear MSI-X Enable bit (bit 31).
-    host.write(addr, cap_offset, val & ~@as(u32, 1 << 31));
+    io.write(cap_offset, val & ~@as(u32, 1 << 31));
 }
 
 /// Setter for MSI-X Table entry.
