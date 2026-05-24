@@ -131,7 +131,7 @@ pub const EventRing = struct {
         }
 
         const next_trb: *volatile Trb = if (@intFromPtr(trb) >= @intFromPtr(&self.trbs[self.trbs.len - 1])) blk: {
-            self.pcs = !self.pcs;
+            self.pcs +%= 1;
             break :blk &self.trbs[0];
         } else @ptrFromInt(@intFromPtr(trb) + @sizeOf(Trb));
 
