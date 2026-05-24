@@ -829,19 +829,14 @@ const Qemu = struct {
                 "-S",
             });
         }
+
+        // Default peripherals
         switch (self.machine) {
             .virt => try args.appendSlice(allocator, &.{
                 "-object",
                 "rng-random,id=rng0,filename=/dev/urandom",
                 "-device",
                 "virtio-rng-device,rng=rng0",
-            }),
-            else => {},
-        }
-
-        // Default peripherals
-        switch (self.machine) {
-            .virt => try args.appendSlice(allocator, &.{
                 "-device",
                 "nec-usb-xhci,id=xhci",
                 "-device",
