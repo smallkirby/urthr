@@ -1,3 +1,6 @@
+/// Number of TRBs that fit in one 4 KiB page.
+pub const trbs_per_page = mem.page_size / @sizeOf(Trb);
+
 /// Ring that can be used both for Command Ring and Transfer Ring.
 ///
 /// #### Command Ring
@@ -60,8 +63,6 @@ pub const EventRing = struct {
     ///
     /// Supports only one ERS for now.
     const num_ers = 1;
-    /// Number of TRBs per Event Ring Segment.
-    const num_trbs_per_segment = mem.page_size / @sizeOf(Trb);
 
     /// Buffers for TRB.
     trbs: []volatile Trb,
@@ -76,7 +77,7 @@ pub const EventRing = struct {
 
     /// Initialize a new Event Ring.
     pub fn new(irs: regs.Interrupter, allocator: PageAllocator) mem.Error!EventRing {
-        const buf = try allocator.alloc(Trb, num_trbs_per_segment);
+        const buf = try allocator.alloc(Trb, trbs_per_page);
         errdefer allocator.free(buf);
         for (buf) |*e| e.* = std.mem.zeroes(Trb);
 
@@ -91,12 +92,12 @@ pub const EventRing = struct {
 
     /// Initialize and set the Event Ring to the primary interrupter.
     pub fn init(self: *EventRing) void {
-        rtt.expectEqual(self.erst.len, self.trbs.len / num_trbs_per_segment);
+        rtt.expectEqual(self.erst.len, self.trbs.len / trbs_per_page);
 
         // Initialize ERST entries.
         for (self.erst, 0..) |*erst, i| {
-            const start = i * num_trbs_per_segment;
-            erst.* = .from(self.trbs[start .. start + num_trbs_per_segment]);
+            const start = i * trbs_per_page;
+            erst.* = .from(self.trbs[start .. start + trbs_per_page]);
         }
 
         // Set the Event Ring Segment Table.

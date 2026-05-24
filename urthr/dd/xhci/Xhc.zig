@@ -164,10 +164,8 @@ pub fn setup(self: *Self) Error!void {
 // =============================================================
 
 fn initRings(self: *Self) Error!void {
-    const num_trbs_per_ring = mem.page_size / @sizeOf(Trb);
-
     // Init Command Ring.
-    self.cring = try rings.Ring.new(num_trbs_per_ring, mem.page);
+    self.cring = try rings.Ring.new(rings.trbs_per_page, mem.page);
     self.operational.write(regs.Crcr0, regs.Crcr0{
         .rcs = self.cring.pcs,
         .cs = false,
