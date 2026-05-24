@@ -7,6 +7,7 @@ pub const net = @import("dd/net.zig");
 pub const pci = @import("dd/pci.zig");
 pub const pl011 = @import("dd/pl011.zig");
 pub const sdhc = @import("dd/sdhc.zig");
+pub const usb = @import("dd/usb.zig");
 pub const virtio = @import("dd/virtio.zig");
 pub const VirtioBlk = @import("dd/VirtioBlk.zig");
 pub const VirtioRng = @import("dd/VirtioRng.zig");

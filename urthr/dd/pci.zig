@@ -133,14 +133,18 @@ pub const Host = struct {
                 }
 
                 const rc = io.readReg(HeaderRevClass);
+                const class = ClassCode{
+                    .base = rc.base_class,
+                    .sub = rc.sub_class,
+                    .interface = rc.prog_if,
+                };
                 out[n] = .{
                     .bus = bus,
                     .device = device,
                     .function = function,
                     .vendor_id = vd.vendor_id,
                     .device_id = vd.device_id,
-                    .class = rc.base_class,
-                    .subclass = rc.sub_class,
+                    .class = class,
                 };
 
                 n += 1;
@@ -385,10 +389,22 @@ pub const ScanResult = struct {
     vendor_id: u16,
     /// Device ID.
     device_id: u16,
+    /// Class code.
+    class: ClassCode,
+};
+
+/// Class code.
+pub const ClassCode = struct {
     /// Base class.
-    class: u8,
+    base: u8,
     /// Subclass.
-    subclass: u8,
+    sub: u8,
+    /// Programming interface.
+    interface: u8,
+
+    pub fn format(self: ClassCode, writer: *std.Io.Writer) !void {
+        try writer.print("{X:0>2}:{X:0>2}:{X:0>2}", .{ self.base, self.sub, self.interface });
+    }
 };
 
 /// BAR information.
