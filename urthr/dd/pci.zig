@@ -363,7 +363,10 @@ fn Io(Module: type) type {
                     self.write(bar_offset, @as(u32, @intCast(addr)) | (value & 0xF));
                 },
                 .mem64 => {
-                    @panic("64-bit BAR setting not implemented.");
+                    const bar_offset: u12 = @intCast(bar_base + bar.index * @sizeOf(HeaderBar0));
+                    const value = self.read(bar_offset);
+                    self.write(bar_offset, @as(u32, @intCast(addr)) | (value & 0xF));
+                    self.write(bar_offset + 4, @intCast(addr >> 32));
                 },
             }
         }
