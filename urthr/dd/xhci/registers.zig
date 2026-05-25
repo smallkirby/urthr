@@ -64,12 +64,13 @@ pub const CapParam2 = packed struct(u32) {
 // =============================================================
 // xHC Operational Registers
 
-pub const Operational = mmio.Module(.{ .size = u32 }, &.{
+pub const Operational = mmio.Module(.{ .natural = u64 }, &.{
     .{ 0x00, CommandRegister },
     .{ 0x04, StatusRegister },
     .{ 0x08, PageSize },
     .{ 0x18, Crcr0 },
     .{ 0x1C, Crcr1 },
+    .{ 0x48, Dcbaap },
     .{ 0x50, ConfigureRegister },
     .{ 0x400, mmio.Marker(.port_set) },
 });
@@ -173,6 +174,11 @@ pub const Crcr1 = packed struct(u32) {
     crp: u32,
 };
 
+/// Device Context Base Address Array Pointer.
+pub const Dcbaap = packed struct(u64) {
+    value: u64,
+};
+
 /// Runtime xHC configuration register. (CONFIG)
 pub const ConfigureRegister = packed struct(u32) {
     /// Number of Device Slots Enabled.
@@ -183,6 +189,103 @@ pub const ConfigureRegister = packed struct(u32) {
     cie: bool,
     /// Reserved.
     _10: u22 = 0,
+};
+
+/// Entry in Port Register Set.
+pub const Port = mmio.Module(.{ .natural = u64 }, &.{
+    .{ 0x00, PortSc },
+    .{ 0x04, PortPmsc },
+    .{ 0x08, PortLi },
+    .{ 0x0C, PortHlpmc },
+});
+
+/// Port Status and Control Register.
+pub const PortSc = packed struct(u32) {
+    /// Current Connect Status.
+    ///
+    /// If true, the port is connected to a device.
+    ccs: bool,
+    /// Port Enabled/Disabled.
+    ped: bool,
+    /// Reserved.
+    _2: u1 = 0,
+    /// Over-current Active.
+    oca: bool,
+    /// Port Reset.
+    pr: bool,
+    /// Port Link State.
+    pls: u4,
+    /// Port Power.
+    pp: bool,
+    /// Port Speed.
+    speed: PortSpeed,
+    /// Port Indicator Control.
+    pic: u2,
+    /// Port Link State Write Strobe.
+    lws: bool,
+    /// Connect Status Change. RW1CS.
+    csc: bool,
+    /// Port Enabled/Disabled Change.
+    pec: bool,
+    /// Warm Port Reset Change.
+    wrc: bool,
+    /// Over-current Change.
+    occ: bool,
+    /// Port Reset Change.
+    prc: bool,
+    /// Port Link State Change.
+    plc: bool,
+    /// Port Config Error Change.
+    cec: bool,
+    /// Cold Attach Status.
+    cas: bool,
+    /// Wake on Connect Enable.
+    wce: bool,
+    /// Wake on Disconnect Enable.
+    wde: bool,
+    /// Wake on Over-current Enable.
+    woe: bool,
+    /// Reserved.
+    _28: u2 = 0,
+    /// Device Removable.
+    dr: bool,
+    /// Warm Port Reset.
+    wpr: bool,
+};
+
+const PortSpeed = enum(u4) {
+    invalid = 0,
+    full = 1,
+    low = 2,
+    high = 3,
+    super = 4,
+    super_plus = 5,
+
+    pub fn maxPacketSize(self: PortSpeed) u16 {
+        return switch (self) {
+            .invalid => 0,
+            .full => 8,
+            .low => 8,
+            .high => 64,
+            .super => 512,
+            .super_plus => 512,
+        };
+    }
+};
+
+/// Port Power Management Status and Control Register.
+pub const PortPmsc = packed struct(u32) {
+    value: u32,
+};
+
+/// Port Link Info Register.
+pub const PortLi = packed struct(u32) {
+    value: u32,
+};
+
+/// Port Hardware LPM Control Register.
+pub const PortHlpmc = packed struct(u32) {
+    value: u32,
 };
 
 // =============================================================
