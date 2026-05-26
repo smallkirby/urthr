@@ -9,6 +9,9 @@ var gicr_phys: usize = 0;
 /// Minimum LPI interrupt ID.
 pub const lpi_base: usize = 8192;
 
+/// The maximum interrupt ID supported.
+const max_lpi = 16383;
+
 /// Set the address of GICD and GICR.
 pub fn setBase(gicd_base: usize, gicr_base: Pair(usize), itsp: Pair(usize)) void {
     // GICD
@@ -113,12 +116,13 @@ pub fn initLocal(alloc: PageAllocator) PageAllocator.Error!void {
     its.mapc(cpu, target, true);
 
     // Setup LPI Configuration table.
-    const num_config = 256;
+    const idbits = std.math.log2_int_ceil(usize, max_lpi) - 1;
+    const num_config = max_lpi - lpi_base + 1;
     const config = try alloc.alloc(LpiConfig, num_config);
     errdefer alloc.free(config);
     @memset(config, std.mem.zeroes(LpiConfig));
     rd.modify(gicr.Propbaser, .{
-        .idbits = 31,
+        .idbits = @as(u5, @intCast(idbits)),
         .inner_cache = .none,
         .outer_cache = .same,
         .sh = .none,
@@ -126,7 +130,8 @@ pub fn initLocal(alloc: PageAllocator) PageAllocator.Error!void {
     });
 
     // Setup LPI Pending table.
-    const pend = try alloc.alloc(u64, num_config / @bitSizeOf(LpiConfig));
+    const num_pend = num_config / @bitSizeOf(u8);
+    const pend = try alloc.alloc(u8, num_pend);
     errdefer alloc.free(pend);
     @memset(pend, 0);
     rd.modify(gicr.Pendbaser, .{
@@ -134,6 +139,7 @@ pub fn initLocal(alloc: PageAllocator) PageAllocator.Error!void {
         .outer_cache = .same,
         .sh = .none,
         .phys = @as(u40, @truncate(alloc.translateIntP(pend) >> @bitOffsetOf(gicr.Pendbaser, "phys"))),
+        .ptz = true, // Already zeroed above.
     });
 
     // Commit changes.
