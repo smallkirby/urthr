@@ -63,7 +63,9 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals() (common.mem.Error || net.Error)!void {
+///
+/// This function is called before exceptions are enabled.
+pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
     // Interrupt controller.
     {
         arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
@@ -137,6 +139,26 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
         rdd.clk.init();
     }
 
+    // Framebuffer.
+    blk: {
+        rdd.FrameBuffer.init(
+            urd.mem.phys,
+            urd.mem.page,
+            .{ .memcpy = dmaMemcpy },
+        ) catch |err| {
+            log.err("framebuffer initialization failed: {t}", .{err});
+            break :blk;
+        };
+        urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
+            log.warn("failed to add console backend: {t}", .{err});
+        };
+    }
+}
+
+/// Initialize peripherals.
+///
+/// This function is called after exceptions are enabled.
+pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
     // RNG.
     log.info("Initializing RNG.", .{});
     {
@@ -168,21 +190,6 @@ pub fn initPeripherals() (common.mem.Error || net.Error)!void {
             50_000_000, // 50 MHz PLL base clock
             urd.mem.page,
         );
-    }
-
-    // Framebuffer.
-    blk: {
-        rdd.FrameBuffer.init(
-            urd.mem.phys,
-            urd.mem.page,
-            .{ .memcpy = dmaMemcpy },
-        ) catch |err| {
-            log.err("framebuffer initialization failed: {t}", .{err});
-            break :blk;
-        };
-        urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
-            log.warn("failed to add console backend: {t}", .{err});
-        };
     }
 
     // Ethernet.

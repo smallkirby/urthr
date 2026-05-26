@@ -17,6 +17,9 @@ var virtio_blk_dev: ?dd.VirtioBlk = null;
 /// Virtio RNG device instance.
 var virtio_rng_dev: ?dd.VirtioRng = null;
 
+/// PCIe ECAM.
+var ecam: dd.pci.EcamHost = undefined;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -45,7 +48,9 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 pub fn deinitLoader() void {}
 
 /// Initialize peripherals.
-pub fn initPeripherals() common.mem.Error!void {
+///
+/// This function is called before exceptions are enabled.
+pub fn initPeripherals1() common.mem.Error!void {
     // Interrupt controller.
     {
         const gicd = try urd.mem.phys.reserveAndRemap(
@@ -87,10 +92,14 @@ pub fn initPeripherals() common.mem.Error!void {
             null,
             .device,
         );
-
-        _ = pci;
+        ecam = dd.pci.EcamHost.init(pci, urd.mem.page);
     }
+}
 
+/// Initialize peripherals phase 2.
+///
+/// This function is called after exceptions are enabled.
+pub fn initPeripherals2() urd.mem.Error!void {
     // virtio
     {
         const virtio_size = dd.virtio.mmio_space_size;
