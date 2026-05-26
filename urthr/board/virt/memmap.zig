@@ -56,6 +56,12 @@ pub const gicr = Range{
     .end = 0x0900_0000,
 };
 
+/// GICv3 ITS.
+pub const gicits = Range{
+    .start = 0x0808_0000,
+    .end = 0x080A_0000,
+};
+
 /// PL011 UART (debug port)
 pub const pl011 = Range{
     .start = 0x0900_0000,

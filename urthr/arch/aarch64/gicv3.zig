@@ -3,14 +3,25 @@
 //! Supports only Group 1 Non-Secure interrupts.
 //! Supports only a single CPU cluster.
 
+/// Physical base address of GICR frames.
+var gicr_phys: usize = 0;
+
+/// Minimum LPI interrupt ID.
+pub const lpi_base: usize = 8192;
+
 /// Set the address of GICD and GICR.
-pub fn setBase(gicd_base: usize, gicr_base: usize) void {
+pub fn setBase(gicd_base: usize, gicr_base: Pair(usize), itsp: Pair(usize)) void {
+    // GICD
     gicd.mod.setBase(gicd_base);
-    gicr.base = gicr_base;
+    // GICR
+    gicr.base = gicr_base.value;
+    gicr_phys = gicr_base.phys;
+    // ITS
+    its.setBase(itsp);
 }
 
 /// Initialize Distributor.
-pub fn initGlobal() void {
+pub fn initGlobal(alloc: PageAllocator) common.mem.Error!void {
     const implementer_arm = 0x43B;
     rtt.expectEqual(implementer_arm, gicd.mod.read(gicd.Iidr).implementer);
 
@@ -51,10 +62,13 @@ pub fn initGlobal() void {
         .enable_grp1 = true,
     });
     gicd.waitRwp();
+
+    // Setup global ITS.
+    try its.init(alloc);
 }
 
 /// Initialize Redistributor for the current AP.
-pub fn initLocal() void {
+pub fn initLocal(alloc: PageAllocator) PageAllocator.Error!void {
     const cpu = getCpuId();
     const rd = gicr.getRdMod(cpu);
     const sgi = gicr.getSgiMod(cpu);
@@ -90,6 +104,43 @@ pub fn initLocal() void {
     var igrpen1 = am.mrs(.icc_igrpen1_el1);
     igrpen1.enable = true;
     am.msr(.icc_igrpen1_el1, igrpen1);
+
+    // Maps a `cpu`-th collection to this Redistributor.
+    const target = if (its.useRdAddress())
+        gicr.getRdPhys(cpu)
+    else
+        cpu;
+    its.mapc(cpu, target, true);
+
+    // Setup LPI Configuration table.
+    const num_config = 256;
+    const config = try alloc.alloc(LpiConfig, num_config);
+    errdefer alloc.free(config);
+    @memset(config, std.mem.zeroes(LpiConfig));
+    rd.modify(gicr.Propbaser, .{
+        .idbits = 31,
+        .inner_cache = .none,
+        .outer_cache = .same,
+        .sh = .none,
+        .phys = @as(u40, @truncate(alloc.translateIntP(config) >> @bitOffsetOf(gicr.Propbaser, "phys"))),
+    });
+
+    // Setup LPI Pending table.
+    const pend = try alloc.alloc(u64, num_config / @bitSizeOf(LpiConfig));
+    errdefer alloc.free(pend);
+    @memset(pend, 0);
+    rd.modify(gicr.Pendbaser, .{
+        .inner_cache = .none,
+        .outer_cache = .same,
+        .sh = .none,
+        .phys = @as(u40, @truncate(alloc.translateIntP(pend) >> @bitOffsetOf(gicr.Pendbaser, "phys"))),
+    });
+
+    // Commit changes.
+    its.sync(target);
+
+    // Enable LPIs.
+    rd.modify(gicr.Ctlr, .{ .enable_lpis = true });
 }
 
 /// Get the interrupt ID of the signaled interrupt.
@@ -298,11 +349,13 @@ const gicd = struct {
 
 const gicr = struct {
     /// RD_base frame module.
-    const Redist = mmio.Module(.{ .size = u32 }, &.{
+    const Redist = mmio.Module(.{ .natural = u64 }, &.{
         .{ 0x000, Ctlr },
         .{ 0x008, Typer1 },
         .{ 0x00C, Typer2 },
         .{ 0x014, Waker },
+        .{ 0x070, Propbaser },
+        .{ 0x078, Pendbaser },
     });
 
     /// SGI_base frame module.
@@ -332,6 +385,12 @@ const gicr = struct {
         module.setBase(base + cpu * frame_size);
 
         return module;
+    }
+
+    /// Get the physical address of the Redistributor frame for the given CPU.
+    pub fn getRdPhys(cpu: usize) usize {
+        rtt.expect(cpu < num_redists);
+        return gicr_phys + cpu * frame_size;
     }
 
     /// Get the SGI frame for the given CPU.
@@ -465,6 +524,138 @@ const gicr = struct {
         /// Reserved.
         _3: u29 = 0,
     };
+
+    /// Redistributor Properties Base Address Register.
+    const Propbaser = packed struct(u64) {
+        /// The number of bits of LPI INTID supported, minus one.
+        idbits: u5,
+        /// Reserved.
+        _5: u2 = 0,
+        /// Inner Cacheability attributes of accesses to the LPI Configuration table.
+        inner_cache: enum(u3) {
+            /// Device-nGnRnE.
+            ngnrne = 0,
+            /// Non-cacheable.
+            none = 1,
+            /// Cacheable, Read-allocate, Write-through.
+            c_ra_wt = 2,
+            /// Cacheable, Read-allocate, Write-back.
+            c_ra_wb = 3,
+            /// Cacheable, Write-allocate, Write-through.
+            c_wa_wt = 4,
+            /// Cacheable, Write-allocate, Write-back.
+            c_wa_wb = 5,
+            /// Cacheable, Read-allocate, Write-allocate, Write-through.
+            c_ra_wa_wt = 6,
+            /// Cacheable, Read-allocate, Write-allocate, Write-back.
+            c_ra_wa_wb = 7,
+        },
+        /// Shareability attributes of accesses to the LPI Configuration table.
+        sh: enum(u2) {
+            /// Non-shareable.
+            none = 0,
+            /// Inner Shareable.
+            inner = 1,
+            /// Outer Shareable.
+            outer = 2,
+        },
+        /// Physical address containing the LPI configuration table.
+        phys: u40,
+        /// Reserved.
+        _52: u4 = 0,
+        outer_cache: enum(u3) {
+            /// Same as inner cacheability attributes.
+            same = 0,
+            /// Non-cacheable.
+            none = 1,
+            /// Cacheable, Read-allocate, Write-through.
+            c_ra_wt = 2,
+            /// Cacheable, Read-allocate, Write-back.
+            c_ra_wb = 3,
+            /// Cacheable, Write-allocate, Write-through.
+            c_wa_wt = 4,
+            /// Cacheable, Write-allocate, Write-back.
+            c_wa_wb = 5,
+            /// Cacheable, Read-allocate, Write-allocate, Write-through.
+            c_ra_wa_wt = 6,
+            /// Cacheable, Read-allocate, Write-allocate, Write-back.
+            c_ra_wa_wb = 7,
+        },
+        /// Reserved.
+        _59: u5 = 0,
+    };
+
+    /// Redistributor Pending Table Base Address Register.
+    const Pendbaser = packed struct(u64) {
+        /// Reserved.
+        _0: u7 = 0,
+        /// Inner Cacheability attributes of accesses to the LPI Configuration table.
+        inner_cache: enum(u3) {
+            /// Device-nGnRnE.
+            ngnrne = 0,
+            /// Non-cacheable.
+            none = 1,
+            /// Cacheable, Read-allocate, Write-through.
+            c_ra_wt = 2,
+            /// Cacheable, Read-allocate, Write-back.
+            c_ra_wb = 3,
+            /// Cacheable, Write-allocate, Write-through.
+            c_wa_wt = 4,
+            /// Cacheable, Write-allocate, Write-back.
+            c_wa_wb = 5,
+            /// Cacheable, Read-allocate, Write-allocate, Write-through.
+            c_ra_wa_wt = 6,
+            /// Cacheable, Read-allocate, Write-allocate, Write-back.
+            c_ra_wa_wb = 7,
+        },
+        /// Shareability attributes of accesses to the LPI Configuration table.
+        sh: enum(u2) {
+            /// Non-shareable.
+            none = 0,
+            /// Inner Shareable.
+            inner = 1,
+            /// Outer Shareable.
+            outer = 2,
+        },
+        /// Physical address containing the LPI configuration table.
+        phys: u40,
+        /// Reserved.
+        _52: u4 = 0,
+        outer_cache: enum(u3) {
+            /// Same as inner cacheability attributes.
+            same = 0,
+            /// Non-cacheable.
+            none = 1,
+            /// Cacheable, Read-allocate, Write-through.
+            c_ra_wt = 2,
+            /// Cacheable, Read-allocate, Write-back.
+            c_ra_wb = 3,
+            /// Cacheable, Write-allocate, Write-through.
+            c_wa_wt = 4,
+            /// Cacheable, Write-allocate, Write-back.
+            c_wa_wb = 5,
+            /// Cacheable, Read-allocate, Write-allocate, Write-through.
+            c_ra_wa_wt = 6,
+            /// Cacheable, Read-allocate, Write-allocate, Write-back.
+            c_ra_wa_wb = 7,
+        },
+        /// Reserved.
+        _59: u3 = 0,
+        /// Pending table is zero. WO.
+        ptz: bool,
+        /// Reserved.
+        _63: u1 = 0,
+    };
+};
+
+/// LPI Configuration table entry.
+const LpiConfig = packed struct(u8) {
+    /// LPI enable.
+    enable: bool,
+    /// Reserved.
+    _1: u1 = 0,
+    /// The priority of the LPI.
+    priority: u6,
 };
 
 // =============================================================
@@ -482,8 +673,11 @@ pub fn getCpuId() u8 {
 
 const std = @import("std");
 const common = @import("common");
+const PageAllocator = common.mem.PageAllocator;
 const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
+const Pair = common.Pair;
 const am = @import("asm.zig");
 const reg = @import("register.zig");
+const its = @import("gicv3its.zig");

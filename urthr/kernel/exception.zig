@@ -32,8 +32,8 @@ pub fn initGlobal() void {
 /// Initialize local IRQ handling for the current core.
 ///
 /// IRQs are still masked at this point.
-pub fn initLocal() void {
-    board.initIrqLocal();
+pub fn initLocal() urd.mem.Error!void {
+    try board.initIrqLocal();
 }
 
 /// Call the registered interrupt handler for the given vector.

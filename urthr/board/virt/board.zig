@@ -62,8 +62,20 @@ pub fn initPeripherals() common.mem.Error!void {
             null,
             .device,
         );
-        arch.gicv3.setBase(gicd, gicr);
-        arch.gicv3.initGlobal();
+        const its = try urd.mem.phys.reserveAndRemap(
+            "ITS",
+            memmap.gicits.start,
+            memmap.gicits.size(),
+            null,
+            .device,
+        );
+        arch.gicv3.setBase(
+            gicd,
+            .new(gicr, memmap.gicr.start),
+            .new(its, memmap.gicits.start),
+        );
+
+        try arch.gicv3.initGlobal(urd.mem.page);
     }
 
     // PCIe ECAM.
@@ -195,9 +207,9 @@ pub fn initIrqGlobal(f: ExceptionHandler) void {
 }
 
 /// Initialize GIC for the calling AP.
-pub fn initIrqLocal() void {
+pub fn initIrqLocal() common.mem.PageAllocator.Error!void {
     // Initialize CPU interface.
-    arch.gicv3.initLocal();
+    try arch.gicv3.initLocal(urd.mem.page);
 
     // Initialize exception handling for this CPU.
     arch.exception.initLocal();
@@ -308,5 +320,6 @@ const util = common.util;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
+const Pair = common.Pair;
 const urd = @import("urthr");
 const dd = @import("dd");

@@ -30,3 +30,5 @@ rto = "rto"
 flate = "flate"
 # SME
 sme = "sme"
+# GITS Translater Register
+translater = "translater"

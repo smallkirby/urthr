@@ -72,7 +72,7 @@ fn zsubmain() !void {
     idmap[logical_core] = arch.getCoreId();
 
     // Set the exception vector for this CPU.
-    urd.exception.initLocal();
+    try urd.exception.initLocal();
 
     // Initialize per-CPU data.
     urd.pcpu.localInit(logical_core);
