@@ -76,6 +76,12 @@ pub const virtio = Range{
     .end = 0x0A00_4000,
 };
 
+/// PCIe MMIO region.
+pub const pci_mmio = Range{
+    .start = 0x1000_0000,
+    .end = 0x3EFF_0000,
+};
+
 /// PCIe
 pub const pci = Range{
     .start = 0x0040_1000_0000,

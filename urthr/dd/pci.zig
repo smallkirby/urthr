@@ -139,9 +139,7 @@ pub const Host = struct {
                     .interface = rc.prog_if,
                 };
                 out[n] = .{
-                    .bus = bus,
-                    .device = device,
-                    .function = function,
+                    .addr = addr,
                     .vendor_id = vd.vendor_id,
                     .device_id = vd.device_id,
                     .class = class,
@@ -379,12 +377,8 @@ fn Io(Module: type) type {
 
 /// PCI device found during bus scan.
 pub const ScanResult = struct {
-    /// Bus number.
-    bus: BusNum,
-    /// Device number.
-    device: DeviceNum,
-    /// Function number.
-    function: FunctionNum,
+    /// Device address.
+    addr: DevAddr,
     /// Vendor ID.
     vendor_id: u16,
     /// Device ID.

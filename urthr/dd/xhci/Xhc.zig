@@ -28,74 +28,11 @@ cring: rings.Ring,
 ering: rings.EventRing,
 
 /// xHC PCI class code.
-const class = pci.ClassCode{
+pub const class = pci.ClassCode{
     .base = 0x0C,
     .sub = 0x03,
     .interface = 0x30,
 };
-
-/// Initialize the PCI device as an xHC controller.
-pub fn initPci(hc: pci.Host, addr: pci.DevAddr) Error!*Self {
-    const io = hc.getTypedIo(addr, pci.HeaderType0);
-
-    // Check if it's an xHCI controller.
-    {
-        const rc = io.readReg(pci.HeaderRevClass);
-        const cls = pci.ClassCode{
-            .base = rc.base_class,
-            .sub = rc.sub_class,
-            .interface = rc.prog_if,
-        };
-        if (!std.meta.eql(class, cls)) {
-            return Error.InvalidDevice;
-        }
-    }
-
-    // Configure device command register.
-    io.modifyReg(pci.HeaderCommandStatus, .{
-        .memory_space_enable = true,
-        .bus_master_enable = true,
-    });
-
-    // Check if BAR is valid.
-    var barbuf: [1]pci.BarInfo = undefined;
-    const bar = blk: {
-        const bars = io.parseBars(&barbuf);
-        if (bars.len != barbuf.len) {
-            return Error.InvalidDevice;
-        }
-        if (bars[0].index != 0) {
-            return Error.InvalidDevice;
-        }
-        if (bars[0].type != .mem64) {
-            return Error.InvalidDevice;
-        }
-
-        break :blk bars[0];
-    };
-
-    // Configure BAR.
-    const base, const phys = blk: {
-        const phys_base = if (bar.address == 0)
-            0x1000_0000 // TODO: assign appropriate free AXI address depending on board.
-        else
-            bar.address & bar.address_mask;
-
-        const base = try mem.phys.reserveAndRemap(
-            "xhc",
-            phys_base,
-            bar.size(),
-            null,
-            .device,
-        );
-        io.setBarAddress(bar, phys_base);
-
-        break :blk .{ base, phys_base };
-    };
-    log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
-
-    return initMmio(base);
-}
 
 /// Initialize the xHC controller mapped to the given base address.
 pub fn initMmio(base: usize) Error!*Self {
