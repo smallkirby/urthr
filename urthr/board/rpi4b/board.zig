@@ -63,7 +63,9 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
 }
 
 /// Initialize peripherals.
-pub fn initPeripherals() common.mem.Error!void {
+///
+/// This function is called before exceptions are enabled.
+pub fn initPeripherals1() urd.mem.Error!void {
     // Interrupt controller.
     {
         arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
@@ -86,22 +88,6 @@ pub fn initPeripherals() common.mem.Error!void {
             .device,
         ));
         try rdd.dma.init();
-    }
-
-    // SDHC
-    {
-        const base = try urd.mem.phys.reserveAndRemap(
-            "SDHC",
-            memmap.sdhost.start,
-            memmap.sdhost.size(),
-            null,
-            .device,
-        );
-        dd.sdhc.setBase(base);
-        dd.sdhc.init(
-            50_000_000, // 50 MHz
-            urd.mem.page,
-        );
     }
 
     // Mailbox.
@@ -131,6 +117,27 @@ pub fn initPeripherals() common.mem.Error!void {
         urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
             log.warn("failed to add console backend: {}", .{err});
         };
+    }
+}
+
+/// Initialize peripherals.
+///
+/// This function is called after exceptions are enabled.
+pub fn initPeripherals2() urd.mem.Error!void {
+    // SDHC
+    {
+        const base = try urd.mem.phys.reserveAndRemap(
+            "SDHC",
+            memmap.sdhost.start,
+            memmap.sdhost.size(),
+            null,
+            .device,
+        );
+        dd.sdhc.setBase(base);
+        dd.sdhc.init(
+            50_000_000, // 50 MHz
+            urd.mem.page,
+        );
     }
 }
 

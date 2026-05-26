@@ -81,15 +81,19 @@ fn zmain() !void {
     log.debug("Initializing networking stack.", .{});
     try urd.net.init();
 
-    // Initialize peripherals.
-    log.info("Initializing peripherals.", .{});
-    try board.initPeripherals();
-    log.debug("Memory Map:", .{});
-    urd.mem.debugPrintResources(log.debug);
+    // Initialize peripherals phase 1.
+    log.info("Initializing peripherals phase 1.", .{});
+    try board.initPeripherals1();
 
     // Setup IRQ.
     log.debug("Setting up IRQ.", .{});
     try urd.exception.initLocal();
+
+    // Initialize peripherals phase 2.
+    log.info("Initializing peripherals phase 2.", .{});
+    try board.initPeripherals2();
+    log.debug("Memory Map:", .{});
+    urd.mem.debugPrintResources(log.debug);
 
     // Initialize scheduler.
     log.info("Initializing scheduler.", .{});
