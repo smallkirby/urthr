@@ -20,6 +20,9 @@ var virtio_rng_dev: ?dd.VirtioRng = null;
 /// PCIe ECAM.
 var ecam: dd.pci.EcamHost = undefined;
 
+/// xHC device.
+var xhc: ?*dd.usb.Xhc = null;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -140,6 +143,70 @@ pub fn initPeripherals2() urd.mem.Error!void {
             log.info("Found virtio-rng device#{d}", .{i});
             break;
         }
+    }
+
+    // xHC
+    outer: {
+        const hc = ecam.interface();
+
+        // Scan for xHC device.
+        var scan_buf: [16]dd.pci.ScanResult = undefined;
+        const results = hc.scan(0, &scan_buf);
+        const xhcdev: dd.pci.ScanResult = for (results) |res| {
+            if (std.meta.eql(dd.usb.Xhc.class, res.class)) {
+                break res;
+            }
+        } else break :outer;
+
+        // Configure device command register.
+        const io = hc.getTypedIo(xhcdev.addr, dd.pci.HeaderType0);
+        io.modifyReg(dd.pci.HeaderCommandStatus, .{
+            .memory_space_enable = true,
+            .bus_master_enable = true,
+        });
+
+        // Check if BAR is valid.
+        var barbuf: [1]dd.pci.BarInfo = undefined;
+        const bar = blk: {
+            const bars = io.parseBars(&barbuf);
+            if (bars.len != barbuf.len) {
+                break :outer;
+            }
+            if (bars[0].index != 0) {
+                break :outer;
+            }
+            if (bars[0].type != .mem64) {
+                break :outer;
+            }
+
+            break :blk bars[0];
+        };
+
+        // Configure BAR.
+        const base, const phys = blk: {
+            const phys_base = if (bar.address == 0)
+                memmap.pci_mmio.start
+            else
+                bar.address & bar.address_mask;
+
+            const base = try mem.phys.reserveAndRemap(
+                "xhc",
+                phys_base,
+                bar.size(),
+                null,
+                .device,
+            );
+            io.setBarAddress(bar, phys_base);
+
+            break :blk .{ base, phys_base };
+        };
+        log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
+
+        // Initialize xHC driver.
+        xhc = dd.usb.Xhc.initMmio(base) catch |err| {
+            log.err("xHC initialization failed: {t}", .{err});
+            break :outer;
+        };
     }
 }
 
@@ -331,4 +398,5 @@ const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const Pair = common.Pair;
 const urd = @import("urthr");
+const mem = urd.mem;
 const dd = @import("dd");
