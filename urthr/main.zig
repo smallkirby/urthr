@@ -89,7 +89,7 @@ fn zmain() !void {
 
     // Setup IRQ.
     log.debug("Setting up IRQ.", .{});
-    urd.exception.initLocal();
+    try urd.exception.initLocal();
 
     // Initialize scheduler.
     log.info("Initializing scheduler.", .{});

@@ -68,6 +68,23 @@ pub const Range = struct {
     }
 };
 
+/// Get a value type paired with its physical address.
+pub fn Pair(T: type) type {
+    return struct {
+        /// Inner value.
+        value: T,
+        /// Physical address of the value.
+        phys: usize,
+
+        pub fn new(value: T, phys: usize) Pair(T) {
+            return .{
+                .value = value,
+                .phys = phys,
+            };
+        }
+    };
+}
+
 /// Compile-time assertion.
 pub fn comptimeAssert(comptime condition: bool, comptime message: ?[]const u8) void {
     if (!condition) {

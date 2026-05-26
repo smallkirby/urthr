@@ -217,7 +217,7 @@ pub fn initIrqGlobal(f: ExceptionHandler) void {
 }
 
 /// Initialize GIC for the calling AP.
-pub fn initIrqLocal() void {
+pub fn initIrqLocal() urd.mem.Error!void {
     // Initialize CPU interface.
     arch.gicv2.initLocal();
 
