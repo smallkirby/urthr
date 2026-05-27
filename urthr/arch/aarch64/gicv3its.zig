@@ -86,6 +86,8 @@ const Command = enum(u8) {
     mapc = 0x09,
     /// MAPTI.
     mapti = 0x0A,
+    /// INV.
+    inv = 0x0C,
 };
 
 /// MAPC command.
@@ -115,14 +117,24 @@ pub fn mapc(icid: u16, target: u64, valid: bool) void {
 /// `size` is the number of EventID that the device will signal.
 /// `itt` is the physical address of the pre-allocated ITT.
 pub fn mapd(devid: u32, size: usize, itt: usize, valid: bool) void {
-    const size_u5 = std.math.log2_int_ceil(u5, size);
+    const size_bits = std.math.log2_int_ceil(usize, size) + 1;
 
     var cmd = [4]u64{ 0, 0, 0, 0 };
     cmd[0] = @as(u64, devid) << 32;
-    cmd[1] = @as(u5, @intCast(size_u5 - 1));
+    cmd[1] = @as(u5, @intCast(size_bits - 1));
     cmd[2] = (itt & 0xFF_FFFF_FFFF) |
         (@as(u64, @intFromBool(valid)) << 63);
     submitCmd(cmd, .mapd);
+}
+
+/// INV command.
+///
+/// Ensures that any caching in the Redistributors associated with the specified EventID is consistent with Configuration Table in memory.
+pub fn inv(devid: u32, event_id: u32) void {
+    var cmd = [4]u64{ 0, 0, 0, 0 };
+    cmd[0] = @as(u64, devid) << 32;
+    cmd[1] = event_id;
+    submitCmd(cmd, .inv);
 }
 
 /// MAPTI command.
