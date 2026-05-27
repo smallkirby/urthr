@@ -35,7 +35,7 @@ pub const class = pci.ClassCode{
 };
 
 /// Initialize the xHC controller mapped to the given base address.
-pub fn initMmio(base: usize) Error!*Self {
+pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Error)!*Self {
     const self = try mem.bin.create(Self);
     errdefer mem.bin.destroy(self);
 
@@ -61,6 +61,9 @@ pub fn initMmio(base: usize) Error!*Self {
 
     // Initialize DCBAA.
     self.dcbaa = try Dcbaa.init();
+
+    // Register IRQ handler.
+    try urd.exception.setHandler(irq, irqHandler);
 
     return self;
 }
@@ -193,6 +196,11 @@ fn getPortRegAt(self: *Self, index: usize) regs.Port {
     const pr_size = 16;
     const base = self.operational.getMarkerAddress(.port_set) + index * pr_size;
     return .new(base);
+}
+
+/// IRQ handler.
+fn irqHandler(_: urd.exception.Vector) void {
+    log.warn("TODO: xHC handler is empty now.", .{});
 }
 
 // =============================================================
