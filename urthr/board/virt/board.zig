@@ -203,8 +203,50 @@ pub fn initPeripherals2() urd.mem.Error!void {
         log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
 
         // Initialize xHC driver.
-        xhc = dd.usb.Xhc.initMmio(base) catch |err| {
+        const irq = arch.gicv3.lpi_base + 0;
+        xhc = dd.usb.Xhc.init(base, irq) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
+            break :outer;
+        };
+
+        // Register MSI-X.
+        const devid: u32 = (@as(u32, xhcdev.addr.bus) << 8) |
+            (@as(u32, xhcdev.addr.device) << 3) |
+            @as(u32, xhcdev.addr.function);
+        const msg = arch.gicv3.registerLpi(
+            devid,
+            1,
+            irq,
+            mem.page,
+        ) catch |err| {
+            log.err("Failed to register LPIs for xHC: {t}", .{err});
+            break :outer;
+        };
+        const msix = dd.pci.parseMsixConfig(hc, xhcdev.addr) orelse {
+            log.err("Failed to parse MSI-X configuration for xHC.", .{});
+            break :outer;
+        };
+        const table = dd.pci.MsixTable{
+            .base = base + msix.table_offset,
+        };
+        table.setEntry(0, msg, 0);
+        table.maskEntry(0, false);
+        dd.pci.enableMsix(hc, xhcdev.addr, msix.cap_offset);
+    }
+    if (xhc) |x| outer: {
+        x.reset() catch |err| {
+            log.err("xHC reset failed: {t}", .{err});
+            break :outer;
+        };
+        x.setup() catch |err| {
+            log.err("xHC setup failed: {t}", .{err});
+            break :outer;
+        };
+
+        x.run();
+
+        x.scan() catch |err| {
+            log.err("xHC scan failed: {t}", .{err});
             break :outer;
         };
     }
