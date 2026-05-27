@@ -79,7 +79,7 @@ zig build test --summary all -Doptimize=Debug
 | `rtt` | Flag | Enable runtime tests. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 | `qemu` | Path | Path to QEMU (aarch64) directory. | `""` |
-| `qemu_log` | String (Comma-separated): `sd`, `usb` | Enable specified QEMU verbose log outputs. Comma-separated list. | - |
+| `qemu_log` | String (Comma-separated): `sd`, `usb`, `gic` | Enable specified QEMU verbose log outputs. Comma-separated list. | - |
 | `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |
 | `graphic` | Flag | Enable graphical display window in QEMU. | `false` |
 | `idle_watchdog` | Integer | Terminate if the idle thread's execution time exceeds this threshold in seconds. | `0` (disabled) |
