@@ -149,6 +149,49 @@ pub fn initLocal(alloc: PageAllocator) PageAllocator.Error!void {
     rd.modify(gicr.Ctlr, .{ .enable_lpis = true });
 }
 
+/// Register an LPI range [lpi, lpi + size) for the given device.
+///
+/// The Event IDs [0, size) are allocated for the device.
+/// Returns the physical address of message address that device should write an Event ID to signal an interrupt.
+pub fn registerLpi(devid: u32, size: usize, lpi: usize, alloc: PageAllocator) PageAllocator.Error!usize {
+    rtt.expect(lpi_base <= lpi);
+    rtt.expect(lpi + size - 1 <= max_lpi);
+
+    const cpu = getCpuId();
+    const target = if (its.useRdAddress())
+        gicr.getRdPhys(cpu)
+    else
+        cpu;
+
+    // Register the device and events to the ITS.
+    const itt = try its.allocItt(alloc);
+    its.mapd(devid, size, itt, true);
+    for (0..size) |i| {
+        its.mapti(
+            devid,
+            @intCast(i),
+            @intCast(lpi + i),
+            @intCast(cpu),
+        );
+    }
+
+    // Enable the LPI range.
+    const rd = gicr.getRdMod(cpu);
+    const pconfig = @as(usize, rd.read(gicr.Propbaser).phys) << @bitOffsetOf(gicr.Propbaser, "phys");
+    const config = @as([*]volatile LpiConfig, @ptrFromInt(alloc.translateV(pconfig)));
+    for (0..size) |i| {
+        config[(lpi - lpi_base) + i].enable = true;
+    }
+
+    // Invalidate the ITS cache for each LPI.
+    for (0..size) |i| {
+        its.inv(devid, @intCast(i));
+    }
+    its.sync(target);
+
+    return its.getTranslaterPhys();
+}
+
 /// Get the interrupt ID of the signaled interrupt.
 pub fn readIar() u32 {
     return am.mrs(.icc_iar1_el1).intid;
