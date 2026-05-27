@@ -63,7 +63,7 @@ pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Erro
     self.dcbaa = try Dcbaa.init();
 
     // Register IRQ handler.
-    try urd.exception.setHandler(irq, irqHandler);
+    try self.registerController(irq);
 
     return self;
 }
@@ -198,9 +198,43 @@ fn getPortRegAt(self: *Self, index: usize) regs.Port {
     return .new(base);
 }
 
+// =============================================================
+// IRQ
+// =============================================================
+
+/// List of registered controllers.
+var controllers: [3]?IrqController = [_]?IrqController{null} ** 3;
+
+const IrqController = struct {
+    /// Controller instance.
+    controller: *Self,
+    /// Exception vector associated with this controller.
+    irq: urd.exception.Vector,
+};
+
+/// Register the controller to handle the given IRQ.
+fn registerController(self: *Self, irq: urd.exception.Vector) (Error || urd.exception.Error)!void {
+    for (controllers, 0..) |e, i| if (e == null) {
+        controllers[i] = IrqController{
+            .controller = self,
+            .irq = irq,
+        };
+        try urd.exception.setHandler(irq, irqHandler);
+
+        return;
+    };
+    unreachable;
+}
+
 /// IRQ handler.
-fn irqHandler(_: urd.exception.Vector) void {
-    log.warn("TODO: xHC handler is empty now.", .{});
+fn irqHandler(vector: urd.exception.Vector) void {
+    for (controllers) |c| if (c) |entry| {
+        if (entry.irq == vector) {
+            const self = entry.controller;
+            log.warn("TODO: xHC handler is empty now.", .{});
+            _ = self;
+        }
+    };
 }
 
 // =============================================================
