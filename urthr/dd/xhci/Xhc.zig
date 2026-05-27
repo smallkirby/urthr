@@ -20,12 +20,18 @@ runtime: regs.Runtime,
 ///
 /// Device Context pointed to by DCBAA entry is owned by the xHC.
 /// Software must not modify them.
-dcbaa: Dcbaa,
+dcbaa: Dcbaa = undefined,
 
 /// Command Ring.
 cring: rings.Ring,
 /// Event Ring.
 ering: rings.EventRing,
+
+/// List of registered devices.
+devices: DeviceList = .empty,
+
+/// Initialization complete and ready to handle events.
+ready: bool = false,
 
 /// xHC PCI class code.
 pub const class = pci.ClassCode{
@@ -34,10 +40,14 @@ pub const class = pci.ClassCode{
     .interface = 0x30,
 };
 
+/// List of registered devices.
+const DeviceList = std.ArrayList(*Device);
+
 /// Initialize the xHC controller mapped to the given base address.
 pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Error)!*Self {
     const self = try mem.bin.create(Self);
     errdefer mem.bin.destroy(self);
+    self.* = std.mem.zeroInit(Self, .{});
 
     // Initialize registers.
     {
@@ -115,6 +125,8 @@ pub fn setup(self: *Self) Error!void {
         log.debug("  ERSTBA: 0x{X}", .{@as(u64, @bitCast(irs0.read(regs.Erstba)))});
         log.debug("  ERDP:   0x{X}", .{@as(u64, @bitCast(irs0.read(regs.Erdp)))});
     }
+
+    self.ready = true;
 }
 
 /// Start the controller.
@@ -132,14 +144,20 @@ pub fn run(self: *Self) void {
 pub fn scan(self: *Self) mem.Error!void {
     const max_ports = self.capability.read(regs.StructureParam1).maxports;
 
-    for (0..max_ports) |i| {
+    for (1..max_ports) |i| {
         const port = self.getPortRegAt(i);
 
         if (!port.read(regs.PortSc).ccs) {
             continue;
         }
+        log.info("Port#{d}: Connected device detected.", .{i});
 
-        // TODO: initialize device.
+        // Register the found device.
+        const device = try Device.new(i, port);
+        try self.devices.append(urd.mem.bin, device);
+
+        // Reset the port to initialize the device.
+        device.resetPort();
     }
 }
 
@@ -193,9 +211,20 @@ fn getIrsAt(self: *Self, index: usize) regs.Interrupter {
 
 /// Get the Port Register at the given index.
 fn getPortRegAt(self: *Self, index: usize) regs.Port {
+    rtt.expect(index != 0);
+
     const pr_size = 16;
-    const base = self.operational.getMarkerAddress(.port_set) + index * pr_size;
+    const base = self.operational.getMarkerAddress(.port_set) + (index - 1) * pr_size;
     return .new(base);
+}
+
+/// Find the registered device associated with the given port index.
+fn findDeviceByPort(self: *Self, port: usize) ?*Device {
+    for (self.devices.items) |device| {
+        if (device.pi == port) {
+            return device;
+        }
+    } else return null;
 }
 
 // =============================================================
@@ -231,10 +260,52 @@ fn irqHandler(vector: urd.exception.Vector) void {
     for (controllers) |c| if (c) |entry| {
         if (entry.irq == vector) {
             const self = entry.controller;
-            log.warn("TODO: xHC handler is empty now.", .{});
-            _ = self;
+            if (!self.ready) return;
+
+            // TODO: should not handle events in IRQ context.
+            self.handleEvent() catch |err| {
+                log.err("Failed to handle xHC event: {t}", .{err});
+            };
         }
     };
+}
+
+/// Handles pending events in the Event Ring.
+///
+/// Dispatches the event to the appropriate handler based on the event type.
+fn handleEvent(self: *Self) Error!void {
+    while (self.ering.next()) |event| {
+        switch (event.type) {
+            .port_status_change => try self.handlePortStatusChange(@ptrCast(event)),
+            else => log.err("Unsupported event type: {d}", .{@intFromEnum(event.type)}),
+        }
+    }
+}
+
+/// Handle Port Status Change event.
+fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusChange) Error!void {
+    // Check if the event is for a registered port.
+    const device = self.findDeviceByPort(event.port) orelse {
+        log.warn("Port Status Change event for unregistered port: {d}", .{event.port});
+        return Error.NotAvailable;
+    };
+    rtt.expectEqual(.success, event.code);
+
+    const psc = device.pr.read(regs.PortSc);
+    if (psc.prc) {
+        // Port Reset Change.
+        log.info("Port#{d}: Reset completed.", .{event.port});
+        // TODO
+    } else if (psc.csc) {
+        // Connect Status Change.
+        if (psc.ccs) {
+            // Hot plug.
+            urd.unimplemented("xHC device hot plug.");
+        } else {
+            // Unplug.
+            urd.unimplemented("xHC device unplug.");
+        }
+    }
 }
 
 // =============================================================
