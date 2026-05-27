@@ -29,7 +29,7 @@ dev_type: Type,
 /// Logical interfaces associated with this device.
 netif: Interface.InterfaceList = .{},
 /// Interrupt vector number for the device.
-irq: ?u32 = null,
+irq: ?urd.exception.Vector = null,
 
 /// List head for linking network devices.
 list_head: DeviceList.Head = .{},
