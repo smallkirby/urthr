@@ -3,6 +3,8 @@ const Self = @This();
 /// Device state.
 state: State,
 
+/// Port index (1-origin).
+pi: usize,
 /// Port register.
 pr: regs.Port,
 
@@ -24,12 +26,13 @@ const State = enum {
     complete,
 };
 
-pub fn new(pr: regs.Port) mem.Error!*Self {
+pub fn new(pi: usize, pr: regs.Port) mem.Error!*Self {
     const self = try mem.bin.create(Self);
     errdefer mem.bin.destroy(self);
 
     self.* = .{
         .state = .initialized,
+        .pi = pi,
         .pr = pr,
     };
 
