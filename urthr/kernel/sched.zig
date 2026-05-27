@@ -173,7 +173,7 @@ fn exitCurrent() noreturn {
 
 /// Check if the current thread needs to be rescheduled and yield if possible.
 pub fn shouldReschedule() bool {
-    return getCurrent().need_resched;
+    return if (getCurrentNullable()) |c| c.need_resched else false;
 }
 
 /// Mark the currently running thread as needing rescheduling.
@@ -190,7 +190,12 @@ fn pickNext() *Thread {
 
 /// Get the currently running thread.
 pub fn getCurrent() *Thread {
-    return pcpu.get(&current).?;
+    return getCurrentNullable().?;
+}
+
+/// Get the currently running thread, or null if no thread is running.
+fn getCurrentNullable() ?*Thread {
+    return pcpu.get(&current);
 }
 
 /// Set the currently running thread.
