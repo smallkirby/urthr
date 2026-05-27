@@ -868,6 +868,13 @@ const Qemu = struct {
                 });
                 continue;
             }
+            if (std.mem.eql(u8, log, "gic")) {
+                try args.appendSlice(allocator, &.{
+                    "-trace",
+                    "gic*",
+                });
+                continue;
+            }
 
             @panic("Unsupported QEMU log option.");
         }
