@@ -363,7 +363,7 @@ const Dcbaa = struct {
 
     /// Set the Device Context for the given slot index.
     pub fn set(self: *const Dcbaa, slot: u8, context: usize) void {
-        self._raw.entries[slot] = mem.page.translateIntV(context);
+        self._raw.entries[slot] = mem.page.translateIntP(context);
     }
 
     /// Get the pointer to the Device Context of the given slot index.
