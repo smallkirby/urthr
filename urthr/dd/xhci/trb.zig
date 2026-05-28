@@ -14,6 +14,33 @@ pub const Trb = packed struct(u128) {
     type: TrbType,
     /// Control. Ring-specific.
     control: u16,
+
+    /// Obtain the abstract type of the TRB.
+    pub fn from(trb: anytype) *Trb {
+        const typeInfo = @typeInfo(@TypeOf(trb));
+        if (typeInfo != .pointer) {
+            @compileError(std.fmt.cmptimePrint(
+                "Trb.from: expected pointer, got {s}",
+                .{@typeName(@TypeOf(trb))},
+            ));
+        }
+        const child = typeInfo.pointer.child;
+        if (@sizeOf(child) != @sizeOf(Trb)) {
+            @compileError(std.fmt.comptimePrint(
+                "Trb.from: invalid size: {d}",
+                .{@sizeOf(child)},
+            ));
+        }
+
+        if (@FieldType(child, "type") != TrbType) {
+            @compileError(std.fmt.comptimePrint(
+                "Trb.from: expected type field to be TrbType, got {s}",
+                .{@typeName(@FieldType(child, "type"))},
+            ));
+        }
+
+        return @ptrCast(trb);
+    }
 };
 
 /// Type of TRB.
@@ -115,6 +142,29 @@ pub const PortStatusChange = packed struct(u128) {
     type: TrbType = .port_status_change,
     /// Reserved.
     _112: u16 = 0,
+};
+
+/// Enable Slot Command TRB.
+///
+/// Causes the xHC to select an available Device Slot and return the Slot ID.
+pub const EnableSlotTrb = packed struct(u128) {
+    /// Reserved.
+    _0: u32 = 0,
+    /// Reserved.
+    _32: u32 = 0,
+    /// Reserved.
+    _64: u32 = 0,
+
+    /// Cycle bit.
+    cycle: u1,
+    /// Reserved.
+    _65: u9 = 0,
+    /// TRB type.
+    type: TrbType = .enable_slot,
+    /// USB Slot Type.
+    slot_type: u5 = 0,
+    /// Reserved.
+    _117: u11 = 0,
 };
 
 // =============================================================

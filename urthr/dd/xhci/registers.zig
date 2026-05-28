@@ -350,6 +350,31 @@ pub const Erdp = packed struct(u64) {
 };
 
 // =============================================================
+// Doorbell Register
+
+/// Doorbell Register (DB).
+//
+/// xHC presents an array of up to 256 32-bit registers in MMIO space and are indexed by Device Slot ID.
+//
+/// Doobell 0 is dedicated to the Host Controller.
+//
+/// Doobell 1-255 are referred to as the Device Context Doorbell.
+/// There's a 1:1 mapping of Device Context DB to Device Slots.
+//
+/// Software writes to DB to notify the xHC that there's new TRB in the Command Ring or Transfer Ring.
+/// No need to clear DBs.
+/// Returns no information on read.
+pub const DoorBell = packed struct(u32) {
+    /// DB Target.
+    /// Target of the doorbell reference.
+    target: u8,
+    /// Reserved.
+    _8: u8 = 0,
+    /// DB Stream ID.
+    stream_id: u16 = 0,
+};
+
+// =============================================================
 // Imports
 // =============================================================
 
