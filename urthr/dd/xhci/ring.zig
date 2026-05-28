@@ -30,12 +30,12 @@ pub const Ring = struct {
     }
 
     /// Enqueue a TRB to the Ring.
-    pub fn push(self: *Ring, value: Trb) *const Trb {
+    pub fn push(self: *Ring, value: *Trb) *const Trb {
         var trb = value;
         trb.cycle = self.pcs;
 
-        const ret: *const Trb = @ptrCast(@volatileCast(&self.trbs[self.index]));
-        ret.* = trb;
+        const ret: *Trb = @ptrCast(@volatileCast(&self.trbs[self.index]));
+        ret.* = trb.*;
 
         self.index += 1;
         if (self.index == self.trbs.len - 1) {

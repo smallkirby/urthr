@@ -15,6 +15,8 @@ capability: regs.Capability,
 operational: regs.Operational,
 /// Runtime registers module.
 runtime: regs.Runtime,
+/// Doorbell registers array.
+dbs: DoorBellArray,
 
 /// DCBAA.
 ///
@@ -61,10 +63,15 @@ pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Erro
         // Runtime registers.
         const rts_off = self.capability.read(regs.RtsOffset).value;
         self.runtime.setBase(base + (rts_off & ~@as(u64, 0x1F)));
+
+        // Doorbell registers.
+        const db_base = self.capability.read(regs.DbOffset).value;
+        self.dbs = DoorBellArray.new(base + db_base);
     }
     log.debug("xHC capability register  @ 0x{X}", .{self.capability.base});
     log.debug("xHC operational register @ 0x{X}", .{self.operational.base});
     log.debug("xHC runtime register     @ 0x{X}", .{self.runtime.base});
+    log.debug("xHC doorbell register    @ 0x{X}", .{self.dbs.base});
     log.debug("xHC version              : 0x{X}", .{self.capability.read(regs.CapInfo).hci_version});
     log.debug("xHC max slots            : {}", .{self.capability.read(regs.StructureParam1).maxslots});
     log.debug("xHC max ports            : {}", .{self.capability.read(regs.StructureParam1).maxports});
@@ -295,7 +302,13 @@ fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusCha
     if (psc.prc) {
         // Port Reset Change.
         log.info("Port#{d}: Reset completed.", .{event.port});
-        // TODO
+
+        // Push Enable Slot TRB to Command Ring.
+        var enable_slot = trbs.EnableSlotTrb{ .cycle = undefined };
+        _ = self.cring.push(.from(&enable_slot));
+
+        // Notify xHC of the new command.
+        self.dbs.notifyCommand();
     } else if (psc.csc) {
         // Connect Status Change.
         if (psc.ccs) {
@@ -357,6 +370,39 @@ const Dcbaa = struct {
     pub fn at(self: *const Dcbaa, slot: u8) ?usize {
         const ret = self._raw.entries[slot];
         return if (ret == 0) null else mem.page.translateIntV(ret);
+    }
+};
+
+/// Array of DB Registers.
+const DoorBellArray = struct {
+    /// Base address of DB registers array.
+    base: usize,
+
+    const T = mmio.Register(regs.DoorBell, u32);
+
+    fn new(base: usize) DoorBellArray {
+        return .{ .base = base };
+    }
+
+    /// Get the DB Register at the given index.
+    fn at(self: *const DoorBellArray, index: usize) *volatile regs.DoorBell {
+        return @ptrFromInt(self.base + index * @sizeOf(regs.DoorBell));
+    }
+
+    /// Notify the xHC of a command being pushed to the Command Ring.
+    pub fn notifyCommand(self: *const DoorBellArray) void {
+        const db = self.at(0);
+        T.modify(@intFromPtr(db), .{
+            .target = 0,
+        });
+    }
+
+    /// Notify the specified endpoint, of the device specified by the slot ID, of a new TRB in the Transfer Ring.
+    pub fn notifyEndpoint(self: *const DoorBellArray, slot: u8, dci: u5) void {
+        const db = self.at(slot);
+        T.modify(@intFromPtr(db), .{
+            .target = dci,
+        });
     }
 };
 
