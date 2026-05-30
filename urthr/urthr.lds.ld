@@ -1,6 +1,6 @@
 #include <constants.autogen.h>
 
-STACK_SIZE          = 0x5000;
+STACK_SIZE          = 0x8000;
 
 PHDRS {
     text            PT_LOAD FLAGS(5); /* R-X */
