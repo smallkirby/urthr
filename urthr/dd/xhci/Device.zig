@@ -77,10 +77,9 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     self.xhc.setDeviceContext(slot, dc);
 
     // Create Input Context.
-    const ic_page = try mem.page.allocPagesV(1);
-    const ic: *InputContext = @ptrCast(ic_page.ptr);
-    errdefer mem.page.freePagesV(ic_page);
-    @memset(ic_page, 0);
+    const ic = try mem.page.create(InputContext);
+    errdefer mem.page.destroy(ic);
+    @memset(std.mem.asBytes(ic), 0);
 
     // Configure Input Control Context (enable Slot Context and Endpoint 0)
     {
@@ -118,7 +117,7 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
 
     // Request to assign the address.
     self.state = .waiting_address;
-    var cmd = trbs.AddressDeviceTrb.from(slot, ic_page.ptr);
+    var cmd = trbs.AddressDeviceTrb.from(slot, ic);
     self.pending_trb = self.xhc.cring.push(.from(&cmd));
     self.xhc.dbs.notifyCommand();
 }
