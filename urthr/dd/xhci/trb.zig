@@ -167,6 +167,71 @@ pub const EnableSlotTrb = packed struct(u128) {
     _117: u11 = 0,
 };
 
+/// Command Completion Event TRB.
+pub const CommandCompletionTrb = packed struct(u128) {
+    /// Reserved.
+    _0: u4 = 0,
+    /// High 60 bits of the Command TRB that generated this event.
+    command_trb: u60 = 0,
+    /// Command Completion Parameter.
+    param: u24,
+    /// Completion Code. Depends on the command.
+    code: ErrorCode,
+    /// Cycle bit.
+    cycle: u1,
+    /// Reserved.
+    _97: u9 = 0,
+    /// TRB type.
+    type: TrbType = .command_completion,
+    /// The ID of the Virtual Function that generated this event.
+    vfid: u8,
+    /// The Slot ID that generated this event.
+    slot_id: u8,
+
+    /// Get the pointer to the Command TRB that generated this event.
+    pub fn commandTrb(self: *const volatile CommandCompletionTrb) *const volatile Trb {
+        return @ptrFromInt(mem.page.translateV(@as(u64, self.command_trb) << 4));
+    }
+};
+
+/// Address Device Command TRB.
+///
+/// Causes the xHC to select an address for the USB device.
+pub const AddressDeviceTrb = packed struct(u128) {
+    /// Reserved.
+    _0: u4 = 0,
+    /// Input Context Pointer.
+    /// High 60-bit address of the Input Context data structure.
+    context: u60,
+
+    /// Reserved.
+    _64: u32 = 0,
+
+    /// Cycle bit.
+    cycle: u1,
+    /// Reserved.
+    _97: u8 = 0,
+    /// Block Set Address Request.
+    /// If set to false, the command generates a USB SET_ADDRESS request.
+    bsr: bool = false,
+    /// TRB type.
+    type: TrbType = .address_device,
+    /// Reserved.
+    _112: u8 = 0,
+    /// Target Slot ID.
+    slot: u8,
+
+    pub fn from(slot: u8, dc: *const anyopaque) AddressDeviceTrb {
+        rtt.expectEqual(0, @intFromPtr(dc) & 0xF);
+
+        return AddressDeviceTrb{
+            .context = @intCast(mem.page.translateIntP(dc) >> 4),
+            .cycle = undefined,
+            .slot = slot,
+        };
+    }
+};
+
 // =============================================================
 // Imports
 // =============================================================

@@ -160,7 +160,7 @@ pub fn scan(self: *Self) mem.Error!void {
         log.info("Port#{d}: Connected device detected.", .{i});
 
         // Register the found device.
-        const device = try Device.new(i, port);
+        const device = try Device.new(self, i, port);
         try self.devices.append(urd.mem.bin, device);
 
         // Reset the port to initialize the device.
@@ -171,6 +171,11 @@ pub fn scan(self: *Self) mem.Error!void {
 // =============================================================
 // Internals
 // =============================================================
+
+/// Set the Device Context in DCBAA entry of the given slot index.
+pub fn setDeviceContext(self: *const Self, slot: u8, region: []const u8) void {
+    self.dcbaa.set(slot, @intFromPtr(region.ptr));
+}
 
 /// Initialize Command Ring and Event Ring.
 fn initRings(self: *Self) Error!void {
@@ -234,6 +239,18 @@ fn findDeviceByPort(self: *Self, port: usize) ?*Device {
     } else return null;
 }
 
+/// Find the registered device associated with the given pending TRB.
+///
+/// Clears the pending TRB of the found device.
+fn findDeviceByTrb(self: *Self, trb: *const volatile trbs.Trb) ?*Device {
+    for (self.devices.items) |device| {
+        if (device.pending_trb == trb) {
+            device.pending_trb = null;
+            return device;
+        }
+    } else return null;
+}
+
 // =============================================================
 // IRQ
 // =============================================================
@@ -284,6 +301,8 @@ fn handleEvent(self: *Self) Error!void {
     while (self.ering.next()) |event| {
         switch (event.type) {
             .port_status_change => try self.handlePortStatusChange(@ptrCast(event)),
+            .command_completion => try self.handleCommandCompletion(@ptrCast(event)),
+
             else => log.err("Unsupported event type: {d}", .{@intFromEnum(event.type)}),
         }
     }
@@ -305,7 +324,7 @@ fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusCha
 
         // Push Enable Slot TRB to Command Ring.
         var enable_slot = trbs.EnableSlotTrb{ .cycle = undefined };
-        _ = self.cring.push(.from(&enable_slot));
+        device.pending_trb = self.cring.push(.from(&enable_slot));
 
         // Notify xHC of the new command.
         self.dbs.notifyCommand();
@@ -321,6 +340,33 @@ fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusCha
     }
 }
 
+/// Handles Command Completion event.
+///
+/// This dispatches the command completion event to the appropriate handler based on the command type.
+fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompletionTrb) Error!void {
+    const command_trb = event.commandTrb();
+    const command_type = command_trb.type;
+    const slot_id = event.slot_id;
+
+    switch (command_type) {
+        // Slot ID is assigned.
+        .enable_slot => {
+            const device = findDeviceByTrb(self, @ptrCast(command_trb)) orelse {
+                log.warn("Enable Slot Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
+                return Error.NotAvailable;
+            };
+            log.debug("Port#{d}:Slot#{d}: Slot enabled.", .{ device.pi, slot_id });
+
+            try device.assignAddress(slot_id);
+        },
+
+        // Unhandled command completion.
+        else => {
+            log.warn("Unhandled command completion: {d}", .{@intFromEnum(command_type)});
+        },
+    }
+}
+
 // =============================================================
 // Data structures
 // =============================================================
@@ -328,7 +374,7 @@ fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusCha
 /// Device Context Base Address Array.
 const Dcbaa = struct {
     /// Virtual pointer to DCBAA.
-    _raw: *RawDcbaa,
+    _raw: *volatile RawDcbaa,
 
     const RawDcbaa = extern struct {
         /// Physical pointers to device contexts.
