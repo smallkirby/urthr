@@ -91,7 +91,7 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     {
         const slot_ctx = &ic.slot;
         slot_ctx.* = .{
-            .root_hub_port = @intCast(self.pi + 1),
+            .root_hub_port = @intCast(self.pi),
             .context_entries = 1,
             .max_exit_latency = 0,
             .addr = 0,
