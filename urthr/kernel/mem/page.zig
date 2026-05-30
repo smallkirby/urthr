@@ -413,8 +413,8 @@ fn phys2virt(paddr: usize) usize {
 // =============================================================
 
 fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
-    lock.lock();
-    defer lock.unlock();
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
 
     const vpages = try arena.allocPages(num_pages);
     const pptr: [*]u8 = @ptrFromInt(virt2phys(@intFromPtr(vpages.ptr)));
@@ -422,8 +422,8 @@ fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
 }
 
 fn freePages(_: *anyopaque, pages: []u8) void {
-    lock.lock();
-    defer lock.unlock();
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
 
     const vptr: [*]u8 = @ptrFromInt(phys2virt(@intFromPtr(pages.ptr)));
     const vpages: []align(page_size) u8 = @alignCast(vptr[0..pages.len]);
