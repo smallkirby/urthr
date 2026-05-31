@@ -17,7 +17,7 @@ slot: u8 = undefined,
 /// Device descriptor provided by the device.
 desc: DeviceDesc = undefined,
 /// List of interfaces provided by the device.
-ifaces: InterfaceList = .{},
+ifaces: Interface.List = .{},
 
 /// Pending TRB that waits for completion of the current operation.
 pending_trb: ?*const volatile trbs.Trb = null,
@@ -40,9 +40,6 @@ const State = enum {
     complete,
 };
 
-/// List type of interfaces.
-const InterfaceList = common.typing.InlineDoublyLinkedList(Interface, "_head");
-
 /// Interface belonging to the device.
 pub const Interface = struct {
     /// Interface descriptor.
@@ -53,7 +50,10 @@ pub const Interface = struct {
     endpoint: EpDesc,
 
     /// List head.
-    _head: InterfaceList.Head = .{},
+    _head: List.Head = .{},
+
+    /// List type of interfaces.
+    const List = common.typing.InlineDoublyLinkedList(Interface, "_head");
 };
 
 pub fn new(xhc: *Xhc, pi: usize, pr: regs.Port) mem.Error!*Self {
