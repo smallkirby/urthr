@@ -16,6 +16,8 @@ pr: regs.Port,
 slot: u8 = undefined,
 /// Device descriptor provided by the device.
 desc: DeviceDesc = undefined,
+/// List of interfaces provided by the device.
+ifaces: InterfaceList = .{},
 
 /// Pending TRB that waits for completion of the current operation.
 pending_trb: ?*const volatile trbs.Trb = null,
@@ -36,6 +38,22 @@ const State = enum {
     waiting_config_set,
     /// Initialization complete.
     complete,
+};
+
+/// List type of interfaces.
+const InterfaceList = common.typing.InlineDoublyLinkedList(Interface, "_head");
+
+/// Interface belonging to the device.
+pub const Interface = struct {
+    /// Interface descriptor.
+    desc: IfaceDesc,
+    /// Type-erased class descriptor.
+    class: *const DescriptorHeader,
+    /// Endpoint descriptor.
+    endpoint: EpDesc,
+
+    /// List head.
+    _head: InterfaceList.Head = .{},
 };
 
 pub fn new(xhc: *Xhc, pi: usize, pr: regs.Port) mem.Error!*Self {
@@ -157,6 +175,35 @@ pub fn onAddressAssigned(self: *Self) Error!void {
     try self.controlTransferIn(setup_data);
 }
 
+/// Request to get a Configuration Descriptor.
+fn requestConfigDesc(self: *Self, config_index: u8) Error!void {
+    rtt.expectEqual(.waiting_config_desc, self.state);
+
+    // Setup GET_DESCRIPTOR request for configuration descriptor
+    const Value = packed struct(u16) {
+        /// Configuration index.
+        desc_index: u8,
+        /// Type of descriptor.
+        desc_type: DescriptorType,
+    };
+    const request_type = SetupData.RequestType{
+        .recipient = .device,
+        .type = .standard,
+        .direction = .in,
+    };
+    const setup_data = SetupData{
+        .request_type = request_type,
+        .request = .get_descriptor,
+        .value = @bitCast(Value{
+            .desc_index = config_index,
+            .desc_type = .configuration,
+        }),
+        .index = 0,
+        .length = mem.page_size, // variable length, so provide a large buffer.
+    };
+    try self.controlTransferIn(setup_data);
+}
+
 // =============================================================
 // Transfer event handlers
 // =============================================================
@@ -198,7 +245,30 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
             // TODO: free the DMA buffer associated with the Data TRB.
 
             self.state = .waiting_config_desc;
-            // TODO: request configuration descriptor.
+            try self.requestConfigDesc(0);
+        },
+
+        // Configuration descriptor is provided.
+        .waiting_config_desc => {
+            if (code != .success) {
+                log.err("Failed to get configuration descriptor: {d}", .{code});
+                return;
+            }
+            const pending = self.popPendingData();
+            self.pending_trb = null;
+            rtt.expectEqual(pending.status, issuer);
+
+            const dtrb = pending.data;
+            const desc: *const volatile ConfigDesc = @ptrFromInt(mem.page.translateV(dtrb.data_buffer));
+            rtt.expectEqual(.configuration, desc.type);
+
+            try self.parseConfigDesc(desc);
+            log.debug("{d} interfaces found.", .{self.ifaces.len});
+
+            // TODO: free the DMA buffer associated with the Data TRB.
+
+            self.state = .waiting_config_set;
+            // TODO: request to set the configuration.
         },
 
         // Unexpected state.
@@ -303,6 +373,75 @@ fn popPendingData(self: *Self) PendingData {
     const ret = self.pending_data.?;
     self.pending_data = null;
     return ret;
+}
+
+/// Parse the given configuration descriptor.
+///
+/// TODO: interfaces that have multiple endpoints are not supported yet.
+fn parseConfigDesc(self: *Self, cdesc: *const volatile ConfigDesc) Error!void {
+    const ParseState = enum {
+        interface,
+        class,
+        endpoint,
+    };
+
+    var left = cdesc.total_length - cdesc.length;
+    var cur: *align(1) const volatile DescriptorHeader = @ptrFromInt(@intFromPtr(cdesc) + cdesc.length);
+    var state: ParseState = .interface;
+    var iface: Interface = undefined;
+
+    // Iterate through all descriptors in the configuration descriptor.
+    while (left > 0) {
+        rtt.expect(cur.length != 0);
+
+        switch (cur.type) {
+            // Interface descriptor.
+            .interface => {
+                rtt.expectEqual(.interface, state);
+
+                const desc: *align(1) const volatile IfaceDesc = @ptrCast(@alignCast(cur));
+                iface.desc = desc.*;
+                state = .class;
+            },
+
+            // Class-specific descriptor.
+            .hid => {
+                rtt.expectEqual(.class, state);
+
+                const desc_buf = try mem.bin.alloc(u8, cur.length);
+                errdefer mem.bin.free(desc_buf);
+                @memcpy(desc_buf, @as([*]const volatile u8, @ptrCast(cur))[0..cur.length]);
+                iface.class = @ptrCast(@alignCast(desc_buf.ptr));
+                state = .endpoint;
+            },
+
+            // Endpoint descriptor.
+            .endpoint => {
+                rtt.expectEqual(.endpoint, state);
+
+                const desc: *align(1) const volatile EpDesc = @ptrCast(@alignCast(cur));
+                iface.endpoint = desc.*;
+                state = .interface;
+
+                // Add the interface to the list.
+                const entry = try mem.bin.create(Interface);
+                entry.* = iface;
+                self.ifaces.append(entry);
+
+                iface = undefined;
+            },
+
+            // Unexpected descriptor.
+            // This includes multiple endpoint descriptors for the same interface (not supported).
+            else => log.warn(
+                "Unexpected descriptor type {d} in configuration descriptor (length={d}).",
+                .{ @intFromEnum(cur.type), cur.length },
+            ),
+        }
+
+        left -= cur.length;
+        cur = @ptrFromInt(@intFromPtr(cur) + cur.length);
+    }
 }
 
 // =============================================================
@@ -760,6 +899,18 @@ pub const RequestDirection = enum(u1) {
     in = 1,
 };
 
+// =============================================================
+// Descriptor definitions
+// =============================================================
+
+/// Common header for all USB descriptors.
+const DescriptorHeader = packed struct(u16) {
+    /// Size of this descriptor in bytes.
+    length: u8,
+    /// Descriptor type.
+    type: DescriptorType,
+};
+
 /// List of Descriptor Types.
 const DescriptorType = enum(u8) {
     /// Standard descriptor types.
@@ -822,6 +973,113 @@ const DeviceDesc = packed struct(u144) {
     serial_index: u8,
     /// Number of possible configurations.
     num_configs: u8,
+};
+
+/// Describes a specific device configuration.
+const ConfigDesc = packed struct(u72) {
+    /// Size of this descriptor in bytes.
+    length: u8,
+    /// Descriptor type.
+    type: DescriptorType = .configuration,
+    /// Total length of this configuration including all interfaces, endpoints, and class descriptors.
+    total_length: u16,
+    /// Number of interfaces supported by this configuration.
+    num_interfaces: u8,
+    /// Value used by the Set Configuration request to select this configuration.
+    config_value: u8,
+    /// Index of string descriptor describing this configuration.
+    config_index: u8,
+    /// Configuration characteristics.
+    attributes: u8,
+    /// Maximum power consumption from the bus (in 2mA units).
+    max_power: u8,
+};
+
+/// Describes a specific interface within a configuration.
+///
+/// Endpoint descriptors for this interface follow the interface descriptor.
+/// Always part of a configuration descriptor.
+const IfaceDesc = packed struct(u72) {
+    /// Size of this descriptor in bytes.
+    length: u8,
+    /// Descriptor type.
+    type: DescriptorType = .interface,
+    /// Interface number.
+    interface_number: u8,
+    /// Value used to select this alternate setting for this interface.
+    alternate_setting: u8,
+    /// Number of endpoints used by this interface (excluding endpoint 0).
+    num_endpoints: u8,
+    /// Class code.
+    class: u8,
+    /// Subclass code.
+    subclass: u8,
+    /// Protocol code.
+    protocol: u8,
+    /// Index of string descriptor describing this interface.
+    interface_index: u8,
+};
+
+/// Information required by the host to determine the bandwidth requirements of an endpoint.
+///
+/// Always part of a configuration descriptor.
+const EpDesc = packed struct(u56) {
+    /// Size of this descriptor in bytes.
+    length: u8,
+    /// Descriptor type.
+    type: DescriptorType = .endpoint,
+    /// Endpoint address.
+    address: Address,
+    /// Attributes of the endpoint.
+    attributes: Attribute,
+    /// Maximum packet size for this endpoint.
+    max_packet_size: u16,
+    /// Interval for polling the endpoint (in milliseconds).
+    interval: u8,
+
+    const Attribute = packed struct(u8) {
+        /// Transfer type.
+        transfer_type: TransferType,
+        /// Reserved.
+        _2: u2 = 0,
+        /// Usage type.
+        usage_type: UsageType,
+        /// Reserved.
+        _6: u2 = 0,
+    };
+
+    const TransferType = enum(u2) {
+        /// Control transfer.
+        control = 0,
+        /// Isochronous transfer.
+        isochronous = 1,
+        /// Bulk transfer.
+        bulk = 2,
+        /// Interrupt transfer.
+        interrupt = 3,
+    };
+
+    const UsageType = enum(u2) {
+        /// Periodic
+        periodic = 0,
+        /// Notification
+        notification = 1,
+
+        _,
+    };
+
+    const Address = packed struct(u8) {
+        /// Endpoint number.
+        ep: u4,
+        /// Reserved.
+        _4: u3 = 0,
+        /// Direction. Ignored for control endpoints.
+        direction: RequestDirection,
+
+        pub inline fn dci(self: Address) u5 {
+            return (@as(u5, self.ep) << 1) + @as(u5, @intFromEnum(self.direction));
+        }
+    };
 };
 
 // =============================================================
