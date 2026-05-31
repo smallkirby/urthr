@@ -75,6 +75,7 @@ pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Erro
     log.debug("xHC version              : 0x{X}", .{self.capability.read(regs.CapInfo).hci_version});
     log.debug("xHC max slots            : {}", .{self.capability.read(regs.StructureParam1).maxslots});
     log.debug("xHC max ports            : {}", .{self.capability.read(regs.StructureParam1).maxports});
+    log.debug("xHC context size         : {d} bytes", .{@as(u8, if (self.capability.read(regs.CapParam1).csz) 64 else 32)});
 
     // Initialize DCBAA.
     self.dcbaa = try Dcbaa.init();
@@ -239,6 +240,15 @@ fn findDeviceByPort(self: *Self, port: usize) ?*Device {
     } else return null;
 }
 
+/// Find the registered device associated with the given slot index.
+fn findDeviceBySlot(self: *Self, slot: u8) ?*Device {
+    for (self.devices.items) |device| {
+        if (device.slot == slot) {
+            return device;
+        }
+    } else return null;
+}
+
 /// Find the registered device associated with the given pending TRB.
 ///
 /// Clears the pending TRB of the found device.
@@ -302,6 +312,7 @@ fn handleEvent(self: *Self) Error!void {
         switch (event.type) {
             .port_status_change => try self.handlePortStatusChange(@ptrCast(event)),
             .command_completion => try self.handleCommandCompletion(@ptrCast(event)),
+            .transfer_event => try self.handleTransferEvent(@ptrCast(event)),
 
             else => log.err("Unsupported event type: {d}", .{@intFromEnum(event.type)}),
         }
@@ -360,11 +371,42 @@ fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompl
             try device.assignAddress(slot_id);
         },
 
+        // Address assigned and Device Context is set.
+        .address_device => {
+            const device = findDeviceByTrb(self, @ptrCast(command_trb)) orelse {
+                log.warn("Address Device Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
+                return Error.NotAvailable;
+            };
+            if (event.code != .success) {
+                log.err("Port#{d}:Slot#{d}: Failed to assign address: {d}", .{ device.pi, slot_id, @intFromEnum(event.code) });
+                return Error.InvalidState;
+            }
+            log.debug("Port#{d}:Slot#{d}: Device addressed.", .{ device.pi, slot_id });
+
+            try device.onAddressAssigned();
+        },
+
         // Unhandled command completion.
         else => {
             log.warn("Unhandled command completion: {d}", .{@intFromEnum(command_type)});
         },
     }
+}
+
+/// Handles Transfer Event.
+///
+/// Delegates the event to the appropriate device based on the slot ID in the event.
+fn handleTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb) Error!void {
+    const slot = event.slot_id;
+
+    // Find the device by slot ID.
+    const device = findDeviceBySlot(self, slot) orelse {
+        log.warn("Transfer Event for unregistered slot: {d}", .{slot});
+        return Error.NotAvailable;
+    };
+
+    // TODO: dispatch to the device.
+    _ = device;
 }
 
 // =============================================================

@@ -111,7 +111,7 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
             .interval = 0,
             .cerr = 0,
             .trdp = @intCast(mem.page.translateIntP(&self.tr.trbs[0]) >> 4),
-            .dcs = 1,
+            .dcs = tr.pcs,
         };
     }
 
@@ -120,6 +120,103 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     var cmd = trbs.AddressDeviceTrb.from(slot, ic);
     self.pending_trb = self.xhc.cring.push(.from(&cmd));
     self.xhc.dbs.notifyCommand();
+}
+
+/// Called when the address has been successfully assigned to the device.
+pub fn onAddressAssigned(self: *Self) Error!void {
+    rtt.expectEqual(.waiting_address, self.state);
+
+    self.state = .waiting_device_desc;
+
+    // Setup GET_DESCRIPTOR request for device descriptor
+    const Value = packed struct(u16) {
+        /// Descriptor number.
+        desc_index: u8,
+        /// Type of descriptor.
+        desc_type: DescriptorType,
+    };
+    const request_type = SetupData.RequestType{
+        .recipient = .device,
+        .type = .standard,
+        .direction = .in,
+    };
+    const setup_data = SetupData{
+        .request_type = request_type,
+        .request = .get_descriptor,
+        .value = @bitCast(Value{
+            .desc_index = 0,
+            .desc_type = .device,
+        }),
+        .index = 0,
+        .length = 18,
+    };
+    try self.controlTransferIn(setup_data);
+}
+
+// =============================================================
+// Utility
+// =============================================================
+
+/// Perform a control transfer in the device-to-host direction on endpoint 0 (Default Control Pipe).
+///
+/// TODO: support transfer to other than control endpoint.
+pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
+    // TODO: Free the allocated memory on event completion.
+    const buf = try mem.page.allocBytesP(data.length);
+    errdefer mem.page.freeBytesP(buf);
+
+    // Setup Stage
+    var setup_trb = trbs.SetupTrb{
+        .request_type = @bitCast(data.request_type),
+        .request = @intFromEnum(data.request),
+        .value = data.value,
+        .index = data.index,
+        .length = data.length,
+        .cycle = undefined,
+        .ioc = false,
+        .trt = .in,
+        .idt = true,
+        .intr_target = 0,
+    };
+    _ = self.tr.push(.from(&setup_trb));
+
+    // Data Stage
+    var data_trb = trbs.DataTrb{
+        .data_buffer = @intFromPtr(buf.ptr),
+        .transfer_length = data.length,
+        .td_size = 0,
+        .cycle = undefined,
+        .ent = false,
+        .isp = false,
+        .ns = false,
+        .chain = true,
+        .ioc = false,
+        .idt = false,
+        .direction = .in,
+        .intr_target = 0,
+    };
+    _ = self.tr.push(.from(&data_trb));
+
+    // Status Stage
+    // Generates an event when complete.
+    var status_trb = trbs.StatusTrb{
+        .cycle = undefined,
+        .ent = false,
+        .chain = false,
+        .ioc = true,
+        .direction = .out,
+        .intr_target = 0,
+    };
+    self.pending_trb = self.tr.push(.from(&status_trb));
+
+    // Ring the doorbell for this slot
+    const ep0_dci = calcDci(0, .in);
+    self.xhc.dbs.notifyEndpoint(self.slot, ep0_dci);
+}
+
+/// Calculate the Device Context Index (DCI).
+fn calcDci(ep: u4, direction: RequestDirection) u5 {
+    return (@as(u5, ep) << 1) + @as(u5, @intFromEnum(direction));
 }
 
 // =============================================================
@@ -496,6 +593,117 @@ const EndpointContext = packed struct(u256) {
         bulk_in = 6,
         intr_in = 7,
     };
+};
+
+/// Contents of the Setup Stage TRB.
+pub const SetupData = packed struct(u64) {
+    /// bmRequestType.
+    ///
+    /// Identifies the characteristics of the request.
+    request_type: RequestType,
+    /// bRequest.
+    ///
+    /// Specifies the particular request.
+    request: Request,
+    /// wValue.
+    ///
+    /// Varying by request type.
+    value: u16,
+    /// wIndex.
+    ///
+    /// Varying by request type.
+    index: u16,
+    /// wLength.
+    ///
+    /// Specifies the length of the data transferred during the second stage of the control transfer.
+    length: u16,
+
+    pub const RequestType = packed struct(u8) {
+        recipient: Recipient,
+        type: Type,
+        direction: RequestDirection,
+    };
+
+    pub const Recipient = enum(u5) {
+        /// Device
+        device = 0,
+        /// Interface
+        interface = 1,
+        /// Endpoint
+        endpoint = 2,
+        /// Other
+        other = 3,
+        /// Vendor specific
+        vendor = 31,
+        /// Reserved.
+        _,
+    };
+
+    pub const Type = enum(u2) {
+        /// Standard
+        standard = 0,
+        /// Class
+        class = 1,
+        /// Vendor
+        vendor = 2,
+        /// Reserved
+        reserved = 3,
+    };
+
+    const Request = enum(u8) {
+        get_status = 0,
+        clear_feature = 1,
+        set_feature = 3,
+        set_address = 5,
+        get_descriptor = 6,
+        set_descriptor = 7,
+        get_configuration = 8,
+        set_configuration = 9,
+        get_interface = 10,
+        set_interface = 11,
+        synch_frame = 12,
+        _,
+    };
+};
+
+/// Direction of a USB request.
+pub const RequestDirection = enum(u1) {
+    /// Host-to-device.
+    out = 0,
+    /// Device-to-host.
+    in = 1,
+};
+
+/// List of Descriptor Types.
+const DescriptorType = enum(u8) {
+    /// Standard descriptor types.
+    device = 1,
+    ///
+    configuration = 2,
+    ///
+    string = 3,
+    ///
+    interface = 4,
+    ///
+    endpoint = 5,
+    ///
+    interface_power = 8,
+    ///
+    otg = 9,
+    ///
+    debug = 10,
+    ///
+    interface_association = 11,
+    ///
+    bos = 15,
+    ///
+    device_cap = 16,
+    // Class-specific descriptor types.
+    hid = 33,
+    ///
+    hid_report = 34,
+
+    _,
 };
 
 // =============================================================
