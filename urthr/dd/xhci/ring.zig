@@ -24,7 +24,17 @@ pub const Ring = struct {
     pub fn new(size: usize, allocator: PageAllocator) mem.Error!Ring {
         const buf = try allocator.alloc(Trb, size);
         errdefer allocator.free(buf);
-        for (buf) |*e| e.* = std.mem.zeroes(Trb);
+        for (buf) |*e| @memset(std.mem.asBytes(e), 0);
+
+        // Initialize Link TRB at the end of the buffer.
+        buf[buf.len - 1] = @bitCast(std.mem.zeroInit(trbs.LinkTrb, .{
+            .ringp = mem.page.translateIntP(buf),
+            .intr_target = 0,
+            .cycle = 1,
+            .tc = true,
+            .chain = false,
+            .ioc = false,
+        }));
 
         return .{ .trbs = buf };
     }
