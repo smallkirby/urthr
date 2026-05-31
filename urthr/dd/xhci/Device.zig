@@ -171,7 +171,7 @@ const InputContext = packed struct {
     }
 
     inline fn getEp0Ctx(self: *InputContext) *EndpointContext {
-        return @ptrCast(&self.ep0);
+        return @ptrFromInt(@intFromPtr(self) + @offsetOf(InputContext, "ep0"));
     }
 
     inline fn at(self: *InputContext, dci: u5) *EndpointContext {
