@@ -489,10 +489,10 @@ const EndpointContext = packed struct(u256) {
     const EndpointType = enum(u3) {
         invalid = 0,
         isoch_out = 1,
-        isoch_in = 2,
-        bulk_out = 3,
-        intr_out = 4,
-        control = 5,
+        bulk_out = 2,
+        intr_out = 3,
+        control = 4,
+        isoch_in = 5,
         bulk_in = 6,
         intr_in = 7,
     };
