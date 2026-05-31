@@ -168,7 +168,7 @@ pub const EcamHost = struct {
     /// Base virtual address of the ECAM region.
     base: usize,
     /// DMA allocator for PCIe devices.
-    dma: DmaAllocatorImpl,
+    dma: DmaAllocator,
 
     const vtable = Host.Vtable{
         .readConf = readConfImpl,
@@ -177,10 +177,10 @@ pub const EcamHost = struct {
     };
 
     /// Initialize the ECAM host controller.
-    pub fn init(base: usize, page_allocator: PageAllocator) Self {
+    pub fn init(base: usize) Self {
         return .{
             .base = base,
-            .dma = .new(page_allocator),
+            .dma = mem.dma.interface(0),
         };
     }
 
@@ -199,9 +199,9 @@ pub const EcamHost = struct {
         @as(*volatile u32, @ptrFromInt(self.address(addr, offset))).* = value;
     }
 
-    fn getDmaAllocatorImpl(ctx: *anyopaque) common.mem.DmaAllocator {
+    fn getDmaAllocatorImpl(ctx: *anyopaque) DmaAllocator {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.dma.interface(0);
+        return self.dma;
     }
 
     /// Construct the physical address for the given device address.
@@ -951,65 +951,16 @@ pub const LinkControlStatus2 = packed struct(u32) {
 };
 
 // =============================================================
-// DMA Allocator
-// =============================================================
-
-/// Implements `common.mem.DmaAllocator` using a page allocator.
-///
-/// Handles the transition between virtual and bus addresses.
-pub const DmaAllocatorImpl = struct {
-    const Self = @This();
-
-    page_allocator: PageAllocator,
-
-    const vtable = common.mem.DmaAllocator.Vtable{
-        .allocPages = Self.allocPages,
-        .freePages = Self.freePages,
-        .virt2phys = Self.virt2phys,
-        .phys2virt = Self.phys2virt,
-    };
-
-    pub fn new(page_allocator: PageAllocator) Self {
-        return .{ .page_allocator = page_allocator };
-    }
-
-    pub fn interface(self: *Self, offset: usize) common.mem.DmaAllocator {
-        return common.mem.DmaAllocator{
-            .ptr = @ptrCast(self),
-            .vtable = &Self.vtable,
-            .offset = offset,
-        };
-    }
-
-    fn allocPages(ctx: *anyopaque, num_pages: usize) common.mem.DmaAllocator.Error![]align(common.mem.DmaAllocator.page_size) u8 {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        return self.page_allocator.allocPagesP(num_pages);
-    }
-
-    fn freePages(ctx: *anyopaque, slice: []u8) void {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        self.page_allocator.freePagesP(slice);
-    }
-
-    fn virt2phys(ctx: *const anyopaque, vaddr: usize) usize {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        return self.page_allocator.translateP(vaddr);
-    }
-
-    fn phys2virt(ctx: *const anyopaque, paddr: usize) usize {
-        const self: *const Self = @ptrCast(@alignCast(ctx));
-        return self.page_allocator.translateV(paddr);
-    }
-};
-
-// =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const log = std.log.scoped(.pci);
 const common = @import("common");
+const DmaAllocator = common.mem.DmaAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const bits = common.bits;
 const mmio = common.mmio;
 const rtt = common.rtt;
+const urthr = @import("urthr");
+const mem = urthr.mem;

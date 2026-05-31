@@ -67,9 +67,6 @@ var capm = dd.pci.PcieCap{};
 /// Host instance singleton.
 var host: BrcmHost = .{};
 
-/// DMA allocator instance.
-var dma_allocator: dd.pci.DmaAllocatorImpl = undefined;
-
 // =============================================================
 // API
 // =============================================================
@@ -80,7 +77,7 @@ pub fn setBase(base: usize) void {
 }
 
 /// Initialize the PCIe controller.
-pub fn init(page_allocator: PageAllocator) void {
+pub fn init() void {
     // Set base address of PCIe Capability Structure.
     capm.setBase(pcie.getMarkerAddress(.cap_regs));
 
@@ -98,9 +95,6 @@ pub fn init(page_allocator: PageAllocator) void {
     pcie.modifyIndexed(RcBar1ConfigLo, 2, 8, .{
         .size = 0,
     });
-
-    // Instantiate DMA allocator.
-    dma_allocator = .new(page_allocator);
 }
 
 /// Get `Host` interface.
@@ -138,7 +132,7 @@ const BrcmHost = struct {
     }
 
     fn getDmaAllocatorImpl(_: *anyopaque) DmaAllocator {
-        return dma_allocator.interface(dma_offset);
+        return mem.dma.interface(dma_offset);
     }
 };
 
@@ -233,7 +227,7 @@ fn encodeIbarSize(size: u64) u5 {
 
 /// Get the DMA allocator that can be used to transfer data over PCIe.
 pub fn getDmaAllocator() DmaAllocator {
-    return dma_allocator.interface(dma_offset);
+    return mem.dma.interface(dma_offset);
 }
 
 /// Reset the PCIe controller.
@@ -802,3 +796,5 @@ const DmaAllocator = common.mem.DmaAllocator;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const dd = @import("dd");
+const urd = @import("urthr");
+const mem = urd.mem;

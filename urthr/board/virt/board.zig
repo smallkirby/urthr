@@ -95,7 +95,7 @@ pub fn initPeripherals1() common.mem.Error!void {
             null,
             .device,
         );
-        ecam = dd.pci.EcamHost.init(pci, urd.mem.page);
+        ecam = dd.pci.EcamHost.init(pci);
     }
 }
 

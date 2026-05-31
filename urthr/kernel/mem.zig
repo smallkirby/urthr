@@ -2,6 +2,8 @@ pub const Error = common.mem.Error;
 
 /// Allocator implementing `std.mem.Allocator` interface.
 pub const bin = bin_impl.interface;
+/// Allocator implementing `common.mem.DmaAllocator` interface.
+pub const dma = @import("mem/dma.zig");
 /// Allocator implementing `common.mem.PageAllocator` interface.
 pub const page = buddy_impl.interface;
 /// Allocator implementing `common.mem.IoAllocator` interface.

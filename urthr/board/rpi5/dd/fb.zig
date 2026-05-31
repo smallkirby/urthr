@@ -137,7 +137,7 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             fb.base = try io.ioremap(
                 aligned_phys,
                 aligned_size,
-                .normal_wc,
+                .wc,
             ) + aligned_offset;
             fb.pitch = pitch;
 

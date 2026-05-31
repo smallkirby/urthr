@@ -1,5 +1,9 @@
 //! DMA allocator interface.
 
+const Self = @This();
+
+pub const Error = mem.Error;
+
 /// The type erased pointer to the allocator implementation.
 ptr: *anyopaque,
 /// The vtable for the allocator.
@@ -8,127 +12,78 @@ vtable: *const Vtable,
 /// Offset added to a physical address to construct a bus address.
 offset: usize,
 
-pub const Error = error{
-    /// Argument is invalid.
-    InvalidArgument,
-    /// Not enough memory to fulfill the request.
-    OutOfMemory,
-};
-
-const Self = @This();
-
 pub const page_size = 4 * units.kib;
 
-/// Address in bus address space.
-pub const BusAddress = packed struct {
-    addr: usize,
+pub const DmaMemory = struct {
+    /// Virtual address of the allocated memory region.
+    cpu: usize,
+    /// Bus address of the allocated memory region.
+    bus: usize,
+    /// Size in bytes of the allocated memory region.
+    size: usize,
 };
 
 pub const Vtable = struct {
-    /// Allocate a given number of physically contiguous pages.
+    /// Allocate a given number of physically contiguous pages with the given memory attribute.
     ///
     /// The pages must be DMA-capable.
-    /// The slice points to a physical address.
-    allocPages: *const fn (ctx: *anyopaque, num_pages: usize) Error![]align(page_size) u8,
+    allocPages: *const fn (ctx: *anyopaque, num_pages: usize, attr: Attribute) Error!DmaMemory,
     /// Free the given pages.
     ///
-    /// The slice points to a physical address.
-    freePages: *const fn (ctx: *anyopaque, slice: []u8) void,
-    /// Convert the given virtual address to physical address.
-    virt2phys: *const fn (ctx: *const anyopaque, vaddr: usize) usize,
-    /// convert the given physical address to virtual address.
-    phys2virt: *const fn (ctx: *const anyopaque, paddr: usize) usize,
+    /// The implementation can assume that the given memory region was allocated by a previous call to `allocPages()`.
+    freePages: *const fn (ctx: *anyopaque, memory: DmaMemory) void,
 };
 
 /// Allocate the given number of pages.
 ///
 /// The allocated pages can be used for DMA operations.
-///
-/// Returns a slice representing the allocated memory region.
-/// The slice points to a virtual address.
-pub fn allocPagesV(self: Self, num_pages: usize) Error![]align(page_size) u8 {
-    const slice = try self.vtable.allocPages(self.ptr, num_pages);
-    const ptr: [*]u8 = @ptrFromInt(self.vtable.phys2virt(
-        self.ptr,
-        @intFromPtr(slice.ptr),
-    ));
+pub fn allocPages(self: Self, num_pages: usize, attr: Attribute) Error!DmaMemory {
+    const memory = try self.vtable.allocPages(self.ptr, num_pages, attr);
 
-    return @alignCast(ptr[0..slice.len]);
+    return .{
+        .cpu = memory.cpu,
+        .bus = memory.bus + self.offset,
+        .size = memory.size,
+    };
 }
 
 /// Allocate the given size in bytes of memory.
 ///
-/// Returns a slice representing the allocated memory region.
-/// The slice points to a virtual address.
-///
-/// The size is rounded up to the nearest page size.
-/// The size of returned slice is equal to or greater than the requested size.
-pub fn allocBytesV(self: Self, size: usize) Error![]u8 {
-    const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
-    return self.allocPagesV(aligned_size / common.mem.size_4kib);
-}
-
-/// Allocate the given number of pages.
-///
-/// The allocated pages can be used for DMA operations.
-///
-/// Returns a slice representing the allocated memory region.
-/// The slice points to a bus address.
-pub fn allocPagesB(self: Self, num_pages: usize) Error!BusAddress {
-    const ptr = try self.allocPagesV(num_pages);
-    return self.translateB(ptr);
-}
-
-/// Allocate the given size in bytes of memory.
-///
-/// Returns a slice representing the allocated memory region.
-/// The slice points to a bus address.
-///
-/// The size is rounded up to the nearest page size.
-/// The size of returned slice is equal to or greater than the requested size.
-pub fn allocBytesB(self: Self, size: usize) Error!BusAddress {
-    const aligned_size = std.mem.alignForward(usize, size, common.mem.size_4kib);
-    return self.allocPagesB(aligned_size / common.mem.size_4kib);
-}
-
-/// Free the given bytes allocated by `allocBytesV()`.
-pub fn freeBytesV(self: Self, slice: []u8) void {
-    const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(slice.ptr));
-    const pslice: []u8 = @as([*]u8, @ptrFromInt(paddr))[0..slice.len];
-    self.vtable.freePages(self.ptr, pslice);
-}
-
-/// Convert the given virtual pointer to pointer in bus address space.
-pub fn translateB(self: Self, vobj: anytype) BusAddress {
-    return switch (@typeInfo(@TypeOf(vobj))) {
-        .pointer => |p| switch (p.size) {
-            .one, .many, .c => {
-                const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(vobj));
-                return BusAddress{ .addr = paddr + self.offset };
-            },
-            .slice => {
-                const paddr = self.vtable.virt2phys(self.ptr, @intFromPtr(vobj.ptr));
-                return BusAddress{ .addr = paddr + self.offset };
-            },
-        },
-        .int => return self.vtable.virt2phys(self.ptr, vobj) + self.offset,
-        else => @compileError("Unsupported type."),
+/// The allocated memory can be used for DMA operations.
+pub fn allocBytes(self: Self, size: usize, attr: Attribute) Error!DmaMemory {
+    const aligned_size = std.mem.alignForward(usize, size, page_size);
+    const num_pages = aligned_size / page_size;
+    const memory = try self.allocPages(num_pages, attr);
+    return .{
+        .cpu = memory.cpu,
+        .bus = memory.bus,
+        .size = size,
     };
 }
 
-/// Convert the given bus address pointer to pointer in virtual address space.
-pub fn translateV(self: Self, bobj: BusAddress, T: type) T {
-    return switch (@typeInfo(T)) {
-        .pointer => {
-            const paddr = bobj.addr - self.offset;
-            return @ptrFromInt(self.vtable.phys2virt(self.ptr, paddr));
-        },
-        .int => {
-            const paddr = bobj.addr - self.offset;
-            return self.vtable.phys2virt(self.ptr, paddr);
-        },
-        else => @compileError("Unsupported type."),
-    };
+/// Free the given memory region.
+///
+/// `memory` must be identical to the memory returned by a previous call to `allocPages()`.
+pub fn freePages(self: Self, memory: DmaMemory) void {
+    rtt.expectEqual(0, memory.bus % page_size);
+
+    self.vtable.freePages(self.ptr, .{
+        .cpu = memory.cpu,
+        .bus = memory.bus - self.offset,
+        .size = memory.size,
+    });
+}
+
+/// Free the given memory region.
+///
+/// `memory` must be identical to the memory returned by a previous call to `allocBytes()`.
+pub fn freeBytes(self: Self, memory: DmaMemory) void {
+    const size = std.mem.alignForward(usize, memory.size, page_size);
+    return self.freePages(.{
+        .cpu = memory.cpu,
+        .bus = memory.bus,
+        .size = size,
+    });
 }
 
 // =============================================================
@@ -137,4 +92,7 @@ pub fn translateV(self: Self, bobj: BusAddress, T: type) T {
 
 const std = @import("std");
 const common = @import("common");
+const mem = common.mem;
 const units = common.units;
+const Attribute = mem.Attribute;
+const rtt = common.rtt;

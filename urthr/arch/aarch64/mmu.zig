@@ -431,7 +431,8 @@ fn getAttrIndex(attr: Attribute) u3 {
     return switch (attr) {
         .device => 0,
         .normal => 1,
-        .normal_wc => 2,
+        .wc => 2,
+        .nc => 2,
     };
 }
 

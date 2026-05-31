@@ -101,7 +101,7 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             .device,
         );
         rdd.pcie.setBase(pci);
-        rdd.pcie.init(urd.mem.page);
+        rdd.pcie.init();
     }
 
     // Mailbox.

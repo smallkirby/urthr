@@ -254,9 +254,9 @@ fn readClearIrq(self: *const Self, qidx: usize) InterruptBf {
 /// RX Queue structure.
 const RxQueue = struct {
     /// DMA-capable memory for RX descriptor queue.
-    memory: []u8,
-    /// List of bus address of RX buffer.
-    buffers: [num_desc]DmaAllocator.BusAddress,
+    memory: DmaMemory,
+    /// List of DMA memory for RX buffer.
+    buffers: [num_desc]DmaMemory,
     /// Next descriptor index to start searching for received packets.
     next_idx: usize = 0,
     /// Tracks descriptors that have been acquired but not yet released.
@@ -340,8 +340,8 @@ const RxQueue = struct {
 
     /// Create a new RX queue.
     pub fn create(allocator: DmaAllocator) DmaAllocator.Error!RxQueue {
-        const memory = try allocator.allocBytesV(@sizeOf(Desc) * num_desc);
-        errdefer allocator.freeBytesV(memory);
+        const memory = try allocator.allocBytes(@sizeOf(Desc) * num_desc, .wc);
+        errdefer allocator.freeBytes(memory);
 
         return .{
             .memory = memory,
@@ -358,7 +358,7 @@ const RxQueue = struct {
             self.buffers[i] = buffer;
 
             desc._96 = 0;
-            desc.setAddr(buffer.addr);
+            desc.setAddr(buffer.bus);
             desc.setHwOwn();
             if (i == num_desc - 1) {
                 desc.setWrap();
@@ -367,17 +367,7 @@ const RxQueue = struct {
             desc.ctrl_stat = std.mem.zeroInit(Control, .{});
         }
 
-        arch.cache(.clean, self.memory, self.memory.len);
-    }
-
-    /// Invalidate cache for RX descriptors.
-    pub fn invalidateCache(self: *const RxQueue) void {
-        arch.cache(.invalidate, self.memory.ptr, self.memory.len);
-    }
-
-    /// Flush cache for RX descriptors.
-    pub fn flushCache(self: *const RxQueue) void {
-        arch.cache(.clean, self.memory.ptr, self.memory.len);
+        arch.cache(.clean, self.memory.cpu, self.memory.size);
     }
 
     /// Get a RX buffer if it has been consumed by MAC.
@@ -388,7 +378,7 @@ const RxQueue = struct {
         const desc = &self.getDescs()[index];
 
         if (!self.in_flights.isSet(index) and desc.swOwns()) {
-            const ptr = self.allocator.translateV(self.buffers[index], [*]const u8);
+            const ptr: [*]const u8 = @ptrFromInt(self.buffers[index].cpu);
             const len = desc.ctrl_stat.frmlen;
             arch.cache(.invalidate, ptr, len);
 
@@ -405,7 +395,7 @@ const RxQueue = struct {
     /// The descriptor remains owned by software until `releaseRxBuf` is called.
     /// Returns null if no packet is available in the queue.
     pub fn tryAcquireRx(self: *RxQueue) ?net.Device.PollResult {
-        arch.cache(.invalidate, self.memory.ptr, self.memory.len);
+        arch.cache(.invalidate, self.memory.cpu, self.memory.size);
 
         for (0..num_desc) |i| {
             const idx = (self.next_idx + i) % num_desc;
@@ -429,17 +419,17 @@ const RxQueue = struct {
 
     /// Get the DMA address of the RX queue.
     pub fn addrDma(self: *const RxQueue) usize {
-        return self.allocator.translateB(self.memory).addr;
+        return self.memory.bus;
     }
 
     /// Create a buffer for receiving packets.
     ///
     /// Returns the bus address of the buffer.
-    fn createBuffer(self: *const RxQueue) DmaAllocator.Error!DmaAllocator.BusAddress {
-        const page = try self.allocator.allocBytesB(buffer_size);
+    fn createBuffer(self: *const RxQueue) DmaAllocator.Error!DmaMemory {
+        const page = try self.allocator.allocBytes(buffer_size, .wc);
         arch.cache(
             .invalidate,
-            self.allocator.translateV(page, usize),
+            page.cpu,
             buffer_size,
         );
         return page;
@@ -447,16 +437,16 @@ const RxQueue = struct {
 
     /// Get the pointer to the RX descriptors.
     fn getDescs(self: *const RxQueue) *volatile [num_desc]Desc {
-        return @ptrCast(@alignCast(self.memory.ptr));
+        return @ptrFromInt(self.memory.cpu);
     }
 };
 
 /// TX Queue structure.
 const TxQueue = struct {
     /// DMA-capable memory for TX descriptor ring.
-    memory: []u8,
+    memory: DmaMemory,
     /// DMA-capable memory for TX data buffers.
-    buffer_memory: []u8,
+    buffer_memory: DmaMemory,
     /// Next descriptor index to use.
     next_idx: usize = 0,
     /// DMA allocator that manages the memory.
@@ -501,11 +491,11 @@ const TxQueue = struct {
 
     /// Create a new TX queue, allocating DMA memory.
     pub fn create(allocator: DmaAllocator) DmaAllocator.Error!TxQueue {
-        const desc_mem = try allocator.allocBytesV(@sizeOf(Desc) * num_desc);
-        errdefer allocator.freeBytesV(desc_mem);
+        const desc_mem = try allocator.allocBytes(@sizeOf(Desc) * num_desc, .wc);
+        errdefer allocator.freeBytes(desc_mem);
 
-        const buf_mem = try allocator.allocBytesV(buffer_size * num_desc);
-        errdefer allocator.freeBytesV(buf_mem);
+        const buf_mem = try allocator.allocBytes(buffer_size * num_desc, .wc);
+        errdefer allocator.freeBytes(buf_mem);
 
         return .{
             .memory = desc_mem,
@@ -530,7 +520,7 @@ const TxQueue = struct {
             };
         }
 
-        arch.cache(.clean, self.memory.ptr, self.memory.len);
+        arch.cache(.clean, self.memory.cpu, self.memory.size);
     }
 
     /// Copy frame data into the TX buffer and set up the descriptor.
@@ -568,23 +558,23 @@ const TxQueue = struct {
 
     /// Get the DMA bus address of the descriptor ring.
     pub fn addrDma(self: *const TxQueue) usize {
-        return self.allocator.translateB(self.memory).addr;
+        return self.memory.bus;
     }
 
     /// Get the bus address of a specific TX buffer.
     fn getBufferBusAddr(self: *const TxQueue, idx: usize) usize {
-        const base = self.allocator.translateB(self.buffer_memory).addr;
+        const base = self.buffer_memory.bus;
         return base + idx * buffer_size;
     }
 
     /// Get a virtual pointer to a specific TX buffer.
     fn getBufferVirtPtr(self: *const TxQueue, idx: usize) [*]u8 {
-        return self.buffer_memory.ptr + idx * buffer_size;
+        return @ptrFromInt(self.buffer_memory.cpu + idx * buffer_size);
     }
 
     /// Get the pointer to the TX descriptors.
     fn getDescs(self: *const TxQueue) *volatile [num_desc]Desc {
-        return @ptrCast(@alignCast(self.memory.ptr));
+        return @ptrFromInt(self.memory.cpu);
     }
 };
 
@@ -1187,7 +1177,7 @@ const mmio = common.mmio;
 const rtt = common.rtt;
 const Timer = common.Timer;
 const DmaAllocator = common.mem.DmaAllocator;
-const MemoryManager = common.mem.MemoryManager;
+const DmaMemory = DmaAllocator.DmaMemory;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const net = urd.net;
