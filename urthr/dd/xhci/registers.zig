@@ -43,8 +43,18 @@ pub const StructureParam3 = packed struct(u32) {
 
 /// HCCPARAMS1
 pub const CapParam1 = packed struct(u32) {
+    /// 64-bit Addressing Capability.
+    ac64: bool,
+    /// BW Negotiation Capability.
+    bnc: bool,
+    /// Context Size.
+    ///
+    /// If true, xHC uses 64 byte Context data structures. Otherwise, 32 byte.
+    csz: bool,
+    /// Port Power Control.
+    ppc: bool,
     /// Unimplemented
-    _0: u16 = 0,
+    _4: u12 = 0,
     /// xHCI Extended Capabilities Pointer.
     xecp: u16,
 };
