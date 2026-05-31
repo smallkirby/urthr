@@ -14,9 +14,13 @@ pi: usize,
 pr: regs.Port,
 /// Slot ID assigned to the device.
 slot: u8 = undefined,
+/// Device descriptor provided by the device.
+desc: DeviceDesc = undefined,
 
 /// Pending TRB that waits for completion of the current operation.
 pending_trb: ?*const volatile trbs.Trb = null,
+/// Pending Data TRB that's waiting for a Transfer Event.
+pending_data: ?PendingData = null,
 
 /// Device state.
 const State = enum {
@@ -154,6 +158,55 @@ pub fn onAddressAssigned(self: *Self) Error!void {
 }
 
 // =============================================================
+// Transfer event handlers
+// =============================================================
+
+/// Callback for Transfer Event TRB.
+pub fn onTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb) Error!void {
+    const issuer: *const trbs.Trb =
+        @ptrFromInt(mem.page.translateV(event.trb));
+
+    switch (issuer.type) {
+        .status => try self.onStatusTransfer(event, @ptrCast(issuer)),
+        else => log.err(
+            "Unexpected TRB type in Transfer Event: {d}",
+            .{@intFromEnum(issuer.type)},
+        ),
+    }
+}
+
+/// Called when a Transfer Event TRB is received for a Status Stage TRB.
+fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, issuer: *const trbs.StatusTrb) Error!void {
+    const code = event.code;
+
+    switch (self.state) {
+        // Device descriptor is provided.
+        .waiting_device_desc => {
+            if (code != .success) {
+                log.err("Failed to get device descriptor: {d}", .{code});
+                return;
+            }
+            const pending = self.popPendingData();
+            self.pending_trb = null;
+            rtt.expectEqual(pending.status, issuer);
+
+            const dtrb = pending.data;
+            const desc: *const volatile DeviceDesc = @ptrFromInt(mem.page.translateV(dtrb.data_buffer));
+            self.desc = desc.*;
+            rtt.expectEqual(.device, desc.type);
+
+            // TODO: free the DMA buffer associated with the Data TRB.
+
+            self.state = .waiting_config_desc;
+            // TODO: request configuration descriptor.
+        },
+
+        // Unexpected state.
+        else => log.warn("Unexpected transfer event for control transfer while state is {t}", .{self.state}),
+    }
+}
+
+// =============================================================
 // Utility
 // =============================================================
 
@@ -195,7 +248,7 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
         .direction = .in,
         .intr_target = 0,
     };
-    _ = self.tr.push(.from(&data_trb));
+    const dtrb = self.tr.push(.from(&data_trb));
 
     // Status Stage
     // Generates an event when complete.
@@ -207,7 +260,13 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
         .direction = .out,
         .intr_target = 0,
     };
-    self.pending_trb = self.tr.push(.from(&status_trb));
+    const strb = self.tr.push(.from(&status_trb));
+    self.pending_trb = strb;
+
+    // Push the Data TRB.
+    if (data.length > 0) {
+        self.pushPendingData(strb, dtrb);
+    }
 
     // Ring the doorbell for this slot
     const ep0_dci = calcDci(0, .in);
@@ -217,6 +276,33 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
 /// Calculate the Device Context Index (DCI).
 fn calcDci(ep: u4, direction: RequestDirection) u5 {
     return (@as(u5, ep) << 1) + @as(u5, @intFromEnum(direction));
+}
+
+/// Pending Data TRB that waits for completion of a transfer operation.
+const PendingData = struct {
+    /// Pointer to Status TRB that will be triggered when the transfer is complete.
+    status: *const volatile trbs.StatusTrb,
+    /// Pointer to Data TRB that describes the transfer.
+    data: *const volatile trbs.DataTrb,
+};
+
+/// Records the pending data transfer operations.
+fn pushPendingData(self: *Self, status: *const Trb, data: *const Trb) void {
+    rtt.expectEqual(null, self.pending_data);
+
+    self.pending_data = .{
+        .status = @ptrCast(status),
+        .data = @ptrCast(data),
+    };
+}
+
+/// Pop the pending data transfer operation.
+fn popPendingData(self: *Self) PendingData {
+    rtt.expect(self.pending_data != null);
+
+    const ret = self.pending_data.?;
+    self.pending_data = null;
+    return ret;
 }
 
 // =============================================================
@@ -706,11 +792,44 @@ const DescriptorType = enum(u8) {
     _,
 };
 
+/// General information about a device.
+const DeviceDesc = packed struct(u144) {
+    /// Size of this descriptor in bytes.
+    length: u8,
+    /// Descriptor type.
+    type: DescriptorType = .device,
+    /// USB Specification Release Number in Binary-Coded Decimal (BCD) format.
+    usb_spec: u16,
+    /// Class code.
+    class: u8,
+    /// Subclass code.
+    subclass: u8,
+    /// Protocol code.
+    protocol: u8,
+    /// Maximum packet size for endpoint 0 (default control pipe).
+    max_packet_size: u8,
+    /// Vendor ID.
+    vendor: u16,
+    /// Product ID.
+    product: u16,
+    /// Device release number in BCD format.
+    device: u16,
+    /// Index of string descriptor describing the manufacturer.
+    manufacture_index: u8,
+    /// Index of string descriptor describing the product.
+    product_index: u8,
+    /// Index of string descriptor describing the serial number.
+    serial_index: u8,
+    /// Number of possible configurations.
+    num_configs: u8,
+};
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.xhc);
 const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");

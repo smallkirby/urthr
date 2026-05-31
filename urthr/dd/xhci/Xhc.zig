@@ -405,8 +405,8 @@ fn handleTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb
         return Error.NotAvailable;
     };
 
-    // TODO: dispatch to the device.
-    _ = device;
+    // Dispatch to the device.
+    try device.onTransferEvent(event);
 }
 
 // =============================================================
