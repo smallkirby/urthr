@@ -86,9 +86,15 @@ const mip0_range = DmaRange{
 };
 
 /// RP1 IRQ number.
+///
+/// ref. https://github.com/raspberrypi/linux/blob/0ad641150c52aaaaba11365dab3efa29a68eb0ba/include/dt-bindings/mfd/rp1.h#L106
 const MsiIrq = enum(u8) {
     /// Ethernet.
     eth = 6,
+    /// USB Host0 (USB 2.0).
+    usb0 = 30,
+    /// USB Host1 (USB 3.0).
+    usb1 = 35,
 };
 
 /// SPI interrupts offset.
@@ -473,6 +479,11 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
         const irq_eth: u32 = @intFromEnum(MsiIrq.eth);
         table.setEntry(irq_eth, mip0_range.pci, irq_eth);
         table.maskEntry(irq_eth, false);
+
+        // USB Host1
+        const irq_usb1: u32 = @intFromEnum(MsiIrq.usb1);
+        table.setEntry(irq_usb1, mip0_range.pci, irq_usb1);
+        table.maskEntry(irq_usb1, false);
     }
 
     // Setup PCIe MSI-X configuration.
@@ -481,6 +492,12 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
 
         // Ethernet
         msixConfigSet(cfg, .eth, std.mem.zeroInit(MsixCfg, .{
+            .enable = true,
+            .iack_en = true,
+        }));
+
+        // USB Host1
+        msixConfigSet(cfg, .usb1, std.mem.zeroInit(MsixCfg, .{
             .enable = true,
             .iack_en = true,
         }));
