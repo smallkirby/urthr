@@ -367,7 +367,7 @@ const RxQueue = struct {
             desc.ctrl_stat = std.mem.zeroInit(Control, .{});
         }
 
-        arch.cache(.clean, self.memory.cpu, self.memory.size);
+        self.allocator.syncForDevice(self.memory.cpu, self.memory.size);
     }
 
     /// Get a RX buffer if it has been consumed by MAC.
@@ -380,7 +380,7 @@ const RxQueue = struct {
         if (!self.in_flights.isSet(index) and desc.swOwns()) {
             const ptr: [*]const u8 = @ptrFromInt(self.buffers[index].cpu);
             const len = desc.ctrl_stat.frmlen;
-            arch.cache(.invalidate, ptr, len);
+            self.allocator.syncForCpu(self.buffers[index].cpu, len);
 
             self.in_flights.set(index);
             return ptr[0..len];
@@ -395,7 +395,7 @@ const RxQueue = struct {
     /// The descriptor remains owned by software until `releaseRxBuf` is called.
     /// Returns null if no packet is available in the queue.
     pub fn tryAcquireRx(self: *RxQueue) ?net.Device.PollResult {
-        arch.cache(.invalidate, self.memory.cpu, self.memory.size);
+        self.allocator.syncForCpu(self.memory.cpu, self.memory.size);
 
         for (0..num_desc) |i| {
             const idx = (self.next_idx + i) % num_desc;
@@ -413,7 +413,7 @@ const RxQueue = struct {
     pub fn releaseRxBuf(self: *RxQueue, index: usize) void {
         const desc = &self.getDescs()[index];
         desc.setHwOwn();
-        arch.cache(.clean, desc, @sizeOf(Desc));
+        self.allocator.syncForDeviceAny(desc);
         self.in_flights.unset(index);
     }
 
@@ -427,11 +427,7 @@ const RxQueue = struct {
     /// Returns the bus address of the buffer.
     fn createBuffer(self: *const RxQueue) DmaAllocator.Error!DmaMemory {
         const page = try self.allocator.allocBytes(buffer_size, .normal);
-        arch.cache(
-            .invalidate,
-            page.cpu,
-            buffer_size,
-        );
+        self.allocator.syncForCpu(page.cpu, page.size);
         return page;
     }
 
@@ -520,7 +516,7 @@ const TxQueue = struct {
             };
         }
 
-        arch.cache(.clean, self.memory.cpu, self.memory.size);
+        self.allocator.syncForDevice(self.memory.cpu, self.memory.size);
     }
 
     /// Copy frame data into the TX buffer and set up the descriptor.
@@ -530,7 +526,7 @@ const TxQueue = struct {
 
         const buf = self.getBufferVirtPtr(idx);
         @memcpy(buf[0..data.len], data);
-        arch.cache(.clean, buf, data.len);
+        self.allocator.syncForDeviceAny(buf[0..data.len]);
 
         const desc = &self.getDescs()[idx];
         desc.ctrl = .{
@@ -539,7 +535,7 @@ const TxQueue = struct {
             .wrap = idx == num_desc - 1,
             .used = false,
         };
-        arch.cache(.clean, desc, @sizeOf(Desc));
+        self.allocator.syncForDeviceAny(desc);
     }
 
     /// Poll until any descriptor's used bit is set by HW.
@@ -548,12 +544,14 @@ const TxQueue = struct {
     pub fn waitForCompletion(self: *const TxQueue, timeout: Timer.TimeSlice) net.Error!void {
         const idx = self.next_idx;
         const desc = &self.getDescs()[idx];
-        try spinWaitUntil(timeout, null, desc, struct {
-            fn f(d: *volatile Desc) bool {
-                arch.cache(.invalidate, d, @sizeOf(Desc));
+        const S = struct {
+            fn f(arg: struct { *const TxQueue, *volatile Desc }) bool {
+                const d = arg.@"1";
+                arg.@"0".allocator.syncForCpuAny(d);
                 return d.ctrl.used;
             }
-        }.f);
+        };
+        try spinWaitUntil(timeout, null, .{ self, desc }, S.f);
     }
 
     /// Get the DMA bus address of the descriptor ring.

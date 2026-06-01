@@ -1,4 +1,5 @@
 pub const memmap = @import("memmap.zig");
+pub const sync = @import("sync.zig");
 
 /// Function signature of exception handler.
 ///
@@ -354,4 +355,3 @@ const urd = @import("urthr");
 const dd = @import("dd");
 const map = @import("memmap.zig");
 const rdd = @import("dd.zig");
-const sync = @import("sync.zig");

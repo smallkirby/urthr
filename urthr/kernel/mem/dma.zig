@@ -14,6 +14,7 @@ pub fn interface(offset: usize) DmaAllocator {
 const vtable = DmaAllocator.Vtable{
     .allocPages = allocPages,
     .freePages = freePages,
+    .sync = sync,
 };
 
 fn allocPages(_: *anyopaque, num_pages: usize, attr: Attribute) Error!DmaMemory {
@@ -42,6 +43,14 @@ fn freePages(_: *anyopaque, memory: DmaMemory) void {
     mem.page.freePagesP(ptr[0..memory.size]);
 }
 
+fn sync(_: *anyopaque, cpu: usize, size: usize, dir: DmaAllocator.Vtable.Direction) void {
+    const p = @as([*]u8, @ptrFromInt(cpu))[0..size];
+    switch (dir) {
+        .cpu => board.sync.invalidateData(p),
+        .device => board.sync.cleanData(p),
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
@@ -51,5 +60,6 @@ const common = @import("common");
 const Attribute = common.mem.Attribute;
 const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;
+const board = @import("board").impl;
 const urd = @import("urthr");
 const mem = urd.mem;

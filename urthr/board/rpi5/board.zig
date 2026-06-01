@@ -1,4 +1,5 @@
 pub const memmap = @import("memmap.zig");
+pub const sync = @import("sync.zig");
 
 /// Function signature of exception handler.
 ///
@@ -412,6 +413,5 @@ const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
 const dd = @import("dd");
 const rdd = @import("dd.zig");
-const sync = @import("sync.zig");
 const urd = @import("urthr");
 const net = urd.net;

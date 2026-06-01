@@ -32,6 +32,16 @@ pub const Vtable = struct {
     ///
     /// The implementation can assume that the given memory region was allocated by a previous call to `allocPages()`.
     freePages: *const fn (ctx: *anyopaque, memory: DmaMemory) void,
+    /// Synchronize the given memory region for CPU / device access.
+    ///
+    /// If the direction is `cpu`, the implementation must ensure that any changes made by the device to the memory are visible to the CPU.
+    /// Otherwise, the implementation must ensure that any changes made by the CPU to the memory are visible to the device.
+    sync: *const fn (ctx: *anyopaque, cpu: usize, size: usize, dir: Direction) void,
+
+    pub const Direction = enum {
+        cpu,
+        device,
+    };
 };
 
 /// Allocate the given number of pages.
@@ -84,6 +94,40 @@ pub fn freeBytes(self: Self, memory: DmaMemory) void {
         .bus = memory.bus,
         .size = size,
     });
+}
+
+/// Synchronize the given memory region for CPU access.
+pub fn syncForCpu(self: Self, cpu: usize, size: usize) void {
+    self.vtable.sync(self.ptr, cpu, size, .cpu);
+}
+
+/// Synchronize the given memory region for CPU access.
+pub fn syncForCpuAny(self: Self, obj: anytype) void {
+    const cpu, const size = objinfo(obj);
+    self.syncForCpu(cpu, size);
+}
+
+/// Synchronize the given memory region for device access.
+pub fn syncForDevice(self: Self, cpu: usize, size: usize) void {
+    self.vtable.sync(self.ptr, cpu, size, .device);
+}
+
+/// Synchronize the given memory region for device access.
+pub fn syncForDeviceAny(self: Self, obj: anytype) void {
+    const cpu, const size = objinfo(obj);
+    self.syncForDevice(cpu, size);
+}
+
+/// Returns the pairof address and size of the given object.
+fn objinfo(obj: anytype) struct { usize, usize } {
+    return switch (@typeInfo(@TypeOf(obj))) {
+        .pointer => |p| switch (p.size) {
+            .one => .{ @intFromPtr(obj), @sizeOf(p.child) },
+            .slice => .{ @intFromPtr(obj.ptr), @sizeOf(p.child) * obj.len },
+            else => @compileError("Unsupported pointer type."),
+        },
+        else => @compileError("Unsupported type."),
+    };
 }
 
 // =============================================================
