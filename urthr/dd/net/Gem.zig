@@ -340,7 +340,7 @@ const RxQueue = struct {
 
     /// Create a new RX queue.
     pub fn create(allocator: DmaAllocator) DmaAllocator.Error!RxQueue {
-        const memory = try allocator.allocBytes(@sizeOf(Desc) * num_desc, .wc);
+        const memory = try allocator.allocBytes(@sizeOf(Desc) * num_desc, .normal);
         errdefer allocator.freeBytes(memory);
 
         return .{
@@ -426,7 +426,7 @@ const RxQueue = struct {
     ///
     /// Returns the bus address of the buffer.
     fn createBuffer(self: *const RxQueue) DmaAllocator.Error!DmaMemory {
-        const page = try self.allocator.allocBytes(buffer_size, .wc);
+        const page = try self.allocator.allocBytes(buffer_size, .normal);
         arch.cache(
             .invalidate,
             page.cpu,
@@ -491,10 +491,10 @@ const TxQueue = struct {
 
     /// Create a new TX queue, allocating DMA memory.
     pub fn create(allocator: DmaAllocator) DmaAllocator.Error!TxQueue {
-        const desc_mem = try allocator.allocBytes(@sizeOf(Desc) * num_desc, .wc);
+        const desc_mem = try allocator.allocBytes(@sizeOf(Desc) * num_desc, .normal);
         errdefer allocator.freeBytes(desc_mem);
 
-        const buf_mem = try allocator.allocBytes(buffer_size * num_desc, .wc);
+        const buf_mem = try allocator.allocBytes(buffer_size * num_desc, .normal);
         errdefer allocator.freeBytes(buf_mem);
 
         return .{
