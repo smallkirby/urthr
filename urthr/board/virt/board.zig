@@ -205,7 +205,7 @@ pub fn initPeripherals2() urd.mem.Error!void {
 
         // Initialize xHC driver.
         const irq = arch.gicv3.lpi_base + 0;
-        xhc = dd.usb.Xhc.init(base, irq) catch |err| {
+        xhc = dd.usb.Xhc.init(base, irq, mem.dma.interface(0)) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :outer;
         };

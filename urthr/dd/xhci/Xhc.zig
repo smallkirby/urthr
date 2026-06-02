@@ -25,15 +25,17 @@ dbs: DoorBellArray,
 dcbaa: Dcbaa = undefined,
 
 /// Command Ring.
-cring: rings.Ring,
+cring: rings.Ring = undefined,
 /// Event Ring.
-ering: rings.EventRing,
+ering: rings.EventRing = undefined,
 
 /// List of registered devices.
 devices: DeviceList = .empty,
 
 /// Initialization complete and ready to handle events.
 ready: bool = false,
+/// DMA allocator.
+dma: DmaAllocator,
 
 /// xHC PCI class code.
 pub const class = pci.ClassCode{
@@ -46,10 +48,12 @@ pub const class = pci.ClassCode{
 const DeviceList = std.ArrayList(*Device);
 
 /// Initialize the xHC controller mapped to the given base address.
-pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Error)!*Self {
+pub fn init(base: usize, irq: urd.exception.Vector, dma: DmaAllocator) (Error || urd.exception.Error)!*Self {
     const self = try mem.bin.create(Self);
     errdefer mem.bin.destroy(self);
-    self.* = std.mem.zeroInit(Self, .{});
+    self.* = std.mem.zeroInit(Self, .{
+        .dma = dma,
+    });
 
     // Initialize registers.
     {
@@ -78,7 +82,7 @@ pub fn init(base: usize, irq: urd.exception.Vector) (Error || urd.exception.Erro
     log.debug("xHC context size         : {d} bytes", .{@as(u8, if (self.capability.read(regs.CapParam1).csz) 64 else 32)});
 
     // Initialize DCBAA.
-    self.dcbaa = try Dcbaa.init();
+    self.dcbaa = try Dcbaa.init(dma);
 
     // Register IRQ handler.
     try self.registerController(irq);
@@ -173,28 +177,28 @@ pub fn scan(self: *Self) mem.Error!void {
 // Internals
 // =============================================================
 
-/// Set the Device Context in DCBAA entry of the given slot index.
-pub fn setDeviceContext(self: *const Self, slot: u8, region: []const u8) void {
-    self.dcbaa.set(slot, @intFromPtr(region.ptr));
+/// Set the Device Context bus address in DCBAA for the given slot index.
+pub fn setDeviceContext(self: *const Self, slot: u8, region: usize) void {
+    self.dcbaa.set(slot, region);
 }
 
 /// Initialize Command Ring and Event Ring.
 fn initRings(self: *Self) Error!void {
     // Init Command Ring.
-    self.cring = try rings.Ring.new(rings.trbs_per_page, mem.page);
+    self.cring = try rings.Ring.new(rings.trbs_per_page, self.dma);
     self.operational.write(regs.Crcr0, regs.Crcr0{
         .rcs = self.cring.pcs,
         .cs = false,
         .ca = false,
-        .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> @bitOffsetOf(regs.Crcr0, "crp")),
+        .crp = @truncate(self.cring.memory.bus >> @bitOffsetOf(regs.Crcr0, "crp")),
     });
     self.operational.write(regs.Crcr1, regs.Crcr1{
-        .crp = @truncate(mem.page.translateIntP(self.cring.trbs) >> 32),
+        .crp = @truncate(self.cring.memory.bus >> 32),
     });
 
     // Init Event Ring for the primary Interrupter.
     const irs0 = self.getIrsAt(0);
-    self.ering = try rings.EventRing.new(irs0, mem.page);
+    self.ering = try rings.EventRing.new(irs0, self.dma);
     self.ering.init();
 }
 
@@ -355,7 +359,7 @@ fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusCha
 ///
 /// This dispatches the command completion event to the appropriate handler based on the command type.
 fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompletionTrb) Error!void {
-    const command_trb = event.commandTrb();
+    const command_trb = event.commandTrb(self.cring.memory);
     const command_type = command_trb.type;
     const slot_id = event.slot_id;
 
@@ -415,11 +419,13 @@ fn handleTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb
 
 /// Device Context Base Address Array.
 const Dcbaa = struct {
-    /// Virtual pointer to DCBAA.
-    _raw: *volatile RawDcbaa,
+    /// DMA memory backing the DCBAA.
+    memory: DmaMemory,
+    /// DMA allocator that manages the memory.
+    dma: DmaAllocator,
 
     const RawDcbaa = extern struct {
-        /// Physical pointers to device contexts.
+        /// Bus address pointers to device contexts.
         entries: [std.math.maxInt(u8)]usize,
 
         comptime {
@@ -427,37 +433,37 @@ const Dcbaa = struct {
         }
     };
 
-    /// Get the physical address of the DCBAA.
+    /// Get the bus address of the DCBAA.
     pub fn dcbaap(self: *const Dcbaa) usize {
-        return mem.page.translateIntP(self._raw);
+        return self.memory.bus;
     }
 
-    /// Initialize DCBAA at the given memory.
-    pub fn init() mem.Error!Dcbaa {
-        const page = try mem.page.allocPagesV(1);
-        const raw: *RawDcbaa = @ptrCast(page.ptr);
-        const storage: [*]u8 = @ptrCast(raw);
+    /// Initialize DCBAA using the given DMA allocator.
+    pub fn init(dma: DmaAllocator) DmaAllocator.Error!Dcbaa {
+        const memory = try dma.allocBytes(@sizeOf(RawDcbaa), .normal);
+        @memset(memory.slice(u8), 0);
+        dma.syncForDevice(memory.cpu, @sizeOf(RawDcbaa));
 
-        @memset(storage[0..@sizeOf(RawDcbaa)], 0);
-
-        return .{ ._raw = raw };
+        return .{
+            .memory = memory,
+            .dma = dma,
+        };
     }
 
     /// Deinitialize DCBAA.
     pub fn deinit(self: *Dcbaa) void {
-        const ptr: [*]const u8 = @ptrCast(self._raw);
-        mem.page.freePages(ptr[0..mem.size_4kib]);
+        self.dma.freeBytes(self.memory);
     }
 
-    /// Set the Device Context for the given slot index.
+    /// Set the Device Context bus address for the given slot index.
     pub fn set(self: *const Dcbaa, slot: u8, context: usize) void {
-        self._raw.entries[slot] = mem.page.translateIntP(context);
+        const entry = &self.ptr().entries[slot];
+        entry.* = context;
+        self.dma.syncForDevice(@intFromPtr(entry), @sizeOf(usize));
     }
 
-    /// Get the pointer to the Device Context of the given slot index.
-    pub fn at(self: *const Dcbaa, slot: u8) ?usize {
-        const ret = self._raw.entries[slot];
-        return if (ret == 0) null else mem.page.translateIntV(ret);
+    fn ptr(self: *const Dcbaa) *RawDcbaa {
+        return self.memory.as(RawDcbaa);
     }
 };
 
@@ -505,6 +511,8 @@ const arch = @import("arch").impl;
 const common = @import("common");
 const mmio = common.mmio;
 const rtt = common.rtt;
+const DmaAllocator = common.mem.DmaAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;
 const dd = @import("dd");
 const pci = dd.pci;
 const urd = @import("urthr");

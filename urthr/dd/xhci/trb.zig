@@ -215,8 +215,8 @@ pub const CommandCompletionTrb = packed struct(u128) {
     slot_id: u8,
 
     /// Get the pointer to the Command TRB that generated this event.
-    pub fn commandTrb(self: *const volatile CommandCompletionTrb) *const volatile Trb {
-        return @ptrFromInt(mem.page.translateV(@as(u64, self.command_trb) << 4));
+    pub fn commandTrb(self: *const volatile CommandCompletionTrb, dma: DmaMemory) *const volatile Trb {
+        return @ptrFromInt(dma.translate(@as(u64, self.command_trb) << 4));
     }
 };
 
@@ -247,11 +247,11 @@ pub const AddressDeviceTrb = packed struct(u128) {
     /// Target Slot ID.
     slot: u8,
 
-    pub fn from(slot: u8, dc: *const anyopaque) AddressDeviceTrb {
-        rtt.expectEqual(0, @intFromPtr(dc) & 0xF);
+    pub fn from(slot: u8, bus: usize) AddressDeviceTrb {
+        rtt.expectEqual(0, bus & 0xF);
 
         return AddressDeviceTrb{
-            .context = @intCast(mem.page.translateIntP(dc) >> 4),
+            .context = @intCast(bus >> 4),
             .cycle = undefined,
             .slot = slot,
         };
@@ -424,6 +424,7 @@ pub const TransferEventTrb = packed struct(u128) {
 
 const std = @import("std");
 const common = @import("common");
+const DmaMemory = common.mem.DmaAllocator.DmaMemory;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const mem = urd.mem;

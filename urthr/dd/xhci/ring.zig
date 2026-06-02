@@ -13,46 +13,60 @@ pub const trbs_per_page = mem.page_size / @sizeOf(Trb);
 /// Used by software to schedule work items for a single USB Endpoint.
 ///
 pub const Ring = struct {
-    /// Buffers for TRB.
-    trbs: []volatile Trb,
+    /// DMA memory backing the TRB ring.
+    memory: DmaMemory,
+    /// Number of TRBs in the ring.
+    size: usize,
+
     /// Producer Cycle State.
     pcs: u1 = 1,
     /// Next index to write to.
     index: usize = 0,
+    /// DMA allocator that manages the memory.
+    allocator: DmaAllocator,
 
     /// Initialize a new Ring.
-    pub fn new(size: usize, allocator: PageAllocator) mem.Error!Ring {
-        const buf = try allocator.alloc(Trb, size);
-        errdefer allocator.free(buf);
-        for (buf) |*e| @memset(std.mem.asBytes(e), 0);
+    pub fn new(size: usize, allocator: DmaAllocator) mem.Error!Ring {
+        const memory = try allocator.allocBytes(@sizeOf(Trb) * size, .normal);
+        errdefer allocator.freeBytes(memory);
+        @memset(memory.slice(u8), 0);
 
         // Initialize Link TRB at the end of the buffer.
-        buf[buf.len - 1] = @bitCast(std.mem.zeroInit(trbs.LinkTrb, .{
-            .ringp = mem.page.translateIntP(buf),
+        memory.slice(Trb)[size - 1] = @bitCast(std.mem.zeroInit(trbs.LinkTrb, .{
+            .ringp = memory.bus,
             .intr_target = 0,
             .cycle = 1,
             .tc = true,
             .chain = false,
             .ioc = false,
         }));
+        allocator.syncForDevice(memory.cpu, memory.size);
 
-        return .{ .trbs = buf };
+        return .{
+            .memory = memory,
+            .size = size,
+            .allocator = allocator,
+        };
     }
 
     /// Enqueue a TRB to the Ring.
+    ///
+    /// The TRB is synced for device access.
     pub fn push(self: *Ring, value: *Trb) *const Trb {
         var trb = value;
         trb.cycle = self.pcs;
 
-        const ret: *Trb = @ptrCast(@volatileCast(&self.trbs[self.index]));
-        ret.* = trb.*;
+        const slice = self.memory.slice(Trb);
+        const index = self.index;
+        slice[index] = trb.*;
+        self.allocator.syncForDeviceAny(&slice[index]);
 
         self.index += 1;
-        if (self.index == self.trbs.len - 1) {
+        if (self.index == self.size - 1) {
             self.rotate();
         }
 
-        return ret;
+        return &slice[index];
     }
 
     /// Push a Link TRB and reset the cursor.
@@ -61,9 +75,9 @@ pub const Ring = struct {
     }
 
     /// Deinitialize the Ring and free the backing memory.
-    pub fn deinit(self: *Ring, allocator: PageAllocator) void {
-        allocator.free(self.trbs);
-        self.trbs = undefined;
+    pub fn deinit(self: *Ring) void {
+        self.allocator.freeBytes(self.memory);
+        self.memory = undefined;
     }
 };
 
@@ -75,47 +89,50 @@ pub const EventRing = struct {
     const num_ers = 1;
 
     /// Buffers for TRB.
-    trbs: []volatile Trb,
+    trbs: DmaMemory,
     /// Consumer Cycle State.
     ccs: u1 = 1,
     /// Dequeue index into TRBs.
     dequeue: usize = 0,
     /// Event Ring Segment Table.
-    erst: []ErstEntry,
+    erst: DmaMemory,
     /// Interrupter module.
     interrupter: regs.Interrupter,
+    /// DMA allocator that manages the memory.
+    allocator: DmaAllocator,
 
     /// Initialize a new Event Ring.
-    pub fn new(irs: regs.Interrupter, allocator: PageAllocator) mem.Error!EventRing {
-        const buf = try allocator.alloc(Trb, trbs_per_page);
-        errdefer allocator.free(buf);
-        for (buf) |*e| e.* = std.mem.zeroes(Trb);
+    pub fn new(irs: regs.Interrupter, allocator: DmaAllocator) mem.Error!EventRing {
+        const memory = try allocator.allocBytes(@sizeOf(Trb) * trbs_per_page, .normal);
+        errdefer allocator.freeBytes(memory);
+        @memset(memory.slice(u8), 0);
 
-        const erst = try allocator.alloc(ErstEntry, num_ers);
+        const erst = try allocator.allocBytes(@sizeOf(ErstEntry) * num_ers, .normal);
         return .{
-            .trbs = buf,
+            .trbs = memory,
             .dequeue = 0,
             .erst = erst,
             .interrupter = irs,
+            .allocator = allocator,
         };
     }
 
     /// Initialize and set the Event Ring to the primary interrupter.
     pub fn init(self: *EventRing) void {
-        rtt.expectEqual(self.erst.len, self.trbs.len / trbs_per_page);
-
         // Initialize ERST entries.
-        for (self.erst, 0..) |*erst, i| {
-            const start = i * trbs_per_page;
-            erst.* = .from(self.trbs[start .. start + trbs_per_page]);
-        }
+        for (self.erst.slice(ErstEntry), 0..) |*erst, i| erst.* = .{
+            .ring_segment_base = self.trbs.bus + i * trbs_per_page * @sizeOf(Trb),
+            .size = trbs_per_page,
+        };
+
+        self.allocator.syncForDevice(self.erst.cpu, self.erst.size);
+        self.allocator.syncForDevice(self.trbs.cpu, self.trbs.size);
 
         // Set the Event Ring Segment Table.
-        const erst_phys = mem.page.translateIntP(self.erst.ptr);
-        self.interrupter.write(regs.Erstsz, @as(u32, @intCast(self.erst.len)));
-        self.interrupter.write(regs.Erstba, erst_phys);
+        self.interrupter.write(regs.Erstsz, @as(u32, @intCast(self.erst.slice(ErstEntry).len)));
+        self.interrupter.write(regs.Erstba, self.erst.bus);
         self.interrupter.modify(regs.Erdp, .{
-            .erdp = toErdpPhys(self.trbs),
+            .erdp = toErdpBus(self.trbs.bus),
         });
 
         // Set the CCS to 1.
@@ -124,7 +141,7 @@ pub const EventRing = struct {
 
     /// Check if an event is queued in the Event Ring.
     pub fn hasEvent(self: *const EventRing) bool {
-        return self.trbs[self.dequeue].cycle == self.ccs;
+        return self.trbs.slice(Trb)[self.dequeue].cycle == self.ccs;
     }
 
     /// Get the next event TRB if exists and advance the dequeue pointer.
@@ -132,16 +149,16 @@ pub const EventRing = struct {
         if (!self.hasEvent()) {
             return null;
         }
-        const trb = &self.trbs[self.dequeue];
+        const trb = &self.trbs.slice(Trb)[self.dequeue];
 
         self.dequeue += 1;
-        if (self.dequeue == self.trbs.len) {
+        if (self.dequeue == self.trbs.slice(Trb).len) {
             self.dequeue = 0;
             self.ccs +%= 1;
         }
 
         self.interrupter.modify(regs.Erdp, .{
-            .erdp = toErdpPhys(&self.trbs[self.dequeue]),
+            .erdp = toErdpBus(self.trbs.bus + self.dequeue * @sizeOf(Trb)),
         });
 
         return trb;
@@ -159,22 +176,15 @@ const ErstEntry = packed struct(u128) {
     size: u16,
     /// Reserved.
     _82: u48 = 0,
-
-    pub fn from(ring: []volatile Trb) ErstEntry {
-        return .{
-            .ring_segment_base = mem.page.translateIntP(ring.ptr),
-            .size = @intCast(ring.len),
-        };
-    }
 };
 
 // =============================================================
 // Utility
 // =============================================================
 
-/// Convert a pointer to the u60 ERDP field value.
-inline fn toErdpPhys(virt: anytype) u60 {
-    return @truncate(mem.page.translateIntP(virt) >> @bitOffsetOf(regs.Erdp, "erdp"));
+/// Convert a bus address to the u60 ERDP field value.
+inline fn toErdpBus(bus: usize) u60 {
+    return @truncate(bus >> @bitOffsetOf(regs.Erdp, "erdp"));
 }
 
 // =============================================================
@@ -184,7 +194,8 @@ inline fn toErdpPhys(virt: anytype) u60 {
 const std = @import("std");
 const log = std.log.scoped(.xhc);
 const common = @import("common");
-const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const mem = urd.mem;

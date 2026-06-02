@@ -21,6 +21,23 @@ pub const DmaMemory = struct {
     bus: usize,
     /// Size in bytes of the allocated memory region.
     size: usize,
+
+    /// Translate the given bus address to a CPU address.
+    pub fn translate(self: DmaMemory, bus: usize) usize {
+        return self.cpu + (bus - self.bus);
+    }
+
+    /// Cast the CPU address of the memory to a pointer of the given type.
+    pub fn as(self: DmaMemory, T: type) *T {
+        return @ptrFromInt(self.cpu);
+    }
+
+    /// Cast the CPU address of the memory to a slice of the given type.
+    pub fn slice(self: DmaMemory, T: type) []T {
+        const size = @sizeOf(T);
+        const len = self.size / size;
+        return @as([*]T, @ptrFromInt(self.cpu))[0..len];
+    }
 };
 
 pub const Vtable = struct {

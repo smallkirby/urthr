@@ -2,6 +2,8 @@ const Self = @This();
 
 /// xHC controller.
 xhc: *Xhc,
+/// DMA allocator.
+dma: DmaAllocator,
 /// Transfer Ring for Endpoint 0.
 tr: rings.Ring = undefined,
 
@@ -62,6 +64,7 @@ pub fn new(xhc: *Xhc, pi: usize, pr: regs.Port) mem.Error!*Self {
 
     self.* = .{
         .xhc = xhc,
+        .dma = xhc.dma,
         .state = .waiting_slot,
         .pi = pi,
         .pr = pr,
@@ -93,15 +96,17 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     self.slot = slot;
 
     // Allocate a Device Context region.
-    const dc = try mem.page.allocPagesV(1);
-    errdefer mem.page.freePagesV(dc);
-    @memset(dc, 0);
-    self.xhc.setDeviceContext(slot, dc);
+    const dc = try self.dma.allocBytes(mem.page_size, .normal);
+    errdefer self.dma.freeBytes(dc);
+    @memset(dc.slice(u8), 0);
+    self.dma.syncForDevice(dc.cpu, dc.size);
+    self.xhc.setDeviceContext(slot, dc.bus);
 
     // Create Input Context.
-    const ic = try mem.page.create(InputContext);
-    errdefer mem.page.destroy(ic);
-    @memset(std.mem.asBytes(ic), 0);
+    const icm = try self.dma.allocBytes(@sizeOf(InputContext), .normal);
+    errdefer self.dma.freeBytes(icm);
+    @memset(icm.slice(u8), 0);
+    const ic = icm.as(InputContext);
 
     // Configure Input Control Context (enable Slot Context and Endpoint 0)
     {
@@ -122,8 +127,8 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     }
     // Configure EP0 (Default Control Pipe) Context.
     {
-        const tr = try rings.Ring.new(rings.trbs_per_page, mem.page);
-        errdefer tr.deinit(urd.page);
+        const tr = try rings.Ring.new(rings.trbs_per_page, self.xhc.dma);
+        errdefer tr.deinit();
         self.tr = tr;
 
         const speed = self.pr.read(regs.PortSc).speed;
@@ -132,14 +137,15 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
             .max_packet_size = speed.maxPacketSize(),
             .interval = 0,
             .cerr = 0,
-            .trdp = @intCast(mem.page.translateIntP(&self.tr.trbs[0]) >> 4),
+            .trdp = @intCast(self.tr.memory.bus >> 4),
             .dcs = tr.pcs,
         };
     }
+    self.xhc.dma.syncForDevice(icm.cpu, icm.size);
 
     // Request to assign the address.
     self.state = .waiting_address;
-    var cmd = trbs.AddressDeviceTrb.from(slot, ic);
+    var cmd = trbs.AddressDeviceTrb.from(slot, icm.bus);
     self.pending_trb = self.xhc.cring.push(.from(&cmd));
     self.xhc.dbs.notifyCommand();
 }
@@ -211,7 +217,7 @@ fn requestConfigDesc(self: *Self, config_index: u8) Error!void {
 /// Callback for Transfer Event TRB.
 pub fn onTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb) Error!void {
     const issuer: *const trbs.Trb =
-        @ptrFromInt(mem.page.translateV(event.trb));
+        @ptrFromInt(self.tr.memory.translate(event.trb));
 
     switch (issuer.type) {
         .status => try self.onStatusTransfer(event, @ptrCast(issuer)),
@@ -237,8 +243,10 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
             self.pending_trb = null;
             rtt.expectEqual(pending.status, issuer);
 
-            const dtrb = pending.data;
-            const desc: *const volatile DeviceDesc = @ptrFromInt(mem.page.translateV(dtrb.data_buffer));
+            // Sync the Data TRB buffer.
+            const desc: *const volatile DeviceDesc = @ptrFromInt(pending.buf.cpu);
+            self.xhc.dma.syncForCpu(@intFromPtr(desc), @sizeOf(DeviceDesc));
+
             self.desc = desc.*;
             rtt.expectEqual(.device, desc.type);
 
@@ -258,8 +266,9 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
             self.pending_trb = null;
             rtt.expectEqual(pending.status, issuer);
 
-            const dtrb = pending.data;
-            const desc: *const volatile ConfigDesc = @ptrFromInt(mem.page.translateV(dtrb.data_buffer));
+            // Sync the Data TRB buffer.
+            const desc: *const volatile ConfigDesc = @ptrFromInt(pending.buf.cpu);
+            self.xhc.dma.syncForCpu(@intFromPtr(desc), mem.page_size);
             rtt.expectEqual(.configuration, desc.type);
 
             try self.parseConfigDesc(desc);
@@ -285,8 +294,8 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
 /// TODO: support transfer to other than control endpoint.
 pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
     // TODO: Free the allocated memory on event completion.
-    const buf = try mem.page.allocBytesP(data.length);
-    errdefer mem.page.freeBytesP(buf);
+    const buf = try self.xhc.dma.allocBytes(data.length, .normal);
+    errdefer self.xhc.dma.freeBytes(buf);
 
     // Setup Stage
     var setup_trb = trbs.SetupTrb{
@@ -305,7 +314,7 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
 
     // Data Stage
     var data_trb = trbs.DataTrb{
-        .data_buffer = @intFromPtr(buf.ptr),
+        .data_buffer = buf.bus,
         .transfer_length = data.length,
         .td_size = 0,
         .cycle = undefined,
@@ -335,7 +344,7 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
 
     // Push the Data TRB.
     if (data.length > 0) {
-        self.pushPendingData(strb, dtrb);
+        self.pushPendingData(strb, dtrb, buf);
     }
 
     // Ring the doorbell for this slot
@@ -354,15 +363,18 @@ const PendingData = struct {
     status: *const volatile trbs.StatusTrb,
     /// Pointer to Data TRB that describes the transfer.
     data: *const volatile trbs.DataTrb,
+    /// DMA buffer associated with the Data TRB.
+    buf: DmaMemory,
 };
 
 /// Records the pending data transfer operations.
-fn pushPendingData(self: *Self, status: *const Trb, data: *const Trb) void {
+fn pushPendingData(self: *Self, status: *const Trb, data: *const Trb, buf: DmaMemory) void {
     rtt.expectEqual(null, self.pending_data);
 
     self.pending_data = .{
         .status = @ptrCast(status),
         .data = @ptrCast(data),
+        .buf = buf,
     };
 }
 
@@ -1089,6 +1101,8 @@ const EpDesc = packed struct(u56) {
 const std = @import("std");
 const log = std.log.scoped(.xhc);
 const common = @import("common");
+const DmaAllocator = common.mem.DmaAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const mem = urd.mem;
