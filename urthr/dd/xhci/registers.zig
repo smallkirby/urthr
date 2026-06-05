@@ -80,8 +80,8 @@ pub const Operational = mmio.Module(.{ .natural = u64 }, &.{
     .{ 0x08, PageSize },
     .{ 0x18, Crcr0 },
     .{ 0x1C, Crcr1 },
-    .{ 0x48, Dcbaap },
-    .{ 0x50, ConfigureRegister },
+    .{ 0x30, Dcbaap },
+    .{ 0x38, ConfigureRegister },
     .{ 0x400, mmio.Marker(.port_set) },
 });
 
