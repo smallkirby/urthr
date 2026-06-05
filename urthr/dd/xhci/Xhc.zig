@@ -388,7 +388,7 @@ fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompl
                 return Error.NotAvailable;
             };
             if (event.code != .success) {
-                log.err("Port#{d}:Slot#{d}: Failed to assign address: {d}", .{ device.pi, slot_id, @intFromEnum(event.code) });
+                log.err("Port#{d}:Slot#{d}: Failed to assign address: {t}", .{ device.pi, slot_id, event.code });
                 return Error.InvalidState;
             }
             log.debug("Port#{d}:Slot#{d}: Device addressed.", .{ device.pi, slot_id });
