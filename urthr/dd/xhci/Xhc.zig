@@ -330,8 +330,7 @@ fn handleEvent(self: *Self) Error!void {
 fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusChange) Error!void {
     // Check if the event is for a registered port.
     const device = self.findDeviceByPort(event.port) orelse {
-        log.warn("Port Status Change event for unregistered port: {d}", .{event.port});
-        return Error.NotAvailable;
+        return;
     };
     rtt.expectEqual(.success, event.code);
 
