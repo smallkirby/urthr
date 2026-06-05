@@ -51,9 +51,8 @@ const DeviceList = std.ArrayList(*Device);
 pub fn init(base: usize, irq: urd.exception.Vector, dma: DmaAllocator) (Error || urd.exception.Error)!*Self {
     const self = try mem.bin.create(Self);
     errdefer mem.bin.destroy(self);
-    self.* = std.mem.zeroInit(Self, .{
-        .dma = dma,
-    });
+    @memset(std.mem.asBytes(self), 0);
+    self.dma = dma;
 
     // Initialize registers.
     {
@@ -123,6 +122,10 @@ pub fn reset(self: *Self) Error!void {
 
 /// Setup necessary internal structure.
 pub fn setup(self: *Self) Error!void {
+    // Set max device slots.
+    self.operational.modify(regs.ConfigureRegister, .{
+        .max_slots_en = self.capability.read(regs.StructureParam1).maxslots,
+    });
     // Initialize rings.
     try self.initRings();
     // Enable  interrupts.
@@ -156,7 +159,7 @@ pub fn run(self: *Self) void {
 pub fn scan(self: *Self) mem.Error!void {
     const max_ports = self.capability.read(regs.StructureParam1).maxports;
 
-    for (1..max_ports) |i| {
+    for (1..max_ports + 1) |i| {
         const port = self.getPortRegAt(i);
 
         if (!port.read(regs.PortSc).ccs) {
@@ -370,6 +373,10 @@ fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompl
                 log.warn("Enable Slot Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
                 return Error.NotAvailable;
             };
+            if (event.code != .success) {
+                log.err("Port#{d}: Enable Slot failed: {t}", .{ device.pi, event.code });
+                return Error.InvalidState;
+            }
             log.debug("Port#{d}:Slot#{d}: Slot enabled.", .{ device.pi, slot_id });
 
             try device.assignAddress(slot_id);

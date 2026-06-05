@@ -94,7 +94,7 @@ const MsiIrq = enum(u8) {
     /// USB Host0 (USB 2.0).
     usb0 = 30,
     /// USB Host1 (USB 3.0).
-    usb1 = 35,
+    usb1 = 36,
 };
 
 /// SPI interrupts offset.
@@ -299,6 +299,18 @@ pub fn getUsbHost1Base() usize {
 /// Get the IRQ number of RP1 peripherals.
 pub fn getIrqNumber(irq: MsiIrq) u16 {
     return @intFromEnum(irq) + mip0_spi_offset + spi_offset;
+}
+
+/// Get the MSI-X IRQ corresponding to the given IRQ number.
+///
+/// Returns null if the IRQ does not correspond to any MSI-X.
+pub fn tryGetMsix(irq: usize) ?MsiIrq {
+    if (irq < mip0_spi_offset + spi_offset) {
+        return null;
+    }
+
+    const spi = irq - (mip0_spi_offset + spi_offset);
+    return std.enums.fromInt(MsiIrq, spi);
 }
 
 /// Map peripherals of RP1.

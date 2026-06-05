@@ -15,6 +15,9 @@ var exception_handler: ?ExceptionHandler = null;
 /// MAC address of GEM controller.
 const gem_mac = net.ether.MacAddr.encode("B8:27:EB:00:00:00");
 
+/// xHC controller.
+var xhc: ?*dd.usb.Xhc = null;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -224,6 +227,44 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
         );
         try gemdev.appendInterface(iface);
     }
+
+    // xHC
+    log.info("Initializing xHC.", .{});
+    blkxhc: {
+        const base = rdd.rp1.getUsbHost1Base();
+        const intid = rdd.rp1.getIrqNumber(.usb1);
+
+        // Initialize xHC driver.
+        xhc = dd.usb.Xhc.init(base, intid, rdd.pcie.getDmaAllocator()) catch |err| {
+            log.err("xHC initialization failed: {t}", .{err});
+            break :blkxhc;
+        };
+    }
+    if (xhc) |x| outer: {
+        x.reset() catch |err| {
+            log.err("xHC reset failed: {t}", .{err});
+            break :outer;
+        };
+
+        x.setup() catch |err| {
+            log.err("xHC setup failed: {t}", .{err});
+            break :outer;
+        };
+
+        // Clear any stale RP1 USB1 auto-mask before arming GIC.
+        rdd.rp1.ackMsix(.usb1);
+        // Enable xHC interrupt.
+        const intid = rdd.rp1.getIrqNumber(.usb1);
+        arch.gicv2.setTrigger(intid, .edge);
+        arch.gicv2.enableIrq(intid);
+
+        x.run();
+
+        x.scan() catch |err| {
+            log.err("xHC scan failed: {t}", .{err});
+            break :outer;
+        };
+    }
 }
 
 /// Prepare for waking up secondary cores.
@@ -323,7 +364,9 @@ fn handleIrq() ?void {
         if (handler(intid)) |_| {
             arch.gicv2.eoi(iar);
 
-            rdd.rp1.ackMsix(.eth); // TODO: should check if this is actually an Ethernet interrupt
+            if (rdd.rp1.tryGetMsix(intid)) |msix| {
+                rdd.rp1.ackMsix(msix);
+            }
 
             if (urd.sched.shouldReschedule()) {
                 urd.sched.reschedule();

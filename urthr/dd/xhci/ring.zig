@@ -141,6 +141,10 @@ pub const EventRing = struct {
 
     /// Check if an event is queued in the Event Ring.
     pub fn hasEvent(self: *const EventRing) bool {
+        self.allocator.syncForCpu(
+            self.trbs.cpu + self.dequeue * @sizeOf(Trb),
+            @sizeOf(Trb),
+        );
         return self.trbs.slice(Trb)[self.dequeue].cycle == self.ccs;
     }
 
