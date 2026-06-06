@@ -132,6 +132,14 @@ pub fn setup(self: *Self) Error!void {
     self.operational.modify(regs.ConfigureRegister, .{
         .max_slots_en = self.capability.read(regs.StructureParam1).maxslots,
     });
+
+    // Initialize scratchpad buffers if required.
+    const sp2 = self.capability.read(regs.StructureParam2);
+    const num_sp: usize = @as(usize, sp2.max_scratchpad_hi) << 5 | sp2.max_scratchpad_lo;
+    if (num_sp > 0) {
+        try self.initScratchpad(num_sp);
+    }
+
     // Initialize rings.
     try self.initRings();
     // Enable  interrupts.
@@ -189,6 +197,26 @@ pub fn scan(self: *Self) mem.Error!void {
 /// Set the Device Context bus address in DCBAA for the given slot index.
 pub fn setDeviceContext(self: *const Self, slot: u8, region: usize) void {
     self.dcbaa.set(slot, region);
+}
+
+/// Allocate scratchpad buffers and register them in DCBAA[0].
+fn initScratchpad(self: *Self, num: usize) Error!void {
+    const page_size: usize = @as(usize, 1) << (@ctz(self.operational.read(regs.PageSize).value) + 12);
+
+    // Allocate Scratchpad Buffer Array.
+    const arr = try self.dma.allocBytes(num * @sizeOf(u64), .normal);
+    @memset(arr.slice(u8), 0);
+
+    // Allocate Scratchpad Buffers and set their bus addresses in the array.
+    for (arr.slice(u64)[0..num]) |*entry| {
+        const buf = try self.dma.allocBytes(page_size, .normal);
+        @memset(buf.slice(u8), 0);
+        self.dma.syncForDevice(buf.cpu, page_size);
+        entry.* = buf.bus;
+    }
+    self.dma.syncForDevice(arr.cpu, num * @sizeOf(u64));
+
+    self.dcbaa.set(0, arr.bus);
 }
 
 /// Initialize Command Ring and Event Ring.

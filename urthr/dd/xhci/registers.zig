@@ -33,8 +33,20 @@ pub const StructureParam1 = packed struct(u32) {
     maxports: u8,
 };
 
+/// HCSPARAMS2
 pub const StructureParam2 = packed struct(u32) {
-    value: u32,
+    /// Isochronous Scheduling Threshold.
+    ist: u4,
+    /// Event Ring Segment Table Max.
+    erst_max: u4,
+    /// Reserved.
+    _8: u13 = 0,
+    /// Max Scratchpad Buffers.
+    max_scratchpad_hi: u5,
+    /// Scratchpad Restore.
+    spr: bool,
+    /// Max Scratchpad Buffers.
+    max_scratchpad_lo: u5,
 };
 
 pub const StructureParam3 = packed struct(u32) {
