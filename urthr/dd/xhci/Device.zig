@@ -372,7 +372,7 @@ fn controlTransferIn(self: *Self, data: SetupData) Error!void {
         .ent = false,
         .isp = false,
         .ns = false,
-        .chain = true,
+        .chain = false,
         .ioc = false,
         .idt = false,
         .direction = .in,
