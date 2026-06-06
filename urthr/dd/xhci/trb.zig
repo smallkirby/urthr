@@ -248,6 +248,7 @@ pub const AddressDeviceTrb = packed struct(u128) {
     slot: u8,
 
     pub fn from(slot: u8, bus: usize) AddressDeviceTrb {
+        rtt.expect(slot != 0);
         rtt.expectEqual(0, bus & 0xF);
 
         return AddressDeviceTrb{

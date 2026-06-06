@@ -122,6 +122,7 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     {
         const slot_ctx: *SlotContext = @ptrFromInt(base + ctx_size * 1);
         slot_ctx.* = .{
+            .speed = self.pr.read(regs.PortSc).speed,
             .root_hub_port = @intCast(self.pi),
             .context_entries = 1,
             .max_exit_latency = 0,
@@ -610,10 +611,10 @@ const SlotContext = packed struct(u256) {
     ///
     /// Used by hubs to route packets to the correct downstream port.
     route: u20 = 0,
-    /// Reserved.
+    /// Speed.
     ///
-    /// Previously used for Speed.
-    _20: u4 = 0,
+    /// Deprecated in xHCI 1.2.
+    speed: regs.PortSpeed,
     /// Reserved.
     _24: u1 = 0,
     /// Multi-TT.

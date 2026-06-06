@@ -275,7 +275,7 @@ pub const PortSc = packed struct(u32) {
     wpr: bool,
 };
 
-const PortSpeed = enum(u4) {
+pub const PortSpeed = enum(u4) {
     invalid = 0,
     full = 1,
     low = 2,
