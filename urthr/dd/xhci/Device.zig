@@ -42,14 +42,26 @@ const State = enum {
     complete,
 };
 
+/// Endpoint belonging to an interface.
+pub const Endpoint = struct {
+    /// Endpoint descriptor.
+    desc: EpDesc,
+
+    /// List head.
+    _head: List.Head = .{},
+
+    /// List type of endpoints.
+    const List = common.typing.InlineDoublyLinkedList(Endpoint, "_head");
+};
+
 /// Interface belonging to the device.
 pub const Interface = struct {
     /// Interface descriptor.
     desc: IfaceDesc,
-    /// Type-erased class descriptor.
-    class: *const DescriptorHeader,
-    /// Endpoint descriptor.
-    endpoint: EpDesc,
+    /// Type-erased class descriptor. null if the interface has no class descriptor.
+    class: ?*const DescriptorHeader,
+    /// Endpoints belonging to the interface.
+    endpoints: Endpoint.List = .{},
 
     /// List head.
     _head: List.Head = .{},
@@ -396,63 +408,60 @@ fn popPendingData(self: *Self) PendingData {
 }
 
 /// Parse the given configuration descriptor.
-///
-/// TODO: interfaces that have multiple endpoints are not supported yet.
 fn parseConfigDesc(self: *Self, cdesc: *const volatile ConfigDesc) Error!void {
     const ParseState = enum {
-        interface,
-        class,
-        endpoint,
+        between_ifaces,
+        in_iface,
     };
 
     var left = cdesc.total_length - cdesc.length;
     var cur: *align(1) const volatile DescriptorHeader = @ptrFromInt(@intFromPtr(cdesc) + cdesc.length);
-    var state: ParseState = .interface;
+    var state: ParseState = .between_ifaces;
     var iface: Interface = undefined;
 
-    // Iterate through all descriptors in the configuration descriptor.
+    const finalizeIface = struct {
+        fn call(s: *Self, i: *Interface) Error!void {
+            const entry = try mem.bin.create(Interface);
+            entry.* = i.*;
+            s.ifaces.append(entry);
+        }
+    }.call;
+
     while (left > 0) {
         rtt.expect(cur.length != 0);
 
         switch (cur.type) {
             // Interface descriptor.
             .interface => {
-                rtt.expectEqual(.interface, state);
-
+                if (state == .in_iface) {
+                    try finalizeIface(self, &iface);
+                }
                 const desc: *align(1) const volatile IfaceDesc = @ptrCast(@alignCast(cur));
-                iface.desc = desc.*;
-                state = .class;
+                iface = .{ .desc = desc.*, .class = null };
+                state = .in_iface;
             },
 
             // Class-specific descriptor.
             .hid => {
-                rtt.expectEqual(.class, state);
+                rtt.expectEqual(.in_iface, state);
 
                 const desc_buf = try mem.bin.alloc(u8, cur.length);
                 errdefer mem.bin.free(desc_buf);
                 @memcpy(desc_buf, @as([*]const volatile u8, @ptrCast(cur))[0..cur.length]);
                 iface.class = @ptrCast(@alignCast(desc_buf.ptr));
-                state = .endpoint;
             },
 
             // Endpoint descriptor.
             .endpoint => {
-                rtt.expectEqual(.endpoint, state);
+                rtt.expectEqual(.in_iface, state);
 
                 const desc: *align(1) const volatile EpDesc = @ptrCast(@alignCast(cur));
-                iface.endpoint = desc.*;
-                state = .interface;
-
-                // Add the interface to the list.
-                const entry = try mem.bin.create(Interface);
-                entry.* = iface;
-                self.ifaces.append(entry);
-
-                iface = undefined;
+                const ep = try mem.bin.create(Endpoint);
+                errdefer mem.bin.destroy(ep);
+                ep.* = .{ .desc = desc.* };
+                iface.endpoints.append(ep);
             },
 
-            // Unexpected descriptor.
-            // This includes multiple endpoint descriptors for the same interface (not supported).
             else => log.warn(
                 "Unexpected descriptor type {d} in configuration descriptor (length={d}).",
                 .{ @intFromEnum(cur.type), cur.length },
@@ -461,6 +470,10 @@ fn parseConfigDesc(self: *Self, cdesc: *const volatile ConfigDesc) Error!void {
 
         left -= cur.length;
         cur = @ptrFromInt(@intFromPtr(cur) + cur.length);
+    }
+
+    if (state == .in_iface) {
+        try finalizeIface(self, &iface);
     }
 }
 
