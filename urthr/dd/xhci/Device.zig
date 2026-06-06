@@ -103,20 +103,24 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     self.xhc.setDeviceContext(slot, dc.bus);
 
     // Create Input Context.
-    const icm = try self.dma.allocBytes(@sizeOf(InputContext), .normal);
+    const ctx_size: usize = switch (self.xhc.csz) {
+        .@"32" => 32,
+        .@"64" => 64,
+    };
+    const icm = try self.dma.allocBytes(ctx_size * 3, .normal);
     errdefer self.dma.freeBytes(icm);
     @memset(icm.slice(u8), 0);
-    const ic = icm.as(InputContext);
+    const base = icm.cpu;
 
     // Configure Input Control Context (enable Slot Context and Endpoint 0)
     {
-        const control = &ic.control;
+        const control: *InputControlContext = @ptrFromInt(base + ctx_size * 0);
         control.ac.a0 = true;
         control.ac.a1 = true;
     }
     // Configure Slot Context.
     {
-        const slot_ctx = &ic.slot;
+        const slot_ctx: *SlotContext = @ptrFromInt(base + ctx_size * 1);
         slot_ctx.* = .{
             .root_hub_port = @intCast(self.pi),
             .context_entries = 1,
@@ -132,11 +136,12 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
         self.tr = tr;
 
         const speed = self.pr.read(regs.PortSc).speed;
-        ic.getEp0Ctx().* = .{
+        const ep0: *EndpointContext = @ptrFromInt(base + ctx_size * 2);
+        ep0.* = .{
             .ep_type = .control,
             .max_packet_size = speed.maxPacketSize(),
             .interval = 0,
-            .cerr = 0,
+            .cerr = 3,
             .trdp = @intCast(self.tr.memory.bus >> 4),
             .dcs = tr.pcs,
         };
@@ -460,92 +465,6 @@ fn parseConfigDesc(self: *Self, cdesc: *const volatile ConfigDesc) Error!void {
 // Data structures
 // =============================================================
 
-/// Defines device configuration and state information that is passed to the xHC.
-const InputContext = packed struct {
-    control: InputControlContext,
-    slot: SlotContext,
-    ep0: EndpointContext,
-    ep1out: EndpointContext,
-    ep1in: EndpointContext,
-    ep2out: EndpointContext,
-    ep2in: EndpointContext,
-    ep3out: EndpointContext,
-    ep3in: EndpointContext,
-    ep4out: EndpointContext,
-    ep4in: EndpointContext,
-    ep5out: EndpointContext,
-    ep5in: EndpointContext,
-    ep6out: EndpointContext,
-    ep6in: EndpointContext,
-    ep7out: EndpointContext,
-    ep7in: EndpointContext,
-    ep8out: EndpointContext,
-    ep8in: EndpointContext,
-    ep9out: EndpointContext,
-    ep9in: EndpointContext,
-    ep10out: EndpointContext,
-    ep10in: EndpointContext,
-    ep11out: EndpointContext,
-    ep11in: EndpointContext,
-    ep12out: EndpointContext,
-    ep12in: EndpointContext,
-    ep13out: EndpointContext,
-    ep13in: EndpointContext,
-    ep14out: EndpointContext,
-    ep14in: EndpointContext,
-    ep15out: EndpointContext,
-    ep15in: EndpointContext,
-
-    comptime {
-        urd.comptimeAssert(
-            @sizeOf(InputContext) == 0x420,
-            "Invalid Input Context size: 0x{X}, expected 0x420",
-            .{@sizeOf(InputContext)},
-        );
-    }
-
-    inline fn getEp0Ctx(self: *InputContext) *EndpointContext {
-        return @ptrFromInt(@intFromPtr(self) + @offsetOf(InputContext, "ep0"));
-    }
-
-    inline fn at(self: *InputContext, dci: u5) *EndpointContext {
-        return switch (dci) {
-            0 => unreachable,
-            1 => &self.ep0,
-            2 => &self.ep1out,
-            3 => &self.ep1in,
-            4 => &self.ep2out,
-            5 => &self.ep2in,
-            6 => &self.ep3out,
-            7 => &self.ep3in,
-            8 => &self.ep4out,
-            9 => &self.ep4in,
-            10 => &self.ep5out,
-            11 => &self.ep5in,
-            12 => &self.ep6out,
-            13 => &self.ep6in,
-            14 => &self.ep7out,
-            15 => &self.ep7in,
-            16 => &self.ep8out,
-            17 => &self.ep8in,
-            18 => &self.ep9out,
-            19 => &self.ep9in,
-            20 => &self.ep10out,
-            21 => &self.ep10in,
-            22 => &self.ep11out,
-            23 => &self.ep11in,
-            24 => &self.ep12out,
-            25 => &self.ep12in,
-            26 => &self.ep13out,
-            27 => &self.ep13in,
-            28 => &self.ep14out,
-            29 => &self.ep14in,
-            30 => &self.ep15out,
-            31 => &self.ep15in,
-        };
-    }
-};
-
 /// Consists of two groups of flags.
 ///
 /// Interpretation depends on the command.
@@ -758,7 +677,7 @@ const SlotContext = packed struct(u256) {
 /// Defines information applied to a specific endpoint of a device.
 const EndpointContext = packed struct(u256) {
     /// Endpoint State.
-    ep_state: EndpointState = undefined,
+    ep_state: EndpointState = .disabled,
     /// Reserved.
     _3: u5 = 0,
     /// Mult.

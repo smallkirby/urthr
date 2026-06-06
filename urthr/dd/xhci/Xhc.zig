@@ -29,6 +29,9 @@ cring: rings.Ring = undefined,
 /// Event Ring.
 ering: rings.EventRing = undefined,
 
+/// Context size in bytes.
+csz: enum { @"32", @"64" } = .@"32",
+
 /// List of registered devices.
 devices: DeviceList = .empty,
 
@@ -82,6 +85,9 @@ pub fn init(base: usize, irq: urd.exception.Vector, dma: DmaAllocator) (Error ||
 
     // Initialize DCBAA.
     self.dcbaa = try Dcbaa.init(dma);
+
+    // Set context size.
+    self.csz = if (self.capability.read(regs.CapParam1).csz) .@"64" else .@"32";
 
     // Register IRQ handler.
     try self.registerController(irq);
