@@ -39,6 +39,8 @@ devices: DeviceList = .empty,
 ready: bool = false,
 /// DMA allocator.
 dma: DmaAllocator,
+/// Event queue for deferred processing from IRQ context.
+eq: EventQueue = .{},
 
 /// xHC PCI class code.
 pub const class = pci.ClassCode{
@@ -154,6 +156,9 @@ pub fn setup(self: *Self) Error!void {
         log.debug("  ERSTBA: 0x{X}", .{@as(u64, @bitCast(irs0.read(regs.Erstba)))});
         log.debug("  ERDP:   0x{X}", .{@as(u64, @bitCast(irs0.read(regs.Erdp)))});
     }
+
+    log.debug("Starting xHC event worker thread.", .{});
+    _ = try urd.sched.spawn("xhci-worker", eventWorker, .{self});
 
     self.ready = true;
 }
@@ -304,7 +309,7 @@ fn findDeviceByTrb(self: *Self, trb: *const volatile trbs.Trb) ?*Device {
 }
 
 // =============================================================
-// IRQ
+// Event handling.
 // =============================================================
 
 /// List of registered controllers.
@@ -332,37 +337,45 @@ fn registerController(self: *Self, irq: urd.exception.Vector) (Error || urd.exce
 }
 
 /// IRQ handler.
+///
+/// Drains the event ring and pushes the events to the event queue,
+/// then wakes up the worker thread to process the events.
 fn irqHandler(vector: urd.exception.Vector) void {
     for (controllers) |c| if (c) |entry| {
         if (entry.irq == vector) {
             const self = entry.controller;
             if (!self.ready) return;
 
-            // TODO: should not handle events in IRQ context.
-            self.handleEvent() catch |err| {
-                log.err("Failed to handle xHC event: {t}", .{err});
-            };
+            while (self.ering.next()) |trb| {
+                self.eq.push(trb.*);
+            }
         }
     };
 }
 
-/// Handles pending events in the Event Ring.
-///
-/// Dispatches the event to the appropriate handler based on the event type.
-fn handleEvent(self: *Self) Error!void {
-    while (self.ering.next()) |event| {
-        switch (event.type) {
-            .port_status_change => try self.handlePortStatusChange(@ptrCast(event)),
-            .command_completion => try self.handleCommandCompletion(@ptrCast(event)),
-            .transfer_event => try self.handleTransferEvent(@ptrCast(event)),
+/// Worker thread entry point for processing xHCI events.
+fn eventWorker(xhc: *Self) noreturn {
+    while (true) {
+        const trb = xhc.eq.pop();
+        xhc.handleEvent(trb) catch |err| {
+            log.err("xHCI event worker error: {t}", .{err});
+        };
+    }
+}
 
-            else => log.err("Unsupported event type: {d}", .{@intFromEnum(event.type)}),
-        }
+/// Dispatches one event TRB to the appropriate handler.
+fn handleEvent(self: *Self, trb: trbs.Trb) Error!void {
+    switch (trb.type) {
+        .port_status_change => try self.handlePortStatusChange(@ptrCast(&trb)),
+        .command_completion => try self.handleCommandCompletion(@ptrCast(&trb)),
+        .transfer_event => try self.handleTransferEvent(@ptrCast(&trb)),
+
+        else => log.err("Unsupported event type: {d}", .{@intFromEnum(trb.type)}),
     }
 }
 
 /// Handle Port Status Change event.
-fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusChange) Error!void {
+fn handlePortStatusChange(self: *Self, event: *const trbs.PortStatusChange) Error!void {
     // Check if the event is for a registered port.
     const device = self.findDeviceByPort(event.port) orelse {
         return;
@@ -395,7 +408,7 @@ fn handlePortStatusChange(self: *Self, event: *const volatile trbs.PortStatusCha
 /// Handles Command Completion event.
 ///
 /// This dispatches the command completion event to the appropriate handler based on the command type.
-fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompletionTrb) Error!void {
+fn handleCommandCompletion(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
     const command_trb = event.commandTrb(self.cring.memory);
     const command_type = command_trb.type;
     const slot_id = event.slot_id;
@@ -441,7 +454,7 @@ fn handleCommandCompletion(self: *Self, event: *const volatile trbs.CommandCompl
 /// Handles Transfer Event.
 ///
 /// Delegates the event to the appropriate device based on the slot ID in the event.
-fn handleTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb) Error!void {
+fn handleTransferEvent(self: *Self, event: *const trbs.TransferEventTrb) Error!void {
     const slot = event.slot_id;
 
     // Find the device by slot ID.
@@ -453,6 +466,59 @@ fn handleTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb
     // Dispatch to the device.
     try device.onTransferEvent(event);
 }
+
+/// Fixed-capacity queue for xHCI events, used to hand off TRBs from IRQ to worker thread.
+const EventQueue = struct {
+    const capacity = 32;
+
+    /// Ring buffer for events.
+    buf: [capacity]trbs.Trb = std.mem.zeroes([capacity]trbs.Trb),
+    /// Index of the head of the queue.
+    head: usize = 0,
+    /// Index of the tail of the queue.
+    tail: usize = 0,
+    /// Number of events in the queue.
+    count: usize = 0,
+    /// Spin lock to protect the queue.
+    lock: SpinLock = .{},
+    /// Wait queue.
+    waitq: WaitQueue = .{},
+
+    /// Enqueue a TRB copy. Called from IRQ context.
+    fn push(self: *@This(), trb: trbs.Trb) void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (self.count >= capacity) {
+            log.warn("xHCI event queue overflow, dropping event", .{});
+            return;
+        }
+
+        self.buf[self.tail] = trb;
+        self.tail +%= 1;
+        self.count += 1;
+
+        _ = self.waitq.wake();
+    }
+
+    /// Dequeue a TRB.
+    ///
+    /// Blocks if the queue is empty. Called from worker thread.
+    fn pop(self: *@This()) trbs.Trb {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        while (self.count == 0) {
+            self.waitq.wait(&self.lock);
+        }
+
+        const trb = self.buf[self.head];
+        self.head +%= 1;
+        self.count -= 1;
+
+        return trb;
+    }
+};
 
 // =============================================================
 // Data structures
@@ -558,6 +624,8 @@ const dd = @import("dd");
 const pci = dd.pci;
 const urd = @import("urthr");
 const mem = urd.mem;
+const SpinLock = urd.SpinLock;
+const WaitQueue = urd.WaitQueue;
 
 const regs = @import("registers.zig");
 const rings = @import("ring.zig");
