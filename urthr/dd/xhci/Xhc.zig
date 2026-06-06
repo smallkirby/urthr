@@ -196,6 +196,7 @@ pub fn scan(self: *Self) mem.Error!void {
 
 /// Set the Device Context bus address in DCBAA for the given slot index.
 pub fn setDeviceContext(self: *const Self, slot: u8, region: usize) void {
+    rtt.expect(slot != 0);
     self.dcbaa.set(slot, region);
 }
 
