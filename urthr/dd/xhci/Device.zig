@@ -228,6 +228,26 @@ fn requestConfigDesc(self: *Self, config_index: u8) Error!void {
     try self.controlTransferIn(setup_data);
 }
 
+/// Request to set the configuration.
+fn setConfig(self: *Self, config: u8) Error!void {
+    rtt.expectEqual(.waiting_config_set, self.state);
+
+    // Setup SET_CONFIGURATION request
+    const request_type = SetupData.RequestType{
+        .recipient = .device,
+        .type = .standard,
+        .direction = .out,
+    };
+    const setup_data = SetupData{
+        .request_type = request_type,
+        .request = .set_configuration,
+        .value = config,
+        .index = 0,
+        .length = 0,
+    };
+    try self.controlTransferOut(setup_data);
+}
+
 // =============================================================
 // Transfer event handlers
 // =============================================================
@@ -295,7 +315,18 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
             // TODO: free the DMA buffer associated with the Data TRB.
 
             self.state = .waiting_config_set;
-            // TODO: request to set the configuration.
+            rtt.expect(desc.config_value != 0);
+            try self.setConfig(desc.config_value);
+        },
+
+        // Configuration is set.
+        .waiting_config_set => {
+            if (code != .success) {
+                log.err("Failed to set configuration: {t}", .{code});
+                return;
+            }
+
+            // TODO: Configure Endpoint
         },
 
         // Unexpected state.
@@ -310,7 +341,7 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
 /// Perform a control transfer in the device-to-host direction on endpoint 0 (Default Control Pipe).
 ///
 /// TODO: support transfer to other than control endpoint.
-pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
+fn controlTransferIn(self: *Self, data: SetupData) Error!void {
     // TODO: Free the allocated memory on event completion.
     const buf = try self.xhc.dma.allocBytes(data.length, .normal);
     errdefer self.xhc.dma.freeBytes(buf);
@@ -365,6 +396,71 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
     // Push the Data TRB.
     if (data.length > 0) {
         self.pushPendingData(strb, dtrb, buf);
+    }
+
+    // Ring the doorbell for this slot
+    const ep0_dci = calcDci(0, .in);
+    self.xhc.dbs.notifyEndpoint(self.slot, ep0_dci);
+}
+
+/// Perform a control transfer in the host-to-device direction on endpoint 0 (Default Control Pipe).
+///
+/// TODO: support transfer to other than control endpoint.
+fn controlTransferOut(self: *Self, data: SetupData) Error!void {
+    // Setup Stage
+    var setup_trb = trbs.SetupTrb{
+        .request_type = @bitCast(data.request_type),
+        .request = @intFromEnum(data.request),
+        .value = data.value,
+        .index = data.index,
+        .length = data.length,
+        .cycle = undefined,
+        .ioc = false,
+        .trt = if (data.length == 0) .no_data else .out,
+        .idt = true,
+        .intr_target = 0,
+    };
+    _ = self.tr.push(Trb.from(&setup_trb));
+
+    // Data Stage
+    const dstage = if (data.length != 0) blk: {
+        const buf = try self.xhc.dma.allocBytes(data.length, .normal);
+        errdefer self.xhc.dma.freeBytes(buf);
+        @memset(buf.slice(u8), 0);
+        self.xhc.dma.syncForDevice(buf.cpu, data.length);
+
+        var data_trb = trbs.DataTrb{
+            .data_buffer = buf.bus,
+            .transfer_length = data.length,
+            .td_size = 0,
+            .cycle = undefined,
+            .ent = false,
+            .isp = false,
+            .ns = false,
+            .chain = false,
+            .ioc = false,
+            .idt = false,
+            .direction = .out,
+            .intr_target = 0,
+        };
+        break :blk .{ self.tr.push(Trb.from(&data_trb)), buf };
+    } else null;
+
+    // Status Stage
+    var status_trb = trbs.StatusTrb{
+        .cycle = undefined,
+        .ent = false,
+        .chain = false,
+        .ioc = true,
+        .direction = if (data.length == 0) .in else .out,
+        .intr_target = 0,
+    };
+    const strb = self.tr.push(Trb.from(&status_trb));
+    self.pending_trb = strb;
+
+    // Push the Data TRB if exists.
+    if (dstage) |d| {
+        self.pushPendingData(strb, d.@"0", d.@"1");
     }
 
     // Ring the doorbell for this slot
