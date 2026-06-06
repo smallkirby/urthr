@@ -302,6 +302,8 @@ pub fn controlTransferIn(self: *Self, data: SetupData) Error!void {
     // TODO: Free the allocated memory on event completion.
     const buf = try self.xhc.dma.allocBytes(data.length, .normal);
     errdefer self.xhc.dma.freeBytes(buf);
+    @memset(buf.slice(u8), 0);
+    self.xhc.dma.syncForDevice(buf.cpu, data.length);
 
     // Setup Stage
     var setup_trb = trbs.SetupTrb{
