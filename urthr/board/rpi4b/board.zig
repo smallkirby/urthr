@@ -142,6 +142,12 @@ pub fn initPeripherals2() urd.mem.Error!void {
     }
 }
 
+/// Initialize peripherals.
+///
+/// This function is called after initial task is spawned.
+/// This function can spawn new threads.
+pub fn initPeripherals3() common.mem.Error!void {}
+
 /// Prepare for waking up secondary cores.
 pub fn prepareSubcoreWakeup() urd.mem.Error!void {
     // Identity-map the entry point page for secondary cores.

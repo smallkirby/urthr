@@ -187,6 +187,10 @@ fn zmain() !void {
 fn initialTask() !void {
     log.info("Initial task started.", .{});
 
+    // Initialize peripherals phase 3.
+    log.info("Initializing peripherals phase 3.", .{});
+    try board.initPeripherals3();
+
     // Start networking subsystem.
     log.info("Starting networking subsystem.", .{});
     try urd.net.run();

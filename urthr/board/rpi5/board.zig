@@ -227,7 +227,13 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
         );
         try gemdev.appendInterface(iface);
     }
+}
 
+/// Initialize peripherals.
+///
+/// This function is called after initial task is spawned.
+/// This function can spawn new threads.
+pub fn initPeripherals3() common.mem.Error!void {
     // xHC
     log.info("Initializing xHC.", .{});
     blkxhc: {
