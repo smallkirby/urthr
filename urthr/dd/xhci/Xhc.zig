@@ -456,7 +456,7 @@ fn handleCommandCompletion(self: *Self, event: *const trbs.CommandCompletionTrb)
             }
             log.debug("Port#{d}:Slot#{d}: Endpoints configured.", .{ device.pi, slot_id });
 
-            // TODO: callback
+            try device.onEndpointConfigured();
         },
 
         // Unhandled command completion.

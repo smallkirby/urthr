@@ -66,6 +66,8 @@ pub const Interface = struct {
     class: ?*const DescriptorHeader,
     /// Endpoints belonging to the interface.
     endpoints: Endpoint.List = .{},
+    /// Driver bound to this interface.
+    driver: ?class.Driver = null,
 
     /// List head.
     _head: List.Head = .{},
@@ -202,6 +204,24 @@ pub fn onAddressAssigned(self: *Self) Error!void {
         .length = 18,
     };
     try self.controlTransferIn(setup_data);
+}
+
+/// Called when the device has been successfully configured.
+pub fn onEndpointConfigured(self: *Self) Error!void {
+    rtt.expectEqual(.waiting_config_set, self.state);
+
+    self.state = .complete;
+
+    // Bind drivers to interfaces.
+    var iter = self.ifaces.iter();
+    while (iter.next()) |iface| {
+        if (try class.from(iface)) |driver| {
+            iface.driver = driver;
+            log.info("Driver {s} bound to interface#{d}", .{ driver.getName(), iface.desc.interface_number });
+        } else {
+            log.warn("No suitable driver found for interface#{d}", .{iface.desc.interface_number});
+        }
+    }
 }
 
 /// Request to get a Configuration Descriptor.
@@ -1259,3 +1279,4 @@ const rings = @import("ring.zig");
 const trbs = @import("trb.zig");
 const Error = @import("Xhc.zig").Error;
 const Trb = trbs.Trb;
+const class = @import("class.zig");
