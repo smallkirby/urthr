@@ -107,15 +107,15 @@ fn changeProtocol(self: *Self, protocol: Protocol) Error!void {
         .index = self.iface.desc.interface_number,
         .length = 0,
     };
-    try self.device.classControlOut(
+    try self.device.ctrlXfer(
         setup_data,
-        self,
+        @ptrCast(self),
         onSetProtocolComplete,
     );
 }
 
 /// Callback invoked when SET_PROTOCOL control transfer completes.
-fn onSetProtocolComplete(ctx: *anyopaque, _: *Device) Error!void {
+fn onSetProtocolComplete(ctx: ?*anyopaque, _: *Device, _: ?DmaMemory) Error!void {
     const self: *Self = @ptrCast(@alignCast(ctx));
     self.arm();
 }

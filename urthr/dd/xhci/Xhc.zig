@@ -28,6 +28,8 @@ dcbaa: Dcbaa = undefined,
 cring: rings.Ring = undefined,
 /// Event Ring.
 ering: rings.EventRing = undefined,
+/// Pending command completions indexed by TRB pointer.
+pending_cmds: PendingCmdList = .empty,
 
 /// Context size in bytes.
 csz: enum { @"32", @"64" } = .@"32",
@@ -196,6 +198,51 @@ pub fn scan(self: *Self) mem.Error!void {
 }
 
 // =============================================================
+// xHC operation API
+// =============================================================
+
+/// Function type for command completion callback.
+pub const CmdCompletionCb = *const fn (
+    /// Device that issued the command.
+    device: *Device,
+    /// Command Completion TRB associated with the completed command.
+    event: *const trbs.CommandCompletionTrb,
+) Error!void;
+
+/// Entry in the pending command list.
+const PendingCmd = struct {
+    /// Pointer to the TRB pushed to the command ring.
+    trb: *const Trb,
+    /// Device that issued the command.
+    device: *Device,
+    /// Called when the command completion event arrives.
+    cb: CmdCompletionCb,
+};
+
+/// List type for pending commands.
+const PendingCmdList = std.ArrayList(PendingCmd);
+
+/// Push a TRB to the command ring and register a completion callback.
+pub fn pushCommand(self: *Self, device: *Device, trb: *Trb, cb: CmdCompletionCb) Error!void {
+    const pushed = self.cring.push(trb);
+    try self.pending_cmds.append(mem.bin, .{
+        .trb = pushed,
+        .device = device,
+        .cb = cb,
+    });
+    self.dbs.notifyCommand();
+}
+
+/// Pop to return the pending command associated with the given TRB pointer.
+fn popPendingCmd(self: *Self, trb: *const volatile Trb) ?PendingCmd {
+    for (self.pending_cmds.items, 0..) |entry, i| {
+        if (entry.trb == trb) {
+            return self.pending_cmds.swapRemove(i);
+        }
+    } else return null;
+}
+
+// =============================================================
 // Internals
 // =============================================================
 
@@ -296,18 +343,6 @@ fn findDeviceBySlot(self: *Self, slot: u8) ?*Device {
     } else return null;
 }
 
-/// Find the registered device associated with the given pending TRB.
-///
-/// Clears the pending TRB of the found device.
-fn findDeviceByTrb(self: *Self, trb: *const volatile trbs.Trb) ?*Device {
-    for (self.devices.items) |device| {
-        if (device.pending_trb == trb) {
-            device.pending_trb = null;
-            return device;
-        }
-    } else return null;
-}
-
 // =============================================================
 // Event handling.
 // =============================================================
@@ -386,13 +421,7 @@ fn handlePortStatusChange(self: *Self, event: *const trbs.PortStatusChange) Erro
     if (psc.prc) {
         // Port Reset Change.
         log.info("Port#{d}: Reset completed.", .{event.port});
-
-        // Push Enable Slot TRB to Command Ring.
-        var enable_slot = trbs.EnableSlotTrb{ .cycle = undefined };
-        device.pending_trb = self.cring.push(.from(&enable_slot));
-
-        // Notify xHC of the new command.
-        self.dbs.notifyCommand();
+        try device.onPortReset();
     } else if (psc.csc) {
         // Connect Status Change.
         if (psc.ccs) {
@@ -406,64 +435,13 @@ fn handlePortStatusChange(self: *Self, event: *const trbs.PortStatusChange) Erro
 }
 
 /// Handles Command Completion event.
-///
-/// This dispatches the command completion event to the appropriate handler based on the command type.
 fn handleCommandCompletion(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
     const command_trb = event.commandTrb(self.cring.memory);
-    const command_type = command_trb.type;
-    const slot_id = event.slot_id;
-
-    switch (command_type) {
-        // Slot ID is assigned.
-        .enable_slot => {
-            const device = findDeviceByTrb(self, @ptrCast(command_trb)) orelse {
-                log.warn("Enable Slot Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
-                return Error.NotAvailable;
-            };
-            if (event.code != .success) {
-                log.err("Port#{d}: Enable Slot failed: {t}", .{ device.pi, event.code });
-                return Error.InvalidState;
-            }
-            log.debug("Port#{d}:Slot#{d}: Slot enabled.", .{ device.pi, slot_id });
-
-            try device.assignAddress(slot_id);
-        },
-
-        // Address assigned and Device Context is set.
-        .address_device => {
-            const device = findDeviceByTrb(self, @ptrCast(command_trb)) orelse {
-                log.warn("Address Device Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
-                return Error.NotAvailable;
-            };
-            if (event.code != .success) {
-                log.err("Port#{d}:Slot#{d}: Failed to assign address: {t}", .{ device.pi, slot_id, event.code });
-                return Error.InvalidState;
-            }
-            log.debug("Port#{d}:Slot#{d}: Device addressed.", .{ device.pi, slot_id });
-
-            try device.onAddressAssigned();
-        },
-
-        // Endpoints are configured.
-        .configure_endpoint => {
-            const device = findDeviceByTrb(self, @ptrCast(command_trb)) orelse {
-                log.warn("Configure Endpoint Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
-                return Error.NotAvailable;
-            };
-            if (event.code != .success) {
-                log.err("Port#{d}:Slot#{d}: Failed to configure endpoints: {t}", .{ device.pi, slot_id, event.code });
-                return Error.InvalidState;
-            }
-            log.debug("Port#{d}:Slot#{d}: Endpoints configured.", .{ device.pi, slot_id });
-
-            try device.onEndpointConfigured();
-        },
-
-        // Unhandled command completion.
-        else => {
-            log.warn("Unhandled command completion: {d}", .{@intFromEnum(command_type)});
-        },
-    }
+    const pending = self.popPendingCmd(command_trb) orelse {
+        log.warn("Command completion for unknown TRB ({t})", .{command_trb.type});
+        return;
+    };
+    try pending.cb(pending.device, event);
 }
 
 /// Handles Transfer Event.

@@ -9,9 +9,6 @@ tr: rings.Ring = undefined,
 /// Device Context for this device.
 dctx: DmaMemory = undefined,
 
-/// Device state.
-state: State,
-
 /// Port index (1-origin).
 pi: usize,
 /// Port register.
@@ -23,12 +20,13 @@ desc: DeviceDesc = undefined,
 /// List of interfaces provided by the device.
 ifaces: Interface.List = .{},
 
-/// Pending TRB that waits for completion of the current operation.
-pending_trb: ?*const volatile trbs.Trb = null,
-/// Pending Data TRB that's waiting for a Transfer Event.
-pending_data: ?PendingData = null,
-/// Callback for a class-initiated EP0 control transfer.
-ctrl_cb: ?CtrlCb = null,
+/// Device state.
+state: State,
+/// Pending Control Transfer completion.
+///
+/// Control transfers are processed sequentially on EP0,
+/// so we can only have one pending control transfer at a time.
+pending_ep0: ?Ep0Completion = null,
 
 /// Device state.
 const State = enum {
@@ -80,6 +78,7 @@ pub const Interface = struct {
     const List = common.typing.InlineDoublyLinkedList(Interface, "_head");
 };
 
+/// Initializes USB device belonging to the given port of the xHC controller.
 pub fn new(xhc: *Xhc, pi: usize, pr: regs.Port) mem.Error!*Self {
     const self = try mem.bin.create(Self);
     errdefer mem.bin.destroy(self);
@@ -110,11 +109,35 @@ pub fn resetPort(self: *Self) void {
     }, null);
 }
 
-/// Request to assign the address to the device.
-pub fn assignAddress(self: *Self, slot: u8) Error!void {
-    rtt.expectEqual(.waiting_slot, self.state);
-    rtt.expect(slot != 0);
+// =============================================================
+// Callbacks for command completion events
+// =============================================================
 
+/// Push an Enable Slot command to the command ring.
+pub fn onPortReset(self: *Self) Error!void {
+    rtt.expectEqual(.waiting_slot, self.state);
+
+    var enable_slot = trbs.EnableSlotTrb{ .cycle = undefined };
+    try self.xhc.pushCommand(
+        self,
+        .from(&enable_slot),
+        onSlotEnabled,
+    );
+}
+
+/// Called when the Enable Slot command completes.
+///
+/// Allocate a Device Context and request to assign an address to the device.
+fn onSlotEnabled(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
+    rtt.expectEqual(.waiting_slot, self.state);
+    if (event.code != .success) {
+        log.err("Port#{d}: Enable Slot failed: {t}", .{ self.pi, event.code });
+        return Error.InvalidState;
+    }
+
+    const slot = event.slot_id;
+    log.debug("Port#{d}:Slot#{d}: Slot enabled.", .{ self.pi, slot });
+    rtt.expect(slot != 0);
     self.slot = slot;
 
     // Allocate a Device Context region.
@@ -170,26 +193,36 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
             .dcs = tr.pcs,
         };
     }
-    self.xhc.dma.syncForDevice(icm.cpu, icm.size);
+    self.dma.syncForDevice(icm.cpu, icm.size);
 
     // Request to assign the address.
     self.state = .waiting_address;
     var cmd = trbs.AddressDeviceTrb.from(slot, icm.bus);
-    self.pending_trb = self.xhc.cring.push(.from(&cmd));
-    self.xhc.dbs.notifyCommand();
+    try self.xhc.pushCommand(
+        self,
+        .from(&cmd),
+        onDeviceAddressed,
+    );
 }
 
-/// Called when the address has been successfully assigned to the device.
-pub fn onAddressAssigned(self: *Self) Error!void {
+/// Called when the Address Device command completes.
+///
+/// Start GET_DESCRIPTOR for the device descriptor.
+fn onDeviceAddressed(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
     rtt.expectEqual(.waiting_address, self.state);
+    if (event.code != .success) {
+        log.err("Port#{d}:Slot#{d}: Failed to assign address: {t}", .{ self.pi, self.slot, event.code });
+        return Error.InvalidState;
+    }
 
+    log.debug("Port#{d}:Slot#{d}: Device addressed.", .{ self.pi, self.slot });
     self.state = .waiting_device_desc;
 
-    // Setup GET_DESCRIPTOR request for device descriptor
+    // Request to get the device descriptor.
     const Value = packed struct(u16) {
-        /// Descriptor number.
+        /// Configuration index.
         desc_index: u8,
-        /// Type of descriptor.
+        /// Descriptor type.
         desc_type: DescriptorType,
     };
     const request_type = SetupData.RequestType{
@@ -207,13 +240,20 @@ pub fn onAddressAssigned(self: *Self) Error!void {
         .index = 0,
         .length = 18,
     };
-    try self.controlTransferIn(setup_data);
+    try self.ctrlXfer(setup_data, null, onDeviceDescReceived);
 }
 
-/// Called when the device has been successfully configured.
-pub fn onEndpointConfigured(self: *Self) Error!void {
+/// Called when the Configure Endpoint command completes.
+///
+/// Bind class drivers to interfaces and mark the device as ready for use.
+fn onEpConfigured(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
     rtt.expectEqual(.waiting_config_set, self.state);
+    if (event.code != .success) {
+        log.err("Port#{d}:Slot#{d}: Failed to configure endpoints: {t}", .{ self.pi, self.slot, event.code });
+        return Error.InvalidState;
+    }
 
+    log.debug("Port#{d}:Slot#{d}: EP configured.", .{ self.pi, self.slot });
     self.state = .complete;
 
     // Bind drivers to interfaces.
@@ -228,15 +268,84 @@ pub fn onEndpointConfigured(self: *Self) Error!void {
     }
 }
 
-/// Request to get a Configuration Descriptor.
-fn requestConfigDesc(self: *Self, config_index: u8) Error!void {
-    rtt.expectEqual(.waiting_config_desc, self.state);
+// =============================================================
+// Callbacks for transfer events
+// =============================================================
 
-    // Setup GET_DESCRIPTOR request for configuration descriptor
+/// Callback for Transfer Event TRB.
+pub fn onTransferEvent(self: *Self, event: *const trbs.TransferEventTrb) Error!void {
+    // EP0 (Default Control Pipe, DCI=1)
+    if (event.endpoint == calcDci(0, .in)) {
+        const comp = self.popPendingEp0Xfer() orelse {
+            log.warn("Transfer event for EP0 with no pending completion.", .{});
+            return;
+        };
+        if (event.code != .success and event.code != .short_packet) {
+            log.err("EP0 transfer failed: {t}", .{event.code});
+            if (comp.buf) |b| self.dma.freeBytes(b);
+            return;
+        }
+
+        return comp.cb(comp.ctx, self, comp.buf);
+    }
+
+    // Other endpoints: find by DCI and dispatch to the class driver.
+    var iface_iter = self.ifaces.iter();
+    while (iface_iter.next()) |iface| {
+        var ep_iter = iface.endpoints.iter();
+        while (ep_iter.next()) |ep| {
+            if (ep.desc.address.dci() == event.endpoint) {
+                if (iface.driver) |drv| {
+                    try drv.vtable.onTransferEvent(drv.ptr, event, ep);
+                } else {
+                    log.warn("Transfer event for endpoint DCI#{d} with no bound driver", .{event.endpoint});
+                }
+                return;
+            }
+        }
+    }
+    log.warn("Transfer event for unknown endpoint DCI#{d}", .{event.endpoint});
+}
+
+/// Callback function for transfer events on EP0 (Default Control Pipe).
+///
+/// Callee is responsible for freeing the buffer.
+const XferCb = *const fn (ctx: ?*anyopaque, device: *Self, buf: ?DmaMemory) Error!void;
+
+/// Pending completion for an EP0 control transfer.
+const Ep0Completion = struct {
+    /// Opaque context passed to the callback.
+    ctx: ?*anyopaque,
+    /// Called when the status stage transfer event arrives.
+    cb: XferCb,
+    /// DMA buffer for the data stage.
+    ///
+    /// `null` if the transfer has no data stage.
+    buf: ?DmaMemory,
+};
+
+/// Called when GET_DESCRIPTOR for the device descriptor completes.
+///
+/// Store the descriptor and then request a configuration descriptor.
+fn onDeviceDescReceived(_: ?*anyopaque, self: *Self, buf: ?DmaMemory) Error!void {
+    rtt.expectEqual(.waiting_device_desc, self.state);
+
+    const memory = buf.?;
+    const desc: *const volatile DeviceDesc = @ptrFromInt(memory.cpu);
+    self.dma.syncForCpu(@intFromPtr(desc), @sizeOf(DeviceDesc));
+    defer self.dma.freeBytes(memory);
+
+    rtt.expectEqual(.device, desc.type);
+    self.desc = desc.*;
+
+    self.state = .waiting_config_desc;
+
+    // Request to get a Configuration Descriptor.
+    const config_index = 0;
     const Value = packed struct(u16) {
         /// Configuration index.
         desc_index: u8,
-        /// Type of descriptor.
+        /// Descriptor type.
         desc_type: DescriptorType,
     };
     const request_type = SetupData.RequestType{
@@ -252,16 +361,36 @@ fn requestConfigDesc(self: *Self, config_index: u8) Error!void {
             .desc_type = .configuration,
         }),
         .index = 0,
-        .length = mem.page_size, // variable length, so provide a large buffer.
+        .length = mem.page_size,
     };
-    try self.controlTransferIn(setup_data);
+    try self.ctrlXfer(
+        setup_data,
+        null,
+        onConfigDescReceived,
+    );
 }
 
-/// Request to set the configuration.
-fn setConfig(self: *Self, config: u8) Error!void {
-    rtt.expectEqual(.waiting_config_set, self.state);
+/// Called when GET_DESCRIPTOR for the configuration descriptor completes.
+///
+/// Parse the configuration descriptor and then request to set the configuration to xHC.
+fn onConfigDescReceived(_: ?*anyopaque, self: *Self, buf: ?DmaMemory) Error!void {
+    rtt.expectEqual(.waiting_config_desc, self.state);
 
-    // Setup SET_CONFIGURATION request
+    const memory = buf.?;
+    const desc: *const volatile ConfigDesc = @ptrFromInt(memory.cpu);
+    self.dma.syncForCpu(@intFromPtr(desc), mem.page_size);
+    defer self.dma.freeBytes(memory);
+
+    const config_value = desc.config_value;
+    rtt.expectEqual(.configuration, desc.type);
+    rtt.expect(config_value != 0);
+
+    try self.parseConfigDesc(desc);
+    log.debug("{d} interfaces found.", .{self.ifaces.len});
+
+    self.state = .waiting_config_set;
+
+    // Request to set the configuration.
     const request_type = SetupData.RequestType{
         .recipient = .device,
         .type = .standard,
@@ -270,18 +399,26 @@ fn setConfig(self: *Self, config: u8) Error!void {
     const setup_data = SetupData{
         .request_type = request_type,
         .request = .set_configuration,
-        .value = config,
+        .value = config_value,
         .index = 0,
         .length = 0,
     };
-    try self.controlTransferOut(setup_data);
+    try self.ctrlXfer(
+        setup_data,
+        null,
+        onConfigSet,
+    );
 }
 
+/// Called when SET_CONFIGURATION completes.
+///
 /// Issues Configure Endpoint command to notify the xHC of the endpoint configuration.
 ///
 /// xHC does not know which configuration has been selected for the device.
 /// So we have to notify the selected setting to the xHC by this function.
-fn configureEndpoint(self: *Self) Error!void {
+fn onConfigSet(_: ?*anyopaque, self: *Self, _: ?DmaMemory) Error!void {
+    rtt.expectEqual(.waiting_config_set, self.state);
+
     // Create and clear the Input Context.
     const ctx_size: usize = switch (self.xhc.csz) {
         .@"32" => 32,
@@ -313,6 +450,21 @@ fn configureEndpoint(self: *Self) Error!void {
             ep.tr = try rings.Ring.new(rings.trbs_per_page, self.dma);
             errdefer ep.tr.deinit();
 
+            const ep_type: EndpointType = switch (ep.desc.address.direction) {
+                .out => switch (ep.desc.attributes.transfer_type) {
+                    .control => .control,
+                    .isochronous => .isoch_out,
+                    .bulk => .bulk_out,
+                    .interrupt => .intr_out,
+                },
+                .in => switch (ep.desc.attributes.transfer_type) {
+                    .control => .control,
+                    .isochronous => .isoch_in,
+                    .bulk => .bulk_in,
+                    .interrupt => .intr_in,
+                },
+            };
+
             // Configure endpoint context.
             // Input Context layout: [Input Control][Slot][EP@DCI=1][EP@DCI=2]...
             const ectx: *EndpointContext = @ptrFromInt(base + ctx_size * (1 + dci));
@@ -328,20 +480,7 @@ fn configureEndpoint(self: *Self) Error!void {
                 .max_pstream = 0,
                 .mult = 0,
                 .cerr = 3,
-                .ep_type = switch (ep.desc.address.direction) {
-                    .out => switch (ep.desc.attributes.transfer_type) {
-                        .control => .control,
-                        .isochronous => .isoch_out,
-                        .bulk => .bulk_out,
-                        .interrupt => .intr_out,
-                    },
-                    .in => switch (ep.desc.attributes.transfer_type) {
-                        .control => .control,
-                        .isochronous => .isoch_in,
-                        .bulk => .bulk_in,
-                        .interrupt => .intr_in,
-                    },
-                },
+                .ep_type = ep_type,
                 .trdp = @intCast(ep.tr.memory.bus >> 4),
             };
         }
@@ -360,60 +499,20 @@ fn configureEndpoint(self: *Self) Error!void {
     self.dma.syncForDevice(icm.cpu, icm.size);
 
     // Issue Configure Endpoint command.
-    var cmd = trbs.ConfigureEndpointTrb.from(self.slot, icm.bus);
-    self.pending_trb = self.xhc.cring.push(Trb.from(&cmd));
-    self.xhc.dbs.notifyCommand();
+    var cmd = trbs.ConfigureEndpointTrb.from(
+        self.slot,
+        icm.bus,
+    );
+    try self.xhc.pushCommand(
+        self,
+        Trb.from(&cmd),
+        onEpConfigured,
+    );
 }
 
 // =============================================================
-// Transfer event handlers
+// Utility
 // =============================================================
-
-/// Callback for Transfer Event TRB.
-pub fn onTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb) Error!void {
-    // EP0 (Default Control Pipe, DCI=1)
-    if (event.endpoint == calcDci(0, .in)) {
-        const issuer: *const trbs.Trb = @ptrFromInt(self.tr.memory.translate(event.trb));
-        switch (issuer.type) {
-            .status => try self.onStatusTransfer(event, @ptrCast(issuer)),
-            else => log.err(
-                "Unexpected TRB type in Transfer Event: {d}",
-                .{@intFromEnum(issuer.type)},
-            ),
-        }
-        return;
-    }
-
-    // Other endpoints: find by DCI and dispatch to the class driver.
-    var iface_iter = self.ifaces.iter();
-    while (iface_iter.next()) |iface| {
-        var ep_iter = iface.endpoints.iter();
-        while (ep_iter.next()) |ep| {
-            if (ep.desc.address.dci() == event.endpoint) {
-                if (iface.driver) |drv| {
-                    try drv.vtable.onTransferEvent(drv.ptr, event, ep);
-                } else {
-                    log.warn("Transfer event for endpoint DCI#{d} with no bound driver", .{event.endpoint});
-                }
-                return;
-            }
-        }
-    }
-    log.warn("Transfer event for unknown endpoint DCI#{d}", .{event.endpoint});
-}
-
-/// Issue a class-specific no-data control OUT transfer on EP0.
-pub fn classControlOut(
-    self: *Self,
-    data: SetupData,
-    ctx: *anyopaque,
-    cb: *const fn (ctx: *anyopaque, device: *Self) Error!void,
-) Error!void {
-    rtt.expectEqual(.complete, self.state);
-    rtt.expectEqual(null, self.ctrl_cb);
-    try self.controlTransferOut(data);
-    self.ctrl_cb = .{ .ctx = ctx, .cb = cb };
-}
 
 /// Queue an Interrupt IN transfer on the given endpoint.
 pub fn transferIn(self: *Self, ep: *Endpoint, buf: DmaMemory) void {
@@ -428,103 +527,22 @@ pub fn transferIn(self: *Self, ep: *Endpoint, buf: DmaMemory) void {
     self.xhc.dbs.notifyEndpoint(self.slot, ep.desc.address.dci());
 }
 
-/// Called when a Transfer Event TRB is received for a Status Stage TRB.
-fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, issuer: *const trbs.StatusTrb) Error!void {
-    const code = event.code;
-
-    switch (self.state) {
-        // Device descriptor is provided.
-        .waiting_device_desc => {
-            if (code != .success) {
-                log.err("Failed to get device descriptor: {d}", .{code});
-                return;
-            }
-            const pending = self.popPendingData();
-            self.pending_trb = null;
-            rtt.expectEqual(pending.status, issuer);
-
-            // Sync the Data TRB buffer.
-            const desc: *const volatile DeviceDesc = @ptrFromInt(pending.buf.cpu);
-            self.xhc.dma.syncForCpu(@intFromPtr(desc), @sizeOf(DeviceDesc));
-
-            self.desc = desc.*;
-            rtt.expectEqual(.device, desc.type);
-
-            // TODO: free the DMA buffer associated with the Data TRB.
-
-            self.state = .waiting_config_desc;
-            try self.requestConfigDesc(0);
-        },
-
-        // Configuration descriptor is provided.
-        .waiting_config_desc => {
-            if (code != .success) {
-                log.err("Failed to get configuration descriptor: {d}", .{code});
-                return;
-            }
-            const pending = self.popPendingData();
-            self.pending_trb = null;
-            rtt.expectEqual(pending.status, issuer);
-
-            // Sync the Data TRB buffer.
-            const desc: *const volatile ConfigDesc = @ptrFromInt(pending.buf.cpu);
-            self.xhc.dma.syncForCpu(@intFromPtr(desc), mem.page_size);
-            rtt.expectEqual(.configuration, desc.type);
-
-            try self.parseConfigDesc(desc);
-            log.debug("{d} interfaces found.", .{self.ifaces.len});
-
-            // TODO: free the DMA buffer associated with the Data TRB.
-
-            self.state = .waiting_config_set;
-            rtt.expect(desc.config_value != 0);
-            try self.setConfig(desc.config_value);
-        },
-
-        // Configuration is set.
-        .waiting_config_set => {
-            if (code != .success) {
-                log.err("Failed to set configuration: {t}", .{code});
-                return;
-            }
-
-            try self.configureEndpoint();
-        },
-
-        // Class-initiated control transfer completed.
-        .complete => {
-            if (code != .success) {
-                log.warn("Class control transfer failed: {}", .{code});
-            }
-            self.pending_trb = null;
-            const cb = self.ctrl_cb orelse {
-                log.warn("Unexpected EP0 transfer event in complete state", .{});
-                return;
-            };
-            self.ctrl_cb = null;
-            try cb.cb(cb.ctx, self);
-        },
-
-        // Unexpected state.
-        else => log.warn("Unexpected transfer event for control transfer while state is {t}", .{self.state}),
-    }
-}
-
-// =============================================================
-// Utility
-// =============================================================
-
-/// Perform a control transfer in the device-to-host direction on endpoint 0 (Default Control Pipe).
+/// Perform a control transfer on EP 0 (Default Control Pipe).
 ///
-/// TODO: support transfer to other than control endpoint.
-fn controlTransferIn(self: *Self, data: SetupData) Error!void {
-    // TODO: Free the allocated memory on event completion.
-    const buf = try self.xhc.dma.allocBytes(data.length, .normal);
-    errdefer self.xhc.dma.freeBytes(buf);
-    @memset(buf.slice(u8), 0);
-    self.xhc.dma.syncForDevice(buf.cpu, data.length);
+/// Direction is determined by the given SetupData.
+pub fn ctrlXfer(self: *Self, data: SetupData, ctx: ?*anyopaque, cb: XferCb) Error!void {
+    const dir = data.request_type.direction;
+    if (dir == .out) rtt.expectEqual(0, data.length);
 
-    // Setup Stage
+    const buf = if (data.length != 0) blk: {
+        const memory = try self.dma.allocBytes(data.length, .normal);
+        errdefer self.dma.freeBytes(memory);
+        @memset(memory.slice(u8), 0);
+        self.dma.syncForDevice(memory.cpu, data.length);
+        break :blk memory;
+    } else null;
+
+    // Setup stage.
     var setup_trb = trbs.SetupTrb{
         .request_type = @bitCast(data.request_type),
         .request = @intFromEnum(data.request),
@@ -533,80 +551,16 @@ fn controlTransferIn(self: *Self, data: SetupData) Error!void {
         .length = data.length,
         .cycle = undefined,
         .ioc = false,
-        .trt = .in,
+        .trt = if (dir == .in) .in else .no_data,
         .idt = true,
         .intr_target = 0,
     };
     _ = self.tr.push(.from(&setup_trb));
 
-    // Data Stage
-    var data_trb = trbs.DataTrb{
-        .data_buffer = buf.bus,
-        .transfer_length = data.length,
-        .td_size = 0,
-        .cycle = undefined,
-        .ent = false,
-        .isp = false,
-        .ns = false,
-        .chain = false,
-        .ioc = false,
-        .idt = false,
-        .direction = .in,
-        .intr_target = 0,
-    };
-    const dtrb = self.tr.push(.from(&data_trb));
-
-    // Status Stage
-    // Generates an event when complete.
-    var status_trb = trbs.StatusTrb{
-        .cycle = undefined,
-        .ent = false,
-        .chain = false,
-        .ioc = true,
-        .direction = .out,
-        .intr_target = 0,
-    };
-    const strb = self.tr.push(.from(&status_trb));
-    self.pending_trb = strb;
-
-    // Push the Data TRB.
-    if (data.length > 0) {
-        self.pushPendingData(strb, dtrb, buf);
-    }
-
-    // Ring the doorbell for this slot
-    const ep0_dci = calcDci(0, .in);
-    self.xhc.dbs.notifyEndpoint(self.slot, ep0_dci);
-}
-
-/// Perform a control transfer in the host-to-device direction on endpoint 0 (Default Control Pipe).
-///
-/// TODO: support transfer to other than control endpoint.
-fn controlTransferOut(self: *Self, data: SetupData) Error!void {
-    // Setup Stage
-    var setup_trb = trbs.SetupTrb{
-        .request_type = @bitCast(data.request_type),
-        .request = @intFromEnum(data.request),
-        .value = data.value,
-        .index = data.index,
-        .length = data.length,
-        .cycle = undefined,
-        .ioc = false,
-        .trt = if (data.length == 0) .no_data else .out,
-        .idt = true,
-        .intr_target = 0,
-    };
-    _ = self.tr.push(Trb.from(&setup_trb));
-
-    // Data Stage
-    const dstage = if (data.length != 0) blk: {
-        const buf = try self.xhc.dma.allocBytes(data.length, .normal);
-        errdefer self.xhc.dma.freeBytes(buf);
-        @memset(buf.slice(u8), 0);
-        self.xhc.dma.syncForDevice(buf.cpu, data.length);
-
+    // Data stage if any.
+    if (buf) |b| {
         var data_trb = trbs.DataTrb{
-            .data_buffer = buf.bus,
+            .data_buffer = b.bus,
             .transfer_length = data.length,
             .td_size = 0,
             .cycle = undefined,
@@ -616,32 +570,46 @@ fn controlTransferOut(self: *Self, data: SetupData) Error!void {
             .chain = false,
             .ioc = false,
             .idt = false,
-            .direction = .out,
+            .direction = if (dir == .in) .in else .out,
             .intr_target = 0,
         };
-        break :blk .{ self.tr.push(Trb.from(&data_trb)), buf };
-    } else null;
+        _ = self.tr.push(.from(&data_trb));
+    }
 
-    // Status Stage
+    // Status stage.
     var status_trb = trbs.StatusTrb{
         .cycle = undefined,
         .ent = false,
         .chain = false,
         .ioc = true,
-        .direction = if (data.length == 0) .in else .out,
+        .direction = if (dir == .in) .out else .in,
         .intr_target = 0,
     };
-    const strb = self.tr.push(Trb.from(&status_trb));
-    self.pending_trb = strb;
+    _ = self.tr.push(.from(&status_trb));
 
-    // Push the Data TRB if exists.
-    if (dstage) |d| {
-        self.pushPendingData(strb, d.@"0", d.@"1");
-    }
+    // Register the pending completion and ring the doorbell.
+    self.pushPendingEp0Xfer(.{
+        .ctx = ctx,
+        .cb = cb,
+        .buf = buf,
+    });
+    self.xhc.dbs.notifyEndpoint(
+        self.slot,
+        calcDci(0, .in),
+    );
+}
 
-    // Ring the doorbell for this slot
-    const ep0_dci = calcDci(0, .in);
-    self.xhc.dbs.notifyEndpoint(self.slot, ep0_dci);
+/// Push a pending EP0 control transfer completion.
+fn pushPendingEp0Xfer(self: *Self, completion: Ep0Completion) void {
+    rtt.expectEqual(null, self.pending_ep0);
+    self.pending_ep0 = completion;
+}
+
+/// Pop to return the pending EP0 control transfer completion.
+fn popPendingEp0Xfer(self: *Self) ?Ep0Completion {
+    const ret = self.pending_ep0;
+    self.pending_ep0 = null;
+    return ret;
 }
 
 /// Calculate the Device Context Index (DCI).
@@ -669,42 +637,6 @@ fn toXhciInterval(binterval: u8, speed: regs.PortSpeed, transfer_type: EpDesc.Tr
         },
         else => return 0,
     }
-}
-
-/// Callback invoked when a class-initiated EP0 control transfer completes.
-const CtrlCb = struct {
-    ctx: *anyopaque,
-    cb: *const fn (ctx: *anyopaque, device: *Self) Error!void,
-};
-
-/// Pending Data TRB that waits for completion of a transfer operation.
-const PendingData = struct {
-    /// Pointer to Status TRB that will be triggered when the transfer is complete.
-    status: *const volatile trbs.StatusTrb,
-    /// Pointer to Data TRB that describes the transfer.
-    data: *const volatile trbs.DataTrb,
-    /// DMA buffer associated with the Data TRB.
-    buf: DmaMemory,
-};
-
-/// Records the pending data transfer operations.
-fn pushPendingData(self: *Self, status: *const Trb, data: *const Trb, buf: DmaMemory) void {
-    rtt.expectEqual(null, self.pending_data);
-
-    self.pending_data = .{
-        .status = @ptrCast(status),
-        .data = @ptrCast(data),
-        .buf = buf,
-    };
-}
-
-/// Pop the pending data transfer operation.
-fn popPendingData(self: *Self) PendingData {
-    rtt.expect(self.pending_data != null);
-
-    const ret = self.pending_data.?;
-    self.pending_data = null;
-    return ret;
 }
 
 /// Parse the given configuration descriptor.
@@ -780,7 +712,6 @@ fn parseConfigDesc(self: *Self, cdesc: *const volatile ConfigDesc) Error!void {
 // =============================================================
 // Data structures
 // =============================================================
-
 /// Consists of two groups of flags.
 ///
 /// Interpretation depends on the command.
@@ -1054,17 +985,17 @@ const EndpointContext = packed struct(u256) {
 
         _,
     };
+};
 
-    const EndpointType = enum(u3) {
-        invalid = 0,
-        isoch_out = 1,
-        bulk_out = 2,
-        intr_out = 3,
-        control = 4,
-        isoch_in = 5,
-        bulk_in = 6,
-        intr_in = 7,
-    };
+const EndpointType = enum(u3) {
+    invalid = 0,
+    isoch_out = 1,
+    bulk_out = 2,
+    intr_out = 3,
+    control = 4,
+    isoch_in = 5,
+    bulk_in = 6,
+    intr_in = 7,
 };
 
 /// Contents of the Setup Stage TRB.
