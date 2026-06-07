@@ -128,7 +128,7 @@ pub fn onPortReset(self: *Self) Error!void {
 /// Called when the Enable Slot command completes.
 ///
 /// Allocate a Device Context and request to assign an address to the device.
-fn onSlotEnabled(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
+fn onSlotEnabled(self: *Self, event: *const trbs.CmdCompletionTrb) Error!void {
     rtt.expectEqual(.waiting_slot, self.state);
     if (event.code != .success) {
         log.err("Port#{d}: Enable Slot failed: {t}", .{ self.pi, event.code });
@@ -208,7 +208,7 @@ fn onSlotEnabled(self: *Self, event: *const trbs.CommandCompletionTrb) Error!voi
 /// Called when the Address Device command completes.
 ///
 /// Start GET_DESCRIPTOR for the device descriptor.
-fn onDeviceAddressed(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
+fn onDeviceAddressed(self: *Self, event: *const trbs.CmdCompletionTrb) Error!void {
     rtt.expectEqual(.waiting_address, self.state);
     if (event.code != .success) {
         log.err("Port#{d}:Slot#{d}: Failed to assign address: {t}", .{ self.pi, self.slot, event.code });
@@ -246,7 +246,7 @@ fn onDeviceAddressed(self: *Self, event: *const trbs.CommandCompletionTrb) Error
 /// Called when the Configure Endpoint command completes.
 ///
 /// Bind class drivers to interfaces and mark the device as ready for use.
-fn onEpConfigured(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
+fn onEpConfigured(self: *Self, event: *const trbs.CmdCompletionTrb) Error!void {
     rtt.expectEqual(.waiting_config_set, self.state);
     if (event.code != .success) {
         log.err("Port#{d}:Slot#{d}: Failed to configure endpoints: {t}", .{ self.pi, self.slot, event.code });
@@ -273,7 +273,7 @@ fn onEpConfigured(self: *Self, event: *const trbs.CommandCompletionTrb) Error!vo
 // =============================================================
 
 /// Callback for Transfer Event TRB.
-pub fn onTransferEvent(self: *Self, event: *const trbs.TransferEventTrb) Error!void {
+pub fn onTransferEvent(self: *Self, event: *const trbs.XferEventTrb) Error!void {
     // EP0 (Default Control Pipe, DCI=1)
     if (event.endpoint == calcDci(0, .in)) {
         const comp = self.popPendingEp0Xfer() orelse {

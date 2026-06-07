@@ -3,9 +3,9 @@
 
 pub const Capability = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x00, CapInfo },
-    .{ 0x04, StructureParam1 },
-    .{ 0x08, StructureParam2 },
-    .{ 0x0C, StructureParam3 },
+    .{ 0x04, HcsParams1 },
+    .{ 0x08, HcsParams2 },
+    .{ 0x0C, HcsParams3 },
     .{ 0x10, CapParam1 },
     .{ 0x14, DbOffset },
     .{ 0x18, RtsOffset },
@@ -22,7 +22,7 @@ pub const CapInfo = packed struct(u32) {
 };
 
 /// HCSPARAMS1
-pub const StructureParam1 = packed struct(u32) {
+pub const HcsParams1 = packed struct(u32) {
     /// Number of device slots.
     maxslots: u8,
     /// Number of interrupters.
@@ -34,7 +34,7 @@ pub const StructureParam1 = packed struct(u32) {
 };
 
 /// HCSPARAMS2
-pub const StructureParam2 = packed struct(u32) {
+pub const HcsParams2 = packed struct(u32) {
     /// Isochronous Scheduling Threshold.
     ist: u4,
     /// Event Ring Segment Table Max.
@@ -49,7 +49,7 @@ pub const StructureParam2 = packed struct(u32) {
     max_scratchpad_lo: u5,
 };
 
-pub const StructureParam3 = packed struct(u32) {
+pub const HcsParams3 = packed struct(u32) {
     value: u32,
 };
 

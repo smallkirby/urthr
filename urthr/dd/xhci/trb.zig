@@ -194,7 +194,7 @@ pub const EnableSlotTrb = packed struct(u128) {
 };
 
 /// Command Completion Event TRB.
-pub const CommandCompletionTrb = packed struct(u128) {
+pub const CmdCompletionTrb = packed struct(u128) {
     /// Reserved.
     _0: u4 = 0,
     /// High 60 bits of the Command TRB that generated this event.
@@ -215,7 +215,7 @@ pub const CommandCompletionTrb = packed struct(u128) {
     slot_id: u8,
 
     /// Get the pointer to the Command TRB that generated this event.
-    pub fn commandTrb(self: *const volatile CommandCompletionTrb, dma: DmaMemory) *const volatile Trb {
+    pub fn commandTrb(self: *const volatile CmdCompletionTrb, dma: DmaMemory) *const volatile Trb {
         return @ptrFromInt(dma.translate(@as(u64, self.command_trb) << 4));
     }
 };
@@ -458,7 +458,7 @@ pub const StatusTrb = packed struct(u128) {
 /// Transfer Event TRB.
 ///
 /// Provides the completion status associated with a Transfer TRB.
-pub const TransferEventTrb = packed struct(u128) {
+pub const XferEventTrb = packed struct(u128) {
     /// Address of the TRB that generated this event.
     trb: Phys,
 

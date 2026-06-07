@@ -67,7 +67,7 @@ fn name() []const u8 {
 }
 
 /// Callback for transfer events on the Interrupt IN endpoint.
-fn onTransferEvent(ctx: *anyopaque, event: *const volatile trbs.TransferEventTrb, _: *Endpoint) Error!void {
+fn onTransferEvent(ctx: *anyopaque, event: *const volatile trbs.XferEventTrb, _: *Endpoint) Error!void {
     const self: *Self = @ptrCast(@alignCast(ctx));
 
     if (event.code == .success or event.code == .short_packet) {

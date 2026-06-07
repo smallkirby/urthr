@@ -10,11 +10,11 @@ pub const Error = error{
 } || mem.Error;
 
 /// Capability registers module.
-capability: regs.Capability,
+cap: regs.Capability,
 /// Operational registers module.
-operational: regs.Operational,
+op: regs.Operational,
 /// Runtime registers module.
-runtime: regs.Runtime,
+rt: regs.Runtime,
 /// Doorbell registers array.
 dbs: DoorBellArray,
 
@@ -64,34 +64,34 @@ pub fn init(base: usize, irq: urd.exception.Vector, dma: DmaAllocator) (Error ||
     // Initialize registers.
     {
         // Capability registers.
-        self.capability.setBase(base + 0);
+        self.cap.setBase(base + 0);
 
         // Operational registers.
-        const cap_info = self.capability.read(regs.CapInfo);
-        self.operational.setBase(base + cap_info.cap_length);
+        const cap_info = self.cap.read(regs.CapInfo);
+        self.op.setBase(base + cap_info.cap_length);
 
         // Runtime registers.
-        const rts_off = self.capability.read(regs.RtsOffset).value;
-        self.runtime.setBase(base + (rts_off & ~@as(u64, 0x1F)));
+        const rts_off = self.cap.read(regs.RtsOffset).value;
+        self.rt.setBase(base + (rts_off & ~@as(u64, 0x1F)));
 
         // Doorbell registers.
-        const db_base = self.capability.read(regs.DbOffset).value;
+        const db_base = self.cap.read(regs.DbOffset).value;
         self.dbs = DoorBellArray.new(base + db_base);
     }
-    log.debug("xHC capability register  @ 0x{X}", .{self.capability.base});
-    log.debug("xHC operational register @ 0x{X}", .{self.operational.base});
-    log.debug("xHC runtime register     @ 0x{X}", .{self.runtime.base});
+    log.debug("xHC capability register  @ 0x{X}", .{self.cap.base});
+    log.debug("xHC operational register @ 0x{X}", .{self.op.base});
+    log.debug("xHC runtime register     @ 0x{X}", .{self.rt.base});
     log.debug("xHC doorbell register    @ 0x{X}", .{self.dbs.base});
-    log.debug("xHC version              : 0x{X}", .{self.capability.read(regs.CapInfo).hci_version});
-    log.debug("xHC max slots            : {}", .{self.capability.read(regs.StructureParam1).maxslots});
-    log.debug("xHC max ports            : {}", .{self.capability.read(regs.StructureParam1).maxports});
-    log.debug("xHC context size         : {d} bytes", .{@as(u8, if (self.capability.read(regs.CapParam1).csz) 64 else 32)});
+    log.debug("xHC version              : 0x{X}", .{self.cap.read(regs.CapInfo).hci_version});
+    log.debug("xHC max slots            : {}", .{self.cap.read(regs.HcsParams1).maxslots});
+    log.debug("xHC max ports            : {}", .{self.cap.read(regs.HcsParams1).maxports});
+    log.debug("xHC context size         : {d} bytes", .{@as(u8, if (self.cap.read(regs.CapParam1).csz) 64 else 32)});
 
     // Initialize DCBAA.
     self.dcbaa = try Dcbaa.init(dma);
 
     // Set context size.
-    self.csz = if (self.capability.read(regs.CapParam1).csz) .@"64" else .@"32";
+    self.csz = if (self.cap.read(regs.CapParam1).csz) .@"64" else .@"32";
 
     // Register IRQ handler.
     try self.registerController(irq);
@@ -102,7 +102,7 @@ pub fn init(base: usize, irq: urd.exception.Vector, dma: DmaAllocator) (Error ||
 /// Reset the controller.
 pub fn reset(self: *Self) Error!void {
     // Stop xHC.
-    self.operational.modify(regs.CommandRegister, .{
+    self.op.modify(regs.CommandRegister, .{
         .inte = false,
         .hsee = false,
         .ewe = false,
@@ -110,22 +110,22 @@ pub fn reset(self: *Self) Error!void {
     });
 
     // Wait until xHC stops.
-    while (self.operational.read(regs.StatusRegister).hch == false) {
+    while (self.op.read(regs.StatusRegister).hch == false) {
         std.atomic.spinLoopHint();
     }
 
     // Reset xHC.
-    self.operational.modify(regs.CommandRegister, .{
+    self.op.modify(regs.CommandRegister, .{
         .hc_rst = true,
     });
 
     // Wait until reset is complete.
-    while (self.operational.read(regs.CommandRegister).hc_rst) {
+    while (self.op.read(regs.CommandRegister).hc_rst) {
         std.atomic.spinLoopHint();
     }
 
     // Wait until the controller is ready.
-    while (self.operational.read(regs.StatusRegister).cnr) {
+    while (self.op.read(regs.StatusRegister).cnr) {
         std.atomic.spinLoopHint();
     }
 }
@@ -133,12 +133,12 @@ pub fn reset(self: *Self) Error!void {
 /// Setup necessary internal structure.
 pub fn setup(self: *Self) Error!void {
     // Set max device slots.
-    self.operational.modify(regs.ConfigureRegister, .{
-        .max_slots_en = self.capability.read(regs.StructureParam1).maxslots,
+    self.op.modify(regs.ConfigureRegister, .{
+        .max_slots_en = self.cap.read(regs.HcsParams1).maxslots,
     });
 
     // Initialize scratchpad buffers if required.
-    const sp2 = self.capability.read(regs.StructureParam2);
+    const sp2 = self.cap.read(regs.HcsParams2);
     const num_sp: usize = @as(usize, sp2.max_scratchpad_hi) << 5 | sp2.max_scratchpad_lo;
     if (num_sp > 0) {
         try self.initScratchpad(num_sp);
@@ -149,7 +149,7 @@ pub fn setup(self: *Self) Error!void {
     // Enable  interrupts.
     try self.enableInterrupt();
     // Set DCBAA pointer.
-    self.operational.write(regs.Dcbaap, self.dcbaa.dcbaap());
+    self.op.write(regs.Dcbaap, self.dcbaa.dcbaap());
 
     {
         const irs0 = self.getIrsAt(0);
@@ -167,18 +167,18 @@ pub fn setup(self: *Self) Error!void {
 
 /// Start the controller.
 pub fn run(self: *Self) void {
-    self.operational.modify(regs.CommandRegister, .{
+    self.op.modify(regs.CommandRegister, .{
         .rs = true,
     });
 
-    self.operational.waitFor(regs.StatusRegister, .{
+    self.op.waitFor(regs.StatusRegister, .{
         .hch = false,
     }, null);
 }
 
 /// Scan all ports.
 pub fn scan(self: *Self) mem.Error!void {
-    const max_ports = self.capability.read(regs.StructureParam1).maxports;
+    const max_ports = self.cap.read(regs.HcsParams1).maxports;
 
     for (1..max_ports + 1) |i| {
         const port = self.getPortRegAt(i);
@@ -206,7 +206,7 @@ pub const CmdCompletionCb = *const fn (
     /// Device that issued the command.
     device: *Device,
     /// Command Completion TRB associated with the completed command.
-    event: *const trbs.CommandCompletionTrb,
+    event: *const trbs.CmdCompletionTrb,
 ) Error!void;
 
 /// Entry in the pending command list.
@@ -254,7 +254,7 @@ pub fn setDeviceContext(self: *const Self, slot: u8, region: usize) void {
 
 /// Allocate scratchpad buffers and register them in DCBAA[0].
 fn initScratchpad(self: *Self, num: usize) Error!void {
-    const page_size: usize = @as(usize, 1) << (@ctz(self.operational.read(regs.PageSize).value) + 12);
+    const page_size: usize = @as(usize, 1) << (@ctz(self.op.read(regs.PageSize).value) + 12);
 
     // Allocate Scratchpad Buffer Array.
     const arr = try self.dma.allocBytes(num * @sizeOf(u64), .normal);
@@ -276,13 +276,13 @@ fn initScratchpad(self: *Self, num: usize) Error!void {
 fn initRings(self: *Self) Error!void {
     // Init Command Ring.
     self.cring = try rings.Ring.new(rings.trbs_per_page, self.dma);
-    self.operational.write(regs.Crcr0, regs.Crcr0{
+    self.op.write(regs.Crcr0, regs.Crcr0{
         .rcs = self.cring.pcs,
         .cs = false,
         .ca = false,
         .crp = @truncate(self.cring.memory.bus >> @bitOffsetOf(regs.Crcr0, "crp")),
     });
-    self.operational.write(regs.Crcr1, regs.Crcr1{
+    self.op.write(regs.Crcr1, regs.Crcr1{
         .crp = @truncate(self.cring.memory.bus >> 32),
     });
 
@@ -303,7 +303,7 @@ fn enableInterrupt(self: *Self) Error!void {
         .ie = true,
         .ip = true,
     });
-    self.operational.modify(regs.CommandRegister, .{
+    self.op.modify(regs.CommandRegister, .{
         .inte = true,
     });
 }
@@ -312,7 +312,7 @@ fn enableInterrupt(self: *Self) Error!void {
 fn getIrsAt(self: *Self, index: usize) regs.Interrupter {
     const rt_size = 32;
     const irs_size = 32;
-    const addr = self.runtime.base + rt_size + index * irs_size;
+    const addr = self.rt.base + rt_size + index * irs_size;
     return .new(addr);
 }
 
@@ -321,7 +321,7 @@ fn getPortRegAt(self: *Self, index: usize) regs.Port {
     rtt.expect(index != 0);
 
     const pr_size = 16;
-    const base = self.operational.getMarkerAddress(.port_set) + (index - 1) * pr_size;
+    const base = self.op.getMarkerAddress(.port_set) + (index - 1) * pr_size;
     return .new(base);
 }
 
@@ -401,16 +401,16 @@ fn eventWorker(xhc: *Self) noreturn {
 /// Dispatches one event TRB to the appropriate handler.
 fn handleEvent(self: *Self, trb: trbs.Trb) Error!void {
     switch (trb.type) {
-        .port_status_change => try self.handlePortStatusChange(@ptrCast(&trb)),
-        .command_completion => try self.handleCommandCompletion(@ptrCast(&trb)),
-        .transfer_event => try self.handleTransferEvent(@ptrCast(&trb)),
+        .port_status_change => try self.onPortChange(@ptrCast(&trb)),
+        .command_completion => try self.onCmdComplete(@ptrCast(&trb)),
+        .transfer_event => try self.onXferEvent(@ptrCast(&trb)),
 
         else => log.err("Unsupported event type: {d}", .{@intFromEnum(trb.type)}),
     }
 }
 
 /// Handle Port Status Change event.
-fn handlePortStatusChange(self: *Self, event: *const trbs.PortStatusChange) Error!void {
+fn onPortChange(self: *Self, event: *const trbs.PortStatusChange) Error!void {
     // Check if the event is for a registered port.
     const device = self.findDeviceByPort(event.port) orelse {
         return;
@@ -435,7 +435,7 @@ fn handlePortStatusChange(self: *Self, event: *const trbs.PortStatusChange) Erro
 }
 
 /// Handles Command Completion event.
-fn handleCommandCompletion(self: *Self, event: *const trbs.CommandCompletionTrb) Error!void {
+fn onCmdComplete(self: *Self, event: *const trbs.CmdCompletionTrb) Error!void {
     const command_trb = event.commandTrb(self.cring.memory);
     const pending = self.popPendingCmd(command_trb) orelse {
         log.warn("Command completion for unknown TRB ({t})", .{command_trb.type});
@@ -447,7 +447,7 @@ fn handleCommandCompletion(self: *Self, event: *const trbs.CommandCompletionTrb)
 /// Handles Transfer Event.
 ///
 /// Delegates the event to the appropriate device based on the slot ID in the event.
-fn handleTransferEvent(self: *Self, event: *const trbs.TransferEventTrb) Error!void {
+fn onXferEvent(self: *Self, event: *const trbs.XferEventTrb) Error!void {
     const slot = event.slot_id;
 
     // Find the device by slot ID.
