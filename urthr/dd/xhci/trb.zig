@@ -259,6 +259,38 @@ pub const AddressDeviceTrb = packed struct(u128) {
     }
 };
 
+/// Configure Endpoint Command TRB.
+///
+/// Evaluates the bandwidth and resource requirements of the endpoints selected by the command.
+pub const ConfigureEndpointTrb = packed struct(u128) {
+    /// Address of the Input Context data structure.
+    ictx: u64,
+    /// Reserved.
+    _64: u32 = 0,
+    /// Cycle bit.
+    cycle: u1,
+    /// Reserved.
+    _97: u8 = 0,
+    /// Deconfigure.
+    dc: bool = false,
+    /// TRB type.
+    type: TrbType = .configure_endpoint,
+    /// Reserved.
+    _112: u8 = 0,
+    /// Target Slot ID.
+    slot: u8,
+
+    pub fn from(slot: u8, ctx: usize) ConfigureEndpointTrb {
+        rtt.expectEqual(0, ctx & 0xF);
+
+        return .{
+            .ictx = ctx,
+            .cycle = undefined,
+            .slot = slot,
+        };
+    }
+};
+
 /// Setup Stage TRB.
 ///
 /// Used to initiate a USB Setup packet on a control endpoint.

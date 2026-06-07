@@ -6,6 +6,8 @@ xhc: *Xhc,
 dma: DmaAllocator,
 /// Transfer Ring for Endpoint 0.
 tr: rings.Ring = undefined,
+/// Device Context for this device.
+dctx: DmaMemory = undefined,
 
 /// Device state.
 state: State,
@@ -46,6 +48,8 @@ const State = enum {
 pub const Endpoint = struct {
     /// Endpoint descriptor.
     desc: EpDesc,
+    /// Transfer Ring for this endpoint.
+    tr: rings.Ring = undefined,
 
     /// List head.
     _head: List.Head = .{},
@@ -113,6 +117,7 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     @memset(dc.slice(u8), 0);
     self.dma.syncForDevice(dc.cpu, dc.size);
     self.xhc.setDeviceContext(slot, dc.bus);
+    self.dctx = dc;
 
     // Create Input Context.
     const ctx_size: usize = switch (self.xhc.csz) {
@@ -144,7 +149,7 @@ pub fn assignAddress(self: *Self, slot: u8) Error!void {
     }
     // Configure EP0 (Default Control Pipe) Context.
     {
-        const tr = try rings.Ring.new(rings.trbs_per_page, self.xhc.dma);
+        const tr = try rings.Ring.new(rings.trbs_per_page, self.dma);
         errdefer tr.deinit();
         self.tr = tr;
 
@@ -248,6 +253,94 @@ fn setConfig(self: *Self, config: u8) Error!void {
     try self.controlTransferOut(setup_data);
 }
 
+/// Issues Configure Endpoint command to notify the xHC of the endpoint configuration.
+///
+/// xHC does not know which configuration has been selected for the device.
+/// So we have to notify the selected setting to the xHC by this function.
+fn configureEndpoint(self: *Self) Error!void {
+    // Create and clear the Input Context.
+    const ctx_size: usize = switch (self.xhc.csz) {
+        .@"32" => 32,
+        .@"64" => 64,
+    };
+    const icm = try self.dma.allocBytes(ctx_size * 32, .normal);
+    const base = icm.cpu;
+    errdefer self.dma.freeBytes(icm);
+    @memset(icm.slice(u8), 0);
+
+    // Configure Input Control Context.
+    const control: *InputControlContext = @ptrFromInt(base + ctx_size * 0);
+    control.ac.a0 = true; // Slot Context
+
+    // Set Add Context Flags and configure all endpoints.
+    const speed = self.pr.read(regs.PortSc).speed;
+    var ac = control.ac;
+    var max_dci: u5 = 0;
+    var iface_iter = self.ifaces.iter();
+    while (iface_iter.next()) |iface| {
+        var ep_iter = iface.endpoints.iter();
+
+        while (ep_iter.next()) |ep| {
+            const dci = ep.desc.address.dci();
+            max_dci = @max(max_dci, dci);
+            ac.set(dci);
+
+            // Init a Transfer Ring for this endpoint.
+            ep.tr = try rings.Ring.new(rings.trbs_per_page, self.dma);
+            errdefer ep.tr.deinit();
+
+            // Configure endpoint context.
+            // Input Context layout: [Input Control][Slot][EP@DCI=1][EP@DCI=2]...
+            const ectx: *EndpointContext = @ptrFromInt(base + ctx_size * (1 + dci));
+            ectx.* = .{
+                .max_packet_size = ep.desc.max_packet_size,
+                .max_burst_size = 0,
+                .dcs = ep.tr.pcs,
+                .interval = toXhciInterval(
+                    ep.desc.interval,
+                    speed,
+                    ep.desc.attributes.transfer_type,
+                ),
+                .max_pstream = 0,
+                .mult = 0,
+                .cerr = 3,
+                .ep_type = switch (ep.desc.address.direction) {
+                    .out => switch (ep.desc.attributes.transfer_type) {
+                        .control => .control,
+                        .isochronous => .isoch_out,
+                        .bulk => .bulk_out,
+                        .interrupt => .intr_out,
+                    },
+                    .in => switch (ep.desc.attributes.transfer_type) {
+                        .control => .control,
+                        .isochronous => .isoch_in,
+                        .bulk => .bulk_in,
+                        .interrupt => .intr_in,
+                    },
+                },
+                .trdp = @intCast(ep.tr.memory.bus >> 4),
+            };
+        }
+    }
+    control.ac = ac;
+
+    // Copy and update slot context.
+    {
+        const slot_ctx: *SlotContext = @ptrFromInt(base + ctx_size * 1);
+        const current: *volatile SlotContext = @ptrFromInt(self.dctx.cpu);
+        slot_ctx.* = current.*;
+        slot_ctx.context_entries = max_dci;
+    }
+
+    // Sync the Input Context for the device.
+    self.dma.syncForDevice(icm.cpu, icm.size);
+
+    // Issue Configure Endpoint command.
+    var cmd = trbs.ConfigureEndpointTrb.from(self.slot, icm.bus);
+    self.pending_trb = self.xhc.cring.push(Trb.from(&cmd));
+    self.xhc.dbs.notifyCommand();
+}
+
 // =============================================================
 // Transfer event handlers
 // =============================================================
@@ -326,7 +419,7 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
                 return;
             }
 
-            // TODO: Configure Endpoint
+            try self.configureEndpoint();
         },
 
         // Unexpected state.
@@ -471,6 +564,28 @@ fn controlTransferOut(self: *Self, data: SetupData) Error!void {
 /// Calculate the Device Context Index (DCI).
 fn calcDci(ep: u4, direction: RequestDirection) u5 {
     return (@as(u5, ep) << 1) + @as(u5, @intFromEnum(direction));
+}
+
+/// Convert USB endpoint descriptor bInterval to xHCI Endpoint Context Interval.
+fn toXhciInterval(binterval: u8, speed: regs.PortSpeed, transfer_type: EpDesc.TransferType) u8 {
+    switch (transfer_type) {
+        .bulk, .control => return 0,
+        else => {},
+    }
+    switch (speed) {
+        .full, .low => {
+            // ceil (log2(bInterval * 8))
+            if (binterval == 0) return 3;
+            const log2 = std.math.log2_int_ceil(u8, binterval);
+            return @min(18, log2 + 3);
+        },
+        .high, .super => {
+            // bInterval - 1
+            if (binterval == 0) return 0;
+            return @min(15, binterval - 1);
+        },
+        else => return 0,
+    }
 }
 
 /// Pending Data TRB that waits for completion of a transfer operation.

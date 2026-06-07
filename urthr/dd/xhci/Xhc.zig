@@ -444,6 +444,21 @@ fn handleCommandCompletion(self: *Self, event: *const trbs.CommandCompletionTrb)
             try device.onAddressAssigned();
         },
 
+        // Endpoints are configured.
+        .configure_endpoint => {
+            const device = findDeviceByTrb(self, @ptrCast(command_trb)) orelse {
+                log.warn("Configure Endpoint Completion event for unregistered device: {d}", .{@intFromEnum(command_type)});
+                return Error.NotAvailable;
+            };
+            if (event.code != .success) {
+                log.err("Port#{d}:Slot#{d}: Failed to configure endpoints: {t}", .{ device.pi, slot_id, event.code });
+                return Error.InvalidState;
+            }
+            log.debug("Port#{d}:Slot#{d}: Endpoints configured.", .{ device.pi, slot_id });
+
+            // TODO: callback
+        },
+
         // Unhandled command completion.
         else => {
             log.warn("Unhandled command completion: {d}", .{@intFromEnum(command_type)});
