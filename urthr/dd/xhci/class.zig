@@ -1,11 +1,11 @@
 /// Instantiates a class driver for the specified interface.
 ///
 /// Returns null if no suitable driver is found.
-pub fn from(iface: *const Device.Interface) Error!?Driver {
+pub fn from(device: *Device, iface: *Device.Interface) Error!?Driver {
     const code: Class = @enumFromInt(iface.desc.class);
 
     return switch (code) {
-        .hid => try @import("class/Hid.zig").init(iface),
+        .hid => try @import("class/Hid.zig").init(device, iface),
 
         // No suitable driver found.
         else => null,
@@ -27,7 +27,7 @@ pub const Driver = struct {
         /// Name of the driver.
         name: *const fn () []const u8,
         /// Callback for transfer event on the endpoint.
-        onTransferEvent: *const fn (ctx: *anyopaque, event: *const trbs.TransferEventTrb, ep: *Endpoint) Error!void,
+        onTransferEvent: *const fn (ctx: *anyopaque, event: *const volatile trbs.TransferEventTrb, ep: *Endpoint) Error!void,
     };
 
     /// Get the name of the class driver.

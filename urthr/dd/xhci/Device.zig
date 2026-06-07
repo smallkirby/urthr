@@ -27,6 +27,8 @@ ifaces: Interface.List = .{},
 pending_trb: ?*const volatile trbs.Trb = null,
 /// Pending Data TRB that's waiting for a Transfer Event.
 pending_data: ?PendingData = null,
+/// Callback for a class-initiated EP0 control transfer.
+ctrl_cb: ?CtrlCb = null,
 
 /// Device state.
 const State = enum {
@@ -59,6 +61,8 @@ pub const Endpoint = struct {
 };
 
 /// Interface belonging to the device.
+///
+/// One interface may have multiple endpoints.
 pub const Interface = struct {
     /// Interface descriptor.
     desc: IfaceDesc,
@@ -215,7 +219,7 @@ pub fn onEndpointConfigured(self: *Self) Error!void {
     // Bind drivers to interfaces.
     var iter = self.ifaces.iter();
     while (iter.next()) |iface| {
-        if (try class.from(iface)) |driver| {
+        if (try class.from(self, iface)) |driver| {
             iface.driver = driver;
             log.info("Driver {s} bound to interface#{d}", .{ driver.getName(), iface.desc.interface_number });
         } else {
@@ -367,16 +371,61 @@ fn configureEndpoint(self: *Self) Error!void {
 
 /// Callback for Transfer Event TRB.
 pub fn onTransferEvent(self: *Self, event: *const volatile trbs.TransferEventTrb) Error!void {
-    const issuer: *const trbs.Trb =
-        @ptrFromInt(self.tr.memory.translate(event.trb));
-
-    switch (issuer.type) {
-        .status => try self.onStatusTransfer(event, @ptrCast(issuer)),
-        else => log.err(
-            "Unexpected TRB type in Transfer Event: {d}",
-            .{@intFromEnum(issuer.type)},
-        ),
+    // EP0 (Default Control Pipe, DCI=1)
+    if (event.endpoint == calcDci(0, .in)) {
+        const issuer: *const trbs.Trb = @ptrFromInt(self.tr.memory.translate(event.trb));
+        switch (issuer.type) {
+            .status => try self.onStatusTransfer(event, @ptrCast(issuer)),
+            else => log.err(
+                "Unexpected TRB type in Transfer Event: {d}",
+                .{@intFromEnum(issuer.type)},
+            ),
+        }
+        return;
     }
+
+    // Other endpoints: find by DCI and dispatch to the class driver.
+    var iface_iter = self.ifaces.iter();
+    while (iface_iter.next()) |iface| {
+        var ep_iter = iface.endpoints.iter();
+        while (ep_iter.next()) |ep| {
+            if (ep.desc.address.dci() == event.endpoint) {
+                if (iface.driver) |drv| {
+                    try drv.vtable.onTransferEvent(drv.ptr, event, ep);
+                } else {
+                    log.warn("Transfer event for endpoint DCI#{d} with no bound driver", .{event.endpoint});
+                }
+                return;
+            }
+        }
+    }
+    log.warn("Transfer event for unknown endpoint DCI#{d}", .{event.endpoint});
+}
+
+/// Issue a class-specific no-data control OUT transfer on EP0.
+pub fn classControlOut(
+    self: *Self,
+    data: SetupData,
+    ctx: *anyopaque,
+    cb: *const fn (ctx: *anyopaque, device: *Self) Error!void,
+) Error!void {
+    rtt.expectEqual(.complete, self.state);
+    rtt.expectEqual(null, self.ctrl_cb);
+    try self.controlTransferOut(data);
+    self.ctrl_cb = .{ .ctx = ctx, .cb = cb };
+}
+
+/// Queue an Interrupt IN transfer on the given endpoint.
+pub fn transferIn(self: *Self, ep: *Endpoint, buf: DmaMemory) void {
+    var trb = trbs.NormalTrb{
+        .data = buf.bus,
+        .length = @intCast(buf.size),
+        .isp = true,
+        .ioc = true,
+        .cycle = undefined,
+    };
+    _ = ep.tr.push(Trb.from(&trb));
+    self.xhc.dbs.notifyEndpoint(self.slot, ep.desc.address.dci());
 }
 
 /// Called when a Transfer Event TRB is received for a Status Stage TRB.
@@ -440,6 +489,20 @@ fn onStatusTransfer(self: *Self, event: *const volatile trbs.TransferEventTrb, i
             }
 
             try self.configureEndpoint();
+        },
+
+        // Class-initiated control transfer completed.
+        .complete => {
+            if (code != .success) {
+                log.warn("Class control transfer failed: {}", .{code});
+            }
+            self.pending_trb = null;
+            const cb = self.ctrl_cb orelse {
+                log.warn("Unexpected EP0 transfer event in complete state", .{});
+                return;
+            };
+            self.ctrl_cb = null;
+            try cb.cb(cb.ctx, self);
         },
 
         // Unexpected state.
@@ -607,6 +670,12 @@ fn toXhciInterval(binterval: u8, speed: regs.PortSpeed, transfer_type: EpDesc.Tr
         else => return 0,
     }
 }
+
+/// Callback invoked when a class-initiated EP0 control transfer completes.
+const CtrlCb = struct {
+    ctx: *anyopaque,
+    cb: *const fn (ctx: *anyopaque, device: *Self) Error!void,
+};
 
 /// Pending Data TRB that waits for completion of a transfer operation.
 const PendingData = struct {
