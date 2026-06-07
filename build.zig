@@ -838,6 +838,8 @@ const Qemu = struct {
                 "-device",
                 "virtio-rng-device,rng=rng0",
                 "-device",
+                "VGA",
+                "-device",
                 "nec-usb-xhci,id=xhci",
                 "-device",
                 "usb-kbd",
