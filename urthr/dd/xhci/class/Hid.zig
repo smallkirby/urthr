@@ -228,17 +228,36 @@ const Keyboard = struct {
         }
     };
 
-    /// Convert USB HID key code to ASCII character (basic mapping)
-    fn codeToChar(key_code: u8) u8 {
+    /// Convert USB HID key code to ASCII character.
+    fn codeToChar(key_code: u8, shifted: bool) ?u8 {
         return switch (key_code) {
-            0x04...0x1D => key_code - 0x04 + 'a', // a-z
-            0x1E...0x27 => key_code - 0x1E + '1', // 1-9, 0
-            0x2C => ' ', // Space
-            0x28 => '\n', // Enter
-            0x29 => 0x1B, // Escape
-            0x2A => 0x08, // Backspace
-            0x2B => '\t', // Tab
-            else => '?', // Unknown / Special key
+            0x04...0x1D => if (shifted) key_code - 0x04 + 'A' else key_code - 0x04 + 'a',
+            0x1E => if (shifted) '!' else '1',
+            0x1F => if (shifted) '@' else '2',
+            0x20 => if (shifted) '#' else '3',
+            0x21 => if (shifted) '$' else '4',
+            0x22 => if (shifted) '%' else '5',
+            0x23 => if (shifted) '^' else '6',
+            0x24 => if (shifted) '&' else '7',
+            0x25 => if (shifted) '*' else '8',
+            0x26 => if (shifted) '(' else '9',
+            0x27 => if (shifted) ')' else '0',
+            0x28 => '\n',
+            0x29 => 0x1B,
+            0x2A => 0x7F, // Backspace to DEL
+            0x2B => '\t',
+            0x2C => ' ',
+            0x2D => if (shifted) '_' else '-',
+            0x2E => if (shifted) '+' else '=',
+            0x2F => if (shifted) '{' else '[',
+            0x30 => if (shifted) '}' else ']',
+            0x33 => if (shifted) ':' else ';',
+            0x34 => if (shifted) '"' else '\'',
+            0x35 => if (shifted) '~' else '`',
+            0x36 => if (shifted) '<' else ',',
+            0x37 => if (shifted) '>' else '.',
+            0x38 => if (shifted) '?' else '/',
+            else => null,
         };
     }
 };
@@ -251,17 +270,23 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
     };
     const kbd = &self.instance.keyboard;
     const last = kbd.last_report;
+    const mods = report.modifiers;
+    const shifted = mods.left_shift or mods.right_shift;
+    const ctrled = mods.left_ctrl or mods.right_ctrl;
 
-    // Check for new key presses
     for (report.keys()) |key| {
-        if (key != 0 and !last.contains(key)) {
-            // TODO: do something
+        if (key == 0 or last.contains(key)) continue;
+
+        if (ctrled) {
+            // Ctrl + <letter> -> control character (0x01–0x1A)
+            if (key >= 0x04 and key <= 0x1D) {
+                urd.input.push(key - 0x04 + 1);
+            }
+            continue;
         }
-    }
-    // Check for key releases
-    for (last.keys()) |key| {
-        if (key != 0 and !report.contains(key)) {
-            // TODO: do something
+
+        if (Keyboard.codeToChar(key, shifted)) |c| {
+            urd.input.push(c);
         }
     }
 
