@@ -25,6 +25,7 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     // General System Control Registers.
 
     .{ .cpacr_el1, CpacrEl1 },
+    .{ .cptr_el2, CptrEl2 },
     .{ .esr_el1, Esr },
     .{ .esr_el2, Esr },
     .{ .esr_el3, Esr },
@@ -237,6 +238,36 @@ pub const CpacrEl1 = packed struct(u64) {
     e0poe: bool,
     /// Reserved.
     _30: u2 = 0,
+    /// Reserved.
+    _32: u32 = 0,
+};
+
+/// CPTR_EL2.
+///
+/// Controls trapping to EL2 of accsesses to some functionalitiy.
+pub const CptrEl2 = packed struct(u64) {
+    /// Reserved.
+    _0: u16 = 0,
+    /// Traps execution of SVE instructions when the PE is not in Streaming SVE mode.
+    zen: u2,
+    /// Reserved.
+    _18: u2 = 0,
+    /// Traps execution of instructions that access the Advanced SIMD and FP registers.
+    fpen: u2,
+    /// Reserved.
+    _22: u2 = 0,
+    /// Traps execution of SME instructions.
+    smen: u2,
+    /// Reserved.
+    _26: u2 = 0,
+    /// Traps System register accesses to all implemented trace registers.
+    tta: u1,
+    /// Enable access to POR_EL0.
+    e0poe: u1,
+    /// Trap Activity Monitor access.
+    tamp: bool,
+    /// Traps accesses to CPACR_EL1 from EL1 to EL2.
+    tcpac: bool,
     /// Reserved.
     _32: u32 = 0,
 };
