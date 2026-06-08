@@ -2,6 +2,7 @@ pub const console = @import("kernel/console.zig");
 pub const dev = @import("kernel/dev.zig");
 pub const exception = @import("kernel/exception.zig");
 pub const fs = @import("kernel/fs.zig");
+pub const input = @import("kernel/input.zig");
 pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
