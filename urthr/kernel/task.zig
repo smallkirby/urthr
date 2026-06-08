@@ -16,7 +16,12 @@ pub fn enterUser(filename: []const u8) !noreturn {
     const current = sched.getCurrent();
     const allocator = urd.mem.bin;
 
-    // Initialize stdout.
+    // Initialize stdin.
+    const tty = try urd.fs.open("/dev/tty", allocator);
+    defer tty.unref();
+    _ = try current.fs.fdtbl.set(0, tty);
+
+    // Initialize stdout and stderr.
     const console = try urd.fs.open("/dev/console", allocator);
     defer console.unref();
     _ = try current.fs.fdtbl.set(1, console);
