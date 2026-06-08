@@ -27,7 +27,7 @@ pub const Driver = struct {
         /// Name of the driver.
         name: *const fn () []const u8,
         /// Callback for transfer event on the endpoint.
-        onTransferEvent: *const fn (ctx: *anyopaque, event: *const volatile trbs.XferEventTrb, ep: *Endpoint) Error!void,
+        onTransferEvent: *const fn (ctx: *anyopaque, event: *const trbs.XferEventTrb, ep: *Endpoint) Error!void,
     };
 
     /// Get the name of the class driver.

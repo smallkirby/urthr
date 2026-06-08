@@ -10,8 +10,28 @@ device: *Device,
 iface: *const Device.Interface,
 /// Interrupt IN endpoint for receiving input reports.
 ep_in: *Device.Endpoint,
+
 /// Buffer for receiving input reports.
 buf: DmaMemory,
+/// Interface instance.
+instance: Instance,
+
+/// Type of HID device.
+const DeviceType = enum {
+    /// Keyboard.
+    keyboard,
+    /// Mouse.
+    mouse,
+    /// Other HID device.
+    other,
+};
+
+/// Interface instance.
+const Instance = union(DeviceType) {
+    keyboard: Keyboard,
+    mouse: void,
+    other: void,
+};
 
 // =============================================================
 // `class.Driver` implementation
@@ -46,11 +66,19 @@ pub fn init(device: *Device, iface: *const Device.Interface) Error!Driver {
     errdefer device.dma.freeBytes(buf);
     @memset(buf.slice(u8), 0);
 
+    // Instantiate the interface instance.
+    const instance = switch (detectDeviceType(iface)) {
+        .keyboard => Instance{ .keyboard = Keyboard{} },
+        .mouse => Instance{ .mouse = {} },
+        .other => Instance{ .other = {} },
+    };
+
     self.* = .{
         .device = device,
         .iface = iface,
         .ep_in = ep_in,
         .buf = buf,
+        .instance = instance,
     };
 
     // Switch to Boot Protocol.
@@ -67,18 +95,22 @@ fn name() []const u8 {
 }
 
 /// Callback for transfer events on the Interrupt IN endpoint.
-fn onTransferEvent(ctx: *anyopaque, event: *const volatile trbs.XferEventTrb, _: *Endpoint) Error!void {
+fn onTransferEvent(ctx: *anyopaque, event: *const trbs.XferEventTrb, _: *Endpoint) Error!void {
     const self: *Self = @ptrCast(@alignCast(ctx));
+    defer self.arm();
 
-    if (event.code == .success or event.code == .short_packet) {
-        self.device.dma.syncForCpu(self.buf.cpu, self.buf.size);
-        // TODO: do something
-    } else {
+    if (event.code != .success and event.code != .short_packet) {
         log.warn("Transfer error: {t}", .{event.code});
+        return;
     }
 
-    // Re-arm the endpoint for the next report.
-    self.arm();
+    self.device.dma.syncForCpu(self.buf.cpu, self.buf.size);
+
+    switch (self.instance) {
+        .keyboard => self.handleKbdInput(self.buf),
+        .mouse => {},
+        .other => {},
+    }
 }
 
 // =============================================================
@@ -92,6 +124,22 @@ const Protocol = enum(u8) {
     /// Non-boot protocol.
     report = 1,
 };
+
+/// Detect what type of HID device this is based on interface descriptor
+fn detectDeviceType(interface: *const Device.Interface) DeviceType {
+    // Check if this is a boot interface device
+    if (interface.desc.subclass == 1) {
+        return switch (interface.desc.protocol) {
+            1 => .keyboard,
+            2 => .mouse,
+            else => .other,
+        };
+    }
+
+    // For non-boot devices, we'd need to parse HID descriptors.
+    // For now, assume it's a generic HID device.
+    return .other;
+}
 
 /// Set the HID protocol.
 fn changeProtocol(self: *Self, protocol: Protocol) Error!void {
@@ -123,6 +171,101 @@ fn onSetProtocolComplete(ctx: ?*anyopaque, _: *Device, _: ?DmaMemory) Error!void
 /// Queue the next Interrupt IN transfer.
 fn arm(self: *Self) void {
     self.device.transferIn(self.ep_in, self.buf);
+}
+
+// =============================================================
+// Keyboard
+// =============================================================
+
+/// Keyboard with boot protocol.
+const Keyboard = struct {
+    /// Last received input report
+    last_report: BootReport = std.mem.zeroes(BootReport),
+
+    /// Boot keyboard input report format.
+    const BootReport = packed struct(u64) {
+        /// Modifier keys.
+        modifiers: Modifiers,
+        /// Reserved.
+        reserved: u8,
+        // Up to 6 simultaneously pressed keys
+        key0: u8,
+        key1: u8,
+        key2: u8,
+        key3: u8,
+        key4: u8,
+        key5: u8,
+
+        const Modifiers = packed struct(u8) {
+            left_ctrl: bool,
+            left_shift: bool,
+            left_alt: bool,
+            left_gui: bool,
+            right_ctrl: bool,
+            right_shift: bool,
+            right_alt: bool,
+            right_gui: bool,
+        };
+
+        /// Create a BootReport from raw data.
+        fn from(data: []const u8) ?*const BootReport {
+            if (data.len < @sizeOf(BootReport)) return null;
+            return @ptrCast(@alignCast(data.ptr));
+        }
+
+        /// Get keys as an array for easier iteration
+        fn keys(self: *const BootReport) [6]u8 {
+            return .{ self.key0, self.key1, self.key2, self.key3, self.key4, self.key5 };
+        }
+
+        /// Check if a key is in the report.
+        fn contains(self: BootReport, key: u8) bool {
+            for (self.keys()) |k| {
+                if (k == key) return true;
+            } else {
+                return false;
+            }
+        }
+    };
+
+    /// Convert USB HID key code to ASCII character (basic mapping)
+    fn codeToChar(key_code: u8) u8 {
+        return switch (key_code) {
+            0x04...0x1D => key_code - 0x04 + 'a', // a-z
+            0x1E...0x27 => key_code - 0x1E + '1', // 1-9, 0
+            0x2C => ' ', // Space
+            0x28 => '\n', // Enter
+            0x29 => 0x1B, // Escape
+            0x2A => 0x08, // Backspace
+            0x2B => '\t', // Tab
+            else => '?', // Unknown / Special key
+        };
+    }
+};
+
+/// Handle a received keyboard input report.
+fn handleKbdInput(self: *Self, buf: DmaMemory) void {
+    const report = Keyboard.BootReport.from(buf.slice(u8)) orelse {
+        log.err("Received invalid keyboard report", .{});
+        return;
+    };
+    const kbd = &self.instance.keyboard;
+    const last = kbd.last_report;
+
+    // Check for new key presses
+    for (report.keys()) |key| {
+        if (key != 0 and !last.contains(key)) {
+            // TODO: do something
+        }
+    }
+    // Check for key releases
+    for (last.keys()) |key| {
+        if (key != 0 and !report.contains(key)) {
+            // TODO: do something
+        }
+    }
+
+    kbd.last_report = report.*;
 }
 
 // =============================================================
