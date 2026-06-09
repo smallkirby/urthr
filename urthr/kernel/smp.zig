@@ -87,6 +87,7 @@ fn zsubmain() !void {
     _ = waked.fetchAdd(1, .release);
 
     // TODO: not implemented.
+    _ = arch.intr.maskAll();
     while (true) asm volatile ("nop");
 }
 
