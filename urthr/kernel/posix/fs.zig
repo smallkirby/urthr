@@ -341,69 +341,17 @@ const DirEnt64 = extern struct {
 // =============================================================
 
 /// syscall: ioctl
-pub fn sysIoctl(fd: usize, request: IoctlRequest, arg: usize) ReturnType {
-    _ = fd;
-
-    switch (request) {
-        // TCGETS: get termios
-        .tcgets => {
-            const ret: *urd.input.Termios = @ptrFromInt(arg);
-            ret.* = urd.input.getTermios();
-            return .success(0);
-        },
-
-        // TCSETS / TCSETSW / TCSETSF
-        .tcsets, .tcsetsw, .tcsetsf => {
-            const t: *const urd.input.Termios = @ptrFromInt(arg);
-            urd.input.setTermios(t.*);
-            return .success(0);
-        },
-
-        // TIOCGWINSZ
-        .tiocgwinsz => {
-            const ret: *IoctlWinSize = @ptrFromInt(arg);
-            ret.* = .{
-                .row = 25,
-                .col = 80,
-                .xpixel = 0,
-                .ypixel = 0,
-            }; // TODO: dummy value
-            return .success(0);
-        },
-
-        // Unrecognized requests.
-        _ => {
-            log.warn("Unrecognized ioctl request: {d}", .{@intFromEnum(request)});
+pub fn sysIoctl(fd: usize, request: u64, arg: usize) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    const result = file.ioctl(request, arg) catch |err| return switch (err) {
+        error.Unsupported => .err(.notty),
+        else => {
+            log.warn("ioctl({d}) failed: {}", .{ request, err });
             return .err(.inval);
         },
-    }
+    };
+    return .success(@intCast(result));
 }
-
-const IoctlRequest = enum(u64) {
-    /// Get the current serial port settings.
-    tcgets = 0x5401,
-    /// Set the serial port settings.
-    tcsets = 0x5402,
-    /// Allow the output buffer to drain, and set the current serial port settings.
-    tcsetsw = 0x5403,
-    /// Allow the output buffers to drain, discard pending input, and set the current serial port settings.
-    tcsetsf = 0x5404,
-    /// Get window size.
-    tiocgwinsz = 0x5413,
-
-    _,
-};
-
-const IoctlWinSize = extern struct {
-    /// Row count.
-    row: u16,
-    /// Column count.
-    col: u16,
-    /// Pixel width.
-    xpixel: u16,
-    /// Pixel height.
-    ypixel: u16,
-};
 
 // =============================================================
 // chmod

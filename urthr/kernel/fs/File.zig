@@ -19,6 +19,10 @@ pub const Ops = struct {
     ///
     /// Return the number of bytes written.
     write: ?*const fn (self: *File, buf: []const u8, pos: usize) Error!usize = null,
+    /// Perform a device-specific control operation.
+    ///
+    /// Returns Error.Unsupported if the file does not support ioctl.
+    ioctl: ?*const fn (self: *File, request: u64, arg: usize) Error!usize = null,
     /// Release filesystem-specific resources associated with the file context.
     ///
     /// Called when the file's reference count reaches zero.
@@ -117,6 +121,17 @@ pub fn write(self: *Self, buf: []const u8) Error!usize {
         );
         self.offset += @intCast(num_written);
         return num_written;
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Perform a device-specific control operation.
+///
+/// Returns Error.Unsupported if the file does not support ioctl.
+pub fn ioctl(self: *Self, request: u64, arg: usize) Error!usize {
+    if (self.ops.ioctl) |f| {
+        return f(self, request, arg);
     } else {
         return Error.Unsupported;
     }
