@@ -345,6 +345,20 @@ pub fn sysIoctl(fd: usize, request: IoctlRequest, arg: usize) ReturnType {
     _ = fd;
 
     switch (request) {
+        // TCGETS: get termios
+        .tcgets => {
+            const ret: *urd.input.Termios = @ptrFromInt(arg);
+            ret.* = urd.input.getTermios();
+            return .success(0);
+        },
+
+        // TCSETS / TCSETSW / TCSETSF
+        .tcsets, .tcsetsw, .tcsetsf => {
+            const t: *const urd.input.Termios = @ptrFromInt(arg);
+            urd.input.setTermios(t.*);
+            return .success(0);
+        },
+
         // TIOCGWINSZ
         .tiocgwinsz => {
             const ret: *IoctlWinSize = @ptrFromInt(arg);
@@ -366,6 +380,14 @@ pub fn sysIoctl(fd: usize, request: IoctlRequest, arg: usize) ReturnType {
 }
 
 const IoctlRequest = enum(u64) {
+    /// Get the current serial port settings.
+    tcgets = 0x5401,
+    /// Set the serial port settings.
+    tcsets = 0x5402,
+    /// Allow the output buffer to drain, and set the current serial port settings.
+    tcsetsw = 0x5403,
+    /// Allow the output buffers to drain, discard pending input, and set the current serial port settings.
+    tcsetsf = 0x5404,
     /// Get window size.
     tiocgwinsz = 0x5413,
 
