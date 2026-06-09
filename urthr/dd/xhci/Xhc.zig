@@ -488,7 +488,7 @@ const EventQueue = struct {
         }
 
         self.buf[self.tail] = trb;
-        self.tail +%= 1;
+        self.tail = (self.tail + 1) % capacity;
         self.count += 1;
 
         _ = self.waitq.wake();
@@ -506,7 +506,7 @@ const EventQueue = struct {
         }
 
         const trb = self.buf[self.head];
-        self.head +%= 1;
+        self.head = (self.head + 1) % capacity;
         self.count -= 1;
 
         return trb;
