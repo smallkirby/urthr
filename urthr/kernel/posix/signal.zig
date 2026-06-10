@@ -20,6 +20,16 @@ pub fn sysRtSigAction(signum: i32, act: usize, oldact: usize, sigsetsize: usize)
     return .success(0);
 }
 
+/// syscall: rt_sigprocmask
+pub fn sysRtSigProcMask(how: i32, set: usize, oldset: usize, sigsetsize: usize) ReturnType {
+    _ = how;
+    _ = set;
+    _ = oldset;
+    _ = sigsetsize;
+
+    return .err(.nosys); // TODO: Not implemented.
+}
+
 // =============================================================
 // Imports
 // =============================================================

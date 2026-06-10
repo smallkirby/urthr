@@ -28,6 +28,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("sched_getaffinity",   123,    posix.sched.sysSchedGetAffinity),
     .new("sigaltstack",         132,    posix.signal.sysSigAltStack),
     .new("rt_sigaction",        134,    posix.signal.sysRtSigAction),
+    .new("rt_sigprocmask",      135,    posix.signal.sysRtSigProcMask),
     .new("getuid",              174,    posix.task.sysGetUid),
     .new("geteuid",             175,    posix.task.sysGetEuid),
     .new("gettid",              178,    posix.task.sysGetTid),
