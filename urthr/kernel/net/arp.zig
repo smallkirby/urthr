@@ -188,6 +188,7 @@ pub const cache = struct {
         /// Does NOT free individual packet buffers. Callers must consume or free them first.
         fn clearPending(self: *CacheEntry) void {
             self.pending.deinit(_allocator);
+            self.pending = .empty;
         }
     };
 
