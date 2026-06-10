@@ -88,6 +88,12 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     if (in_handling) {
         w.log("!!! Double fault detected !!!", .{});
 
+        // Call the terminator if set.
+        if (terminator) |term_fn| {
+            term_fn(99);
+        }
+
+        // Halt the CPU.
         while (true) {
             am.wfe();
         }
