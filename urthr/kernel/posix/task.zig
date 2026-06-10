@@ -31,6 +31,56 @@ pub fn sysGetEuid() ReturnType {
     return .success(0);
 }
 
+/// syscall: setpgid
+pub fn sysSetPgid(pid: i32, pgid: i32) ReturnType {
+    const cur = sched.getCurrent();
+    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.tgid) {
+        return .err(.perm);
+    }
+    if (pgid < 0) {
+        return .err(.inval);
+    }
+    // Session leaders cannot change their pgid.
+    if (cur.tgid == cur.sid) {
+        return .err(.perm);
+    }
+    cur.pgid = if (pgid == 0) cur.tgid else @bitCast(pgid);
+
+    return .success(0);
+}
+
+/// syscall: getpgid
+pub fn sysGetPgid(pid: i32) ReturnType {
+    const cur = sched.getCurrent();
+    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.tgid) {
+        return .err(.perm);
+    }
+    return .success(@intCast(cur.pgid));
+}
+
+/// syscall: setsid
+pub fn sysSetsid() ReturnType {
+    const cur = sched.getCurrent();
+    if (cur.tgid == cur.pgid) {
+        // Already a process group leader.
+        return .err(.perm);
+    }
+    cur.sid = cur.tgid;
+    cur.pgid = cur.tgid;
+
+    return .success(@intCast(cur.sid));
+}
+
+/// syscall: getsid
+pub fn sysGetsid(pid: i32) ReturnType {
+    const cur = sched.getCurrent();
+    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.tgid) {
+        return .err(.perm);
+    }
+
+    return .success(@intCast(cur.sid));
+}
+
 /// syscall: prlimit64
 pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) ReturnType {
     if (pid != 0) {

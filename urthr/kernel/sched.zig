@@ -35,6 +35,8 @@ pub fn initLocal() Allocator.Error!void {
         .id = 0,
         .tgid = 0,
         .ppid = 0,
+        .pgid = 0,
+        .sid = 0,
         .name = "idle", // TODO: should be unique per core.
         .state = .running,
         .sp = undefined,
@@ -296,8 +298,9 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     const vmm = try urd.task.Vmm.new(urd.mem.bin, urd.mem.getKernelPageTable());
     errdefer vmm.deinit(urd.mem.bin);
 
+    const cur = getCurrent();
     // Initialize thread.
-    var fs = getCurrent().fs;
+    var fs = cur.fs;
     fs.root.dentry.ref();
     errdefer fs.root.dentry.unref();
     fs.cwd.dentry.ref();
@@ -308,7 +311,9 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     th.* = .{
         .id = id,
         .tgid = id,
-        .ppid = getCurrent().tgid,
+        .ppid = cur.tgid,
+        .pgid = id,
+        .sid = id,
         .name = try urd.mem.bin.dupe(u8, name),
         .state = .ready,
         .sp = @intFromPtr(sp.ptr) + sp.len,
