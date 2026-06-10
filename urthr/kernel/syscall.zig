@@ -5,7 +5,7 @@
 /// NOTE that this table is referenced only at comptime to construct runtime constants.
 ///
 /// TODO: should be arch-specific.
-const entries = [_]Descriptor{
+const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     // =============================================================
     // POSIX system calls.
 
@@ -40,7 +40,9 @@ const entries = [_]Descriptor{
     // Debug system calls.
 
     .new("ping",        512,    sysPing),
-};
+}
+else [_]Descriptor{}
+;
 
 // zig fmt: on
 
@@ -269,6 +271,7 @@ const SyscallHandler = struct {
 // Imports
 // =============================================================
 
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.syscall);
 const arch = @import("arch").impl;
