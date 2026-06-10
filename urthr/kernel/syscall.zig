@@ -21,6 +21,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("writev",              66,     posix.fs.sysWritev),
     .new("preadv",              69,     posix.fs.sysPreadv),
     .new("pwritev",             70,     posix.fs.sysPwritev),
+    .new("ppoll",               73,     posix.fs.sysPpoll),
     .new("newfstatat",          79,     posix.fs.sysNewFstatAt),
     .new("exit_group",          94,     posix.task.sysExitGroup),
     .new("clock_nanosleep",     115,    posix.task.sysClockNanoSleep),

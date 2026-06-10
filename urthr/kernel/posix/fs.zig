@@ -418,6 +418,28 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
 }
 
 // =============================================================
+// poll
+// =============================================================
+
+/// syscall: ppoll
+pub fn sysPpoll(fds: [*]const PollFd, nfds: usize, timeout: i32) ReturnType {
+    _ = fds;
+    _ = nfds;
+    _ = timeout;
+
+    return .err(.nosys); // TODO: Not implemented.
+}
+
+const PollFd = extern struct {
+    /// File descriptor.
+    fd: i32,
+    /// Requested events.
+    events: u16,
+    /// Returned events.
+    revents: u16,
+};
+
+// =============================================================
 // Internal
 // =============================================================
 
