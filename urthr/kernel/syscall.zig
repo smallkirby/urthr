@@ -28,6 +28,7 @@ const entries = [_]Descriptor{
     .new("sigaltstack",         132,    posix.signal.sysSigAltStack),
     .new("rt_sigaction",        134,    posix.signal.sysRtSigAction),
     .new("getuid",              174,    posix.task.sysGetUid),
+    .new("geteuid",             175,    posix.task.sysGetEuid),
     .new("gettid",              178,    posix.task.sysGetTid),
     .new("brk",                 214,    posix.mem.sysBrk),
     .new("munmap",              215,    posix.mem.sysMunmap),
