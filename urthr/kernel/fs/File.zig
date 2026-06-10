@@ -64,6 +64,8 @@ pub const Iterator = struct {
 path: Path,
 /// File offset.
 offset: usize,
+/// File status flags.
+status_flags: u32 = 0,
 /// File operations.
 ops: Ops,
 /// Reference count.

@@ -17,7 +17,20 @@ pub const Error = error{
 /// Maximum number of open file descriptors per process.
 const max_fds = 64;
 
+/// Per-descriptor flags.
+pub const FdFlags = packed struct(u32) {
+    /// Close this fd on exec.
+    cloexec: bool = false,
+    /// Reserved.
+    _1: u31 = 0,
+
+    const none = FdFlags{};
+};
+
+/// File entries.
 entries: [max_fds]?*File = .{null} ** max_fds,
+/// Per-descriptor flags parallel to entries.
+fd_flags: [max_fds]FdFlags = .{FdFlags.none} ** max_fds,
 
 /// Get the file associated with the given file descriptor.
 ///
@@ -43,10 +56,16 @@ pub fn set(self: *Self, fd: usize, file: *File) Error!void {
 ///
 /// Returns the allocated descriptor, or error.TableFull if the table is full.
 pub fn alloc(self: *Self, file: *File) Error!usize {
-    for (&self.entries, 0..) |*slot, fd| {
-        if (slot.* == null) {
+    return self.allocAt(0, file, .{});
+}
+
+/// Allocate the lowest available file descriptor larger than or equalt to `min_fd` for the given file.
+pub fn allocAt(self: *Self, min_fd: usize, file: *File, flags: FdFlags) Error!usize {
+    for (self.entries[min_fd..], min_fd..) |slot, fd| {
+        if (slot == null) {
             file.ref();
-            slot.* = file;
+            self.entries[fd] = file;
+            self.fd_flags[fd] = flags;
             return fd;
         }
     }
@@ -60,6 +79,7 @@ pub fn close(self: *Self, fd: usize) Error!void {
     if (self.entries[fd]) |file| {
         file.unref();
         self.entries[fd] = null;
+        self.fd_flags[fd] = .{};
     }
 }
 

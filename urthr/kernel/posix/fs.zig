@@ -337,6 +337,74 @@ const DirEnt64 = extern struct {
 };
 
 // =============================================================
+// fcntl
+// =============================================================
+
+/// syscall: fcntl
+pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
+    const cur = sched.getCurrent();
+
+    switch (op) {
+        .dupfd, .dupfd_cloexec => {
+            const file = getFile(fd) catch return .err(.badf);
+            const flags = FdFlags{ .cloexec = op == .dupfd_cloexec };
+            const newfd = cur.fs.fdtbl.allocAt(
+                @intCast(arg),
+                file,
+                flags,
+            ) catch |err| return switch (err) {
+                error.TableFull => .err(.mfile),
+                else => .err(.badf),
+            };
+            return .success(@intCast(newfd));
+        },
+
+        .getfd => {
+            _ = getFile(fd) catch return .err(.badf);
+            return .success(@intCast(@as(u32, @bitCast(cur.fs.fdtbl.fd_flags[fd]))));
+        },
+        .setfd => {
+            const flags: FdFlags = @bitCast(@as(u32, @truncate(arg)));
+            if (flags._1 != 0) return .err(.inval);
+
+            _ = getFile(fd) catch return .err(.badf);
+            cur.fs.fdtbl.fd_flags[fd] = flags;
+            return .success(0);
+        },
+
+        .getfl => {
+            const file = getFile(fd) catch return .err(.badf);
+            return .success(@intCast(file.status_flags));
+        },
+        .setfl => {
+            const file = getFile(fd) catch return .err(.badf);
+            file.status_flags = @truncate(arg);
+            return .success(0);
+        },
+
+        _ => return .err(.nosys),
+    }
+}
+
+/// File control operations.
+const FcntlOp = enum(i32) {
+    /// Duplicate the file descriptor fd using the lowest-numbered available fd greater than or equal to arg.
+    dupfd = 0,
+    /// Returns the file descriptor flags.
+    getfd = 1,
+    /// Set the file descriptor flags specified by arg.
+    setfd = 2,
+    /// Returns the file access mode and the file status flags.
+    getfl = 3,
+    /// Set the file status flags to the value specified by arg.
+    setfl = 4,
+    /// Same as dupfd, but set the close-on-exec flag on the duplicated descriptor.
+    dupfd_cloexec = 1030,
+
+    _,
+};
+
+// =============================================================
 // ioctl
 // =============================================================
 
@@ -496,4 +564,5 @@ const bits = common.bits;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const sched = urd.sched;
+const FdFlags = urd.fs.FdTable.FdFlags;
 const ReturnType = urd.syscall.ReturnType;
