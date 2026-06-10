@@ -72,25 +72,11 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 
 const fs_vtable = fs.FileSystem.Vtable{
     .getLabel = fsGetLabel,
-    .open = fopen,
 };
 
 fn fsGetLabel(ctx: *const anyopaque, allocator: Allocator) fs.Error![]const u8 {
     const self: *const Self = @ptrCast(@alignCast(ctx));
     return allocator.dupe(u8, self.bpb.label[0..]);
-}
-
-/// Open and create a file instance for the given inode.
-fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
-    const file = try allocator.create(FileImpl);
-    errdefer allocator.destroy(file);
-
-    file.* = .{
-        .fat32 = InodeImpl.from(inode).fat32,
-        .start_cluster = InodeImpl.from(inode).cluster,
-    };
-
-    return @ptrCast(file);
 }
 
 // =============================================================
@@ -399,10 +385,24 @@ const DirIterator = struct {
 // =============================================================
 
 const file_vtable = fs.File.Ops{
+    .open = fopen,
     .iterate = fiterate,
     .read = fread,
     .close = fclose,
 };
+
+/// Open and create a file instance for the given inode.
+fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
+    const file = try allocator.create(FileImpl);
+    errdefer allocator.destroy(file);
+
+    file.* = .{
+        .fat32 = InodeImpl.from(inode).fat32,
+        .start_cluster = InodeImpl.from(inode).cluster,
+    };
+
+    return @ptrCast(file);
+}
 
 const FileImpl = struct {
     /// FAT32 filesystem this file belongs to.

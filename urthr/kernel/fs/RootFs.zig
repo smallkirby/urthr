@@ -55,16 +55,7 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 // Filesystem vtable
 // =============================================================
 
-const fs_vtable = fs.FileSystem.Vtable{
-    .open = fopen,
-};
-
-fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
-    const file = try allocator.create(FileImpl);
-    file.* = .{ .inode = InodeImpl.from(inode) };
-
-    return @ptrCast(file);
-}
+const fs_vtable = fs.FileSystem.Vtable{};
 
 const DirEntry = struct {
     /// Name of the directory entry.
@@ -152,6 +143,7 @@ fn ideinit(inode: *fs.Inode) void {
 // =============================================================
 
 const file_vtable = fs.File.Ops{
+    .open = fopen,
     .iterate = fiterate,
     .read = fread,
     .close = fclose,
@@ -161,6 +153,12 @@ const file_vtable = fs.File.Ops{
 const FileImpl = struct {
     inode: *InodeImpl,
 };
+
+fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
+    const file = try allocator.create(FileImpl);
+    file.* = .{ .inode = InodeImpl.from(inode) };
+    return @ptrCast(file);
+}
 
 fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
     const ctx: *FileImpl = @ptrCast(@alignCast(iter.file.ctx));

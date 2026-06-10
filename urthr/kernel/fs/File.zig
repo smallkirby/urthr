@@ -5,6 +5,11 @@ const File = Self;
 const Error = fs.Error;
 
 pub const Ops = struct {
+    /// Allocate and return the per-open context for this file.
+    ///
+    /// Called once when the file is opened. The returned pointer is stored in
+    /// `File.ctx` and forwarded to all other ops and to `close`.
+    open: *const fn (inode: *Inode, allocator: Allocator) Error!*anyopaque,
     /// Iterate over all files in this directory inode.
     ///
     /// This function allocates a memory using the given allocator,
@@ -81,14 +86,16 @@ pub fn open(path: fs.Path, allocator: Allocator) Error!*File {
     errdefer path.dentry.unref();
 
     rtt.expect(path.mount != null);
-    const filesystem = path.mount.?.filesystem;
 
-    const ctx = try filesystem.vtable.open(path.dentry.inode, allocator);
+    const node = path.dentry.inode;
     const file = try allocator.create(File);
+    errdefer allocator.destroy(file);
+
+    const ctx = try node.fops.open(node, allocator);
     file.* = .{
         .path = path,
         .offset = 0,
-        .ops = path.dentry.inode.fops,
+        .ops = node.fops,
         .allocator = allocator,
         .ctx = ctx,
     };

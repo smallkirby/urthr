@@ -83,21 +83,7 @@ pub fn registerDevice(self: *Self, name: []const u8, fops: fs.File.Ops) fs.Error
 // Filesystem vtable
 // =============================================================
 
-const fs_vtable = fs.FileSystem.Vtable{
-    .open = fopen,
-};
-
-fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
-    if (inode.ftype == .directory) {
-        const file = try allocator.create(FileImpl);
-        file.* = .{ .inode = InodeImpl.from(inode) };
-
-        return @ptrCast(file);
-    }
-
-    // Device files carry no per-open state.
-    return undefined;
-}
+const fs_vtable = fs.FileSystem.Vtable{};
 
 const DevEntry = struct {
     name: []const u8,
@@ -159,10 +145,23 @@ fn ideinit(inode: *fs.Inode) void {
 // =============================================================
 
 const file_vtable = fs.File.Ops{
+    .open = fopen,
     .iterate = fiterate,
     .read = fread,
     .close = fclose,
 };
+
+fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
+    if (inode.ftype == .directory) {
+        const file = try allocator.create(FileImpl);
+        file.* = .{ .inode = InodeImpl.from(inode) };
+
+        return @ptrCast(file);
+    }
+
+    // Device files carry no per-open state.
+    return undefined;
+}
 
 const FileImpl = struct {
     inode: *InodeImpl,

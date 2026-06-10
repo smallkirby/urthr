@@ -3,6 +3,7 @@
 //! Implements `fs.File` interface.
 
 pub const fops = fs.File.Ops{
+    .open = open,
     .iterate = iterate,
     .read = read,
     .write = write,
@@ -11,6 +12,10 @@ pub const fops = fs.File.Ops{
 };
 
 pub const name = "tty";
+
+fn open(_: *fs.Inode, _: Allocator) fs.Error!*anyopaque {
+    return &.{};
+}
 
 fn write(_: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     urd.console.write(buf);
