@@ -3,6 +3,18 @@ pub fn sysExitGroup(code: i32) ReturnType {
     task.exit(code);
 }
 
+/// syscall: getpid
+pub fn sysGetPid() ReturnType {
+    const current = sched.getCurrent();
+    return .success(@bitCast(@as(u64, current.tgid)));
+}
+
+/// syscall: getppid
+pub fn sysGetPpid() ReturnType {
+    const current = sched.getCurrent();
+    return .success(@bitCast(@as(u64, current.ppid)));
+}
+
 /// syscall: gettid
 pub fn sysGetTid() ReturnType {
     const current = sched.getCurrent();
@@ -11,14 +23,12 @@ pub fn sysGetTid() ReturnType {
 
 /// syscall: getuid
 pub fn sysGetUid() ReturnType {
-    const current = sched.getCurrent();
-    return .success(@bitCast(@as(u64, current.id)));
+    return .success(0);
 }
 
 /// syscall: geteuid
 pub fn sysGetEuid() ReturnType {
-    const current = sched.getCurrent();
-    return .success(@bitCast(@as(u64, current.id)));
+    return .success(0);
 }
 
 /// syscall: prlimit64

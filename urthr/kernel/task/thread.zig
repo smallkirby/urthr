@@ -2,6 +2,14 @@
 pub const Thread = struct {
     /// Thread ID.
     id: Id,
+    /// Thread Group ID (PID from userspace perspective).
+    ///
+    /// For single-threaded processes this equals `id`.
+    /// Threads created via clone(CLONE_THREAD) share the TGID of the creator.
+    tgid: Id,
+    /// Parent thread group ID.
+    ppid: Id,
+
     /// Thread name.
     name: []const u8,
     /// Thread state.
@@ -10,12 +18,14 @@ pub const Thread = struct {
     sp: usize,
     /// Stack memory region.
     stack: ?[]u8 = null,
+
     /// This thread needs to be rescheduled.
     need_resched: bool = false,
     /// Total accumulated runtime in microseconds.
     runtime_us: u64 = 0,
     /// Raw timer ticks when this thread last started executing.
     last_exec_start: u64 = 0,
+
     /// Memory manager.
     vmm: *task.Vmm,
     /// File system information.
@@ -27,6 +37,7 @@ pub const Thread = struct {
         /// File descriptor table.
         fdtbl: urd.fs.FdTable = .{},
     },
+
     /// Thread list node.
     head: ThreadList.Head = .{},
 };

@@ -33,6 +33,8 @@ pub fn initLocal() Allocator.Error!void {
 
     th.* = .{
         .id = 0,
+        .tgid = 0,
+        .ppid = 0,
         .name = "idle", // TODO: should be unique per core.
         .state = .running,
         .sp = undefined,
@@ -302,8 +304,11 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     errdefer fs.cwd.dentry.unref();
     fs.fdtbl = .{};
 
+    const id = allocateId();
     th.* = .{
-        .id = allocateId(),
+        .id = id,
+        .tgid = id,
+        .ppid = getCurrent().tgid,
         .name = try urd.mem.bin.dupe(u8, name),
         .state = .ready,
         .sp = @intFromPtr(sp.ptr) + sp.len,
