@@ -70,8 +70,14 @@ pub const Ring = struct {
     }
 
     /// Push a Link TRB and reset the cursor.
-    fn rotate(_: *Ring) void {
-        urd.unimplemented("Ring.rotate");
+    fn rotate(self: *Ring) void {
+        const slice = self.memory.slice(Trb);
+        const link = &slice[self.size - 1];
+        link.cycle = self.pcs;
+        self.allocator.syncForDeviceAny(link);
+
+        self.pcs ^= 1;
+        self.index = 0;
     }
 
     /// Deinitialize the Ring and free the backing memory.
