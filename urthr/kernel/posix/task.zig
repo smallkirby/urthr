@@ -3,6 +3,63 @@ pub fn sysExitGroup(code: i32) ReturnType {
     task.exit(code);
 }
 
+/// syscall: kill
+pub fn sysKill(pid: i32, signal: Signal) ReturnType {
+    const cur = sched.getCurrent();
+    if (signal == .check) return .success(0);
+
+    // Resolve target process group or PID.
+    const tgid: u32 = if (pid > 0)
+        @bitCast(pid)
+    else if (pid == 0)
+        cur.pgid
+    else
+        return .err(.nosys); // negative pid (process group) not implemented
+
+    // Only self-targeting is supported for now.
+    if (tgid != cur.tgid and tgid != cur.pgid) {
+        urd.unimplemented("kill: not self-targeting.");
+    }
+
+    switch (signal) {
+        // Job-control signals with no real delivery yet: silently accept.
+        .stop, .tstp, .ttin, .ttou, .cont => return .success(0),
+        // Termination signals.
+        .term, .int, .hup, .quit, .kill => task.exit(0),
+
+        else => urd.unimplemented("unsupported signal,"),
+    }
+}
+
+const Signal = enum(i32) {
+    /// No signal is sent, but error checking is still performed.
+    check = 0,
+    /// Hangup detected on controlling terminal or death of controlling process.
+    hup = 1,
+    /// Interrupt from keyboard.
+    int = 2,
+    /// Quit from keyboard.
+    quit = 3,
+    /// Kill signal.
+    kill = 9,
+    /// Termination signal.
+    term = 15,
+    /// Child stopped or terminated.
+    chld = 17,
+    /// Continue if stopped.
+    cont = 18,
+    /// Stop process.
+    stop = 19,
+    /// Terminal stop signal.
+    tstp = 20,
+    /// Background process attempting read.
+    ttin = 21,
+    /// Background process attempting write.
+    ttou = 22,
+
+    _,
+};
+
 /// syscall: getpid
 pub fn sysGetPid() ReturnType {
     const current = sched.getCurrent();

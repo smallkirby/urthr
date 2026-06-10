@@ -27,6 +27,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("exit_group",          94,     posix.task.sysExitGroup),
     .new("clock_nanosleep",     115,    posix.task.sysClockNanoSleep),
     .new("sched_getaffinity",   123,    posix.sched.sysSchedGetAffinity),
+    .new("kill",                129,    posix.task.sysKill),
     .new("sigaltstack",         132,    posix.signal.sysSigAltStack),
     .new("rt_sigaction",        134,    posix.signal.sysRtSigAction),
     .new("rt_sigprocmask",      135,    posix.signal.sysRtSigProcMask),
