@@ -85,6 +85,13 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
     return stack[0..(addr - @intFromPtr(stack.ptr))];
 }
 
+/// Get the ISR context saved on the given kernel stack.
+///
+/// Valid only when called from a syscall handler.
+pub fn isrContextOf(kstack: []u8) *IsrContext {
+    return @ptrFromInt(@intFromPtr(kstack.ptr) + kstack.len - @sizeOf(IsrContext));
+}
+
 /// Switch context from the old thread to the new thread.
 pub extern fn switchContext(old: *usize, new: *const usize) callconv(.c) void;
 
@@ -96,7 +103,7 @@ pub fn setThreadPointer(tp: usize) void {
 /// Drop from EL1 to EL0 and start executing at the given user PC with the given user SP.
 ///
 /// Does not return.
-pub extern fn enterUserland(pc: usize, sp: usize) callconv(.c) noreturn;
+pub extern fn enterUserland(pc: usize, sp: usize, kstack: usize) callconv(.c) noreturn;
 
 /// Thread entry trampoline function.
 fn trampoline() callconv(.naked) noreturn {

@@ -74,7 +74,12 @@ pub fn enterUser(filename: []const u8) !noreturn {
     const usp = try scon.finalize();
 
     // Enter userland.
-    arch.thread.enterUserland(ldr_info.entry, usp);
+    const kstack = current.stack.?;
+    arch.thread.enterUserland(
+        ldr_info.entry,
+        usp,
+        @intFromPtr(kstack.ptr) + kstack.len,
+    );
 }
 
 /// Exit the current process with the given exit code.

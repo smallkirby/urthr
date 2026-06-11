@@ -197,6 +197,13 @@ pub fn getCurrent() *Thread {
     return getCurrentNullable().?;
 }
 
+/// Get the ISR context of the current thread.
+///
+/// Valid only when called from a syscall handler.
+pub fn getCurrentCtx() *arch.exception.Context {
+    return arch.thread.isrContextOf(getCurrent().stack.?);
+}
+
 /// Get the currently running thread, or null if no thread is running.
 fn getCurrentNullable() ?*Thread {
     return pcpu.get(&current);
