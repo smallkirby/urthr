@@ -135,8 +135,8 @@ pub const EventRing = struct {
         self.allocator.syncForDevice(self.trbs.cpu, self.trbs.size);
 
         // Set the Event Ring Segment Table.
-        self.interrupter.write(regs.Erstsz, @as(u32, @intCast(self.erst.slice(ErstEntry).len)));
-        self.interrupter.write(regs.Erstba, self.erst.bus);
+        self.interrupter.writei(regs.Erstsz, @as(u32, @intCast(self.erst.slice(ErstEntry).len)));
+        self.interrupter.writei(regs.Erstba, self.erst.bus);
         self.interrupter.modify(regs.Erdp, .{
             .erdp = toErdpBus(self.trbs.bus),
         });

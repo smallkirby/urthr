@@ -178,13 +178,13 @@ pub fn setOutput(pin: Pin, high: bool) void {
     const mask = bits.set(@as(u32, 0), info.pin_offset);
 
     // Set direction to output.
-    info.rio.write(RioOeSet, mask);
+    info.rio.writei(RioOeSet, mask);
 
     // Set output value
     if (high) {
-        info.rio.write(RioOutSet, mask);
+        info.rio.writei(RioOutSet, mask);
     } else {
-        info.rio.write(RioOutClr, mask);
+        info.rio.writei(RioOutClr, mask);
     }
 }
 

@@ -228,12 +228,12 @@ fn setEnableIrq(self: *const Self, qidx: usize, enable: bool) void {
     rtt.expect(qidx == 0); // Only one queue supported.
 
     if (enable) {
-        self.module.write(Ier, std.mem.zeroInit(InterruptBf, .{
+        self.module.writei(Ier, std.mem.zeroInit(InterruptBf, .{
             .rcomp = true,
             .rxubr = true,
         }));
     } else {
-        self.module.write(Idr, 0xFFFF_FFFF);
+        self.module.writei(Idr, 0xFFFF_FFFF);
     }
 }
 
@@ -595,8 +595,8 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
 
     // Set RX queue address.
     const rxq_dma = self.rxq.addrDma();
-    self.module.write(Rxbqbh, @as(u32, @truncate(rxq_dma >> 32)));
-    self.module.write(Rxbqb, @as(u32, @truncate(rxq_dma)));
+    self.module.writei(Rxbqbh, @as(u32, @truncate(rxq_dma >> 32)));
+    self.module.writei(Rxbqb, @as(u32, @truncate(rxq_dma)));
 
     // Allocate and configure TX queue.
     self.txq = try TxQueue.create(self.dma_allocator);
@@ -604,8 +604,8 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
 
     // Set TX queue address.
     const txq_dma = self.txq.addrDma();
-    self.module.write(Txbqbh, @as(u32, @truncate(txq_dma >> 32)));
-    self.module.write(Txbqb, @as(u32, @truncate(txq_dma)));
+    self.module.writei(Txbqbh, @as(u32, @truncate(txq_dma >> 32)));
+    self.module.writei(Txbqb, @as(u32, @truncate(txq_dma)));
 
     arch.barrier(.full, .release);
 }

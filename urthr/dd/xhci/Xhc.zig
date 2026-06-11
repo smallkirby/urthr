@@ -149,7 +149,7 @@ pub fn setup(self: *Self) Error!void {
     // Enable  interrupts.
     try self.enableInterrupt();
     // Set DCBAA pointer.
-    self.op.write(regs.Dcbaap, self.dcbaa.dcbaap());
+    self.op.writei(regs.Dcbaap, self.dcbaa.dcbaap());
 
     {
         const irs0 = self.getIrsAt(0);

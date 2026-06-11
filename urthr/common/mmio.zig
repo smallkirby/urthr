@@ -191,7 +191,14 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
         }
 
         /// Write to the specified field.
-        pub fn write(self: Self, T: type, value: anytype) void {
+        pub fn write(self: Self, T: type, value: T) void {
+            const offset, const MT = getRegister(T);
+
+            MT.write(self.base + offset, value);
+        }
+
+        /// Write to the specified field with any type.
+        pub fn writei(self: Self, T: type, value: anytype) void {
             const offset, const MT = getRegister(T);
 
             MT.write(self.base + offset, value);

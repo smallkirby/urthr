@@ -262,11 +262,11 @@ fn reset() void {
         .reply_error_disable = true,
         .replay_dec_error_disable = true,
     });
-    pcie.write(PcieMiscAxiReadErrorData, 0xFFFF_FFFF);
+    pcie.writei(PcieMiscAxiReadErrorData, 0xFFFF_FFFF);
 
     // Adjust timeouts.
-    pcie.write(MiscUbusTimeout, 0x0B2D_0000);
-    pcie.write(RcConfigRetryTimeout, 0x0ABA_0000);
+    pcie.writei(MiscUbusTimeout, 0x0B2D_0000);
+    pcie.writei(RcConfigRetryTimeout, 0x0ABA_0000);
 
     // Disable broken forwarding search. Set chicken bits for 2712D0.
     pcie.modify(MiscAxiIntfCtrl, .{
@@ -281,16 +281,16 @@ fn reset() void {
         var value: u32 = @bitCast(pcie.read(MiscAxiIntfCtrl));
         value &= ~@as(u32, 0x3F);
         value |= 15;
-        pcie.write(MiscAxiIntfCtrl, value);
+        pcie.writei(MiscAxiIntfCtrl, value);
     }
 
     // Setup QoS.
     pcie.modify(PcieCtrl, .{
         .en_vdm_qos_control = true,
     });
-    pcie.write(MiscVdmPriorityToQosMapHi, 0xBBAA9888);
-    pcie.write(MiscVdmPriorityToQosMapLo, 0xBBAA9888);
-    pcie.write(RcTlVdmCtrl1, 0);
+    pcie.writei(MiscVdmPriorityToQosMapHi, 0xBBAA9888);
+    pcie.writei(MiscVdmPriorityToQosMapLo, 0xBBAA9888);
+    pcie.writei(RcTlVdmCtrl1, 0);
     pcie.modify(RcTlVdmCtrl0, .{
         .enabled = true,
         .ignore_tag = true,
@@ -385,8 +385,8 @@ fn initAer() void {
     aer.setBase(conf.getRegisterAddress(dd.pci.ExtCapHeader));
 
     // Unmask all error reporting.
-    aer.write(AerUncorrectableMask, 0);
-    aer.write(AerCorrectableMask, 0);
+    aer.writei(AerUncorrectableMask, 0);
+    aer.writei(AerCorrectableMask, 0);
 }
 
 /// AER status.
@@ -434,7 +434,7 @@ pub fn mdioWrite(addr: u16, data: u32) void {
 
     // Write data.
     const data_done_bit_pos = 31;
-    pcie.write(RcDlMdioWrite, bits.set(data, data_done_bit_pos));
+    pcie.writei(RcDlMdioWrite, bits.set(data, data_done_bit_pos));
 
     // Wait for completion.
     for (0..10) |_| {

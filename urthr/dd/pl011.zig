@@ -48,20 +48,20 @@ pub fn init(clk: anytype, baudrate: u64) void {
     pl011.modify(Lcrh, .{ .fen = false });
 
     // Clear interrupts.
-    pl011.write(Icr, Icr.mask());
+    pl011.writei(Icr, Icr.mask());
 
     // Set baud rate.
-    pl011.write(Ibrd, @as(u16, @intCast(ibrd)));
-    pl011.write(Fbrd, @as(u6, @intCast(fbrd)));
+    pl011.writei(Ibrd, @as(u16, @intCast(ibrd)));
+    pl011.writei(Fbrd, @as(u6, @intCast(fbrd)));
 
     // Enable FIFO, set 8n1.
-    pl011.write(Lcrh, std.mem.zeroInit(Lcrh, .{
+    pl011.writei(Lcrh, std.mem.zeroInit(Lcrh, .{
         .fen = true,
         .wlen = .bits8,
     }));
 
     // Enable UART, TX and RX.
-    pl011.write(Cr, std.mem.zeroInit(Cr, .{
+    pl011.writei(Cr, std.mem.zeroInit(Cr, .{
         .uarten = true,
         .txe = true,
         .rxe = true,

@@ -185,7 +185,7 @@ fn submitCmd(cmd: [4]CommandWord, op: Command) void {
 
 /// Update GITS_CWRITER to notify the ITS of newly queued commands.
 fn commit() void {
-    its.write(Cwriter, cmd_idx * @sizeOf(CommandWord));
+    its.writei(Cwriter, cmd_idx * @sizeOf(CommandWord));
 }
 
 /// Wait until the ITS finishes processing all commands and is idle.

@@ -159,10 +159,10 @@ fn reset() void {
     sdhc.waitFor(SwReset, .{ .all = false }, null);
 
     // Enable all interrupts.
-    sdhc.write(NormalIntStatusEn, 0xFFFF);
-    sdhc.write(ErrorIntStatusEn, 0xFFFF);
-    sdhc.write(NormalIntSignalEn, 0xFFFF);
-    sdhc.write(ErrorIntSignalEn, 0xFFFF);
+    sdhc.writei(NormalIntStatusEn, 0xFFFF);
+    sdhc.writei(ErrorIntStatusEn, 0xFFFF);
+    sdhc.writei(NormalIntSignalEn, 0xFFFF);
+    sdhc.writei(ErrorIntSignalEn, 0xFFFF);
 }
 
 // =============================================================
@@ -341,7 +341,7 @@ fn initPower() void {
             @panic("No supported voltage found for SD bus.");
 
     // Clear power.
-    sdhc.write(PowerControl, 0);
+    sdhc.writei(PowerControl, 0);
     arch.timer.spinWaitMilli(1);
 
     // Select voltage.
@@ -620,15 +620,15 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     sdhc.waitFor(PresentState, .{ .cmd = false, .dat = false }, .ms(1));
 
     // Clear interrupt status.
-    sdhc.write(NormalIntStatus, 0xFFFF);
-    sdhc.write(ErrorIntStatus, 0xFFFF);
+    sdhc.writei(NormalIntStatus, 0xFFFF);
+    sdhc.writei(ErrorIntStatus, 0xFFFF);
 
     // Set argument.
     const argval: u32 = switch (@typeInfo(@TypeOf(arg))) {
         .comptime_int => @as(u32, arg),
         else => @bitCast(arg),
     };
-    sdhc.write(Argument, Argument{ .value = argval });
+    sdhc.write(Argument, .{ .value = argval });
 
     // Set data if present.
     const use_adma2 = adma2_avail and if (data) |d| d.len >= block_size else false;
@@ -654,7 +654,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
             .bsize = @intCast(buf.len),
             .boundary = .k4,
         });
-        sdhc.write(Bcount16, 1);
+        sdhc.writei(Bcount16, 1);
     }
 
     // Set command.

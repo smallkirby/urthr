@@ -232,21 +232,21 @@ pub fn init(base: usize, expected: DeviceId, page_allocator: PageAllocator, allo
 /// Initialize the device following virtio spec 3.1.1.
 fn initDevice(self: *Self) Error!void {
     // Reset the device.
-    self.module.write(Status, 0);
+    self.module.writei(Status, 0);
     self.module.modify(Status, .{ .ack = true });
     self.module.modify(Status, .{ .driver = true });
 
     // Set guest page size before any queue is used.
-    self.module.write(GuestPageSize, page_size);
+    self.module.writei(GuestPageSize, page_size);
 
     // Read device feature bits.
     const device_features = if (self.version == .legacy)
         self.module.read(DeviceFeat).value
     else blk: {
         var features: u64 = 0;
-        self.module.write(DeviceFeatSel, 0);
+        self.module.writei(DeviceFeatSel, 0);
         features |= @as(u64, self.module.read(DeviceFeat).value);
-        self.module.write(DeviceFeatSel, 1);
+        self.module.writei(DeviceFeatSel, 1);
         features |= @as(u64, self.module.read(DeviceFeat).value) << 32;
         break :blk features;
     };
@@ -254,15 +254,15 @@ fn initDevice(self: *Self) Error!void {
     // Negotiate features.
     // TODO: accept callback to delegate feature selection to caller.
     if (self.version == .legacy) {
-        self.module.write(DriverFeat, @as(u32, @truncate(device_features)));
+        self.module.writei(DriverFeat, @as(u32, @truncate(device_features)));
     } else {
         const virtio_f_version1: u64 = 1 << 32;
 
         const features: u64 = device_features & virtio_f_version1;
-        self.module.write(DriverFeatSel, 0);
-        self.module.write(DriverFeat, bits.extract(u32, features, 0));
-        self.module.write(DriverFeatSel, 1);
-        self.module.write(DriverFeat, bits.extract(u32, features, 32));
+        self.module.writei(DriverFeatSel, 0);
+        self.module.writei(DriverFeat, bits.extract(u32, features, 0));
+        self.module.writei(DriverFeatSel, 1);
+        self.module.writei(DriverFeat, bits.extract(u32, features, 32));
     }
 
     // Set FEATURES_OK status bit (device does not accept features after this).
@@ -272,7 +272,7 @@ fn initDevice(self: *Self) Error!void {
 /// Setup a virtqueue.
 pub fn setupQueue(self: *Self, index: u32) Error!void {
     // Select the queue.
-    self.module.write(QueueSel, index);
+    self.module.writei(QueueSel, index);
 
     // Check if queue is already in use.
     if (self.queues.contains(index)) {
@@ -303,20 +303,20 @@ pub fn setupQueue(self: *Self, index: u32) Error!void {
     const desc_addr = self.page_allocator.translateP(vq.getDescAddr());
 
     if (self.version == .legacy) {
-        self.module.write(QueueAlign, page_size);
-        self.module.write(QueuePfn, @as(u32, @intCast(desc_addr / page_size)));
+        self.module.writei(QueueAlign, page_size);
+        self.module.writei(QueuePfn, @as(u32, @intCast(desc_addr / page_size)));
     } else {
         const avail_addr = self.page_allocator.translateP(vq.getAvailAddr());
         const used_addr = self.page_allocator.translateP(vq.getUsedAddr());
 
-        self.module.write(QueueDescLow, @as(u32, @truncate(desc_addr)));
-        self.module.write(QueueDescHigh, @as(u32, @truncate(desc_addr >> 32)));
-        self.module.write(QueueDriverLow, @as(u32, @truncate(avail_addr)));
-        self.module.write(QueueDriverHigh, @as(u32, @truncate(avail_addr >> 32)));
-        self.module.write(QueueDeviceLow, @as(u32, @truncate(used_addr)));
-        self.module.write(QueueDeviceHigh, @as(u32, @truncate(used_addr >> 32)));
+        self.module.writei(QueueDescLow, @as(u32, @truncate(desc_addr)));
+        self.module.writei(QueueDescHigh, @as(u32, @truncate(desc_addr >> 32)));
+        self.module.writei(QueueDriverLow, @as(u32, @truncate(avail_addr)));
+        self.module.writei(QueueDriverHigh, @as(u32, @truncate(avail_addr >> 32)));
+        self.module.writei(QueueDeviceLow, @as(u32, @truncate(used_addr)));
+        self.module.writei(QueueDeviceHigh, @as(u32, @truncate(used_addr >> 32)));
 
-        self.module.write(QueueReady, 1);
+        self.module.writei(QueueReady, 1);
     }
 
     self.queues.put(index, vq) catch return Error.OutOfMemory;
@@ -334,7 +334,7 @@ pub fn finishInit(self: *const Self) void {
 
 /// Notify the device that there are new buffers in the queue.
 pub fn notifyQueue(self: *const Self, queue_index: u16) void {
-    self.module.write(QueueNotify, @as(u32, queue_index));
+    self.module.writei(QueueNotify, @as(u32, queue_index));
 }
 
 /// Read a value from the device config space.

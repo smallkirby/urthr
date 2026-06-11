@@ -38,13 +38,13 @@ pub fn init(base: usize) void {
         for (Channel.avails) |chan| {
             mask = bits.set(mask, @as(u32, @intFromEnum(chan)));
         }
-        mb.write(HostEventIrqEnSet, mask);
+        mb.writei(HostEventIrqEnSet, mask);
     }
 }
 
 /// Generate interrupts on the M3 cores.
 pub fn notify(chan: Channel) void {
-    mb.write(ProcEventsSet, bits.set(@as(u32, 0), @intFromEnum(chan)));
+    mb.writei(ProcEventsSet, bits.set(@as(u32, 0), @intFromEnum(chan)));
 }
 
 /// Check if there's a pending interrupt on the given channel.
@@ -56,7 +56,7 @@ pub fn checkIrq(chan: Channel) bool {
 
 /// Clear interrupt on the given channel.
 pub fn clearIrq(chan: Channel) void {
-    mb.write(HostEventIrqEnClr, bits.set(@as(u32, 0), @intFromEnum(chan)));
+    mb.writei(HostEventIrqEnClr, bits.set(@as(u32, 0), @intFromEnum(chan)));
 }
 
 /// Mailbox channels.

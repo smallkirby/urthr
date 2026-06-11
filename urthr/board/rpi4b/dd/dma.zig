@@ -165,7 +165,7 @@ pub fn setupChannel(chan: usize) void {
     // Enable the channel globally.
     var map: u32 = @bitCast(global.read(Enable));
     map |= @as(u32, 1) << @as(u5, @intCast(chan));
-    global.write(Enable, map);
+    global.writei(Enable, map);
 
     // Reset the DMA channel.
     switch (dmas[chan]) {
