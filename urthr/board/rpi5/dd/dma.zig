@@ -220,23 +220,23 @@ pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
             dma.write(ndma.Cbad, .{
                 .addr = @intCast(cbs[chan].phys()),
             });
-            dma.write(ndma.Cs, std.mem.zeroInit(ndma.Cs, .{
+            dma.writez(ndma.Cs, .{
                 .active = true,
                 .wait_for_outstanding_writes = true,
                 .priority = 15,
                 .panic_priority = 15,
-            }));
+            });
         },
         inline else => |*dma| {
             dma.write(dma4.Cbad, .{
                 .addr = @intCast(cbs[chan].phys() >> 5),
             });
-            dma.write(dma4.Cs, std.mem.zeroInit(dma4.Cs, .{
+            dma.writez(dma4.Cs, .{
                 .active = true,
                 .wait_for_outstanding_writes = true,
                 .qos = 15,
                 .panic_qos = 15,
-            }));
+            });
         },
     }
 }

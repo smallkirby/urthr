@@ -99,9 +99,9 @@ pub fn init(netdev: *net.Device) net.Error!void {
     });
 
     // Enable MDIO.
-    self.module.write(Ncr, std.mem.zeroInit(Ncr, .{
+    self.module.writez(Ncr, .{
         .mpe = true,
-    }));
+    });
     self.module.modify(Ncfgr, .{
         .clk = 6, // div by 128
     });
@@ -579,7 +579,7 @@ const TxQueue = struct {
 /// Configure DMA settings.
 fn configureDma(self: *Self) DmaAllocator.Error!void {
     // Configure DMA settings.
-    self.module.write(Dmacfg, std.mem.zeroInit(Dmacfg, .{
+    self.module.writez(Dmacfg, .{
         .fbldo = 16, // 16 beats
         .endia_desc = builtin.cpu.arch.endian() == .big,
         .endia_pkt = builtin.cpu.arch.endian() == .big,
@@ -587,7 +587,7 @@ fn configureDma(self: *Self) DmaAllocator.Error!void {
         .txpbms = true, // Full TX packet buffer
         .rxbs = 32, // 2048 bytes
         .addr64 = true, // Enable 64-bit DMA addressing
-    }));
+    });
 
     // Allocate and configure RX queue.
     self.rxq = try RxQueue.create(self.dma_allocator);

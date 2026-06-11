@@ -87,40 +87,40 @@ fn initClock() void {
         20 => 0,
         else => @compileError("Unsupported SDIO clock step value."),
     };
-    cfg.write(Mode, std.mem.zeroInit(Mode, .{
+    cfg.writez(Mode, .{
         .src_sel = 2, // PLL sys VCO
         .steps = steps_value,
-    }));
+    });
 
     // Default RX delay.
-    cfg.write(RxDelay, std.mem.zeroInit(RxDelay, .{
+    cfg.writez(RxDelay, .{
         .overflow = .clamp,
         .map = .stretch,
         .fixed = 6,
-    }));
+    });
 
     // Default SD delay.
-    cfg.write(SdDelay, std.mem.zeroInit(SdDelay, .{
+    cfg.writez(SdDelay, .{
         .step = 5,
-    }));
+    });
 
     // We select freq, we turn on TX clock, we turn on SD clk, we pick clock generator mode.
-    cfg.write(UseLocal, std.mem.zeroInit(UseLocal, .{
+    cfg.writez(UseLocal, .{
         .freq_sel = true,
         .clk_gen_sel = true,
         .card_clk_en = true,
         .clk2card_on = true,
-    }));
+    });
 
     // Set rate.
     const init_freq = 400_000; // 400 kHz
     const div = (core_clk_freq / init_freq) - 1;
-    cfg.write(Local, std.mem.zeroInit(Local, .{
+    cfg.writez(Local, .{
         .clk_gen_sel = true,
         .card_clk_en = true,
         .clk2card_on = true,
         .freq_sel = @as(u10, @intCast(div)),
-    }));
+    });
 
     // De-assert reset.
     cfg.write(Cs, 0);

@@ -361,11 +361,11 @@ fn initPower() void {
 
 /// Initialize bus settings.
 fn initBus() void {
-    sdhc.write(HostControl1, std.mem.zeroInit(HostControl1, .{
+    sdhc.writez(HostControl1, .{
         .data_width = .b1,
         .highspeed = false,
         .dma_select = @as(DmaSelect, if (adma2_avail) .adma2b32 else .none),
-    }));
+    });
     sdhc.modify(HostControl2, .{
         .adma2length = .b16,
     });

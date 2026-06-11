@@ -204,6 +204,16 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             MT.write(self.base + offset, value);
         }
 
+        /// Write to the specified field.
+        ///
+        /// The value must be a partial struct of the register type.
+        /// The unspecified fields are initialized with zero values.
+        pub fn writez(self: Self, T: type, value: anytype) void {
+            const offset, const MT = getRegister(T);
+
+            MT.write(self.base + offset, std.mem.zeroInit(T, value));
+        }
+
         /// Write to the specified indexed field.
         pub fn writeIndexed(self: Self, T: type, index: usize, stride: usize, value: anytype) void {
             const offset, const MT = getRegister(T);

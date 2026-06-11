@@ -86,7 +86,7 @@ pub fn putc(c: u8) void {
     }
 
     // Write data.
-    pl011.write(Dr, std.mem.zeroInit(Dr, .{ .data = c }));
+    pl011.writez(Dr, .{ .data = c });
 
     // Wait until transmission is complete.
     flush();

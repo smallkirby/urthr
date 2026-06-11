@@ -311,11 +311,11 @@ fn reset() void {
     });
 
     // Configure DMA.
-    pcie.write(MiscMiscCtrl, std.mem.zeroInit(MiscMiscCtrl, .{
+    pcie.writez(MiscMiscCtrl, .{
         .scb_access_en = true,
         .cfg_read_ur_mode = true,
         .max_burst_size = .b256,
-    }));
+    });
 
     // Set link speed.
     pcie.modify(dd.pci.LinkCap1, .{
