@@ -276,13 +276,13 @@ fn initScratchpad(self: *Self, num: usize) Error!void {
 fn initRings(self: *Self) Error!void {
     // Init Command Ring.
     self.cring = try rings.Ring.new(rings.trbs_per_page, self.dma);
-    self.op.write(regs.Crcr0, regs.Crcr0{
+    self.op.write(regs.Crcr0, .{
         .rcs = self.cring.pcs,
         .cs = false,
         .ca = false,
         .crp = @truncate(self.cring.memory.bus >> @bitOffsetOf(regs.Crcr0, "crp")),
     });
-    self.op.write(regs.Crcr1, regs.Crcr1{
+    self.op.write(regs.Crcr1, .{
         .crp = @truncate(self.cring.memory.bus >> 32),
     });
 

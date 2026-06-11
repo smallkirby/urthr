@@ -33,7 +33,7 @@ pub fn call(channel: Channels, phys: u32) void {
     }
 
     // Write the data combined with the channel.
-    mbox.write(Mbox1Write, Mbox1Write{
+    mbox.write(Mbox1Write, .{
         .channel = channel,
         .data = @as(u28, @truncate(phys >> 4)),
     });

@@ -81,7 +81,7 @@ pub fn readIar() gicc.Iar {
 ///
 /// The value returned by `readIar()` must be passed to this function without modification.
 pub fn eoi(iar: gicc.Iar) void {
-    gicc.mod.write(gicc.Eoir, gicc.Eoir{
+    gicc.mod.write(gicc.Eoir, .{
         .interrupt_id = iar.interrupt_id,
         .cpuid = iar.cpuid,
     });
@@ -185,7 +185,7 @@ const gicd = struct {
             target_list = bits.set(target_list, cpu_id);
         }
 
-        mod.write(Sgir, Sgir{
+        mod.write(Sgir, .{
             .sgi_id = id,
             .target_list = target_list,
             .filter = .filter,

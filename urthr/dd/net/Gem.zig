@@ -93,7 +93,7 @@ pub fn init(netdev: *net.Device) net.Error!void {
     }
 
     // Select RGMII mode.
-    self.module.write(Usrio, Usrio{
+    self.module.write(Usrio, .{
         .rgmii = true,
         .clken = true,
     });
@@ -211,13 +211,13 @@ fn getMacAddr(self: *const Self) MacAddr {
 
 /// Set the MAC address in the GEM controller.
 fn setMacAddr(self: *const Self, mac: MacAddr) void {
-    self.module.write(Sa1b, Sa1b{
+    self.module.write(Sa1b, .{
         .mac0 = mac.value[0],
         .mac1 = mac.value[1],
         .mac2 = mac.value[2],
         .mac3 = mac.value[3],
     });
-    self.module.write(Sa1t, Sa1t{
+    self.module.write(Sa1t, .{
         .mac4 = mac.value[4],
         .mac5 = mac.value[5],
     });
@@ -630,7 +630,7 @@ const phy_addr = 1;
 fn mdioReadAddr(self: *const Self, phy: u5, reg: u5) u16 {
     self.mdioWaitForIdle();
 
-    self.module.write(Man, Man{
+    self.module.write(Man, .{
         .sof = 0b01, // Clause 22
         .rw = .read,
         .phya = phy,
@@ -653,7 +653,7 @@ fn mdioRead(self: *const Self, reg: u5) u16 {
 fn mdioWrite(self: *const Self, reg: u5, value: u16) void {
     self.mdioWaitForIdle();
 
-    self.module.write(Man, Man{
+    self.module.write(Man, .{
         .sof = 0b01, // Clause 22
         .rw = .write,
         .phya = phy_addr,

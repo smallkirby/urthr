@@ -579,7 +579,7 @@ fn readBlockAdma2(addr: u32, buf: []u8) void {
     arch.cache(.clean, desc, @sizeOf(Adma2Desc));
 
     // Set ADMA2 system address
-    sdhc.write(AdmaSystemAddress, AdmaSystemAddress{
+    sdhc.write(AdmaSystemAddress, .{
         .addr = @intCast(@intFromPtr(page_allocator.translateP(desc))),
     });
 
@@ -638,7 +638,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         }
 
         // Set transfer mode if data is present.
-        sdhc.write(TransferMode, TransferMode{
+        sdhc.write(TransferMode, .{
             .dma_enable = use_adma2,
             .block_count_enable = true,
             .auto_cmd_enable = .disabled,
@@ -650,7 +650,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         });
 
         // Set block size and count.
-        sdhc.write(Bsize, Bsize{
+        sdhc.write(Bsize, .{
             .bsize = @intCast(buf.len),
             .boundary = .k4,
         });

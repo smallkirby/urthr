@@ -253,7 +253,7 @@ pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
     // Start the DMA.
     switch (dmas[chan]) {
         .normal => |*dma| {
-            dma.write(ndma.Cbad, ndma.Cbad{
+            dma.write(ndma.Cbad, .{
                 .addr = @intCast(cbs[chan].phys()),
             });
             dma.write(ndma.Cs, std.mem.zeroInit(ndma.Cs, .{
@@ -264,7 +264,7 @@ pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
             }));
         },
         inline else => |*dma| {
-            dma.write(dma4.Cbad, dma4.Cbad{
+            dma.write(dma4.Cbad, .{
                 .addr = @intCast(cbs[chan].phys()),
             });
             dma.write(dma4.Cs, std.mem.zeroInit(dma4.Cs, .{

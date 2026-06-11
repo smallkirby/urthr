@@ -292,7 +292,7 @@ pub fn setupQueue(self: *Self, index: u32) Error!void {
 
     // Select queue size.
     const queue_size = @min(max_size, default_queue_size);
-    self.module.write(QueueNum, QueueNum{ .value = queue_size });
+    self.module.write(QueueNum, .{ .value = queue_size });
     log.debug("vq#{d}: max_size={d}, using={d}", .{ index, max_size, queue_size });
 
     // Allocate virtqueue.
