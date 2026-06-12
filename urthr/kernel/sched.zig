@@ -146,7 +146,7 @@ pub fn reschedule() void {
 /// Exit the current thread.
 ///
 /// Marks the current thread as dead and switches to the next ready thread.
-fn exitCurrent() noreturn {
+pub fn exitCurrent() noreturn {
     _ = lock.lockDisableIrq();
 
     rtt.expect(getCurrent() != getIdle());
@@ -331,6 +331,91 @@ pub fn spawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
 
     // Add the thread to the ready queue.
     qready.append(th);
+
+    return th;
+}
+
+pub const CloneFlags = packed struct {
+    /// Shares the same address space.
+    vm: bool,
+    /// Suspend the parent thread until the child thread exits.
+    suspend_parent: bool,
+};
+
+/// Clone the current thread.
+///
+/// If `stack` is zero, the child starts with the parent's current user stack pointer.
+/// If `flags.suspend_parent` is set, this function blocks until the child exits or calls execve.
+pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
+    const cur = getCurrent();
+
+    // Initialize kernel stack with a copy of the parent's ISR context.
+    const kstack = try urd.mem.page.allocPagesV(thread.default_stack_size / page_size);
+    errdefer urd.mem.page.freePagesV(kstack);
+    const usp = if (stack != 0)
+        stack
+    else
+        arch.thread.getUserStackPointer();
+    const sp = arch.thread.initStackFork(
+        kstack,
+        getCurrentCtx(),
+        usp,
+    );
+
+    // Share or copy VM.
+    const vmm = if (flags.vm)
+        cur.vmm.ref()
+    else
+        cur.vmm.clone(urd.mem.bin) catch return Error.OutOfMemory;
+    errdefer vmm.deinit(urd.mem.bin);
+
+    // Copy fs information and fd table.
+    var fs = cur.fs;
+    fs.root.dentry.ref();
+    errdefer fs.root.dentry.unref();
+    fs.cwd.dentry.ref();
+    errdefer fs.cwd.dentry.unref();
+    fs.fdtbl = cur.fs.fdtbl.clone();
+    errdefer fs.fdtbl.deinit();
+
+    // Copy parent's thread name.
+    const name = try urd.mem.bin.dupe(u8, cur.name);
+    errdefer urd.mem.bin.free(name);
+
+    // Completion the child signals on exit or execve.
+    var vforkw: thread.VforkWaiter = .{};
+
+    // Initialize thread struct.
+    const th = try urd.mem.bin.create(Thread);
+    errdefer urd.mem.bin.destroy(th);
+    {
+        const ie = lock.lockDisableIrq();
+        defer lock.unlockRestoreIrq(ie);
+        const id = allocateId();
+
+        th.* = .{
+            .id = id,
+            .tgid = id,
+            .ppid = cur.tgid,
+            .pgid = cur.pgid,
+            .sid = cur.sid,
+            .name = name,
+            .state = .ready,
+            .sp = @intFromPtr(sp.ptr) + sp.len,
+            .stack = kstack,
+            .vmm = vmm,
+            .fs = fs,
+            .vfork_done = if (flags.suspend_parent) &vforkw else null,
+        };
+        qready.append(th);
+    }
+
+    // Wait for the child to exit or call execve.
+    if (flags.suspend_parent) {
+        vforkw.wait();
+        // Clears the queue since the queue is available only on this stack frame.
+        th.vfork_done = null;
+    }
 
     return th;
 }

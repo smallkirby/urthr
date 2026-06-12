@@ -86,8 +86,27 @@ pub fn enterUser(filename: []const u8) !noreturn {
 pub fn exit(code: i32) noreturn {
     log.debug("Process exiting with code {d}", .{code});
 
-    log.err("not implemented: task.exit", .{});
-    urd.eol(0);
+    const cur = sched.getCurrent();
+    cur.exit_status = code;
+
+    // Release the fd table.
+    cur.fs.fdtbl.deinit();
+
+    // Release fs information.
+    cur.fs.root.dentry.unref();
+    cur.fs.cwd.dentry.unref();
+
+    // Free the address space.
+    cur.vmm.deinit(urd.mem.bin);
+
+    // Wake up the parent waiting on a vfork-clone.
+    if (cur.vfork_done) |vd| {
+        cur.vfork_done = null;
+        vd.complete();
+    }
+
+    // Switch to the next thread. Never returns.
+    sched.exitCurrent();
 }
 
 /// Constructor for user stack.

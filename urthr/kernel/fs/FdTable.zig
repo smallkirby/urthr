@@ -83,6 +83,19 @@ pub fn close(self: *Self, fd: usize) Error!void {
     }
 }
 
+/// Clone this table, taking a reference on each open file.
+pub fn clone(self: *const Self) Self {
+    var new = Self{};
+    for (self.entries, 0..) |slot, fd| {
+        if (slot) |file| {
+            file.ref();
+            new.entries[fd] = file;
+            new.fd_flags[fd] = self.fd_flags[fd];
+        }
+    }
+    return new;
+}
+
 /// Close all open file descriptors.
 pub fn deinit(self: *Self) void {
     for (&self.entries) |*slot| {

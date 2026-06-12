@@ -23,6 +23,11 @@ pub const Thread = struct {
     /// Stack memory region.
     stack: ?[]u8 = null,
 
+    /// Exit status of this thread. Valid only when the state is `dead`.
+    exit_status: i32 = 0,
+    /// Completion to signal on exit or execve when created by a vfork.
+    vfork_done: ?*VforkWaiter = null,
+
     /// This thread needs to be rescheduled.
     need_resched: bool = false,
     /// Total accumulated runtime in microseconds.
@@ -62,6 +67,35 @@ pub const State = enum {
     blocked,
     /// Thread has finished execution and is waiting to be cleaned up.
     dead,
+};
+
+/// Wait-queue used by a parent to wait for a vfork-cloned child.
+pub const VforkWaiter = struct {
+    /// Lock protecting this completion.
+    lock: urd.SpinLock = .{},
+    /// Queue the parent waits on.
+    wq: urd.WaitQueue = .{},
+    /// Set when the child has exited or called execve.
+    done: bool = false,
+
+    /// Mark as completed and wake the waiting parent.
+    pub fn complete(self: *VforkWaiter) void {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        self.done = true;
+        _ = self.wq.wake();
+    }
+
+    /// Block until the child signals completion.
+    pub fn wait(self: *VforkWaiter) void {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        while (!self.done) {
+            self.wq.wait(&self.lock);
+        }
+    }
 };
 
 /// Thread function type.

@@ -21,6 +21,8 @@ tree: VmTree = .{},
 brk: usize = 0,
 /// Next candidate address for anonymous mmap.
 mmap_hint: usize = mmap_base,
+/// Number of tasks sharing this address space.
+refcnt: usize = 1,
 
 /// Base virtual address for anonymous mmap allocations.
 const mmap_base: usize = 0x0000_0040_0000_0000;
@@ -46,12 +48,70 @@ pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!
     return vmm;
 }
 
-/// Deinitialize this instance and free all resources.
-pub fn deinit(self: *Self, allocator: Allocator) void {
-    allocator.destroy(self);
+/// Increment the reference count to share this address space.
+pub fn ref(self: *Self) *Self {
+    self.refcnt += 1;
+    return self;
+}
 
-    // TODO: free all virtual memory areas and unmap all pages.
-    urd.unimplemented("Vmm.deinit");
+/// Deinitialize this instance and free all resources.
+///
+/// Resources are released only when the last reference is dropped.
+pub fn deinit(self: *Self, allocator: Allocator) void {
+    self.refcnt -= 1;
+    if (self.refcnt > 0) return;
+
+    // Unmap all VMAs and free their backing pages.
+    while (self.tree.min()) |node| {
+        const vma = node.container();
+        self.unmap(vma.start, vma.size) catch {};
+    }
+
+    // TODO: free the page table pages themselves.
+
+    allocator.destroy(self);
+}
+
+/// Clone this VM, copying all mapped pages into a new page table.
+///
+/// The child shares no physical pages with the parent.
+pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
+    const child = try new(
+        allocator,
+        .{ .l1 = self.pgtbl.l1 },
+    );
+    errdefer child.deinit(allocator);
+
+    var it = self.tree.iterator();
+    while (it.next()) |node| {
+        const vma = node.container();
+        _ = try child.map(vma.start, vma.size, vma.perm);
+
+        // Copy page contents from parent to child.
+        var offset: usize = 0;
+        while (offset < vma.size) : (offset += urd.mem.page_size) {
+            const va = vma.start + offset;
+            const parent_pa = arch.mmu.translateWalk(
+                self.pgtbl.select(va),
+                va,
+                urd.mem.page,
+            ) orelse continue;
+            const child_pa = arch.mmu.translateWalk(
+                child.pgtbl.select(va),
+                va,
+                urd.mem.page,
+            ) orelse unreachable;
+
+            const src = urd.mem.page.translateV(@as([*]u8, @ptrFromInt(parent_pa))[0..urd.mem.page_size]);
+            const dst = urd.mem.page.translateV(@as([*]u8, @ptrFromInt(child_pa))[0..urd.mem.page_size]);
+            @memcpy(dst, src);
+        }
+    }
+
+    child.brk = self.brk;
+    child.mmap_hint = self.mmap_hint;
+
+    return child;
 }
 
 /// Maps the given user-space virtual address.

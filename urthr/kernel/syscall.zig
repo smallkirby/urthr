@@ -42,6 +42,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("gettid",              178,    posix.task.sysGetTid),
     .new("brk",                 214,    posix.mem.sysBrk),
     .new("munmap",              215,    posix.mem.sysMunmap),
+    .new("clone",               220,    posix.task.sysClone),
     .new("mmap",                222,    posix.mem.sysMmap),
     .new("mprotect",            226,    posix.mem.sysMprotect),
     .new("prlimit64",           261,    posix.task.sysPrlimit64),

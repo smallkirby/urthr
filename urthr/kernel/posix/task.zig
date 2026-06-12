@@ -3,6 +3,61 @@ pub fn sysExitGroup(code: i32) ReturnType {
     task.exit(code);
 }
 
+/// syscall: clone
+pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp: usize, tls: usize) ReturnType {
+    _ = parent_tidp;
+    _ = child_tidp;
+    _ = tls;
+
+    if (flags.fs) urd.unimplemented("clone: share FS");
+    if (flags.files) urd.unimplemented("clone: share open files");
+    if (flags.sighand) urd.unimplemented("clone: share signal handlers");
+    if (flags.pidfd) urd.unimplemented("clone: pidfd");
+    if (flags.ptrace) urd.unimplemented("clone: ptrace");
+    if (flags.parent) urd.unimplemented("clone: share parent");
+    if (flags.thread) urd.unimplemented("clone: share thread group");
+
+    if (flags.thread and !flags.sighand) return .err(.inval);
+    if (flags.sighand and !flags.vm) return .err(.inval);
+
+    const ch_flags = std.mem.zeroInit(sched.CloneFlags, .{
+        .vm = flags.vm,
+        .suspend_parent = flags.vfork,
+    });
+    const child = sched.clone(
+        ch_flags,
+        stack,
+    ) catch return .err(.nomem);
+
+    return .success(@bitCast(@as(u64, child.tgid)));
+}
+
+/// Linux compatible flags for clone syscall.
+const CloneFlags = packed struct(u64) {
+    /// Signal to send to the parent on child termination.
+    csignal: u8,
+    /// Share VM.
+    vm: bool,
+    /// Share FS info.
+    fs: bool,
+    /// Shares open files.
+    files: bool,
+    /// Share signal handlers and blocked signals.
+    sighand: bool,
+    /// A pidfd should be placed in parent.
+    pidfd: bool,
+    /// Continue tracing in the child.
+    ptrace: bool,
+    /// Suspend the parent until the child exits or calls execve.
+    vfork: bool,
+    /// Have the same parent as the cloner.
+    parent: bool,
+    /// Have the same thread group.
+    thread: bool,
+    /// Reserved.
+    _17: u47 = 0,
+};
+
 /// syscall: kill
 pub fn sysKill(pid: i32, signal: Signal) ReturnType {
     const cur = sched.getCurrent();

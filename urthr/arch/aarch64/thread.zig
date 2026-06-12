@@ -85,6 +85,35 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
     return stack[0..(addr - @intFromPtr(stack.ptr))];
 }
 
+/// Initialize the thread stack for a cloned child process.
+pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize) []u8 {
+    var addr: usize = @intFromPtr(stack.ptr) + stack.len;
+
+    addr -= @sizeOf(IsrContext);
+    const ic: *align(16) IsrContext = @ptrFromInt(addr);
+    addr -= @sizeOf(SwitchContext);
+    const sc: *align(16) SwitchContext = @ptrFromInt(addr);
+
+    // Copy parent's ISR context.
+    ic.* = parent_ctx.*;
+    ic.x0 = 0; // return value for the child.
+
+    // Construct initial switch context for the child.
+    sc.* = std.mem.zeroInit(SwitchContext, .{
+        .x30 = @intFromPtr(&forkTrampoline),
+        // Consumed by forkTrampoline.
+        .x19 = user_sp,
+        .x20 = am.mrsi(.tpidr_el0),
+    });
+
+    return stack[0..(addr - @intFromPtr(stack.ptr))];
+}
+
+/// Get the current user stack pointer.
+pub fn getUserStackPointer() usize {
+    return @bitCast(am.mrsi(.sp_el0));
+}
+
 /// Get the ISR context saved on the given kernel stack.
 ///
 /// Valid only when called from a syscall handler.
@@ -110,6 +139,18 @@ fn trampoline() callconv(.naked) noreturn {
     asm volatile (
         \\
         // Exit pseudo-exception handler using the orphan frame.
+        \\bl exit_exception
+        // Unreachable.
+        \\udf #0
+    );
+}
+
+/// Thread entry trampoline function for cloned threads.
+fn forkTrampoline() callconv(.naked) noreturn {
+    asm volatile (
+        \\msr sp_el0, x19
+        \\msr tpidr_el0, x20
+        // Exit pseudo-exception handler using the copied parent frame.
         \\bl exit_exception
         // Unreachable.
         \\udf #0
