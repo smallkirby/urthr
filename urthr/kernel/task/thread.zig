@@ -45,7 +45,7 @@ pub const Thread = struct {
 };
 
 /// Default stack size for threads.
-pub const default_stack_size = 16 * 1024; // 16 KiB
+pub const default_stack_size = 64 * 1024; // 64 KiB
 
 /// Thread identifier.
 pub const Id = u32;
