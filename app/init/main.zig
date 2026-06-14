@@ -4,6 +4,18 @@ pub fn main(init: std.process.Init) !void {
     log.info("Initial process started.", .{});
     log.info("----------------------------------", .{});
 
+    // Show arguments.
+    {
+        const allocator = init.arena.allocator();
+        const args = try init.minimal.args.toSlice(allocator);
+        defer allocator.free(args);
+
+        log.info("Arguments: {d}", .{args.len});
+        for (args, 0..) |arg, i| {
+            log.info("  ARG#{d}: {s}", .{ i, arg });
+        }
+    }
+
     // Show environment variables.
     {
         log.info("Environment Variables: {d}", .{init.environ_map.count()});
