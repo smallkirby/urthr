@@ -12,7 +12,7 @@ const stack_base = 0x7FFF_FF00_0000;
 /// Enter userland by loading the specified executable.
 ///
 /// This function does not return on success.
-pub fn enterUser(filename: []const u8) !noreturn {
+pub fn enterUser(filename: []const u8, args: []const []const u8, envs: []const []const u8) !noreturn {
     const current = sched.getCurrent();
     const allocator = urd.mem.bin;
 
@@ -51,9 +51,16 @@ pub fn enterUser(filename: []const u8) !noreturn {
     // Arguments.
     {
         try scon.appendArgv(filename);
+        for (args) |arg| {
+            try scon.appendArgv(arg);
+        }
     }
     // Environment variables.
-    {}
+    {
+        for (envs) |env| {
+            try scon.appendEnv(env);
+        }
+    }
     // Auxiliary vectors.
     {
         // AT_PHDR, AT_PHENT, AT_PHNUM.
