@@ -160,7 +160,7 @@ pub fn setup(self: *Self) Error!void {
     }
 
     log.debug("Starting xHC event worker thread.", .{});
-    _ = try urd.sched.spawn("xhci-worker", eventWorker, .{self});
+    _ = try urd.task.kspawn("xhci-worker", eventWorker, .{self});
 
     self.ready = true;
 }

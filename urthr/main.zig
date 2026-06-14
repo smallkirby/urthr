@@ -166,7 +166,7 @@ fn zmain() !void {
 
     // Spawn the initial kernel thread.
     log.info("Spawning initial task.", .{});
-    _ = try urd.sched.spawn("init", initialTask, .{});
+    _ = try urd.task.kspawn("init", initialTask, .{});
 
     // Start preemptive scheduling timer.
     try urd.sched.start();

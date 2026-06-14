@@ -20,11 +20,11 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
     if (flags.thread and !flags.sighand) return .err(.inval);
     if (flags.sighand and !flags.vm) return .err(.inval);
 
-    const ch_flags = std.mem.zeroInit(sched.CloneFlags, .{
+    const ch_flags = std.mem.zeroInit(task.CloneFlags, .{
         .vm = flags.vm,
         .suspend_parent = flags.vfork,
     });
-    const child = sched.clone(
+    const child = task.clone(
         ch_flags,
         stack,
     ) catch return .err(.nomem);

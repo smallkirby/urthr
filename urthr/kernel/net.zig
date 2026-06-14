@@ -88,8 +88,8 @@ pub fn run() (Error || urd.sched.Error)!void {
     }
 
     // Start the worker threads.
-    _ = try urd.sched.spawn("net-rx", rxworker, .{});
-    _ = try urd.sched.spawn("net-tx", txworker, .{});
+    _ = try urd.task.kspawn("net-rx", rxworker, .{});
+    _ = try urd.task.kspawn("net-tx", txworker, .{});
 
     // Obtain an IP address via DHCP.
     {

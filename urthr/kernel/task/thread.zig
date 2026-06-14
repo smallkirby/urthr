@@ -38,14 +38,7 @@ pub const Thread = struct {
     /// Memory manager.
     vmm: *task.Vmm,
     /// File system information.
-    fs: struct {
-        /// Root directory of this thread.
-        root: urd.fs.Path,
-        /// Current working directory of this thread.
-        cwd: urd.fs.Path,
-        /// File descriptor table.
-        fdtbl: urd.fs.FdTable = .{},
-    },
+    fs: ThreadFs,
 
     /// Thread list node.
     head: ThreadList.Head = .{},
@@ -96,6 +89,16 @@ pub const VforkWaiter = struct {
             self.wq.wait(&self.lock);
         }
     }
+};
+
+/// Thread FS information.
+pub const ThreadFs = struct {
+    /// Root directory of this thread.
+    root: urd.fs.Path,
+    /// Current working directory of this thread.
+    cwd: urd.fs.Path,
+    /// File descriptor table.
+    fdtbl: urd.fs.FdTable = .{},
 };
 
 /// Thread function type.
