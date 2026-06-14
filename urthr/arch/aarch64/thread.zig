@@ -64,6 +64,8 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
             .f = false,
             .i = false,
         })),
+        .sp_el0 = 0,
+        .tpidr_el0 = 0,
     };
 
     // Construct initial switch context.
@@ -97,13 +99,12 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize)
     // Copy parent's ISR context.
     ic.* = parent_ctx.*;
     ic.x0 = 0; // return value for the child.
+    ic.sp_el0 = user_sp;
+    ic.tpidr_el0 = am.mrsi(.tpidr_el0);
 
     // Construct initial switch context for the child.
     sc.* = std.mem.zeroInit(SwitchContext, .{
-        .x30 = @intFromPtr(&forkTrampoline),
-        // Consumed by forkTrampoline.
-        .x19 = user_sp,
-        .x20 = am.mrsi(.tpidr_el0),
+        .x30 = @intFromPtr(&trampoline),
     });
 
     return stack[0..(addr - @intFromPtr(stack.ptr))];
@@ -139,18 +140,6 @@ fn trampoline() callconv(.naked) noreturn {
     asm volatile (
         \\
         // Exit pseudo-exception handler using the orphan frame.
-        \\bl exit_exception
-        // Unreachable.
-        \\udf #0
-    );
-}
-
-/// Thread entry trampoline function for cloned threads.
-fn forkTrampoline() callconv(.naked) noreturn {
-    asm volatile (
-        \\msr sp_el0, x19
-        \\msr tpidr_el0, x20
-        // Exit pseudo-exception handler using the copied parent frame.
         \\bl exit_exception
         // Unreachable.
         \\udf #0

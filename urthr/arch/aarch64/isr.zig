@@ -291,6 +291,8 @@ pub const Context = extern struct {
     _pad: u64,
     pc: u64,
     pstate: u64,
+    sp_el0: u64,
+    tpidr_el0: u64,
 };
 
 // =============================================================

@@ -6,9 +6,8 @@ enterUserland:
   // Set up registers for eret.
   msr elr_el1, x0
   msr sp_el0,  x1
-  mov sp,      x2  // Reset SP_EL1 to the bottom of stack.
-  mov x2, #0
-  msr spsr_el1, x2 // EL0, AArch64, all interrupts unmasked
+  mov sp,      x2   // Reset SP_EL1 to the bottom of stack.
+  msr spsr_el1, xzr // EL0, AArch64, all interrupts unmasked
   isb
 
   // Zero out all general-purpose registers before entering userland.
