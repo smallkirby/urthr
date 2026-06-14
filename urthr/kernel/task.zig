@@ -8,7 +8,7 @@ pub const Error = error{
     InvalidArgument,
     /// Memory allocation failed.
     OutOfMemory,
-};
+} || loader.Error;
 
 /// The number of pages allocated for user stack.
 const num_stack_pages = 32;
@@ -26,12 +26,12 @@ var id_next: thread.Id = 1;
 /// The arguments are copied and passed to the entry function.
 ///
 /// Spawned thread does not have a user context.
-pub fn kspawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
+pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread {
     const cur = sched.getCurrent();
     const th = try mem.bin.create(Thread);
     errdefer mem.bin.destroy(th);
-    const dupname = try mem.bin.dupe(u8, name);
-    errdefer mem.bin.free(dupname);
+    const name = try mem.bin.dupe(u8, filename);
+    errdefer mem.bin.free(name);
 
     // Copy arguments.
     const argv = try mem.bin.create(@TypeOf(args));
@@ -75,7 +75,7 @@ pub fn kspawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
         .ppid = cur.tgid,
         .pgid = id,
         .sid = id,
-        .name = dupname,
+        .name = name,
         .state = .ready,
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
@@ -87,6 +87,85 @@ pub fn kspawn(name: []const u8, entry: anytype, args: anytype) Error!*Thread {
     sched.enqueue(th);
 
     return th;
+}
+
+/// Replace the current user process image with a new executable.
+pub fn execve(
+    filename: []const u8,
+    args: []const []const u8,
+    envs: []const []const u8,
+) Error!void {
+    const current = sched.getCurrent();
+    const allocator = mem.bin;
+    const name = try allocator.dupe(u8, filename);
+    errdefer allocator.free(name);
+
+    // Deep-copy arguments.
+    const argv = try allocator.dupe([]const u8, args);
+    for (argv, 0..) |*arg, i| {
+        arg.* = try allocator.dupe(u8, args[i]);
+    }
+    const envp = try allocator.dupe([]const u8, envs);
+    for (envp, 0..) |*env, i| {
+        env.* = try allocator.dupe(u8, envs[i]);
+    }
+
+    // Replace VM.
+    const old_vm = current.vmm;
+    const new_vm = try Vmm.new(allocator, mem.getKernelPageTable());
+    current.vmm = new_vm;
+    arch.mmu.switchUserTable(new_vm.pgtbl.l0, mem.page);
+    // Rollback VM on failure.
+    errdefer {
+        current.vmm = old_vm;
+        arch.mmu.switchUserTable(old_vm.pgtbl.l0, mem.page);
+        new_vm.deinit(allocator);
+    }
+
+    // Setup user image.
+    const uimg = try setupUserImage(
+        current,
+        name,
+        argv,
+        envp,
+    );
+
+    // =============================================================
+    // No error can be returned after this point.
+
+    // Clean up memories.
+    allocator.free(name);
+    for (argv) |arg| {
+        allocator.free(arg);
+    }
+    allocator.free(argv);
+    for (envp) |env| {
+        allocator.free(env);
+    }
+    allocator.free(envp);
+
+    // Set thread pointer.
+    arch.thread.setThreadPointer(uimg.tp);
+
+    // Old VM is no longer needed.
+    old_vm.deinit(allocator);
+
+    // Wake up the parent waiting on a vfork-clone.
+    if (current.vfork_done) |vd| {
+        current.vfork_done = null;
+        vd.complete();
+    }
+
+    // Enter userland.
+    // Kernel stack is reset to the initial state.
+    const kstack = current.stack.?;
+    arch.thread.enterUserland(
+        uimg.entry,
+        uimg.sp,
+        @intFromPtr(kstack.ptr) + kstack.len,
+    );
+
+    unreachable;
 }
 
 /// Enter userland by loading the specified executable.
@@ -111,68 +190,29 @@ pub fn enterUser(
     _ = try current.fs.fdtbl.set(1, console);
     _ = try current.fs.fdtbl.set(2, console);
 
-    // Load the executable.
-    const ldr_info = try loader.load(current, filename);
-    current.vmm.brk = ldr_info.brk;
+    // Setup user image.
+    const uimg = try setupUserImage(
+        current,
+        filename,
+        args,
+        envs,
+    );
 
     // Set thread pointer.
-    arch.thread.setThreadPointer(ldr_info.tp);
-
-    // Prepare user stack.
-    const stack = try current.vmm.map(
-        stack_base,
-        num_stack_pages * mem.page_size,
-        .rw,
-    );
-    @memset(stack, 0);
-
-    // Construct stack content.
-    var scon = StackCreator.init(
-        stack,
-        stack_base,
-        allocator,
-    );
-    // Arguments.
-    {
-        try scon.appendArgv(filename);
-        for (args) |arg| {
-            try scon.appendArgv(arg);
-        }
-    }
-    // Environment variables.
-    {
-        for (envs) |env| {
-            try scon.appendEnv(env);
-        }
-    }
-    // Auxiliary vectors.
-    {
-        // AT_PHDR, AT_PHENT, AT_PHNUM.
-        try scon.appendAux(.new(.phdr, ldr_info.phdr_addr));
-        try scon.appendAux(.new(.phent, ldr_info.phdr_entsize));
-        try scon.appendAux(.new(.phnum, ldr_info.phdr_num));
-
-        // AT_RANDOM.
-        var random: [16]u8 = undefined;
-        urd.rng.getRandom(&random);
-        const handle = try scon.appendOpaque(&random);
-        try scon.appendAux(.new(.random, @intFromEnum(handle)));
-
-        // AT_PAGESZ.
-        try scon.appendAux(.new(.pagesz, mem.page_size));
-    }
-
-    const usp = try scon.finalize();
+    arch.thread.setThreadPointer(uimg.tp);
 
     // Enter userland.
     const kstack = current.stack.?;
     arch.thread.enterUserland(
-        ldr_info.entry,
-        usp,
+        uimg.entry,
+        uimg.sp,
         @intFromPtr(kstack.ptr) + kstack.len,
     );
+
+    unreachable;
 }
 
+/// Flags for thread cloning.
 pub const CloneFlags = packed struct {
     /// Shares the same address space.
     vm: bool,
@@ -292,6 +332,83 @@ fn allocateId() thread.Id {
     id_next +%= 1;
 
     return id;
+}
+
+/// Information needed to start executing a user thread.
+const UserImage = struct {
+    /// Entry point of the user thread.
+    entry: usize,
+    /// Initial user stack pointer.
+    sp: usize,
+    /// Thread pointer.
+    tp: usize,
+};
+
+/// Construct a user thread image by loading the executable and preparing the user stack.
+///
+/// Requires the VM is set for the target thread.
+fn setupUserImage(
+    th: *Thread,
+    filename: []const u8,
+    args: []const []const u8,
+    envs: []const []const u8,
+) Error!UserImage {
+    const allocator = mem.bin;
+
+    // Load the executable.
+    const ldr_info = try loader.load(th, filename);
+    th.vmm.brk = ldr_info.brk;
+
+    // Prepare user stack.
+    const stack = try th.vmm.map(
+        stack_base,
+        num_stack_pages * mem.page_size,
+        .rw,
+    );
+    @memset(stack, 0);
+
+    // Construct stack content.
+    var scon = StackCreator.init(
+        stack,
+        stack_base,
+        allocator,
+    );
+    // Arguments.
+    {
+        try scon.appendArgv(filename);
+        for (args) |arg| {
+            try scon.appendArgv(arg);
+        }
+    }
+    // Environment variables.
+    {
+        for (envs) |env| {
+            try scon.appendEnv(env);
+        }
+    }
+    // Auxiliary vectors.
+    {
+        // AT_PHDR, AT_PHENT, AT_PHNUM.
+        try scon.appendAux(.new(.phdr, ldr_info.phdr_addr));
+        try scon.appendAux(.new(.phent, ldr_info.phdr_entsize));
+        try scon.appendAux(.new(.phnum, ldr_info.phdr_num));
+
+        // AT_RANDOM.
+        var random: [16]u8 = undefined;
+        urd.rng.getRandom(&random);
+        const handle = try scon.appendOpaque(&random);
+        try scon.appendAux(.new(.random, @intFromEnum(handle)));
+
+        // AT_PAGESZ.
+        try scon.appendAux(.new(.pagesz, mem.page_size));
+    }
+    const usp = try scon.finalize();
+
+    return .{
+        .entry = ldr_info.entry,
+        .sp = usp,
+        .tp = ldr_info.tp,
+    };
 }
 
 // =============================================================

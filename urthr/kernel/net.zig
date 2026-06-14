@@ -78,7 +78,7 @@ pub fn init() Allocator.Error!void {
 }
 
 /// Start running the network subsystem and register devices.
-pub fn run() (Error || urd.sched.Error)!void {
+pub fn run() (Error || urd.task.Error)!void {
     // Link-up all registered devices.
     {
         var iter = device_list.iter();

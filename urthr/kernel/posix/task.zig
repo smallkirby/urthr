@@ -58,6 +58,46 @@ const CloneFlags = packed struct(u64) {
     _17: u47 = 0,
 };
 
+/// syscall: execve
+pub fn sysExecve(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8) ReturnType {
+    const max_argv = 128;
+    const max_envp = 128;
+
+    // Construct argv and envp arrays.
+    var args: [max_argv][]const u8 = undefined;
+    var envs: [max_envp][]const u8 = undefined;
+
+    var argc: usize = 0;
+    while (argv[argc]) |arg| : (argc += 1) {
+        if (argc == max_argv) {
+            return .err(.toobig);
+        }
+        args[argc] = std.mem.span(arg);
+    }
+    var envc: usize = 0;
+    while (envp[envc]) |env| : (envc += 1) {
+        if (envc == max_envp) {
+            return .err(.toobig);
+        }
+        envs[envc] = std.mem.span(env);
+    }
+
+    urd.task.execve(
+        std.mem.span(path),
+        args[0..argc],
+        envs[0..envc],
+    ) catch |err| return switch (err) {
+        error.InvalidArgument => .err(.inval),
+        error.OutOfMemory => .err(.nomem),
+        error.InvalidElf, error.NotSupported => .err(.noexec),
+        error.NotFound => .err(.noent),
+        error.NotDirectory => .err(.notdir),
+        else => .err(.inval),
+    };
+
+    unreachable;
+}
+
 /// syscall: kill
 pub fn sysKill(pid: i32, signal: Signal) ReturnType {
     const cur = sched.getCurrent();

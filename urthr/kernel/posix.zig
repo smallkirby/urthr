@@ -9,12 +9,18 @@ pub const ErrorEnum = enum(i64) {
     perm = -1,
     /// No such file or directory.
     noent = -2,
+    /// Too large.
+    toobig = -7,
+    /// Exec format error.
+    noexec = -8,
     /// Bad file descriptor.
     badf = -9,
     /// Resource temporarily unavailable.
     again = -11,
     /// Cannot allocate memory.
     nomem = -12,
+    /// Permission denied.
+    nacces = -13,
     /// Not a directory.
     notdir = -20,
     /// Invalid argument.

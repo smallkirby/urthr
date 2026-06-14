@@ -7,7 +7,7 @@ pub const Error = error{
     InvalidDevice,
     /// Controller is in an invalid state for the requested operation.
     InvalidState,
-} || mem.Error;
+} || mem.Error || urd.task.Error;
 
 /// Capability registers module.
 cap: regs.Capability,
