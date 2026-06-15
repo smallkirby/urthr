@@ -180,6 +180,11 @@ const Signal = enum(i32) {
     _,
 };
 
+/// syscall: set_tid_address
+pub fn sysSetTidAddress(_: usize) ReturnType {
+    return .err(.nosys);
+}
+
 /// syscall: getpid
 pub fn sysGetPid() ReturnType {
     const current = sched.getCurrent();
