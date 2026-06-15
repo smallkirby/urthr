@@ -9,6 +9,8 @@ pub const ErrorEnum = enum(i64) {
     perm = -1,
     /// No such file or directory.
     noent = -2,
+    /// No child processes.
+    child = -10,
     /// Too large.
     toobig = -7,
     /// Exec format error.

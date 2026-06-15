@@ -3,6 +3,31 @@ pub fn sysExitGroup(code: i32) ReturnType {
     task.exit(code);
 }
 
+/// syscall: wait4
+pub fn sysWait4(pid: i32, wstatus: *allowzero i32, options: WaitOptions, _: usize) ReturnType {
+    const result = task.waitChild(
+        pid,
+        options.nohang,
+    ) catch |err| switch (err) {
+        error.NoChild => return .err(.child),
+    } orelse return .success(0);
+
+    if (@intFromPtr(wstatus) != 0) {
+        wstatus.* = (result.exit_status & 0xff) << 8;
+    }
+
+    return .success(@intCast(result.pid));
+}
+
+const WaitOptions = packed struct(u32) {
+    /// Dont't block waiting.
+    nohang: bool,
+    /// Report status of children.
+    untraced: bool,
+    /// Reserved.
+    _2: u30 = 0,
+};
+
 /// syscall: clone
 pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp: usize, tls: usize) ReturnType {
     _ = parent_tidp;

@@ -8,6 +8,8 @@ pub const Error = error{
     InvalidArgument,
     /// Memory allocation failed.
     OutOfMemory,
+    /// There's no child process matching the given PID.
+    NoChild,
 } || loader.Error;
 
 /// The number of pages allocated for user stack.
@@ -19,6 +21,11 @@ const stack_base = 0x7FFF_FF00_0000;
 var lock: SpinLock = .{};
 /// Thread ID assigned to the next created thread.
 var id_next: thread.Id = 1;
+
+/// Dead threads waiting to be reaped by their parent.
+var zombie_list: ThreadList = .{};
+/// Protects the zombie list.
+var zombie_lock: SpinLock = .{};
 
 /// Spawn a new kernel thread with the given entry function and arguments.
 ///
@@ -81,7 +88,15 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         .stack = stack,
         .vmm = vmm,
         .fs = fs,
+        .parent = cur,
     };
+
+    // Register as a child of the current thread.
+    {
+        const ie = zombie_lock.lockDisableIrq();
+        defer zombie_lock.unlockRestoreIrq(ie);
+        cur.children.append(th);
+    }
 
     // Add the thread to the ready queue.
     sched.enqueue(th);
@@ -282,7 +297,13 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .vmm = vmm,
             .fs = fs,
             .vfork_done = if (flags.suspend_parent) &vforkw else null,
+            .parent = cur,
         };
+        {
+            const zombie_ie = zombie_lock.lockDisableIrq();
+            defer zombie_lock.unlockRestoreIrq(zombie_ie);
+            cur.children.append(th);
+        }
         sched.enqueue(th);
     }
 
@@ -319,8 +340,81 @@ pub fn exit(code: i32) noreturn {
         vd.complete();
     }
 
+    // Remove from parent's children list, and move to zombie list.
+    // IRQs are intentionally disabled until the context switch
+    // to prevent the parent from freeing kernel stack before `exitCurrent()` completes.
+    {
+        _ = zombie_lock.lockDisableIrq();
+        defer zombie_lock.unlock();
+
+        if (cur.parent) |p| {
+            p.children.remove(cur);
+            _ = p.child_exit_wq.wake();
+        }
+        zombie_list.append(cur);
+    }
+
     // Switch to the next thread. Never returns.
     sched.exitCurrent();
+}
+
+const WaitResult = struct {
+    /// PID of the reaped child.
+    pid: u32,
+    /// Raw exit status from exit_group.
+    exit_status: i32,
+};
+
+/// Wait for a child thread to exit and reap it.
+///
+/// Returns null when nowait is true and no matching child has exited yet.
+/// Returns an error when there's no child matching the given PID.
+pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
+    const cur = sched.getCurrent();
+
+    const ie = zombie_lock.lockDisableIrq();
+    defer zombie_lock.unlockRestoreIrq(ie);
+
+    while (true) {
+        // Check zombie list.
+        var it = zombie_list.iter();
+        while (it.next()) |th| {
+            if (!matchesChild(cur, pid, th)) continue;
+
+            defer if (th.stack) |kstack| mem.page.freeBytesV(kstack);
+            defer mem.bin.destroy(th);
+            defer mem.bin.free(th.name);
+
+            zombie_list.remove(th);
+            return .{
+                .pid = th.tgid,
+                .exit_status = th.exit_status,
+            };
+        }
+
+        // Check for alive matching children.
+        var child_it = cur.children.iter();
+        while (child_it.next()) |th| {
+            if (matchesChild(cur, pid, th)) break;
+        } else {
+            return error.NoChild;
+        }
+
+        if (!nowait) {
+            cur.child_exit_wq.wait(&zombie_lock);
+        } else {
+            return null;
+        }
+    }
+}
+
+/// Check if the given child thread matches the PID in POSIX-way.
+fn matchesChild(parent: *const Thread, pid: i32, child: *const Thread) bool {
+    if (child.ppid != parent.tgid) return false;
+    if (pid == -1) return true; // any child.
+    if (pid > 0) return child.tgid == @as(u32, @bitCast(pid)); // any child in process group.
+    if (pid == 0) return child.pgid == parent.pgid; // specific child with TGID == PID.
+    return child.pgid == @as(u32, @bitCast(-pid)); // any child with PGID == -PID.
 }
 
 // =============================================================
@@ -468,6 +562,8 @@ const mem = urd.mem;
 const sched = urd.sched;
 const Thread = thread.Thread;
 const ThreadFs = thread.ThreadFs;
+const ThreadList = thread.ThreadList;
+const ChildrenList = thread.ChildrenList;
 const VforkWaiter = thread.VforkWaiter;
 
 const loader = @import("task/loader.zig");
