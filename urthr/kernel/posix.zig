@@ -3,6 +3,7 @@ pub const mem = @import("posix/mem.zig");
 pub const sched = @import("posix/sched.zig");
 pub const signal = @import("posix/signal.zig");
 pub const task = @import("posix/task.zig");
+pub const time = @import("posix/time.zig");
 
 pub const ErrorEnum = enum(i64) {
     /// Operation not permitted.
