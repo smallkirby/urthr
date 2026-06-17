@@ -21,6 +21,8 @@ pub const LogFn = klog.LogFn;
 pub const SpinLock = @import("kernel/SpinLock.zig");
 pub const WaitQueue = @import("kernel/WaitQueue.zig");
 
+/// Urthr version string.
+pub const version = options.version;
 /// Runtime tests enabled.
 pub const enable_rtt = options.enable_rtt;
 

@@ -1,3 +1,6 @@
+const zon = @import("build.zig.zon");
+const version = zon.version;
+
 pub fn build(b: *std.Build) !void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
@@ -138,6 +141,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(bool, "enable_rtt", enable_rtt);
     options.addOption(bool, "restart_on_panic", restart);
     options.addOption(u64, "idle_watchdog", idle_watchdog);
+    options.addOption([]const u8, "version", version);
 
     const options_module = options.createModule();
 

@@ -38,6 +38,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("getpgid",             155,    posix.task.sysGetPgid),
     .new("setsid",              157,    posix.task.sysSetsid),
     .new("getsid",              158,    posix.task.sysGetsid),
+    .new("uname",               160,    posix.system.sysUname),
     .new("getpid",              172,    posix.task.sysGetPid),
     .new("getppid",             173,    posix.task.sysGetPpid),
     .new("getuid",              174,    posix.task.sysGetUid),
