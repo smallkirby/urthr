@@ -229,35 +229,39 @@ const Keyboard = struct {
     };
 
     /// Convert USB HID key code to ASCII character.
-    fn codeToChar(key_code: u8, shifted: bool) ?u8 {
+    fn codeToChars(key_code: u8, shifted: bool) []const u8 {
         return switch (key_code) {
-            0x04...0x1D => if (shifted) key_code - 0x04 + 'A' else key_code - 0x04 + 'a',
-            0x1E => if (shifted) '!' else '1',
-            0x1F => if (shifted) '@' else '2',
-            0x20 => if (shifted) '#' else '3',
-            0x21 => if (shifted) '$' else '4',
-            0x22 => if (shifted) '%' else '5',
-            0x23 => if (shifted) '^' else '6',
-            0x24 => if (shifted) '&' else '7',
-            0x25 => if (shifted) '*' else '8',
-            0x26 => if (shifted) '(' else '9',
-            0x27 => if (shifted) ')' else '0',
-            0x28 => '\n',
-            0x29 => 0x1B,
-            0x2A => 0x7F, // Backspace to DEL
-            0x2B => '\t',
-            0x2C => ' ',
-            0x2D => if (shifted) '_' else '-',
-            0x2E => if (shifted) '+' else '=',
-            0x2F => if (shifted) '{' else '[',
-            0x30 => if (shifted) '}' else ']',
-            0x33 => if (shifted) ':' else ';',
-            0x34 => if (shifted) '"' else '\'',
-            0x35 => if (shifted) '~' else '`',
-            0x36 => if (shifted) '<' else ',',
-            0x37 => if (shifted) '>' else '.',
-            0x38 => if (shifted) '?' else '/',
-            else => null,
+            0x04...0x1D => if (shifted) &.{key_code - 0x04 + 'A'} else &.{key_code - 0x04 + 'a'},
+            0x1E => if (shifted) "!" else "1",
+            0x1F => if (shifted) "@" else "2",
+            0x20 => if (shifted) "#" else "3",
+            0x21 => if (shifted) "$" else "4",
+            0x22 => if (shifted) "%" else "5",
+            0x23 => if (shifted) "^" else "6",
+            0x24 => if (shifted) "&" else "7",
+            0x25 => if (shifted) "*" else "8",
+            0x26 => if (shifted) "(" else "9",
+            0x27 => if (shifted) ")" else "0",
+            0x28 => "\n",
+            0x29 => &.{0x1B},
+            0x2A => &.{0x7F}, // Backspace to DEL
+            0x2B => "\t",
+            0x2C => " ",
+            0x2D => if (shifted) "_" else "-",
+            0x2E => if (shifted) "+" else "=",
+            0x2F => if (shifted) "{" else "[",
+            0x30 => if (shifted) "}" else "]",
+            0x33 => if (shifted) ":" else ";",
+            0x34 => if (shifted) "\"" else "'",
+            0x35 => if (shifted) "~" else "`",
+            0x36 => if (shifted) "<" else ",",
+            0x37 => if (shifted) ">" else ".",
+            0x38 => if (shifted) "?" else "/",
+            0x4F => "\x1B[C", // Right arrow
+            0x50 => "\x1B[D", // Left arrow
+            0x51 => "\x1B[B", // Down arrow
+            0x52 => "\x1B[A", // Up arrow
+            else => &.{},
         };
     }
 };
@@ -285,7 +289,7 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
             continue;
         }
 
-        if (Keyboard.codeToChar(key, shifted)) |c| {
+        for (Keyboard.codeToChars(key, shifted)) |c| {
             urd.input.push(c);
         }
     }
