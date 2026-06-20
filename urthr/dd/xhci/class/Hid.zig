@@ -251,6 +251,7 @@ const Keyboard = struct {
             0x2E => if (shifted) "+" else "=",
             0x2F => if (shifted) "{" else "[",
             0x30 => if (shifted) "}" else "]",
+            0x31 => if (shifted) "|" else "\\",
             0x33 => if (shifted) ":" else ";",
             0x34 => if (shifted) "\"" else "'",
             0x35 => if (shifted) "~" else "`",
