@@ -7,6 +7,7 @@ pub const Mount = @import("fs/Mount.zig");
 pub const Fat32 = @import("fs/Fat32.zig");
 pub const RootFs = @import("fs/RootFs.zig");
 pub const DevFs = @import("fs/DevFs.zig");
+pub const PipeFs = @import("fs/PipeFs.zig");
 pub const FdTable = @import("fs/FdTable.zig");
 
 /// Filesystem-specific errors.
@@ -97,6 +98,13 @@ pub fn init(allocator: Allocator) Error!void {
 
     // Initialize the dentry cache.
     dcache = Dentry.Cache.new(allocator);
+    // Initialize the pipe filesystem.
+    pipefs = try PipeFs.init(allocator);
+}
+
+/// Create a new pipe and return its read and write file objects.
+pub fn createPipe() Error!PipeFs.PipePair {
+    return pipefs.createPipe();
 }
 
 /// Mount a filesystem to the specified path.
@@ -305,6 +313,13 @@ const ComponentIterator = std.fs.path.ComponentIterator(.posix, u8);
 
 /// dentry cache instance.
 var dcache: Dentry.Cache = undefined;
+
+// =============================================================
+// Anonymous filesystems
+// =============================================================
+
+/// pipefs instance.
+var pipefs: *PipeFs = undefined;
 
 // =============================================================
 // Imports
