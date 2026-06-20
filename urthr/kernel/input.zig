@@ -7,6 +7,9 @@ const size_line_buf = 256;
 /// Size of the ring buffer (completed lines ready to be read).
 const size_ring = 4096;
 
+/// Event signaled when input data becomes available.
+pub var event: Event = .{};
+
 /// Input state.
 var state: struct {
     /// Current line (incomplete input until newline).
@@ -67,8 +70,15 @@ pub fn push(c: u8) void {
     } else {
         // If raw mode, push directly to the ring buffer.
         ringPush(ch);
-        state.cv.signal();
+        notifyReaders();
     }
+}
+
+/// Return true if there is data in the ring buffer ready to read without blocking.
+pub fn available() bool {
+    const ie = state.lock.lockDisableIrq();
+    defer state.lock.unlockRestoreIrq(ie);
+    return state.r_head != state.r_tail;
 }
 
 /// Read up to `buf.len` bytes, blocking until data is available.
@@ -78,7 +88,10 @@ pub fn read(buf: []u8) usize {
     const ie = state.lock.lockDisableIrq();
     defer state.lock.unlockRestoreIrq(ie);
 
-    const min: usize = if (state.termios.lflag.icanon) 1 else @max(1, state.termios.cc[cc.vmin]);
+    const min: usize = if (state.termios.lflag.icanon)
+        1
+    else
+        @max(1, state.termios.cc[cc.vmin]);
 
     while (ringLen() < min) {
         state.cv.wait(&state.lock);
@@ -108,7 +121,7 @@ fn pushCanonical(c: u8) void {
         '\n' => {
             flushLine('\n');
             if (echo) console.writeUnsafe("\r\n");
-            state.cv.signal();
+            notifyReaders();
         },
         // Backspace or DEL.
         0x08, 0x7F => {
@@ -125,7 +138,7 @@ fn pushCanonical(c: u8) void {
         // Ctrl+D
         0x04 => {
             flushLine(0);
-            state.cv.signal();
+            notifyReaders();
         },
         // Normal character.
         else => {
@@ -160,6 +173,12 @@ fn ringPush(c: u8) void {
         state.ring[state.r_tail % size_ring] = c;
         state.r_tail += 1;
     }
+}
+
+/// Notify readers that data is available.
+fn notifyReaders() void {
+    state.cv.signal();
+    event.wakeAll();
 }
 
 // =============================================================
@@ -363,3 +382,4 @@ const urd = @import("urthr");
 const console = urd.console;
 const SpinLock = urd.SpinLock;
 const CondVar = urd.sync.CondVar;
+const Event = urd.sync.Event;

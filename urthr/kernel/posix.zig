@@ -6,6 +6,14 @@ pub const system = @import("posix/system.zig");
 pub const task = @import("posix/task.zig");
 pub const time = @import("posix/time.zig");
 
+/// POSIX-compliant timespec structure.
+pub const Timespec = extern struct {
+    /// Seconds.
+    sec: i64,
+    /// Nanoseconds.
+    nsec: u32,
+};
+
 pub const ErrorEnum = enum(i64) {
     /// Operation not permitted.
     perm = -1,

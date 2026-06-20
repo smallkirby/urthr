@@ -278,6 +278,10 @@ const SyscallHandler = struct {
                 64 => @bitCast(@as(u64, @truncate(arg))),
                 else => @compileError("convert(): Invalid struct size"),
             },
+            .optional => |opt| switch (@typeInfo(opt.child)) {
+                .pointer => if (arg == 0) null else @ptrFromInt(arg),
+                else => @compileError(std.fmt.comptimePrint("convert(): Invalid optional type: {s}", .{@typeName(T)})),
+            },
             else => @compileError(std.fmt.comptimePrint("convert(): Invalid type: {s}", .{@typeName(T)})),
         };
     }

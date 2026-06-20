@@ -8,6 +8,7 @@ pub const fops = fs.File.Ops{
     .read = read,
     .write = write,
     .close = close,
+    .poll = poll,
 };
 
 pub const name = "null";
@@ -26,6 +27,13 @@ fn read(_: *fs.File, _: []u8, _: usize) fs.Error!usize {
 
 fn iterate(_: *fs.File.Iterator, _: Allocator) fs.Error!?fs.File.IterResult {
     return null;
+}
+
+fn poll(_: *fs.File) fs.Error!fs.PollResult {
+    return .{ .events = .{
+        .in = true,
+        .out = true,
+    } };
 }
 
 fn close(_: *anyopaque, _: Allocator) void {}

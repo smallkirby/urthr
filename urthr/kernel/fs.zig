@@ -42,6 +42,27 @@ pub const Path = struct {
     mount: ?*Mount,
 };
 
+/// I/O readiness events.
+pub const PollEvents = packed struct {
+    /// Readable data is available.
+    in: bool = false,
+    /// Urgent data is available.
+    urgent: bool = false,
+    /// Writable data is available.
+    out: bool = false,
+
+    // No events are ready.
+    pub const none = PollEvents{};
+};
+
+/// Result of a poll operation.
+pub const PollResult = struct {
+    /// Currently ready events.
+    events: PollEvents,
+    /// Event to wait on when not ready.
+    wait: ?*Event = null,
+};
+
 /// Initialize the filesystem subsystem.
 ///
 /// Current thread's root directory is set to the unmounted root.
@@ -294,3 +315,4 @@ const common = @import("common");
 const block = common.block;
 const urd = @import("urthr");
 const sched = urd.sched;
+const Event = urd.sync.Event;

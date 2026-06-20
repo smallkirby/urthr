@@ -9,6 +9,7 @@ pub const fops = fs.File.Ops{
     .write = write,
     .ioctl = ioctl,
     .close = close,
+    .poll = poll,
 };
 
 pub const name = "console";
@@ -53,6 +54,12 @@ fn ioctl(_: *fs.File, request: u64, arg: usize) fs.Error!usize {
         else => return fs.Error.Unsupported,
     }
     return 0;
+}
+
+fn poll(_: *fs.File) fs.Error!fs.PollResult {
+    return .{ .events = .{
+        .out = true,
+    } };
 }
 
 fn close(_: *anyopaque, _: Allocator) void {}

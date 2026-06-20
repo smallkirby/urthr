@@ -33,13 +33,6 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     return .success(0);
 }
 
-const Timespec = extern struct {
-    /// Seconds.
-    sec: i64,
-    /// Nanoseconds.
-    nsec: u32,
-};
-
 const ClockType = enum(u32) {
     /// A settable system-wire real-time clock.
     realtime = 0,
@@ -63,3 +56,4 @@ const SleepFlags = enum(u32) {
 const std = @import("std");
 const urd = @import("urthr");
 const ReturnType = urd.syscall.ReturnType;
+const Timespec = urd.posix.Timespec;

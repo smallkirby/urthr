@@ -149,6 +149,7 @@ const file_vtable = fs.File.Ops{
     .iterate = fiterate,
     .read = fread,
     .close = fclose,
+    .poll = fpoll,
 };
 
 fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
@@ -189,6 +190,10 @@ fn fread(_: *fs.File, _: []u8, _: usize) fs.Error!usize {
 fn fclose(ctx: *anyopaque, allocator: Allocator) void {
     const file: *FileImpl = @ptrCast(@alignCast(ctx));
     allocator.destroy(file);
+}
+
+fn fpoll(_: *fs.File) fs.Error!fs.PollResult {
+    return .{ .events = .none };
 }
 
 // =============================================================

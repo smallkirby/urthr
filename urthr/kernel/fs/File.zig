@@ -32,6 +32,8 @@ pub const Ops = struct {
     ///
     /// Called when the file's reference count reaches zero.
     close: *const fn (ctx: *anyopaque, allocator: Allocator) void,
+    /// Return I/O readiness and the event to wait on if not ready.
+    poll: *const fn (self: *File) Error!PollResult,
 };
 
 /// Context used in `iterate` operation.
@@ -177,6 +179,11 @@ pub fn unref(self: *Self) void {
     }
 }
 
+/// Return I/O readiness and the event to wait on if not ready.
+pub fn poll(self: *Self) Error!PollResult {
+    return self.ops.poll(self);
+}
+
 /// Get the type of this file.
 pub fn getType(self: *const Self) fs.FileType {
     return self.inode().ftype;
@@ -199,3 +206,5 @@ const urd = @import("urthr");
 const fs = urd.fs;
 const Inode = @import("Inode.zig");
 const Path = fs.Path;
+const PollEvents = fs.PollEvents;
+const PollResult = fs.PollResult;

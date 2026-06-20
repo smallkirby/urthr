@@ -389,6 +389,7 @@ const file_vtable = fs.File.Ops{
     .iterate = fiterate,
     .read = fread,
     .close = fclose,
+    .poll = fpoll,
 };
 
 /// Open and create a file instance for the given inode.
@@ -419,6 +420,17 @@ const FileImpl = struct {
 fn fclose(ctx: *anyopaque, allocator: Allocator) void {
     const file: *FileImpl = @ptrCast(@alignCast(ctx));
     allocator.destroy(file);
+}
+
+/// Check I/O readiness of the file.
+fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
+    return switch (file.getType()) {
+        .regular => .{ .events = .{
+            .in = true,
+            .out = true,
+        } },
+        .directory => .{ .events = .none },
+    };
 }
 
 /// Get the next file entry in a directory file.

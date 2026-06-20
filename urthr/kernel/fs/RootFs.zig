@@ -147,6 +147,7 @@ const file_vtable = fs.File.Ops{
     .iterate = fiterate,
     .read = fread,
     .close = fclose,
+    .poll = fpoll,
 };
 
 /// rootfs specific file implementation.
@@ -182,6 +183,16 @@ fn fread(_: *fs.File, _: []u8, _: usize) fs.Error!usize {
 fn fclose(ctx: *anyopaque, allocator: Allocator) void {
     const file: *FileImpl = @ptrCast(@alignCast(ctx));
     allocator.destroy(file);
+}
+
+fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
+    return switch (file.getType()) {
+        .regular => .{ .events = .{
+            .in = true,
+            .out = true,
+        } },
+        .directory => .{ .events = .none },
+    };
 }
 
 // =============================================================

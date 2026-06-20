@@ -9,6 +9,7 @@ pub const fops = fs.File.Ops{
     .write = write,
     .ioctl = ioctl,
     .close = close,
+    .poll = poll,
 };
 
 pub const name = "tty";
@@ -73,6 +74,16 @@ fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
         else => return fs.Error.Unsupported,
     }
     return 0;
+}
+
+fn poll(_: *fs.File) fs.Error!fs.PollResult {
+    return .{
+        .events = .{
+            .in = urd.input.available(),
+            .out = true,
+        },
+        .wait = &urd.input.event,
+    };
 }
 
 fn iterate(_: *fs.File.Iterator, _: Allocator) fs.Error!?fs.File.IterResult {
