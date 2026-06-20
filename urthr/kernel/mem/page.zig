@@ -626,5 +626,5 @@ const util = common.util;
 const PageAllocator = common.mem.PageAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
-const SpinLock = urd.SpinLock;
+const SpinLock = urd.sync.SpinLock;
 const vmap = @import("vmemmap.zig");

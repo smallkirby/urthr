@@ -1153,6 +1153,6 @@ const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
 const CondVar = urd.sync.CondVar;
-const SpinLock = urd.SpinLock;
+const SpinLock = urd.sync.SpinLock;
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;

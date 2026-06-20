@@ -222,5 +222,5 @@ const board = @import("board").impl;
 const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
-const SpinLock = urd.SpinLock;
+const SpinLock = urd.sync.SpinLock;
 const Thread = urd.task.thread.Thread;

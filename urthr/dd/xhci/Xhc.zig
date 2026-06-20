@@ -618,7 +618,7 @@ const pci = dd.pci;
 const urd = @import("urthr");
 const mem = urd.mem;
 const CondVar = urd.sync.CondVar;
-const SpinLock = urd.SpinLock;
+const SpinLock = urd.sync.SpinLock;
 
 const regs = @import("registers.zig");
 const rings = @import("ring.zig");

@@ -3,7 +3,7 @@
 const Error = mem.Error;
 
 /// Spin lock.
-var _lock: urd.SpinLock = .{};
+var _lock: SpinLock = .{};
 /// List of memory resources.
 ///
 /// This list must be sorted by the start address of the memory resources.
@@ -298,6 +298,7 @@ const urd = @import("urthr");
 const mem = urd.mem;
 const Virt = mem.Virt;
 const Phys = mem.Phys;
+const SpinLock = urd.sync.SpinLock;
 const common = @import("common");
 const Attribute = common.mem.Attribute;
 const IoAllocator = common.mem.IoAllocator;

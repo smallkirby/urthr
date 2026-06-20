@@ -289,5 +289,5 @@ const arch = @import("arch").impl;
 const urd = @import("urthr");
 const sched = urd.sched;
 const time = urd.time;
-const SpinLock = urd.SpinLock;
 const Thread = urd.task.thread.Thread;
+const SpinLock = @import("SpinLock.zig");

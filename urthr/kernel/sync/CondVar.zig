@@ -57,6 +57,6 @@ const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
 const sched = urd.sched;
-const SpinLock = urd.SpinLock;
 const thread = urd.task.thread;
 const ThreadList = thread.ThreadList;
+const SpinLock = @import("SpinLock.zig");

@@ -80,4 +80,5 @@ fn unsafeFlush(_: *anyopaque) void {}
 
 const common = @import("common");
 const Console = common.Console;
-const SpinLock = @import("SpinLock.zig");
+const urd = @import("urthr");
+const SpinLock = urd.sync.SpinLock;

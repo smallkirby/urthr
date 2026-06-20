@@ -77,7 +77,7 @@ pub const State = enum {
 /// Wait-queue used by a parent to wait for a vfork-cloned child.
 pub const VforkWaiter = struct {
     /// Lock protecting this completion.
-    lock: urd.SpinLock = .{},
+    lock: SpinLock = .{},
     /// Queue the parent waits on.
     cv: CondVar = .{},
     /// Set when the child has exited or called execve.
@@ -131,4 +131,6 @@ const typing = common.typing;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const task = urd.task;
+const sync = urd.sync;
 const CondVar = urd.sync.CondVar;
+const SpinLock = sync.SpinLock;

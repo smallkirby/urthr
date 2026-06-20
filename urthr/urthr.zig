@@ -19,7 +19,6 @@ pub const time = @import("kernel/time.zig");
 pub const trace = @import("trace.zig");
 
 pub const LogFn = klog.LogFn;
-pub const SpinLock = @import("kernel/SpinLock.zig");
 
 /// Urthr version string.
 pub const version = options.version;
