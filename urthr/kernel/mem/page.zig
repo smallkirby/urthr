@@ -275,7 +275,13 @@ const Arena = struct {
 
     /// Free the given pages to the appropriate list.
     pub fn freePages(self: *Arena, pages: []u8) void {
-        const order = roundUpToOrder(pages.len / page_size);
+        if (pages.len == 0) return;
+
+        const order = roundUpToOrder(std.math.divCeil(
+            usize,
+            pages.len,
+            page_size,
+        ) catch unreachable);
         rtt.expectEqual(0, @intFromPtr(pages.ptr) & getOrderMask(order));
 
         const new_page = self.getList(order).freeBlock(pages);
@@ -422,6 +428,8 @@ fn allocPages(_: *anyopaque, num_pages: usize) Error![]align(page_size) u8 {
 }
 
 fn freePages(_: *anyopaque, pages: []u8) void {
+    if (pages.len == 0) return;
+
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
