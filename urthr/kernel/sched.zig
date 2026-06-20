@@ -69,14 +69,54 @@ pub fn enqueue(th: *Thread) void {
     qready.append(th);
 }
 
-/// Put the current thread to sleep and release the given lock.
+/// Enqueue a thread only if it is currently blocked.
+///
+/// If the thread is not blocked, nop.
+pub fn wake(th: *Thread) void {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    if (th.state == .blocked) {
+        th.state = .ready;
+        qready.append(th);
+        markNeedResched();
+    }
+}
+
+/// Put the current thread to sleep.
+///
+/// Returns immediately if `woken` is already set.
+///
+/// Marks the current thread as blocked before switching.
+pub fn blockCurrentCheckWoken(woken: *const bool) void {
+    const ie = lock.lockDisableIrq();
+    defer arch.intr.setMask(ie);
+
+    // Check if the thread was already woken during the lock is held.
+    if (woken.*) {
+        lock.unlock();
+        return;
+    }
+
+    blockCurrentImpl(null);
+}
+
+/// Put the current thread to sleep.
 ///
 /// Marks the current thread as blocked before switching.
 ///
-/// The lock is released before switching.
-/// IRQs remain disabled when the thread resumes.
+/// The lock is released on return.
 pub fn blockCurrent(caller_lock: ?*SpinLock) void {
     const ie = lock.lockDisableIrq();
+    defer arch.intr.setMask(ie);
+
+    blockCurrentImpl(caller_lock);
+}
+
+/// Put the current thread to sleep and switch to another thread.
+fn blockCurrentImpl(caller_lock: ?*SpinLock) void {
+    rtt.expect(lock.isLocked());
+    if (caller_lock) |l| rtt.expect(l.isLocked());
 
     // Update the current thread's runtime.
     accountRuntime();
@@ -92,13 +132,14 @@ pub fn blockCurrent(caller_lock: ?*SpinLock) void {
     // Switch user-space page table if needed.
     arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
 
+    // Release locks before switching.
     lock.unlock();
     if (caller_lock) |l| l.unlock();
 
+    // Switch to the next thread.
     arch.thread.switchContext(&cur.sp, &next.sp);
 
-    arch.intr.setMask(ie);
-
+    // Update the last switch-in timestamp.
     updateLastExecTimestamp();
 }
 
