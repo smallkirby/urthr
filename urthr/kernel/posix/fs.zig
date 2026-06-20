@@ -61,6 +61,42 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
     return .success(@intCast(newfd));
 }
 
+/// syscall: pipe2
+pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
+    const cur = sched.getCurrent();
+    const fd_flags = FdFlags{ .cloexec = flags.cloexec };
+
+    // Create a pipe file pair.
+    const pair = urd.fs.createPipe() catch return .err(.nomem);
+    defer {
+        // Release the initial refs.
+        pair.read.unref();
+        pair.write.unref();
+    }
+
+    // Put the read- and write-end into the fd table.
+    const rfd = cur.fs.fdtbl.allocAt(
+        0,
+        pair.read,
+        fd_flags,
+    ) catch {
+        return .err(.mfile);
+    };
+    const wfd = cur.fs.fdtbl.allocAt(
+        0,
+        pair.write,
+        fd_flags,
+    ) catch {
+        cur.fs.fdtbl.close(rfd) catch {};
+        return .err(.mfile);
+    };
+
+    pipefd[0] = @intCast(rfd);
+    pipefd[1] = @intCast(wfd);
+
+    return .success(0);
+}
+
 /// syscall: close
 pub fn sysClose(fd: usize) ReturnType {
     sched.getCurrent().fs.fdtbl.close(fd) catch {

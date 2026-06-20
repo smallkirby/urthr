@@ -16,6 +16,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("chdir",               49,     posix.fs.sysChdir),
     .new("fchmodat",            53,     posix.fs.sysFchmodAt),
     .new("openat",              56,     posix.fs.sysOpenAt),
+    .new("pipe2",               59,     posix.fs.sysPipe2),
     .new("close",               57,     posix.fs.sysClose),
     .new("getdents64",          61,     posix.fs.sysGetDents64),
     .new("read",                63,     posix.fs.sysRead),
