@@ -113,15 +113,10 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
         .cluster = ctx.cluster,
     };
 
-    // Create upper case name for comparson.
-    var uname = try self.allocator.alloc(u8, name.len);
-    defer self.allocator.free(uname);
-    uname = std.ascii.upperString(uname, name);
-
     while (try iter.next(self.allocator)) |result| {
         defer result.deinit(self.allocator);
 
-        if (std.mem.eql(u8, result.name, uname)) {
+        if (std.ascii.eqlIgnoreCase(result.name, name)) {
             const inode = try self.allocator.create(InodeImpl);
             errdefer self.allocator.destroy(inode);
 
@@ -305,7 +300,8 @@ const DirIterator = struct {
             // Use LFN if valid, otherwise fall back to short name.
             const name = if (self.lfn.isValid(&entry.name)) blk: {
                 const buf = try allocator.alloc(u8, self.lfn.len);
-                break :blk std.ascii.upperString(buf, self.lfn.buf[0..buf.len]);
+                @memcpy(buf, self.lfn.buf[0..buf.len]);
+                break :blk buf;
             } else try parseName(entry, allocator);
             errdefer allocator.free(name);
 
@@ -367,7 +363,7 @@ const DirIterator = struct {
         }
 
         const name = try allocator.alloc(u8, len);
-        return std.ascii.upperString(name, buf[0..len]);
+        return std.ascii.lowerString(name, buf[0..len]);
     }
 
     /// Compute checksum of the short name.
