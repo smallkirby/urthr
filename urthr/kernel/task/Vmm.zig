@@ -220,6 +220,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
 
+    // Update page table mapping.
     try arch.mmu.remap4kb(
         self.pgtbl,
         vaddr,
@@ -227,6 +228,16 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
         perm,
         urd.mem.page,
     );
+
+    // Update VMA tree.
+    var scan: usize = vaddr;
+    const end = vaddr + size;
+    while (scan < end) {
+        const node = self.tree.find(scan) orelse break;
+        const vma = node.container();
+        vma.perm = perm;
+        scan = vma.start + vma.size;
+    }
 }
 
 /// Extend the program break to the given address.
