@@ -99,6 +99,20 @@ pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
     return .success(@bitCast(n.len));
 }
 
+// syscall: readv
+pub fn sysReadv(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
+    const iovs = iov[0..iovcnt];
+    const file = getFile(fd) catch return .err(.badf);
+
+    var total: usize = 0;
+    for (iovs) |v| {
+        const n = file.read(v.slice()) catch return .err(.again);
+        total += n.len;
+    }
+
+    return .success(@bitCast(total));
+}
+
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const offset = bits.concat(u64, offset_h, offset_l);

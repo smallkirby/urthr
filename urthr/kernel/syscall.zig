@@ -19,6 +19,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("getdents64",          61,     posix.fs.sysGetDents64),
     .new("read",                63,     posix.fs.sysRead),
     .new("write",               64,     posix.fs.sysWrite),
+    .new("readv",               65,     posix.fs.sysReadv),
     .new("writev",              66,     posix.fs.sysWritev),
     .new("preadv",              69,     posix.fs.sysPreadv),
     .new("pwritev",             70,     posix.fs.sysPwritev),
