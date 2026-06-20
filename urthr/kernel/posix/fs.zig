@@ -490,21 +490,133 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
 // =============================================================
 
 /// syscall: ppoll
-pub fn sysPpoll(fds: [*]const PollFd, nfds: usize, timeout: i32) ReturnType {
-    _ = fds;
-    _ = nfds;
-    _ = timeout;
+///
+/// - `fds`: Array of file descriptors to poll.
+/// - `nfds`: Number of file descriptors in `fds`.
+/// - `tmop`: Upper limit on the amount of time that this function will block.
+/// - `sigmask`: TODO: Unused.
+/// - `sigsetsize`: TODO: Unused.
+pub fn sysPpoll(
+    fds: [*]PollFd,
+    nfds: usize,
+    tmop: ?*const posix.Timespec,
+    _: ?*const anyopaque,
+    _: usize,
+) ReturnType {
+    if (nfds > Event.max_multiwait) {
+        return .err(.inval);
+    }
 
-    return .err(.nosys); // TODO: Not implemented.
+    const kfds = mem.bin.alloc(PollFd, nfds) catch return .err(.nomem);
+    defer mem.bin.free(kfds);
+    @memcpy(kfds, fds[0..nfds]);
+
+    // Calculate deadline for blocking.
+    const deadline_ns = if (tmop) |t| blk: {
+        const dur_ns: u64 = @intCast(t.sec * std.time.ns_per_s + @as(i64, @intCast(t.nsec)));
+        break :blk urd.time.getCurrentTimestamp() + dur_ns;
+    } else null;
+
+    const done: usize = while (true) {
+        var n_ready: usize = 0;
+        var wait_events: [Event.max_multiwait - 1]*Event = undefined;
+        var n_events: usize = 0;
+
+        // Check if any of the file descriptors are ready.
+        for (kfds) |*pfd| {
+            pfd.revents = .empty;
+
+            // Ignore negative descriptors.
+            if (pfd.fd < 0) continue;
+
+            // Poll the file readiness.
+            const file = getFile(@intCast(pfd.fd)) catch {
+                pfd.revents.nval = true;
+                n_ready += 1;
+                continue;
+            };
+            const result = file.poll() catch {
+                pfd.revents.err = true;
+                n_ready += 1;
+                continue;
+            };
+            const ready = std.mem.zeroInit(PollEvents, .{
+                .in = result.events.in,
+                .pri = result.events.urgent,
+                .out = result.events.out,
+            });
+            pfd.revents = pfd.events.eand(ready);
+
+            if (pfd.revents != PollEvents.empty) {
+                n_ready += 1;
+            } else if (result.wait) |ev| {
+                wait_events[n_events] = ev;
+                n_events += 1;
+            }
+        }
+
+        // If at least one event is ready, return.
+        if (n_ready > 0) {
+            break n_ready;
+        }
+
+        // If it already reached the deadline, return.
+        if (deadline_ns) |dl| {
+            if (urd.time.getCurrentTimestamp() >= dl) break @as(usize, 0);
+        }
+
+        if (n_events > 0 or deadline_ns != null)
+            _ = Event.waitAny(
+                wait_events[0..n_events],
+                deadline_ns,
+            )
+        else
+            sched.reschedule();
+    };
+
+    @memcpy(fds[0..nfds], kfds);
+    return .success(@intCast(done));
 }
 
+/// POSIX-compliant pollfd structure.
 const PollFd = extern struct {
     /// File descriptor.
     fd: i32,
     /// Requested events.
-    events: u16,
+    events: PollEvents,
     /// Returned events.
-    revents: u16,
+    revents: PollEvents,
+};
+
+/// POSIX-compliant event type that can be polled for.
+const PollEvents = packed struct(u16) {
+    /// There is data to read.
+    in: bool,
+    /// There is urgent data to read.
+    pri: bool,
+    /// Writing now will not block.
+    out: bool,
+
+    // =============================================================
+    // Always implicitly polled for.
+    // Users should not include these in `events`, but `revents` may contain these values.
+
+    /// Error condition.
+    err: bool,
+    /// Hung up.
+    hup: bool,
+    /// Invalid polling request.
+    nval: bool,
+
+    /// Reserved.
+    _6: u10 = 0,
+
+    const empty = std.mem.zeroes(PollEvents);
+
+    /// Bitwise AND of two PollEvents.
+    fn eand(self: PollEvents, other: PollEvents) PollEvents {
+        return @bitCast(@as(u16, @bitCast(self)) & @as(u16, @bitCast(other)));
+    }
 };
 
 // =============================================================
@@ -563,6 +675,9 @@ const common = @import("common");
 const bits = common.bits;
 const rtt = common.rtt;
 const urd = @import("urthr");
+const mem = urd.mem;
+const posix = urd.posix;
 const sched = urd.sched;
+const Event = urd.sync.Event;
 const FdFlags = urd.fs.FdTable.FdFlags;
 const ReturnType = urd.syscall.ReturnType;
