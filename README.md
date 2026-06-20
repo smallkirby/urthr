@@ -75,7 +75,7 @@ zig build test --summary all -Doptimize=Debug
 | `sdcreate` | Flag | Create SD card image and use it in this run. | - |
 | `log_level` | String: `debug`, `info`, `warn`, `error` | Logging level. Output under the logging level is suppressed. | `info` |
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
-| `trace` | String (Comma-separated): `sdhc,net` | Enable trace outputs. | - |
+| `trace` | String (Comma-separated): `sdhc,net,syscall` | Enable trace outputs. | - |
 | `rtt` | Flag | Enable runtime tests. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 | `qemu` | Path | Path to QEMU (aarch64) directory. | `""` |
