@@ -35,6 +35,32 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) R
     return .success(@bitCast(fd));
 }
 
+/// syscall: dup3
+pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
+    if (oldfd == newfd) {
+        return .err(.inval);
+    }
+    if (newfd >= urd.fs.max_fds) {
+        return .err(.mfile);
+    }
+
+    const file = getFile(oldfd) catch return .err(.badf);
+    const cur = sched.getCurrent();
+
+    // Close newfd if already open.
+    cur.fs.fdtbl.close(newfd) catch {};
+
+    // Allocate a nearest available fd.
+    const fd_flags = FdFlags{ .cloexec = flags.cloexec };
+    _ = cur.fs.fdtbl.allocAt(
+        newfd,
+        file,
+        fd_flags,
+    ) catch return .err(.mfile);
+
+    return .success(@intCast(newfd));
+}
+
 /// syscall: close
 pub fn sysClose(fd: usize) ReturnType {
     sched.getCurrent().fs.fdtbl.close(fd) catch {
@@ -43,6 +69,35 @@ pub fn sysClose(fd: usize) ReturnType {
 
     return .success(0);
 }
+
+const OpenFlags = packed struct(i32) {
+    /// Read-only.
+    ro: bool = false,
+    /// Write-only.
+    wo: bool = false,
+    /// Read and write.
+    rdwr: bool = false,
+    /// Reserved.
+    _3: u3 = 0,
+    /// Create file if it does not exist.
+    creat: bool = false,
+    /// Error if O_CREAT and the file exists.
+    excl: bool = false,
+    /// Even if the path refers to TTY, do not open it as a controlling TTY device.
+    noctty: bool = false,
+    /// Truncate file to zero length if it already exists.
+    trunc: bool = false,
+    /// Append mode.
+    append: bool = false,
+    /// Nonblocking mode if possible.
+    nonblock: bool = false,
+    /// Reserved.
+    _12: u7 = 0,
+    /// Enable close-on-exec flag.
+    cloexec: bool = false,
+    /// Reserved.
+    _14: u12 = 0,
+};
 
 // =============================================================
 // Write

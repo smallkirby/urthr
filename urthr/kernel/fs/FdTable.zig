@@ -15,7 +15,7 @@ pub const Error = error{
 };
 
 /// Maximum number of open file descriptors per process.
-const max_fds = 64;
+pub const max_fds = 64;
 
 /// Per-descriptor flags.
 pub const FdFlags = packed struct(u32) {

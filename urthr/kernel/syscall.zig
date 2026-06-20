@@ -10,6 +10,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     // POSIX system calls.
 
     .new("getcwd",              17,     posix.fs.sysGetCwd),
+    .new("dup3",                24,     posix.fs.sysDup3),
     .new("fcntl",               25,     posix.fs.sysFcntl),
     .new("ioctl",               29,     posix.fs.sysIoctl),
     .new("chdir",               49,     posix.fs.sysChdir),

@@ -27,6 +27,8 @@ pub const Error = error{
     Unsupported,
 } || block.Error;
 
+pub const max_fds: usize = FdTable.max_fds;
+
 /// File type.
 pub const FileType = enum {
     /// Regular file.
