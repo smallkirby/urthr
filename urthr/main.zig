@@ -104,6 +104,9 @@ fn zmain() !void {
     urd.time.initGlobal();
     urd.time.initLocal();
 
+    // Initialize sync primitives.
+    urd.sync.init();
+
     // Warm up secondary CPUs.
     log.info("Warming up secondary CPUs.", .{});
     try urd.smp.init();
