@@ -475,7 +475,7 @@ const EventQueue = struct {
     /// Spin lock to protect the queue.
     lock: SpinLock = .{},
     /// Wait queue.
-    waitq: WaitQueue = .{},
+    cv: CondVar = .{},
 
     /// Enqueue a TRB copy. Called from IRQ context.
     fn push(self: *@This(), trb: trbs.Trb) void {
@@ -491,7 +491,7 @@ const EventQueue = struct {
         self.tail = (self.tail + 1) % capacity;
         self.count += 1;
 
-        _ = self.waitq.wake();
+        self.cv.signal();
     }
 
     /// Dequeue a TRB.
@@ -502,7 +502,7 @@ const EventQueue = struct {
         defer self.lock.unlockRestoreIrq(ie);
 
         while (self.count == 0) {
-            self.waitq.wait(&self.lock);
+            self.cv.wait(&self.lock);
         }
 
         const trb = self.buf[self.head];
@@ -617,8 +617,8 @@ const dd = @import("dd");
 const pci = dd.pci;
 const urd = @import("urthr");
 const mem = urd.mem;
+const CondVar = urd.sync.CondVar;
 const SpinLock = urd.SpinLock;
-const WaitQueue = urd.WaitQueue;
 
 const regs = @import("registers.zig");
 const rings = @import("ring.zig");

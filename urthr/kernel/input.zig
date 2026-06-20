@@ -26,8 +26,8 @@ var state: struct {
 
     /// Spinlock to protect the state.
     lock: SpinLock,
-    /// Wait queue for readers waiting for input.
-    waitq: WaitQueue,
+    /// Condition variable for readers waiting for input.
+    cv: CondVar,
 } = .{
     .line = undefined,
     .line_len = 0,
@@ -36,7 +36,7 @@ var state: struct {
     .r_tail = 0,
     .termios = .default(),
     .lock = .{},
-    .waitq = .{},
+    .cv = .{},
 };
 
 /// Get the current termios settings.
@@ -67,7 +67,7 @@ pub fn push(c: u8) void {
     } else {
         // If raw mode, push directly to the ring buffer.
         ringPush(ch);
-        _ = state.waitq.wake();
+        state.cv.signal();
     }
 }
 
@@ -81,7 +81,7 @@ pub fn read(buf: []u8) usize {
     const min: usize = if (state.termios.lflag.icanon) 1 else @max(1, state.termios.cc[cc.vmin]);
 
     while (ringLen() < min) {
-        state.waitq.wait(&state.lock);
+        state.cv.wait(&state.lock);
     }
 
     var n: usize = 0;
@@ -108,7 +108,7 @@ fn pushCanonical(c: u8) void {
         '\n' => {
             flushLine('\n');
             if (echo) console.writeUnsafe("\r\n");
-            _ = state.waitq.wake();
+            state.cv.signal();
         },
         // Backspace or DEL.
         0x08, 0x7F => {
@@ -125,7 +125,7 @@ fn pushCanonical(c: u8) void {
         // Ctrl+D
         0x04 => {
             flushLine(0);
-            _ = state.waitq.wake();
+            state.cv.signal();
         },
         // Normal character.
         else => {
@@ -362,4 +362,4 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const console = urd.console;
 const SpinLock = urd.SpinLock;
-const WaitQueue = urd.WaitQueue;
+const CondVar = urd.sync.CondVar;

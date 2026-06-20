@@ -37,8 +37,8 @@ pub const Thread = struct {
     children: ChildrenList = .{},
     /// Link node in parent's children list.
     sibling: ChildrenList.Head = .{},
-    /// Wait queue the parent blocks on to wait for the child to exit.
-    child_exit_wq: WaitQueue = .{},
+    /// Condition variable the parent blocks on to wait for the child to exit.
+    child_exit_cv: CondVar = .{},
 
     /// This thread needs to be rescheduled.
     need_resched: bool = false,
@@ -79,7 +79,7 @@ pub const VforkWaiter = struct {
     /// Lock protecting this completion.
     lock: urd.SpinLock = .{},
     /// Queue the parent waits on.
-    wq: urd.WaitQueue = .{},
+    cv: CondVar = .{},
     /// Set when the child has exited or called execve.
     done: bool = false,
 
@@ -89,7 +89,7 @@ pub const VforkWaiter = struct {
         defer self.lock.unlockRestoreIrq(ie);
 
         self.done = true;
-        _ = self.wq.wake();
+        self.cv.signal();
     }
 
     /// Block until the child signals completion.
@@ -98,7 +98,7 @@ pub const VforkWaiter = struct {
         defer self.lock.unlockRestoreIrq(ie);
 
         while (!self.done) {
-            self.wq.wait(&self.lock);
+            self.cv.wait(&self.lock);
         }
     }
 };
@@ -131,4 +131,4 @@ const typing = common.typing;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const task = urd.task;
-const WaitQueue = urd.WaitQueue;
+const CondVar = urd.sync.CondVar;

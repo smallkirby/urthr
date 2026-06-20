@@ -2,42 +2,51 @@
 
 const Self = @This();
 
-/// List of threads waiting on this queue.
+/// List of threads blocked on this condition variable.
 waiters: ThreadList = .{},
 
-/// Wake one thread from the wait queue.
+/// Wake one waiting thread.
 ///
-/// Moves the first waiting thread to the scheduler's ready queue.
+/// The caller must hold the protecting lock.
 ///
-/// Returns true if a thread was woken up.
-pub fn wake(self: *Self) bool {
-    const th = self.waiters.popFirst() orelse {
-        // No waiters to wake.
-        return false;
-    };
-
-    sched.enqueue(th);
-    sched.markNeedResched();
-
-    return true;
+/// NOP if there are no waiters.
+pub fn signal(self: *Self) void {
+    if (self.waiters.popFirst()) |th| {
+        sched.enqueue(th);
+        sched.markNeedResched();
+    }
 }
 
 /// Block the current thread on this wait queue.
 ///
-/// The caller must hold the protecting SpinLock with IRQs disabled.
+/// The caller must hold the protecting lock with IRQs disabled.
 /// The lock is released before sleeping and re-acquired after waking.
 ///
 /// This must NOT be called from IRQ context.
-pub fn wait(self: *Self, spin: *SpinLock) void {
-    rtt.expect(spin.isLocked());
+pub fn wait(self: *Self, lock: *SpinLock) void {
+    rtt.expect(lock.isLocked());
 
     self.waiters.append(sched.getCurrent());
 
     // Release the protecting lock and switch to another thread.
-    sched.blockCurrent(spin);
+    sched.blockCurrent(lock);
 
     // Re-acquire the lock with IRQs disabled.
-    _ = spin.lockDisableIrq();
+    _ = lock.lockDisableIrq();
+}
+
+/// Wake all waiting threads.
+///
+/// The caller must hold the protecting lock.
+///
+/// NOP if there are no waiters.
+pub fn broadcast(self: *Self) void {
+    var woke = false;
+    while (self.waiters.popFirst()) |th| {
+        sched.enqueue(th);
+        woke = true;
+    }
+    if (woke) sched.markNeedResched();
 }
 
 // =============================================================
@@ -50,5 +59,4 @@ const urd = @import("urthr");
 const sched = urd.sched;
 const SpinLock = urd.SpinLock;
 const thread = urd.task.thread;
-const Thread = thread.Thread;
 const ThreadList = thread.ThreadList;

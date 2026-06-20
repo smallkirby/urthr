@@ -11,6 +11,7 @@ pub const posix = @import("kernel/posix.zig");
 pub const rng = @import("kernel/rng.zig");
 pub const sched = @import("kernel/sched.zig");
 pub const smp = @import("kernel/smp.zig");
+pub const sync = @import("kernel/sync.zig");
 pub const syscall = @import("kernel/syscall.zig");
 pub const task = @import("kernel/task.zig");
 pub const time = @import("kernel/time.zig");
@@ -19,7 +20,6 @@ pub const trace = @import("trace.zig");
 
 pub const LogFn = klog.LogFn;
 pub const SpinLock = @import("kernel/SpinLock.zig");
-pub const WaitQueue = @import("kernel/WaitQueue.zig");
 
 /// Urthr version string.
 pub const version = options.version;

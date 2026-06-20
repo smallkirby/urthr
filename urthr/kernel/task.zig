@@ -349,7 +349,7 @@ pub fn exit(code: i32) noreturn {
 
         if (cur.parent) |p| {
             p.children.remove(cur);
-            _ = p.child_exit_wq.wake();
+            p.child_exit_cv.signal();
         }
         zombie_list.append(cur);
     }
@@ -401,7 +401,7 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
         }
 
         if (!nowait) {
-            cur.child_exit_wq.wait(&zombie_lock);
+            cur.child_exit_cv.wait(&zombie_lock);
         } else {
             return null;
         }

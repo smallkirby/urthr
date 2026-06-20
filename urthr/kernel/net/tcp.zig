@@ -596,7 +596,7 @@ pub fn send(desc: usize, data: []const u8) net.Error!void {
 
                 if (cap == 0) {
                     trace("send: receiver window is full, waiting for ACK.", .{});
-                    sock.wq.wait(&sock._lock);
+                    sock.cv.wait(&sock._lock);
                     continue;
                 }
 
@@ -637,7 +637,7 @@ pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
     switch (sock.state) {
         .established => {
             while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
-                sock.wq.wait(&sock._lock);
+                sock.cv.wait(&sock._lock);
             }
         },
         .close_wait => if (remain == 0) return &.{},
@@ -721,7 +721,7 @@ const SocketTable = struct {
         const allocator = urd.mem.bin;
 
         // Notify the waiting thread if any to unblock it.
-        _ = socket.wq.wake();
+        socket.cv.signal();
 
         // Free the queue.
         var cur = socket.rq.first;
@@ -825,7 +825,7 @@ const Socket = struct {
     /// Retransmission queue.
     rq: std.DoublyLinkedList,
     /// Wait queue.
-    wq: urd.WaitQueue,
+    cv: CondVar,
     /// Lock to protect the wait queue.
     _lock: SpinLock,
     _lock_ie: u64,
@@ -836,7 +836,7 @@ const Socket = struct {
         const ie = self._lock.lockDisableIrq();
         defer self._lock.unlockRestoreIrq(ie);
 
-        self.wq.wait(&self._lock);
+        self.cv.wait(&self._lock);
     }
 
     pub fn wake(self: *Socket) void {
@@ -845,7 +845,7 @@ const Socket = struct {
         const ie = self._lock.lockDisableIrq();
         defer self._lock.unlockRestoreIrq(ie);
 
-        _ = self.wq.wake();
+        self.cv.signal();
     }
 
     pub fn lock(self: *Socket) void {
@@ -1152,6 +1152,7 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
+const CondVar = urd.sync.CondVar;
 const SpinLock = urd.SpinLock;
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;

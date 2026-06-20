@@ -163,7 +163,7 @@ pub fn recvfrom(desc: usize, buf: []u8) RecvResult {
         // TODO: should return an error if the socket is closed while waiting
 
         // Wait for incoming data.
-        sock.waitq.wait(&sock.lock);
+        sock.cv.wait(&sock.lock);
     };
 
     const len = @min(buf.len, pending.data.len);
@@ -249,7 +249,7 @@ const Socket = struct {
     /// List of pending packets.
     pending_data: std.DoublyLinkedList,
     /// Wait queue to wake the receiver thread.
-    waitq: urd.WaitQueue = .{},
+    cv: CondVar = .{},
     /// Lock to protect the socket state and pending data.
     lock: SpinLock = .{},
 
@@ -286,7 +286,7 @@ const Socket = struct {
         }
 
         // Wake a receiver thread.
-        _ = self.waitq.wake();
+        self.cv.signal();
     }
 
     /// Free given pending entry data.
@@ -353,7 +353,7 @@ const SocketTable = struct {
         };
 
         // Wake all waiting threads.
-        while (sock.waitq.wake()) {}
+        sock.cv.broadcast();
     }
 
     /// Get a socket by its descriptor.
@@ -447,6 +447,7 @@ const common = @import("common");
 const Range = common.Range;
 const rtt = common.rtt;
 const urd = @import("urthr");
+const CondVar = urd.sync.CondVar;
 const SpinLock = urd.SpinLock;
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;

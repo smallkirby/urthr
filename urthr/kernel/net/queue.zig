@@ -32,8 +32,8 @@ pub const RxQueue = struct {
     count: usize = 0,
     /// Protecting lock.
     lock: SpinLock = .{},
-    /// Wait queue for the consumer thread.
-    waitq: WaitQueue = .{},
+    /// Condition variable for the consumer thread.
+    cv: CondVar = .{},
     /// Number of dropped packets due to queue full.
     drops: u64 = 0,
 
@@ -55,7 +55,7 @@ pub const RxQueue = struct {
         self.head = (self.head + 1) % capacity;
         self.count += 1;
 
-        _ = self.waitq.wake();
+        self.cv.signal();
     }
 
     /// Dequeue a packet in thread context.
@@ -69,7 +69,7 @@ pub const RxQueue = struct {
         defer self.lock.unlockRestoreIrq(ie);
 
         while (self.count == 0) {
-            self.waitq.wait(&self.lock);
+            self.cv.wait(&self.lock);
         }
 
         return &self.slots[self.tail];
@@ -124,8 +124,8 @@ pub const TxQueue = struct {
     count: usize = 0,
     /// Protecting lock.
     lock: SpinLock = .{},
-    /// Wait queue for the TX worker thread.
-    waitq: WaitQueue = .{},
+    /// Condition variable for the TX worker thread.
+    cv: CondVar = .{},
     /// Number of dropped packets due to queue full.
     drops: u64 = 0,
 
@@ -147,7 +147,7 @@ pub const TxQueue = struct {
         self.head = (self.head + 1) % capacity;
         self.count += 1;
 
-        _ = self.waitq.wake();
+        self.cv.signal();
     }
 
     /// Dequeue a TX packet in thread context.
@@ -159,7 +159,7 @@ pub const TxQueue = struct {
         defer self.lock.unlockRestoreIrq(ie);
 
         while (self.count == 0) {
-            self.waitq.wait(&self.lock);
+            self.cv.wait(&self.lock);
         }
 
         const pkt = self.slots[self.tail];
@@ -178,7 +178,7 @@ const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
 const SpinLock = urd.SpinLock;
-const WaitQueue = urd.WaitQueue;
+const CondVar = urd.sync.CondVar;
 const Device = @import("Device.zig");
 const NetBuffer = @import("NetBuffer.zig");
 const Protocol = urd.net.Protocol;
