@@ -19,6 +19,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("pipe2",               59,     posix.fs.sysPipe2),
     .new("close",               57,     posix.fs.sysClose),
     .new("getdents64",          61,     posix.fs.sysGetDents64),
+    .new("lseek",               62,     posix.fs.sysLseek),
     .new("read",                63,     posix.fs.sysRead),
     .new("write",               64,     posix.fs.sysWrite),
     .new("readv",               65,     posix.fs.sysReadv),

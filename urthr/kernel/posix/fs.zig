@@ -136,6 +136,37 @@ const OpenFlags = packed struct(i32) {
 };
 
 // =============================================================
+// Seek
+// =============================================================
+
+/// syscall: lseek
+pub fn sysLseek(fd: usize, offset: i64, whence: Whence) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+
+    const new_offset: i64 = switch (whence) {
+        .set => offset,
+        .cur => @as(i64, @intCast(file.offset)) + offset,
+        .end => @as(i64, @intCast(file.size())) + offset,
+        else => return .err(.inval),
+    };
+    if (new_offset < 0) return .err(.inval);
+
+    file.offset = @intCast(new_offset);
+    return .success(@bitCast(new_offset));
+}
+
+const Whence = enum(i32) {
+    /// Offset is set to offset bytes.
+    set = 0,
+    /// Offset is set to its current location plus offset bytes.
+    cur = 1,
+    /// Offset is set to the size of the file plus offset bytes.
+    end = 2,
+
+    _,
+};
+
+// =============================================================
 // Write
 // =============================================================
 
