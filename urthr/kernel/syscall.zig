@@ -34,7 +34,8 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("clock_gettime",       113,    posix.time.sysClockGetTime),
     .new("clock_nanosleep",     115,    posix.time.sysClockNanoSleep),
     .new("sched_getaffinity",   123,    posix.sched.sysSchedGetAffinity),
-    .new("kill",                129,    posix.task.sysKill),
+    .new("kill",                129,    posix.signal.sysKill),
+    .new("rt_sigreturn",        139,    posix.signal.sysRtSigReturn),
     .new("sigaltstack",         132,    posix.signal.sysSigAltStack),
     .new("rt_sigaction",        134,    posix.signal.sysRtSigAction),
     .new("rt_sigprocmask",      135,    posix.signal.sysRtSigProcMask),
@@ -98,6 +99,7 @@ pub const ReturnType = union(enum) {
 /// Initialize syscall subsystem.
 pub fn init() void {
     arch.setSystemCallHandler(invoke);
+    arch.setEreturnHook(urd.task.signal.deliver);
 }
 
 /// Call a system call handler corresponding to the given syscall number.
