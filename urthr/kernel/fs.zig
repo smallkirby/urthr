@@ -26,6 +26,8 @@ pub const Error = error{
     CorruptedData,
     /// The operation is not supported by the filesystem.
     Unsupported,
+    /// Write to a pipe with no readers.
+    BrokenPipe,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;

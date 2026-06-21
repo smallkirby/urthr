@@ -277,13 +277,12 @@ fn frWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     defer pipe.lock.unlockRestoreIrq(ie);
 
     while (pipe.isFull()) {
-        if (pipe.readers == 0) return fs.Error.Unsupported;
+        if (pipe.readers == 0) return fs.Error.BrokenPipe;
         pipe.wcv.wait(&pipe.lock);
     }
 
     if (pipe.readers == 0) {
-        // Write to a pipe with no readers is not supported.
-        return fs.Error.Unsupported;
+        return fs.Error.BrokenPipe;
     }
 
     const n = pipe.write(buf);
