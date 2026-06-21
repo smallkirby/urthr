@@ -265,6 +265,26 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 // Stat
 // =============================================================
 
+/// syscall: fstat
+pub fn sysFstat(fd: usize, statbuf: *Stat) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+
+    statbuf.* = .{
+        .st_dev = 0,
+        .st_ino = file.path.dentry.inode.number,
+        .st_mode = @bitCast(Mode.from(file)),
+        .st_nlink = 1,
+        .st_uid = 0,
+        .st_gid = 0,
+        .st_rdev = 0,
+        .st_size = @intCast(file.size()),
+        .st_blksize = 512,
+        .st_blocks = @intCast(file.size() / 512),
+    };
+
+    return .success(0);
+}
+
 /// syscall: newfstatat
 pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flags: i32) ReturnType {
     _ = flags; // TODO: should be implemented.
