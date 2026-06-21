@@ -72,6 +72,11 @@ pub fn setSystemCallHandler(f: anytype) void {
     svc.setHandler(f);
 }
 
+/// Set hook called before every return to EL0.
+pub fn setEreturnHook(f: exception.EreturnHook) void {
+    exception.setEreturnHook(f);
+}
+
 /// Cache operation type.
 const CacheOp = enum {
     /// Invalidate cache lines.

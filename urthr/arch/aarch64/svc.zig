@@ -46,6 +46,9 @@ pub fn svc(ctx: *Context) void {
         arg6,
     );
     ctx.x0 = @bitCast(ret);
+
+    // Deliver any pending signals before returning to userspace.
+    isr.callEreturnHook();
 }
 
 // =============================================================
@@ -53,4 +56,5 @@ pub fn svc(ctx: *Context) void {
 // =============================================================
 
 const am = @import("asm.zig");
-const Context = @import("isr.zig").Context;
+const isr = @import("isr.zig");
+const Context = isr.Context;

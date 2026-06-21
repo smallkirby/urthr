@@ -16,6 +16,11 @@ pub const HandlerSignature = *const fn () ?void;
 /// Function pointer to the registered exception handler.
 var handler: ?HandlerSignature = null;
 
+/// ERET hook function signature.
+pub const EreturnHook = *const fn () void;
+/// Hook called before returning to EL0.
+var eret_hook: ?EreturnHook = null;
+
 /// Initialize exception handling for this CPU.
 pub fn initLocal() void {
     am.msr(.vbar_el1, .{ .addr = @intFromPtr(&exception_table) });
@@ -36,6 +41,16 @@ pub fn setTerminator(f: @TypeOf(terminator)) void {
 /// Set the exception handler function.
 pub fn setHandler(h: HandlerSignature) void {
     handler = h;
+}
+
+/// Set hook called before every return to EL0.
+pub fn setEreturnHook(f: EreturnHook) void {
+    eret_hook = f;
+}
+
+/// Call the ERET hook if registered.
+pub fn callEreturnHook() void {
+    if (eret_hook) |f| f();
 }
 
 // =============================================================
@@ -225,6 +240,7 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {
     if (handler) |f| {
         if (f()) |_| {
+            callEreturnHook();
             return;
         }
     }

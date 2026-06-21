@@ -1,5 +1,6 @@
 //! Process and thread module.
 
+pub const signal = @import("task/signal.zig");
 pub const thread = @import("task/thread.zig");
 pub const Vmm = @import("task/Vmm.zig");
 

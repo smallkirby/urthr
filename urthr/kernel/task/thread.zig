@@ -28,6 +28,9 @@ pub const Thread = struct {
     /// Completion to signal on exit or execve when created by a vfork.
     vfork_done: ?*VforkWaiter = null,
 
+    /// Signal handling state.
+    sigstate: signal.State = .{},
+
     /// Pointer to the parent thread. null for the idle thread and orphaned threads.
     ///
     /// TODO: becomes dangling if the parent exits while this thread is still alive.
@@ -134,3 +137,4 @@ const task = urd.task;
 const sync = urd.sync;
 const CondVar = urd.sync.CondVar;
 const SpinLock = sync.SpinLock;
+const signal = @import("signal.zig");
