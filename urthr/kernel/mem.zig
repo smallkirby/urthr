@@ -161,6 +161,19 @@ pub fn isUserAddress(va: usize) bool {
     return vmap.user.start <= va and va < vmap.user.end;
 }
 
+/// Statistics of an allocator.
+pub const Stats = struct {
+    /// Total size in bytes managed by the allocator.
+    total_bytes: usize,
+    /// Free size in bytes.
+    free_bytes: usize,
+};
+
+/// Get memory statistics.
+pub fn getStats() Stats {
+    return buddy_impl.getStats();
+}
+
 /// End virtual address of kernel image.
 extern const __end: *void;
 

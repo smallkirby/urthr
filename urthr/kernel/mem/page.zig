@@ -410,6 +410,25 @@ fn phys2virt(paddr: usize) usize {
     return paddr + vmap.linear.start;
 }
 
+/// Get current memory statistics from the buddy allocator.
+pub fn getStats() mem.Stats {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    var total: usize = 0;
+    var free: usize = 0;
+    for (arena.lists, 0..) |list, order| {
+        const pages_per_block = Arena.orderToInt(@intCast(order));
+        total += pages_per_block * list.numTotal();
+        free += pages_per_block * list.numFree();
+    }
+
+    return .{
+        .total_bytes = total * page_size,
+        .free_bytes = free * page_size,
+    };
+}
+
 // =============================================================
 // Interface
 // =============================================================
@@ -630,5 +649,6 @@ const util = common.util;
 const PageAllocator = common.mem.PageAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
+const mem = urd.mem;
 const SpinLock = urd.sync.SpinLock;
 const vmap = @import("vmemmap.zig");

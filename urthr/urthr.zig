@@ -8,6 +8,7 @@ pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
 pub const pcpu = @import("kernel/pcpu.zig");
 pub const posix = @import("kernel/posix.zig");
+pub const proc = @import("kernel/proc.zig");
 pub const rng = @import("kernel/rng.zig");
 pub const sched = @import("kernel/sched.zig");
 pub const smp = @import("kernel/smp.zig");

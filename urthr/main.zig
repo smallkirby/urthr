@@ -129,6 +129,7 @@ fn zmain() !void {
         try urd.fs.mount(croot, rootfs.filesystem(), allocator);
         try urd.fs.mkdir(croot, "boot", allocator);
         try urd.fs.mkdir(croot, "dev", allocator);
+        try urd.fs.mkdir(croot, "proc", allocator);
     }
 
     if (board.getBlockDevice()) |dev| {
@@ -162,6 +163,10 @@ fn zmain() !void {
     // Mount devfs at /dev and register devices.
     log.info("Mounting devfs.", .{});
     try urd.dev.init();
+
+    // Mount procfs at /proc.
+    log.info("Mounting procfs.", .{});
+    try urd.proc.init(urd.mem.bin);
 
     // Initialize syscall subsystem.
     log.info("Initializing syscall subsystem.", .{});

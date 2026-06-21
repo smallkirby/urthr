@@ -8,6 +8,7 @@ pub const Fat32 = @import("fs/Fat32.zig");
 pub const RootFs = @import("fs/RootFs.zig");
 pub const DevFs = @import("fs/DevFs.zig");
 pub const PipeFs = @import("fs/PipeFs.zig");
+pub const ProcFs = @import("fs/ProcFs.zig");
 pub const FdTable = @import("fs/FdTable.zig");
 
 /// Filesystem-specific errors.
