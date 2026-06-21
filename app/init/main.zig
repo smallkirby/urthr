@@ -56,6 +56,26 @@ pub fn main(init: std.process.Init) !void {
         try writer.interface.writeAll(&buf);
     }
 
+    // Test signal delivery.
+    log.info("Testing signal delivery.", .{});
+    {
+        // Register a handler for SIGTERM.
+        const sa: linux.Sigaction = .{
+            .handler = .{ .handler = onSignal },
+            .mask = linux.sigemptyset(),
+            .flags = 0,
+        };
+        _ = linux.sigaction(.TERM, &sa, null);
+
+        // Send SIGTERM to self.
+        const pid = linux.getpid();
+        _ = linux.kill(pid, .TERM);
+
+        if (!signal_called) {
+            return error.SignalNotDelivered;
+        }
+    }
+
     log.info("Testing sleep.", .{});
     {
         for (0..3) |i| {
@@ -63,6 +83,15 @@ pub fn main(init: std.process.Init) !void {
             log.info("  {d}/3", .{i + 1});
         }
     }
+}
+
+/// Whether signal handler is called.
+var signal_called: bool = false;
+
+/// Signal handler.
+fn onSignal(signo: linux.SIG) callconv(.c) void {
+    log.info("Signal#{d} handler called", .{@intFromEnum(signo)});
+    signal_called = true;
 }
 
 // =============================================================
@@ -126,3 +155,4 @@ const StackIterator = struct {
 const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.init);
+const linux = std.os.linux;
