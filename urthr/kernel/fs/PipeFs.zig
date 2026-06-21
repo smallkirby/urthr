@@ -277,11 +277,15 @@ fn frWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     defer pipe.lock.unlockRestoreIrq(ie);
 
     while (pipe.isFull()) {
-        if (pipe.readers == 0) return fs.Error.BrokenPipe;
+        if (pipe.readers == 0) {
+            signal.push(.pipe);
+            return fs.Error.BrokenPipe;
+        }
         pipe.wcv.wait(&pipe.lock);
     }
 
     if (pipe.readers == 0) {
+        signal.push(.pipe);
         return fs.Error.BrokenPipe;
     }
 
@@ -348,5 +352,6 @@ const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
+const signal = urd.task.signal;
 const SpinLock = urd.sync.SpinLock;
 const CondVar = urd.sync.CondVar;
