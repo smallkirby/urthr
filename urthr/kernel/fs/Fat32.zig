@@ -455,6 +455,9 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
 fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
     const ctx = FileImpl.from(file);
 
+    const file_size = file.path.dentry.inode.size;
+    if (offset >= file_size) return 0;
+
     const fat32 = ctx.fat32;
     const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
 
@@ -465,13 +468,17 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
         clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
     }
 
+    // Clamp the read to the remaining file bytes.
+    const remaining = file_size - offset;
+    const read_buf = buf[0..@min(buf.len, remaining)];
+
     // Read sector by sector, copying into the caller's buffer.
     var bytes_read: usize = 0;
     var cur_offset = offset;
     var cur_clus = clus;
     var cur_clus_file_offset = clus_file_offset;
 
-    while (bytes_read < buf.len) {
+    while (bytes_read < read_buf.len) {
         const offset_in_clus = cur_offset - cur_clus_file_offset;
         const sector_in_clus = offset_in_clus / sector_size;
         const offset_in_sec = offset_in_clus % sector_size;
@@ -480,8 +487,8 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
         var sec_buf: [sector_size]u8 = undefined;
         try fat32.device.readBlock(lba, &sec_buf);
 
-        const to_copy = @min(sector_size - offset_in_sec, buf.len - bytes_read);
-        @memcpy(buf[bytes_read..][0..to_copy], sec_buf[offset_in_sec..][0..to_copy]);
+        const to_copy = @min(sector_size - offset_in_sec, read_buf.len - bytes_read);
+        @memcpy(read_buf[bytes_read..][0..to_copy], sec_buf[offset_in_sec..][0..to_copy]);
 
         bytes_read += to_copy;
         cur_offset += to_copy;
