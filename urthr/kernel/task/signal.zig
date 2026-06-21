@@ -97,7 +97,8 @@ pub fn deliver() void {
 
         // Default action if the handler is set to default.
         if (action.handler == Action.sig_default) {
-            @panic("Default signal actions are not implemented yet");
+            getDefaultHandler(@enumFromInt(signo))();
+            continue;
         }
 
         // Construct sigframe for user-space handler.
@@ -273,6 +274,22 @@ fn generateTrampoline() Trampoline {
 
         else => @compileError("Unsupported architecture."),
     };
+}
+
+// =============================================================
+// Default handlers
+// =============================================================
+
+/// Get a default handler for the given signal number.
+fn getDefaultHandler(signo: Signal) *const fn () void {
+    return switch (signo) {
+        else => defaultAbort,
+    };
+}
+
+/// Default signal handler to abort.
+fn defaultAbort() void {
+    task.exit(-1);
 }
 
 // =============================================================
