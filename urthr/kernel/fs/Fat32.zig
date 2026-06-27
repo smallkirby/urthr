@@ -148,11 +148,19 @@ fn ideinit(inode: *fs.Inode) void {
 ///
 /// FAT32 does not have a real inode number.
 /// So we synthesize a unique number for each file based on its directory entry position.
-fn calcInodeNumber(pos: DirIterator.DirEntryPosition) u64 {
+fn calcInodeNumber(pos: Position) u64 {
     const index_offset: u8 = @intCast(pos.offset / @sizeOf(DirEntry));
     const sector: u64 = @as(u56, @truncate(pos.sector));
     return (sector << 8) + index_offset;
 }
+
+/// Unique identifier for a position within a disk.
+const Position = struct {
+    /// Sector number.
+    sector: usize,
+    /// Offset in bytes within the sector.
+    offset: usize,
+};
 
 /// Directory iterator.
 const DirIterator = struct {
@@ -179,19 +187,12 @@ const DirIterator = struct {
         /// `entry` also contains the short name, but caller must use this field to get the correct name.
         name: []const u8,
         /// Position of the directory entry.
-        pos: DirEntryPosition,
+        pos: Position,
 
         pub fn deinit(self: *const Result, allocator: Allocator) void {
             allocator.free(self.name);
             allocator.destroy(self.entry);
         }
-    };
-
-    const DirEntryPosition = struct {
-        /// Sector number of the directory entry from the start of the partition.
-        sector: usize,
-        /// Offset of the directory entry in bytes from the start of the sector.
-        offset: usize,
     };
 
     const LfnInfo = struct {
