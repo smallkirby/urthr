@@ -83,6 +83,7 @@ const vtable_impl = struct {
         .blockSize = &getBlockSize,
         .blockCount = &getBlockCount,
         .read = &read,
+        .write = &write,
     };
 
     /// Get the block size in bytes.
@@ -110,6 +111,22 @@ const vtable_impl = struct {
         };
 
         return buffer.len;
+    }
+
+    /// Write blocks to the device.
+    fn write(ctx: *anyopaque, lba: block.Lba, data: []const u8) block.Error!usize {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const num_sectors = data.len / sector_size;
+
+        if (data.len % sector_size != 0) {
+            return block.Error.InvalidArgument;
+        }
+
+        self.writeSectors(lba, data, num_sectors) catch {
+            return block.Error.IoError;
+        };
+
+        return data.len;
     }
 };
 
@@ -193,6 +210,71 @@ fn readConfig(dev: *virtio) Config {
         .seg_max = dev.readConfig(u32, 12),
         .blk_size = dev.readConfig(u32, 20),
     };
+}
+
+/// Write sectors to the device.
+fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!void {
+    const vq = self.dev.getQueue(queue_index) orelse return Error.DeviceError;
+
+    if (data.len != count * sector_size) {
+        return Error.InvalidDevice;
+    }
+
+    // Allocate DMA-capable buffers.
+    const req = self.page_allocator.create(Request) catch return Error.OutOfMemory;
+    defer self.page_allocator.destroy(req);
+
+    const status = self.page_allocator.create(Status) catch return Error.OutOfMemory;
+    defer self.page_allocator.destroy(status);
+
+    req.* = .{
+        .type = .write,
+        .sector = sector,
+    };
+
+    // Build descriptor chain.
+    const bufs = [_]virtio.Buffer{
+        .{
+            .addr = self.page_allocator.translateP(@intFromPtr(req)),
+            .len = @sizeOf(Request),
+            .write = false,
+        },
+        .{
+            .addr = self.page_allocator.translateP(@intFromPtr(data.ptr)),
+            .len = @intCast(data.len),
+            .write = false,
+        },
+        .{
+            .addr = self.page_allocator.translateP(@intFromPtr(status)),
+            .len = 1,
+            .write = true,
+        },
+    };
+
+    // Add buffers to the queue.
+    vq.addBuf(&bufs) catch return Error.DeviceError;
+
+    // Notify the device.
+    self.dev.notifyQueue(queue_index);
+
+    // Wait for completion.
+    // TODO: should use interrupt.
+    var timeout: u32 = 1_000_000; // 1 sec
+    while (vq.getUsed() == null) {
+        timeout -= 1;
+        if (timeout == 0) {
+            log.err("write timeout", .{});
+            return Error.IoError;
+        }
+
+        arch.timer.spinWaitMicro(1);
+    }
+
+    // Check status.
+    if (status.* != .ok) {
+        log.err("write failed: status={d}", .{status.*});
+        return Error.IoError;
+    }
 }
 
 /// Virtio-blk device configuration.
