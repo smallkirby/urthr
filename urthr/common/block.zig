@@ -40,6 +40,16 @@ pub const Device = struct {
         ///
         /// Returns the number of bytes read.
         read: *const fn (ctx: *anyopaque, lba: Lba, buffer: []u8) Error!usize,
+
+        /// Write blocks to the device from the given buffer.
+        ///
+        /// `lba` is the starting block address to write to.
+        /// `buffer` is the source buffer to write from.
+        ///
+        /// The buffer size must be a multiple of the block size.
+        ///
+        /// Returns the number of bytes written.
+        write: *const fn (ctx: *anyopaque, lba: Lba, data: []const u8) Error!usize,
     };
 
     /// Get the block size of the device in bytes.
@@ -61,5 +71,16 @@ pub const Device = struct {
         }
 
         _ = try self.vtable.read(self.ptr, lba, buffer);
+    }
+
+    /// Write a single block to the device from the given buffer.
+    ///
+    /// The buffer size must be multiple of the block size.
+    pub fn writeBlock(self: Self, lba: Lba, data: []const u8) Error!void {
+        if (data.len % self.getBlockSize() != 0) {
+            return Error.InvalidArgument;
+        }
+
+        _ = try self.vtable.write(self.ptr, lba, data);
     }
 };
