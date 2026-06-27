@@ -17,6 +17,7 @@ pub const Partition = struct {
         .blockSize = &blockSize,
         .blockCount = &blockCount,
         .read = &read,
+        .write = &write,
     };
 
     /// Get the block size of the partition device.
@@ -45,6 +46,22 @@ pub const Partition = struct {
         // Translate LBA to parent device LBA.
         const parent_lba = self.lba + lba;
         return self.parent.vtable.read(self.parent.ptr, parent_lba, buffer);
+    }
+
+    /// Write blocks to the partition device.
+    fn write(ctx: *anyopaque, lba: block.Lba, data: []const u8) block.Error!usize {
+        const self: *Partition = @ptrCast(@alignCast(ctx));
+
+        // Check bounds.
+        const block_size = self.parent.getBlockSize();
+        const num_blocks = data.len / block_size;
+        if (lba + num_blocks > self.nsecs) {
+            return block.Error.InvalidArgument;
+        }
+
+        // Translate LBA to parent device LBA.
+        const parent_lba = self.lba + lba;
+        return self.parent.vtable.write(self.parent.ptr, parent_lba, data);
     }
 
     /// Get the block device interface for this partition.
