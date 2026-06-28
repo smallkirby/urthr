@@ -177,6 +177,7 @@ const vtable_impl = struct {
         .blockSize = &getBlockSize,
         .blockCount = &getBlockCount,
         .read = &read,
+        .write = &write,
     };
 
     /// Get the block size in bytes.
@@ -211,6 +212,11 @@ const vtable_impl = struct {
         }
 
         return buffer.len;
+    }
+
+    /// Write blocks of data to the device.
+    fn write(_: *anyopaque, _: block.Lba, _: []const u8) block.Error!usize {
+        urd.unimplemented("sdhc.write");
     }
 };
 
