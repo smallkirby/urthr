@@ -25,6 +25,10 @@ pub const Ops = struct {
     ///
     /// Called when the reference count of the inode reaches zero.
     deinit: *const fn (inode: *Inode) void,
+
+    /// Create a new regular file under `dir` with the given name.
+    /// TODO: merge with mkdir.
+    create: ?*const fn (dir: *Inode, name: []const u8, ftype: fs.FileType, allocator: Allocator) Error!*Inode = null,
 };
 
 /// inode number type.
@@ -70,6 +74,8 @@ pub fn unref(self: *Self) void {
 /// Create a directory under this inode with the given name.
 pub fn mkdir(self: *Self, name: []const u8, allocator: Allocator) Error!void {
     if (self.ftype != .directory) return Error.NotDirectory;
+
+    // TODO: check if a file with the same name already exists.
 
     if (self.iops.mkdir) |f| {
         return f(self, name, allocator);

@@ -29,6 +29,8 @@ pub const Error = error{
     Unsupported,
     /// Write to a pipe with no readers.
     BrokenPipe,
+    /// The filesystem is full and cannot accommodate more data.
+    NoSpace,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;

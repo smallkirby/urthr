@@ -85,6 +85,7 @@ fn fsGetLabel(ctx: *const anyopaque, allocator: Allocator) fs.Error![]const u8 {
 
 const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
+    .create = &icreate,
     .deinit = &ideinit,
 };
 
@@ -142,6 +143,73 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
 fn ideinit(inode: *fs.Inode) void {
     const ctx = InodeImpl.from(inode);
     ctx.fat32.allocator.destroy(ctx);
+}
+
+/// Create a new file or directory under a directory inode.
+fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) fs.Error!*fs.Inode {
+    const ctx = InodeImpl.from(dir);
+    const self = ctx.fat32;
+
+    if (!isFitSfn(name)) {
+        log.err("Creation of file with LFN not supported: {s}", .{name});
+        return fs.Error.Unsupported;
+    }
+
+    // Find or create a directory entry slot.
+    const entpos = try self.findDirSlot(ctx.cluster, 1, .create) orelse unreachable;
+    // TODO: lock or atomic find-and-create to avoid race.
+
+    // Allocate a new cluster for the file.
+    const clus = try self.allocateCluster(null);
+    // TODO: free the cluster in errdefer.
+    // TODO: clear the cluster to zero.
+
+    // Initialize the new inode.
+    const inode = try self.allocator.create(InodeImpl);
+    errdefer self.allocator.destroy(inode);
+
+    // Write the directory entry to the disk.
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlock(entpos.sector, &buf);
+    {
+        const attr = DirEntry.Attributes{
+            .read_only = false,
+            .hidden = false,
+            .system = false,
+            .volume_id = false,
+            .directory = (ftype == .directory),
+            .archive = true,
+        };
+        const ent: *DirEntry = @ptrCast(@alignCast(&buf[entpos.offset]));
+        ent.* = std.mem.zeroInit(DirEntry, .{
+            .attr = attr,
+            .first_cluster_low = bits.extract(u16, clus, 0),
+            .first_cluster_high = bits.extract(u16, clus, 16),
+            .file_size = 0,
+        });
+        // Timestamp
+        writeTimeFields(ent);
+        // Name
+        // TODO: support LFN.
+        writeSfn(ent, name);
+    }
+    try self.device.writeBlock(entpos.sector, &buf);
+
+    // Construct inode.
+    inode.* = .{
+        .common = .{
+            .number = calcInodeNumber(entpos),
+            .size = 0,
+            .ftype = ftype,
+            .iops = inode_vtable,
+            .fops = file_vtable,
+        },
+        .fat32 = self,
+        .cluster = clus,
+    };
+    inode.common.ref();
+
+    return &inode.common;
 }
 
 /// Calculate inode number.
@@ -556,6 +624,226 @@ fn getNextCluster(self: *Self, cluster: Cluster) fs.Error!?Cluster {
     return entry;
 }
 
+const FindOption = enum {
+    /// Returns `nulli if no available slot is found.
+    none,
+    /// Allocate a new cluster if no available slot is found.
+    create,
+};
+
+/// Find an deleted or free directory entry slot in the given directory cluster chain.
+///
+/// When `opt` is `.create`, allocate a new cluster if no available slot is found.
+///
+/// Caller must ensure that the given cluster is a part of a directory.
+fn findDirSlot(self: *Self, start: Cluster, count: usize, opt: FindOption) fs.Error!?Position {
+    var clus = start;
+    var buf: [sector_size]u8 = undefined;
+
+    var avail_start: Position = undefined;
+    var avail_count: usize = 0;
+    // Iterate through the cluster chain.
+    while (true) {
+        // Iterate through all sectors in the cluster.
+        const clus_lba = self.clusterToLba(clus);
+        for (0..self.bpb.sec_per_clus) |sec| {
+            const lba = clus_lba + sec;
+            try self.device.readBlock(lba, &buf);
+
+            // Iterate through all directory entries in the sector.
+            for (clus2dirents(&buf), 0..) |ent, i| {
+                if (ent.isFree() or ent.isDeleted()) {
+                    if (avail_count == 0) {
+                        avail_start = .{
+                            .sector = lba,
+                            .offset = i * @sizeOf(DirEntry),
+                        };
+                    }
+                    avail_count += 1;
+                } else {
+                    avail_count = 0;
+                }
+
+                if (avail_count == count) {
+                    return avail_start;
+                }
+            }
+        }
+
+        clus = try self.getNextCluster(clus) orelse break;
+    }
+
+    // Available consecutive slots not found.
+    if (opt == .none) {
+        return null;
+    }
+
+    // Create a new cluster for new directory entries.
+    @memset(&buf, 0);
+    var cur = clus;
+    while (avail_count < count) {
+        const new = try self.allocateCluster(cur);
+        const lba = self.clusterToLba(new);
+        for (0..self.bpb.sec_per_clus) |sec| {
+            try self.device.writeBlock(lba + sec, &buf);
+        }
+
+        if (avail_count == 0) {
+            avail_start = .{
+                .sector = lba,
+                .offset = 0,
+            };
+        }
+        avail_count += self.bpb.sec_per_clus * (sector_size / @sizeOf(DirEntry));
+
+        cur = new;
+    }
+
+    return avail_start;
+}
+
+/// Find a free cluster, mark it as end-of-chain, and optionally link it to the chain.
+///
+/// Returns the new cluster number.
+fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
+    const total_fat_entries = @as(u64, self.bpb.fat_sz32) * sector_size / fat_entry_size;
+    const root_clus = self.bpb.root_clus;
+
+    var buf: [sector_size]u8 = undefined;
+    var current_fat_sector: u64 = std.math.maxInt(u64);
+
+    // Iterate through the FATs to find a free cluster.
+    var clus = root_clus;
+    while (clus < total_fat_entries) : (clus += 1) {
+        const fat_offset = clus * fat_entry_size;
+        const fat_sector = @as(u64, self.bpb.rsvd_sec_cnt) + fat_offset / sector_size;
+        const entry_offset = fat_offset % sector_size;
+
+        if (fat_sector != current_fat_sector) {
+            try self.device.readBlock(fat_sector, &buf);
+            current_fat_sector = fat_sector;
+        }
+
+        const entry = std.mem.readInt(
+            u32,
+            buf[entry_offset..][0..fat_entry_size],
+            .little,
+        ) & fat_mask;
+        if (entry == fat_free_cluster) {
+            // Mark as EOC.
+            try self.setFatEntry(clus, fat_eoc_min);
+            // Link to previous cluster if provided.
+            if (prev) |p| try self.setFatEntry(p, clus);
+
+            return clus;
+        }
+    }
+
+    return fs.Error.NoSpace;
+}
+
+/// Update a FAT entry for the given cluster across all FAT copies.
+fn setFatEntry(self: *Self, cluster: Cluster, value: u32) fs.Error!void {
+    rtt.expectEqual(0, value & ~fat_mask);
+    rtt.expect(cluster >= self.bpb.root_clus);
+
+    const offset = @as(u64, cluster) * fat_entry_size;
+    const sec_offset = offset / sector_size;
+    const entry_offset = offset % sector_size;
+    const first_fat_sec = @as(u64, self.bpb.rsvd_sec_cnt) + sec_offset;
+
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlock(first_fat_sec, &buf);
+
+    // Write the new FAT entry value to the temporary buffer.
+    const old = std.mem.readInt(
+        u32,
+        buf[entry_offset..][0..fat_entry_size],
+        .little,
+    );
+    const new = (old & ~fat_mask) | (value & fat_mask);
+    std.mem.writeInt(
+        u32,
+        buf[entry_offset..][0..fat_entry_size],
+        new,
+        .little,
+    );
+
+    // Write the updated FAT entry to all FAT copies.
+    for (0..self.bpb.num_fats) |i| {
+        const fat_sector = @as(u64, self.bpb.rsvd_sec_cnt) +
+            i * self.bpb.fat_sz32 + sec_offset;
+        try self.device.writeBlock(fat_sector, &buf);
+    }
+}
+
+/// Convert a cluster data to a directory entry slice.
+fn clus2dirents(buf: []const u8) []const DirEntry {
+    rtt.expectEqual(0, buf.len % @sizeOf(DirEntry));
+    const ptr: [*]const DirEntry = @ptrCast(@alignCast(buf.ptr));
+    return ptr[0 .. buf.len / @sizeOf(DirEntry)];
+}
+
+/// Fill the timestamp fields of a directory entry with the current time.
+fn writeTimeFields(dirent: *DirEntry) void {
+    // TODO: implement
+    _ = dirent;
+}
+
+/// Write the SFN to the directory entry.
+/// TODO: make this a method of `DirEntry`.
+fn writeSfn(dirent: *DirEntry, name: []const u8) void {
+    rtt.expect(isFitSfn(name));
+
+    const stem = sfnGetStem(name);
+    const ext = sfnGetExt(name);
+    const dst_stem = dirent.name[0..8];
+    const dst_ext = dirent.name[8..11];
+    @memset(&dirent.name, ' ');
+    @memcpy(dst_stem[0..stem.len], stem);
+    @memcpy(dst_ext[0..ext.len], ext);
+}
+
+/// Extract the stem part of a name for SFN.
+///
+/// - `foo.txt` -> `foo`
+/// - `foo` -> `foo`
+/// - `foo.` -> `foo.`
+/// - `.txt` -> ``
+fn sfnGetStem(name: []const u8) []const u8 {
+    const stem = std.fs.path.stem(name);
+    const ext_dot = std.fs.path.extension(name);
+    return if (ext_dot.len == 1) name else stem;
+}
+
+/// Extract the extension part of a name for SFN.
+///
+/// - `foo.txt` -> `txt`
+/// - `foo` -> ``
+/// - `foo.` -> ``
+/// - `.txt` -> `txt`
+fn sfnGetExt(name: []const u8) []const u8 {
+    const ext_dot = std.fs.path.extension(name);
+    return if (ext_dot.len <= 1) "" else ext_dot[1..];
+}
+
+/// Check if the given name can be represented as a SFN.
+fn isFitSfn(name: []const u8) bool {
+    const stem = sfnGetStem(name);
+    const ext = sfnGetExt(name);
+    if (stem.len == 0 or stem.len > 8) return false;
+    if (ext.len > 3) return false;
+
+    for (stem) |c| {
+        if (!std.ascii.isAlphanumeric(c)) return false;
+    }
+    for (ext) |c| {
+        if (!std.ascii.isAlphanumeric(c)) return false;
+    }
+
+    return true;
+}
+
 /// BPB information extracted from the boot sector.
 const BpbInfo = struct {
     /// Number of sectors per cluster.
@@ -623,13 +911,13 @@ const fat_entry_size = 4;
 const fat32_signature = "FAT32   ";
 
 /// Mask to extract valid cluster number from FAT entry.
-const fat_mask = 0x0FFF_FFFF;
+const fat_mask: u32 = 0x0FFF_FFFF;
 /// Minimum value indicating end-of-cluster-chain.
-const fat_eoc_min = 0x0FFFFFF8;
+const fat_eoc_min: u32 = 0x0FFFFFF8;
 /// Bad cluster marker.
-const fat_bad_cluster = 0x0FFF_FFF7;
+const fat_bad_cluster: u32 = 0x0FFF_FFF7;
 /// Free cluster marker.
-const fat_free_cluster = 0x0000_0000;
+const fat_free_cluster: u32 = 0x0000_0000;
 
 /// BIOS Parameter Block (BPB) in a Boot Sector of FAT32.
 const Bpb = extern struct {
