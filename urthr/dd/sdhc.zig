@@ -215,8 +215,25 @@ const vtable_impl = struct {
     }
 
     /// Write blocks of data to the device.
-    fn write(_: *anyopaque, _: block.Lba, _: []const u8) block.Error!usize {
-        urd.unimplemented("sdhc.write");
+    fn write(ctx: *anyopaque, lba: block.Lba, buffer: []const u8) block.Error!usize {
+        const self: *CardInfo = @ptrCast(@alignCast(ctx));
+
+        if (buffer.len % block_size != 0) {
+            return block.Error.InvalidArgument;
+        }
+        if (lba > std.math.maxInt(u32)) {
+            return block.Error.InvalidArgument;
+        }
+
+        for (0..(buffer.len / block_size)) |i| {
+            writeBlock(
+                self,
+                @intCast(lba + i),
+                buffer[i * block_size .. (i + 1) * block_size],
+            );
+        }
+
+        return buffer.len;
     }
 };
 
@@ -553,7 +570,7 @@ fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
     const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
 
     if (adma2_avail) {
-        readBlockAdma2(addr, buf);
+        ioBlockAdma2(17, addr, buf);
     } else {
         readBlockPio(addr, buf);
     }
@@ -564,11 +581,40 @@ fn readBlockPio(addr: u32, buf: []u8) void {
     _ = issueCmd(17, false, addr, buf).unwrap();
 }
 
-/// Read a single block using ADMA2.
-fn readBlockAdma2(addr: u32, buf: []u8) void {
+/// Write a single 512-byte block to the SD card.
+///
+/// Uses ADMA2 if supported, otherwise falls back to PIO.
+fn writeBlock(ci: *const CardInfo, lba: u32, buf: []const u8) void {
+    rtt.expectEqual(buf.len, block_size);
+
+    const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
+
+    if (adma2_avail) {
+        ioBlockAdma2(24, addr, @constCast(buf));
+    } else {
+        writeBlockPio(addr, buf);
+    }
+}
+
+/// Read a single block using PIO mode.
+fn writeBlockPio(addr: u32, buf: []const u8) void {
+    _ = issueCmd(24, false, addr, @constCast(buf)).unwrap();
+}
+
+/// Transfer a single block using ADMA2.
+fn ioBlockAdma2(cmd: u6, addr: u32, buf: []u8) void {
     const data = page_allocator.allocBytesV(buf.len) catch unreachable;
     defer page_allocator.freeBytesV(data);
-    arch.cache(.invalidate, data, buf.len);
+
+    switch (Direction.of(cmd, false)) {
+        .read => {
+            arch.cache(.invalidate, data, buf.len);
+        },
+        .write => {
+            @memcpy(data, buf);
+            arch.cache(.clean, data, buf.len);
+        },
+    }
 
     const desc = page_allocator.create(Adma2Desc) catch unreachable;
     defer page_allocator.destroy(desc);
@@ -589,10 +635,14 @@ fn readBlockAdma2(addr: u32, buf: []u8) void {
         .addr = @intCast(@intFromPtr(page_allocator.translateP(desc))),
     });
 
-    // Issue read command.
-    _ = issueCmd(17, false, addr, data[0..buf.len]).unwrap();
+    // Issue command.
+    _ = issueCmd(cmd, false, addr, data[0..buf.len]).unwrap();
 
-    @memcpy(buf, data[0..buf.len]);
+    // Copy data back to buffer if reading.
+    if (Direction.of(cmd, false) == .read) {
+        arch.cache(.invalidate, data, buf.len);
+        @memcpy(buf, data[0..buf.len]);
+    }
 }
 
 // =============================================================
@@ -648,7 +698,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
             .dma_enable = use_adma2,
             .block_count_enable = true,
             .auto_cmd_enable = .disabled,
-            .data_direction = .read,
+            .data_direction = Direction.of(idx, acmd),
             .multi_block = if (use_adma2 or buf.len > block_size) .multiple else .single,
             .response_type = .r1,
             .response_err_check = false,
@@ -693,25 +743,62 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         sdhc.waitFor(PresentState, .{ .dat = false }, .ms(1));
     }
 
-    // Read data if needed.
+    // Read or write data if present.
     if (data) |buf| {
-        if (use_adma2) {
-            // Wait for DMA transfer complete.
-            sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
+        switch (Direction.of(idx, acmd)) {
+            .read => if (use_adma2) {
+                // Wait for DMA transfer complete.
+                sdhc.waitFor(
+                    NormalIntStatus,
+                    .{ .transfer_complete = true },
+                    .ms(1),
+                );
+                // Invalidate cache.
+                arch.cache(.invalidate, buf, buf.len);
+            } else {
+                sdhc.waitFor(
+                    NormalIntStatus,
+                    .{ .buf_read_ready = true },
+                    .ms(1),
+                );
 
-            // Invalidate cache.
-            arch.cache(.invalidate, buf, buf.len);
-        } else {
-            sdhc.waitFor(NormalIntStatus, .{ .buf_read_ready = true }, .ms(1));
+                const buf_len = buf.len / @sizeOf(u32);
+                const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
+                for (0..buf_len) |i| {
+                    p[i] = bits.fromLittleEndian(sdhc.read(BufferDataPort).value);
+                }
 
-            const buf_len = buf.len / @sizeOf(u32);
-            const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
-            for (0..buf_len) |i| {
-                p[i] = bits.fromLittleEndian((sdhc.read(BufferDataPort).value));
-            }
+                sdhc.waitFor(
+                    NormalIntStatus,
+                    .{ .transfer_complete = true },
+                    .ms(1),
+                );
+            },
+            .write => if (use_adma2) {
+                sdhc.waitFor(
+                    NormalIntStatus,
+                    .{ .transfer_complete = true },
+                    .ms(1),
+                );
+            } else {
+                sdhc.waitFor(
+                    NormalIntStatus,
+                    .{ .buf_write_ready = true },
+                    .ms(1),
+                );
 
-            // Wait until data transfer is complete.
-            sdhc.waitFor(NormalIntStatus, .{ .transfer_complete = true }, .ms(1));
+                const buf_len = buf.len / @sizeOf(u32);
+                const p: [*]const u32 = @ptrCast(@alignCast(&buf[0]));
+                for (0..buf_len) |i| {
+                    sdhc.write(BufferDataPort, .{ .value = bits.toLittleEndian(p[i]) });
+                }
+
+                sdhc.waitFor(
+                    NormalIntStatus,
+                    .{ .transfer_complete = true },
+                    .ms(1),
+                );
+            },
         }
     }
 
@@ -858,7 +945,7 @@ const ResponseType = enum(u3) {
         return if (!acmd) switch (cmd_idx) {
             // CMD
             0 => .r0,
-            6, 13, 16, 17, 55 => .r1,
+            6, 13, 16, 17, 24, 55 => .r1,
             7 => .r1b,
             2, 9 => .r2,
             3 => .r6,
@@ -1411,12 +1498,7 @@ const TransferMode = packed struct(u16) {
         auto_select = 0b11,
     },
     /// Data Transfer Direction Select.
-    data_direction: enum(u1) {
-        /// Write (Host to Card).
-        write = 0,
-        /// Read (Card to Host).
-        read = 1,
-    },
+    data_direction: Direction,
     /// Multi / Single Block Select.
     multi_block: enum(u1) {
         /// Single Block.
@@ -1437,6 +1519,29 @@ const TransferMode = packed struct(u16) {
     response_int_disable: bool,
     /// Reserved.
     _9: u7 = 0,
+};
+
+/// Transfer Direction.
+const Direction = enum(u1) {
+    /// Write (Host to Card).
+    write = 0,
+    /// Read (Card to Host).
+    read = 1,
+
+    // Get the transfer direction for the given command.
+    pub fn of(cmd_idx: u6, acmd: bool) Direction {
+        return if (!acmd) switch (cmd_idx) {
+            0, 2, 3, 7, 8, 9, 13, 16, 55 => .read,
+            6 => .read,
+            17 => .read,
+            24 => .write,
+            else => @panic("Unsupported CMD command index for data transfer."),
+        } else switch (cmd_idx) {
+            6, 41 => .read,
+            51 => .read,
+            else => @panic("Unsupported ACMD command index for data transfer."),
+        };
+    }
 };
 
 /// Command Register.
