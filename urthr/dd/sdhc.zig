@@ -402,14 +402,14 @@ fn initCard() CardInfo {
     // CMD0: GO_IDLE_STATE
     trace("CMD0  : GO_IDLE_STATE", .{});
     {
-        _ = issueCmd(0, false, 0, null).unwrap();
+        _ = issueCmd(.{ .cmd = .go_idle_state }, 0, null).unwrap();
         arch.timer.spinWaitMilli(1);
     }
 
     // CMD8: SEND_IF_COND
     trace("CMD8  : SEND_IF_COND", .{});
     {
-        const res = issueCmd(8, false, 0x1AA, null);
+        const res = issueCmd(.{ .cmd = .send_if_cond }, 0x1AA, null);
 
         if (res.err.cmd_timeout) {
             f8 = false;
@@ -425,7 +425,7 @@ fn initCard() CardInfo {
     {
         // With voltage = 0.
         declareAcmd(null);
-        const ocr = issueCmd(41, true, Acmd41{
+        const ocr = issueCmd(.{ .acmd = .send_op_cond }, Acmd41{
             .volt_window = 0,
             .hcs = .sdhc_sdxc,
         }, null).unwrap();
@@ -433,7 +433,7 @@ fn initCard() CardInfo {
         // with setting voltage.
         ccs = while (true) {
             declareAcmd(null);
-            const res = issueCmd(41, true, Acmd41{
+            const res = issueCmd(.{ .acmd = .send_op_cond }, Acmd41{
                 .volt_window = @truncate(ocr.raw()),
                 .hcs = .sdhc_sdxc,
             }, null).unwrap().as(Ocr);
@@ -449,20 +449,20 @@ fn initCard() CardInfo {
     // CMD2: ALL_SEND_CID
     trace("CMD2  : ALL_SEND_CID", .{});
     const cid = blk: {
-        break :blk issueCmd(2, false, 0, null).unwrap().as(Cid);
+        break :blk issueCmd(.{ .cmd = .all_send_cid }, 0, null).unwrap().as(Cid);
     };
 
     // CMD3: SEND_RELATIVE_ADDR
     trace("CMD3  : SEND_RELATIVE_ADDR", .{});
     const rca = blk: {
-        const res = issueCmd(3, false, 0, null).unwrap().as(u32);
+        const res = issueCmd(.{ .cmd = .send_relative_addr }, 0, null).unwrap().as(u32);
         break :blk @as(u16, @truncate(res >> 16));
     };
 
     // CMD9: SEND_CSD
     trace("CMD9  : SEND_CSD", .{});
     const csd = blk: {
-        const res = issueCmd(9, false, @as(u32, rca) << 16, null).unwrap().as(u128);
+        const res = issueCmd(.{ .cmd = .send_csd }, @as(u32, rca) << 16, null).unwrap().as(u128);
         break :blk Csd.from(res);
     };
 
@@ -475,7 +475,7 @@ fn initCard() CardInfo {
     // CMD7: SELECT_CARD
     trace("CMD7  : SELECT_CARD", .{});
     {
-        _ = issueCmd(7, false, @as(u32, rca) << 16, null).unwrap();
+        _ = issueCmd(.{ .cmd = .select_card }, @as(u32, rca) << 16, null).unwrap();
     }
 
     // ACMD51: SEND_SCR
@@ -485,7 +485,7 @@ fn initCard() CardInfo {
 
         // Send CMD55 with retry logic
         declareAcmd(rca);
-        _ = issueCmd(51, true, 0, std.mem.asBytes(&scr)).unwrap();
+        _ = issueCmd(.{ .acmd = .send_scr }, 0, std.mem.asBytes(&scr)).unwrap();
 
         // SCR is returned in big-endian.
         scr = bits.fromBigEndian(scr);
@@ -509,14 +509,14 @@ fn setupTransaction(base_freq: ?u64) void {
     // Specify block size to 512 bytes.
     trace("CMD16 : SET_BLOCKLEN", .{});
     {
-        _ = issueCmd(16, false, block_size, null).unwrap();
+        _ = issueCmd(.{ .cmd = .set_blocklen }, block_size, null).unwrap();
     }
 
     // Setup bus width to 4-bit for Card.
     trace("ACMD6 : SET_BUS_WIDTH", .{});
     {
         declareAcmd(card.rca);
-        _ = issueCmd(6, true, 2, null).unwrap();
+        _ = issueCmd(.{ .acmd = .set_bus_width }, 2, null).unwrap();
     }
 
     // Switch to High Speed Mode.
@@ -527,7 +527,7 @@ fn setupTransaction(base_freq: ?u64) void {
             .group1 = 1, // High Speed
             .mode = .change,
         };
-        _ = issueCmd(6, false, arg, null).unwrap().as(Cmd6);
+        _ = issueCmd(.{ .cmd = .switch_func }, arg, null).unwrap().as(Cmd6);
 
         // TODO: should check the result data.
     }
@@ -549,7 +549,7 @@ fn setupTransaction(base_freq: ?u64) void {
     trace("CMD13 : SEND_STATUS", .{});
     {
         const arg = @as(u32, card.rca) << 16;
-        const res = issueCmd(13, false, arg, null).unwrap().as(CardStatus);
+        const res = issueCmd(.{ .cmd = .send_status }, arg, null).unwrap().as(CardStatus);
 
         if (res.current_state != .tran) {
             @panic("Card not in TRANSFER state after setup.");
@@ -570,7 +570,7 @@ fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
     const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
 
     if (adma2_avail) {
-        ioBlockAdma2(17, addr, buf);
+        ioBlockAdma2(.{ .cmd = .read_single_block }, addr, buf);
     } else {
         readBlockPio(addr, buf);
     }
@@ -578,7 +578,7 @@ fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
 
 /// Read a single block using PIO mode.
 fn readBlockPio(addr: u32, buf: []u8) void {
-    _ = issueCmd(17, false, addr, buf).unwrap();
+    _ = issueCmd(.{ .cmd = .read_single_block }, addr, buf).unwrap();
 }
 
 /// Write a single 512-byte block to the SD card.
@@ -590,7 +590,7 @@ fn writeBlock(ci: *const CardInfo, lba: u32, buf: []const u8) void {
     const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
 
     if (adma2_avail) {
-        ioBlockAdma2(24, addr, @constCast(buf));
+        ioBlockAdma2(.{ .cmd = .write_single_block }, addr, @constCast(buf));
     } else {
         writeBlockPio(addr, buf);
     }
@@ -598,15 +598,15 @@ fn writeBlock(ci: *const CardInfo, lba: u32, buf: []const u8) void {
 
 /// Read a single block using PIO mode.
 fn writeBlockPio(addr: u32, buf: []const u8) void {
-    _ = issueCmd(24, false, addr, @constCast(buf)).unwrap();
+    _ = issueCmd(.{ .cmd = .write_single_block }, addr, @constCast(buf)).unwrap();
 }
 
 /// Transfer a single block using ADMA2.
-fn ioBlockAdma2(cmd: u6, addr: u32, buf: []u8) void {
+fn ioBlockAdma2(cmd: CmdIdx, addr: u32, buf: []u8) void {
     const data = page_allocator.allocBytesV(buf.len) catch unreachable;
     defer page_allocator.freeBytesV(data);
 
-    switch (Direction.of(cmd, false)) {
+    switch (Direction.of(cmd)) {
         .read => {
             arch.cache(.invalidate, data, buf.len);
         },
@@ -636,10 +636,10 @@ fn ioBlockAdma2(cmd: u6, addr: u32, buf: []u8) void {
     });
 
     // Issue command.
-    _ = issueCmd(cmd, false, addr, data[0..buf.len]).unwrap();
+    _ = issueCmd(cmd, addr, data[0..buf.len]).unwrap();
 
     // Copy data back to buffer if reading.
-    if (Direction.of(cmd, false) == .read) {
+    if (Direction.of(cmd) == .read) {
         arch.cache(.invalidate, data, buf.len);
         @memcpy(buf, data[0..buf.len]);
     }
@@ -652,7 +652,7 @@ fn ioBlockAdma2(cmd: u6, addr: u32, buf: []u8) void {
 /// Send CMD55 to declare next command as application-specific.
 fn declareAcmd(rca: ?u16) void {
     const arg = if (rca) |v| @as(u32, v) << 16 else 0;
-    const res = issueCmd(55, false, arg, null).unwrap();
+    const res = issueCmd(.{ .cmd = .app_cmd }, arg, null).unwrap();
 
     if (!res.as(CardStatus).app_cmd) {
         @panic("ACMD not supported.");
@@ -664,11 +664,11 @@ fn declareAcmd(rca: ?u16) void {
 /// Issue a command to the SD card.
 ///
 /// If `data` is provided, the data transfer is performed using DMA if supported,
-/// In that case, `data` musb be DMA-capable buffer (alignment and cache management).
+/// In that case, `data` must be DMA-capable buffer (alignment and cache management).
 /// Caller is responsible for preparing the DMA descriptor table.
 ///
 /// This function blocks until the command and data transfer (if any) complete.
-fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
+fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
     // Sanity check.
     checkSanityCmd();
 
@@ -698,7 +698,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
             .dma_enable = use_adma2,
             .block_count_enable = true,
             .auto_cmd_enable = .disabled,
-            .data_direction = Direction.of(idx, acmd),
+            .data_direction = Direction.of(idx),
             .multi_block = if (use_adma2 or buf.len > block_size) .multiple else .single,
             .response_type = .r1,
             .response_err_check = false,
@@ -714,7 +714,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     }
 
     // Set command.
-    const res_type = ResponseType.of(idx, acmd);
+    const res_type = ResponseType.of(idx);
     const cmd_reg = Command{
         .response = res_type.length(),
         .sub = false,
@@ -722,7 +722,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
         .idx = res_type.idxcheck(),
         .data = data != null,
         .ctype = .normal,
-        .command = idx,
+        .command = idx.toInt(),
     };
     sdhc.write(Command, cmd_reg);
 
@@ -745,7 +745,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
 
     // Read or write data if present.
     if (data) |buf| {
-        switch (Direction.of(idx, acmd)) {
+        switch (Direction.of(idx)) {
             .read => if (use_adma2) {
                 // Wait for DMA transfer complete.
                 sdhc.waitFor(
@@ -803,7 +803,7 @@ fn issueCmd(idx: u6, acmd: bool, arg: anytype, data: ?[]u8) CommandResponse {
     }
 
     return CommandResponse{
-        .cmd = .{ .idx = idx, .acmd = acmd },
+        .cmd = idx,
         .value = .{ ._data = bits.concatMany(u128, .{ res3, res2, res1, res0 }) },
         .err = err_status,
     };
@@ -825,6 +825,59 @@ fn checkSanityCmd() void {
     // SD bus power is on.
     rtt.expect(sdhc.read(ClockControl).sd_clk_en);
 }
+
+/// Command index.
+const CmdIdx = union(enum) {
+    /// Normal command index.
+    cmd: enum(u6) {
+        /// GO_IDLE_STATE
+        go_idle_state = 0,
+        /// ALL_SEND_CID
+        all_send_cid = 2,
+        /// SEND_RELATIVE_ADDR
+        send_relative_addr = 3,
+        /// SWITCH_FUNC
+        switch_func = 6,
+        /// SELECT_CARD
+        select_card = 7,
+        /// SEND_IF_COND
+        send_if_cond = 8,
+        /// SEND_CSD
+        send_csd = 9,
+        /// SEND_STATUS
+        send_status = 13,
+        /// SET_BLOCKLEN
+        set_blocklen = 16,
+        /// READ_SINGLE_BLOCK
+        read_single_block = 17,
+        /// WRITE_SINGLE_BLOCK
+        write_single_block = 24,
+        /// APP_CMD
+        app_cmd = 55,
+    },
+    /// ACMD command index.
+    acmd: enum(u6) {
+        /// SET_BUS_WIDTH
+        set_bus_width = 6,
+        /// SEND_OP_COND
+        send_op_cond = 41,
+        /// SEND_SCR
+        send_scr = 51,
+    },
+
+    pub fn isAcmd(self: CmdIdx) bool {
+        return switch (self) {
+            .cmd => false,
+            .acmd => true,
+        };
+    }
+
+    pub fn toInt(self: CmdIdx) u6 {
+        return switch (self) {
+            inline else => |c| @intFromEnum(c),
+        };
+    }
+};
 
 /// Argument of CMD6.
 const Cmd6 = packed struct(u32) {
@@ -882,12 +935,7 @@ const Acmd41 = packed struct(u32) {
 /// Response and error value for SDHC command.
 const CommandResponse = struct {
     /// Command.
-    cmd: struct {
-        /// Command index.
-        idx: u6,
-        /// Is an application-specific command.
-        acmd: bool,
-    },
+    cmd: CmdIdx,
     /// Command response value.
     value: Value,
     /// Error value.
@@ -902,7 +950,7 @@ const CommandResponse = struct {
     pub fn unwrap(self: CommandResponse) CommandResponse {
         if (!self.err.isNoError()) {
             log.err("{s}CMD{d} error: {}", .{
-                if (self.cmd.acmd) "S" else "", self.cmd.idx, self.err,
+                if (self.cmd.isAcmd()) "S" else "", self.cmd.toInt(), self.err,
             });
             @panic("Unrecoverable SDHC command error.");
         }
@@ -941,21 +989,42 @@ const ResponseType = enum(u3) {
     r7,
 
     /// Get the response type for the given command.
-    pub fn of(cmd_idx: u6, acmd: bool) ResponseType {
-        return if (!acmd) switch (cmd_idx) {
-            // CMD
-            0 => .r0,
-            6, 13, 16, 17, 24, 55 => .r1,
-            7 => .r1b,
-            2, 9 => .r2,
-            3 => .r6,
-            8 => .r7,
-            else => @panic("Unsupported CMD command index."),
-        } else switch (cmd_idx) {
-            // ACMD
-            6, 51 => .r1,
-            41 => .r3,
-            else => @panic("Unsupported ACMD command index."),
+    pub fn of(cmd_idx: CmdIdx) ResponseType {
+        return switch (cmd_idx) {
+            .cmd => |c| switch (c) {
+                .go_idle_state,
+                => .r0,
+
+                .switch_func,
+                .send_status,
+                .set_blocklen,
+                .read_single_block,
+                .write_single_block,
+                .app_cmd,
+                => .r1,
+
+                .select_card,
+                => .r1b,
+
+                .all_send_cid,
+                .send_csd,
+                => .r2,
+
+                .send_relative_addr,
+                => .r6,
+
+                .send_if_cond,
+                => .r7,
+            },
+
+            .acmd => |a| switch (a) {
+                .set_bus_width,
+                .send_scr,
+                => .r1,
+
+                .send_op_cond,
+                => .r3,
+            },
         };
     }
 
@@ -1529,17 +1598,32 @@ const Direction = enum(u1) {
     read = 1,
 
     // Get the transfer direction for the given command.
-    pub fn of(cmd_idx: u6, acmd: bool) Direction {
-        return if (!acmd) switch (cmd_idx) {
-            0, 2, 3, 7, 8, 9, 13, 16, 55 => .read,
-            6 => .read,
-            17 => .read,
-            24 => .write,
-            else => @panic("Unsupported CMD command index for data transfer."),
-        } else switch (cmd_idx) {
-            6, 41 => .read,
-            51 => .read,
-            else => @panic("Unsupported ACMD command index for data transfer."),
+    pub fn of(cmd_idx: CmdIdx) Direction {
+        return switch (cmd_idx) {
+            .cmd => |c| switch (c) {
+                .go_idle_state,
+                .all_send_cid,
+                .send_relative_addr,
+                .switch_func,
+                .select_card,
+                .send_if_cond,
+                .send_csd,
+                .send_status,
+                .set_blocklen,
+                .read_single_block,
+                .app_cmd,
+                => .read,
+
+                .write_single_block,
+                => .write,
+            },
+
+            .acmd => |a| switch (a) {
+                .set_bus_width,
+                .send_op_cond,
+                .send_scr,
+                => .read,
+            },
         };
     }
 };
