@@ -70,7 +70,7 @@ const DirEntry = struct {
 
 const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
-    .mkdir = &imkdir,
+    .create = &icreate,
     .deinit = &ideinit,
 };
 
@@ -86,8 +86,8 @@ pub const InodeImpl = struct {
     }
 };
 
-/// mkdir implementation.
-fn imkdir(dir: *fs.Inode, name: []const u8, allocator: Allocator) fs.Error!void {
+/// create implementation.
+fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, allocator: Allocator) fs.Error!*fs.Inode {
     const ctx = InodeImpl.from(dir);
     const self = ctx.rootfs;
 
@@ -103,7 +103,7 @@ fn imkdir(dir: *fs.Inode, name: []const u8, allocator: Allocator) fs.Error!void 
         .common = .{
             .number = self.entry_count + 2,
             .size = 0,
-            .ftype = .directory,
+            .ftype = ftype,
             .iops = inode_vtable,
             .fops = file_vtable,
         },
@@ -116,6 +116,8 @@ fn imkdir(dir: *fs.Inode, name: []const u8, allocator: Allocator) fs.Error!void 
         .inode = inode,
     };
     self.entry_count += 1;
+
+    return &inode.common;
 }
 
 /// Lookup an inode by its name in the root directory.

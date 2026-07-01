@@ -148,7 +148,7 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
 }
 
 /// Create a directory at the given path with the given name.
-pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!void {
+pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!*Inode {
     var cur = path;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };

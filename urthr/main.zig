@@ -127,9 +127,9 @@ fn zmain() !void {
         const rootfs = try urd.fs.RootFs.init(allocator);
 
         try urd.fs.mount(croot, rootfs.filesystem(), allocator);
-        try urd.fs.mkdir(croot, "boot", allocator);
-        try urd.fs.mkdir(croot, "dev", allocator);
-        try urd.fs.mkdir(croot, "proc", allocator);
+        _ = try urd.fs.mkdir(croot, "boot", allocator);
+        _ = try urd.fs.mkdir(croot, "dev", allocator);
+        _ = try urd.fs.mkdir(croot, "proc", allocator);
     }
 
     if (board.getBlockDevice()) |dev| {
