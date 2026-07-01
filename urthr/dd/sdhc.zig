@@ -400,14 +400,12 @@ fn initCard() CardInfo {
     var ccs = false;
 
     // CMD0: GO_IDLE_STATE
-    trace("CMD0  : GO_IDLE_STATE", .{});
     {
         _ = issueCmd(.{ .cmd = .go_idle_state }, 0, null).unwrap();
         arch.timer.spinWaitMilli(1);
     }
 
     // CMD8: SEND_IF_COND
-    trace("CMD8  : SEND_IF_COND", .{});
     {
         const res = issueCmd(.{ .cmd = .send_if_cond }, 0x1AA, null);
 
@@ -421,7 +419,6 @@ fn initCard() CardInfo {
     }
 
     // ACMD41: SEND_OP_COND
-    trace("ACMD41: SEND_OP_COND", .{});
     {
         // With voltage = 0.
         declareAcmd(null);
@@ -447,20 +444,17 @@ fn initCard() CardInfo {
     }
 
     // CMD2: ALL_SEND_CID
-    trace("CMD2  : ALL_SEND_CID", .{});
     const cid = blk: {
         break :blk issueCmd(.{ .cmd = .all_send_cid }, 0, null).unwrap().as(Cid);
     };
 
     // CMD3: SEND_RELATIVE_ADDR
-    trace("CMD3  : SEND_RELATIVE_ADDR", .{});
     const rca = blk: {
         const res = issueCmd(.{ .cmd = .send_relative_addr }, 0, null).unwrap().as(u32);
         break :blk @as(u16, @truncate(res >> 16));
     };
 
     // CMD9: SEND_CSD
-    trace("CMD9  : SEND_CSD", .{});
     const csd = blk: {
         const res = issueCmd(.{ .cmd = .send_csd }, @as(u32, rca) << 16, null).unwrap().as(u128);
         break :blk Csd.from(res);
@@ -473,13 +467,11 @@ fn initCard() CardInfo {
     }
 
     // CMD7: SELECT_CARD
-    trace("CMD7  : SELECT_CARD", .{});
     {
         _ = issueCmd(.{ .cmd = .select_card }, @as(u32, rca) << 16, null).unwrap();
     }
 
     // ACMD51: SEND_SCR
-    trace("ACMD51: SEND_SCR", .{});
     const scr: Scr = blk: {
         var scr: Scr = undefined;
 
@@ -507,13 +499,11 @@ fn initCard() CardInfo {
 /// After this function, the card's FSM will be in TRANSFER state.
 fn setupTransaction(base_freq: ?u64) void {
     // Specify block size to 512 bytes.
-    trace("CMD16 : SET_BLOCKLEN", .{});
     {
         _ = issueCmd(.{ .cmd = .set_blocklen }, block_size, null).unwrap();
     }
 
     // Setup bus width to 4-bit for Card.
-    trace("ACMD6 : SET_BUS_WIDTH", .{});
     {
         declareAcmd(card.rca);
         _ = issueCmd(.{ .acmd = .set_bus_width }, 2, null).unwrap();
@@ -521,8 +511,6 @@ fn setupTransaction(base_freq: ?u64) void {
 
     // Switch to High Speed Mode.
     if (card.spec == .sdhc_sdxc) {
-        trace("CMD6  : SWITCH_FUNC", .{});
-
         const arg = Cmd6{
             .group1 = 1, // High Speed
             .mode = .change,
@@ -546,7 +534,6 @@ fn setupTransaction(base_freq: ?u64) void {
     arch.timer.spinWaitMicro(10);
 
     // Check status.
-    trace("CMD13 : SEND_STATUS", .{});
     {
         const arg = @as(u32, card.rca) << 16;
         const res = issueCmd(.{ .cmd = .send_status }, arg, null).unwrap().as(CardStatus);
@@ -669,6 +656,8 @@ fn declareAcmd(rca: ?u16) void {
 ///
 /// This function blocks until the command and data transfer (if any) complete.
 fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
+    trace("{s}{d}: {s}", .{ if (idx == .cmd) "CMD" else "ACMD", idx.toInt(), idx.str() });
+
     // Sanity check.
     checkSanityCmd();
 
@@ -875,6 +864,12 @@ const CmdIdx = union(enum) {
     pub fn toInt(self: CmdIdx) u6 {
         return switch (self) {
             inline else => |c| @intFromEnum(c),
+        };
+    }
+
+    pub fn str(self: CmdIdx) []const u8 {
+        return switch (self) {
+            inline else => |c| @tagName(c),
         };
     }
 };
