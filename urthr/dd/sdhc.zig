@@ -655,8 +655,8 @@ fn declareAcmd(rca: ?u16) void {
 /// Caller is responsible for preparing the DMA descriptor table.
 ///
 /// This function blocks until the command and data transfer (if any) complete.
-fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
-    trace("{s}{d}: {s}", .{ if (idx == .cmd) "CMD" else "ACMD", idx.toInt(), idx.str() });
+fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
+    trace("{s}{d}: {s}", .{ if (cmd == .cmd) "CMD" else "ACMD", cmd.toInt(), cmd.str() });
 
     // Sanity check.
     checkSanityCmd();
@@ -687,7 +687,7 @@ fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
             .dma_enable = use_adma2,
             .block_count_enable = true,
             .auto_cmd_enable = .disabled,
-            .data_direction = Direction.of(idx),
+            .data_direction = Direction.of(cmd),
             .multi_block = if (use_adma2 or buf.len > block_size) .multiple else .single,
             .response_type = .r1,
             .response_err_check = false,
@@ -703,7 +703,7 @@ fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
     }
 
     // Set command.
-    const res_type = ResponseType.of(idx);
+    const res_type = ResponseType.of(cmd);
     const cmd_reg = Command{
         .response = res_type.length(),
         .sub = false,
@@ -711,7 +711,7 @@ fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
         .idx = res_type.idxcheck(),
         .data = data != null,
         .ctype = .normal,
-        .command = idx.toInt(),
+        .command = cmd.toInt(),
     };
     sdhc.write(Command, cmd_reg);
 
@@ -734,7 +734,7 @@ fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
 
     // Read or write data if present.
     if (data) |buf| {
-        switch (Direction.of(idx)) {
+        switch (Direction.of(cmd)) {
             .read => if (use_adma2) {
                 // Wait for DMA transfer complete.
                 sdhc.waitFor(
@@ -792,7 +792,7 @@ fn issueCmd(idx: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
     }
 
     return CommandResponse{
-        .cmd = idx,
+        .cmd = cmd,
         .value = .{ ._data = bits.concatMany(u128, .{ res3, res2, res1, res0 }) },
         .err = err_status,
     };
@@ -984,8 +984,8 @@ const ResponseType = enum(u3) {
     r7,
 
     /// Get the response type for the given command.
-    pub fn of(cmd_idx: CmdIdx) ResponseType {
-        return switch (cmd_idx) {
+    pub fn of(cmd: CmdIdx) ResponseType {
+        return switch (cmd) {
             .cmd => |c| switch (c) {
                 .go_idle_state,
                 => .r0,
@@ -1593,8 +1593,8 @@ const Direction = enum(u1) {
     read = 1,
 
     // Get the transfer direction for the given command.
-    pub fn of(cmd_idx: CmdIdx) Direction {
-        return switch (cmd_idx) {
+    pub fn of(cmd: CmdIdx) Direction {
+        return switch (cmd) {
             .cmd => |c| switch (c) {
                 .go_idle_state,
                 .all_send_cid,
