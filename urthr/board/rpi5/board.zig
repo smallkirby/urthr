@@ -192,7 +192,7 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
         dd.sdhc.setBase(sdbase);
         dd.sdhc.init(
             50_000_000, // 50 MHz PLL base clock
-            urd.mem.page,
+            urd.mem.dma.interface(0),
         );
     }
 

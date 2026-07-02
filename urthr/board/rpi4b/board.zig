@@ -137,7 +137,7 @@ pub fn initPeripherals2() urd.mem.Error!void {
         dd.sdhc.setBase(base);
         dd.sdhc.init(
             50_000_000, // 50 MHz
-            urd.mem.page,
+            urd.mem.dma.interface(0),
         );
     }
 }

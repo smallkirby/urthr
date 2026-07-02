@@ -53,8 +53,8 @@ var sdhc = mmio.Module(.{ .natural = u32 }, &.{
 /// Currently, this driver supports only one card.
 var card: CardInfo = undefined;
 
-/// Page allocator.
-var page_allocator: PageAllocator = undefined;
+/// DMA allocator.
+var dma: DmaAllocator = undefined;
 
 /// The device supports ADMA2.
 var adma2_avail = false;
@@ -98,8 +98,8 @@ pub fn setBase(base: usize) void {
 ///
 /// Clocks are initialized using the given base frequency in Hz.
 /// If the base frequencty is provided in the Capability register, it is used instead.
-pub fn init(base_freq: ?u64, allocator: PageAllocator) void {
-    page_allocator = allocator;
+pub fn init(base_freq: ?u64, allocator: DmaAllocator) void {
+    dma = allocator;
 
     // Reset entire HC and wait until it completes.
     reset();
@@ -590,36 +590,38 @@ fn writeBlockPio(addr: u32, buf: []const u8) void {
 
 /// Transfer a single block using ADMA2.
 fn ioBlockAdma2(cmd: CmdIdx, addr: u32, buf: []u8) void {
-    const data = page_allocator.allocBytesV(buf.len) catch unreachable;
-    defer page_allocator.freeBytesV(data);
+    const data_mem = dma.allocBytes(buf.len, .normal) catch unreachable;
+    defer dma.freeBytes(data_mem);
+    const data: [*]u8 = @ptrFromInt(data_mem.cpu);
 
     switch (Direction.of(cmd)) {
         .read => {
-            arch.cache(.invalidate, data, buf.len);
+            dma.syncForCpu(data_mem.cpu, buf.len);
         },
         .write => {
-            @memcpy(data, buf);
-            arch.cache(.clean, data, buf.len);
+            @memcpy(data[0..buf.len], buf);
+            dma.syncForDevice(data_mem.cpu, buf.len);
         },
     }
 
-    const desc = page_allocator.create(Adma2Desc) catch unreachable;
-    defer page_allocator.destroy(desc);
+    const desc_mem = dma.allocBytes(@sizeOf(Adma2Desc), .normal) catch unreachable;
+    defer dma.freeBytes(desc_mem);
+    const desc: *Adma2Desc = @ptrFromInt(desc_mem.cpu);
 
-    // Prepare ADMA2 descriptor
+    // Prepare ADMA2 descriptor.
     desc.* = .{
         .valid = true,
         .end = true,
         .int = false,
         .op = .tran,
         .length = @intCast(buf.len),
-        .addr = @intCast(@intFromPtr(page_allocator.translateP(data).ptr)),
+        .addr = @intCast(data_mem.bus),
     };
-    arch.cache(.clean, desc, @sizeOf(Adma2Desc));
+    dma.syncForDevice(desc_mem.cpu, @sizeOf(Adma2Desc));
 
-    // Set ADMA2 system address
+    // Set ADMA2 system address.
     sdhc.write(AdmaSystemAddress, .{
-        .addr = @intCast(@intFromPtr(page_allocator.translateP(desc))),
+        .addr = @intCast(desc_mem.bus),
     });
 
     // Issue command.
@@ -627,7 +629,7 @@ fn ioBlockAdma2(cmd: CmdIdx, addr: u32, buf: []u8) void {
 
     // Copy data back to buffer if reading.
     if (Direction.of(cmd) == .read) {
-        arch.cache(.invalidate, data, buf.len);
+        dma.syncForCpu(data_mem.cpu, buf.len);
         @memcpy(buf, data[0..buf.len]);
     }
 }
@@ -742,8 +744,7 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
                     .{ .transfer_complete = true },
                     .ms(1),
                 );
-                // Invalidate cache.
-                arch.cache(.invalidate, buf, buf.len);
+                dma.syncForCpu(@intFromPtr(buf.ptr), buf.len);
             } else {
                 sdhc.waitFor(
                     NormalIntStatus,
@@ -2301,6 +2302,6 @@ const block = common.block;
 const mmio = common.mmio;
 const rtt = common.rtt;
 const units = common.units;
-const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
