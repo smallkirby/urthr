@@ -71,7 +71,9 @@ pub fn unref(self: *Self) void {
 pub fn mkdir(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode {
     if (self.ftype != .directory) return Error.NotDirectory;
 
-    // TODO: check if a file with the same name already exists.
+    if (try self.lookup(name)) |_| {
+        return Error.AlreadyExists;
+    }
 
     if (self.iops.create) |f| {
         return f(self, name, .directory, allocator);
@@ -84,7 +86,9 @@ pub fn mkdir(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode {
 pub fn create(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode {
     if (self.ftype != .directory) return Error.NotDirectory;
 
-    // TODO: check if a file with the same name already exists.
+    if (try self.lookup(name)) |_| {
+        return Error.AlreadyExists;
+    }
 
     if (self.iops.create) |f| {
         return f(self, name, .file, allocator);

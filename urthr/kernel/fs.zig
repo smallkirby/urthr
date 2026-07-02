@@ -13,6 +13,8 @@ pub const FdTable = @import("fs/FdTable.zig");
 
 /// Filesystem-specific errors.
 pub const Error = error{
+    /// A file already exists.
+    AlreadyExists,
     /// Attempting to mount on a directory that is already a mount point.
     AlreadyMounted,
     /// The filesystem type is not recognized or invalid.
