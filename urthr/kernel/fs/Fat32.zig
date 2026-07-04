@@ -8,6 +8,8 @@ device: block.Device,
 bpb: BpbInfo,
 /// Root directory inode.
 root: *InodeImpl,
+/// Lock to protect FAT32 entries and directory entries.
+lock: SpinLock = .{},
 /// Memory allocator.
 allocator: Allocator,
 
@@ -155,14 +157,19 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) f
         return fs.Error.Unsupported;
     }
 
-    // Find or create a directory entry slot.
-    const entpos = try self.findDirSlot(ctx.cluster, 1, .create) orelse unreachable;
-    // TODO: lock or atomic find-and-create to avoid race.
+    self.lock.lock();
+    defer self.lock.unlock();
 
     // Allocate a new cluster for the file.
     const clus = try self.allocateCluster(null);
-    // TODO: free the cluster in errdefer.
-    // TODO: clear the cluster to zero.
+    errdefer self.freeCluster(clus) catch unreachable;
+
+    // Find or create a directory entry slot.
+    const entpos = try self.findDirSlot(
+        ctx.cluster,
+        1,
+        .create,
+    ) orelse return fs.Error.NoSpace;
 
     // Initialize the new inode.
     const inode = try self.allocator.create(InodeImpl);
@@ -742,6 +749,16 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
     return fs.Error.NoSpace;
 }
 
+/// Free the cluster chain starting from the given cluster.
+fn freeCluster(self: *Self, clus: Cluster) fs.Error!void {
+    var current = clus;
+    while (true) {
+        const next = try self.getNextCluster(current) orelse break;
+        try self.setFatEntry(current, fat_free_cluster);
+        current = next;
+    }
+}
+
 /// Update a FAT entry for the given cluster across all FAT copies.
 fn setFatEntry(self: *Self, cluster: Cluster, value: u32) fs.Error!void {
     rtt.expectEqual(0, value & ~fat_mask);
@@ -1155,3 +1172,5 @@ const block = common.block;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
+const sync = urd.sync;
+const SpinLock = sync.SpinLock;
