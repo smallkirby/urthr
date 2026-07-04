@@ -91,7 +91,7 @@ pub fn create(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode 
     }
 
     if (self.iops.create) |f| {
-        return f(self, name, .file, allocator);
+        return f(self, name, .regular, allocator);
     } else {
         return Error.Unsupported;
     }
