@@ -159,6 +159,44 @@ pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!*Inode {
     return cur.dentry.inode.mkdir(name, allocator);
 }
 
+/// Create a new regular file at the specified path and open it.
+pub fn create(s: []const u8, allocator: Allocator) Error!*File {
+    const basename = std.fs.path.basenamePosix(s);
+    if (basename.len == 0) {
+        return Error.InvalidArgument;
+    }
+
+    // Lookup parent directory.
+    const dir = if (std.fs.path.dirnamePosix(s)) |dirname|
+        try resolvePath(sched.getCurrent().fs.cwd, dirname, allocator)
+    else
+        sched.getCurrent().fs.cwd;
+
+    // Create new file in the directory.
+    const inode = try dir.dentry.inode.create(basename, allocator);
+
+    // Put the new file into dentry cache.
+    const dentry = Dentry.create(
+        basename,
+        inode,
+        dir.dentry,
+        allocator,
+    ) catch |err| {
+        inode.unref();
+        return err;
+    };
+    errdefer dentry.unref();
+    try dcache.insert(dentry);
+
+    return File.open(
+        .{
+            .dentry = dentry,
+            .mount = dir.mount,
+        },
+        allocator,
+    );
+}
+
 /// Resolve a path to a Path without opening a File.
 ///
 /// Caller must call `path.dentry.unref()` after use.
