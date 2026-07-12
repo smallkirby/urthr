@@ -499,11 +499,34 @@ pub fn build(b: *std.Build) !void {
         b.installArtifact(init);
 
         // =============================================================
+        // utest
+
+        const utest = blk: {
+            const module = b.createModule(.{
+                .root_source_file = b.path("app/utest/utest.zig"),
+                .target = user_target,
+            });
+
+            const exe = b.addTest(.{
+                .name = "utest",
+                .root_module = module,
+                .test_runner = .{
+                    .path = b.path("app/utest/test_runner.zig"),
+                    .mode = .simple,
+                },
+            });
+
+            break :blk exe;
+        };
+        b.installArtifact(utest);
+
+        // =============================================================
         // BootFS
 
         const bootfs = b.step("bootfs", "Create BootFS image");
         const apps = [_]*std.Build.Step.Compile{
             init,
+            utest,
         };
 
         // Create bootfs.img from zig-out/bootfs directory.

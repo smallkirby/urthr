@@ -1,28 +1,39 @@
-//! Experimental init executable.
+extern var utest_init_ptr: ?*std.process.Init;
 
 pub fn main(init: std.process.Init) !void {
-    log.info("Initial process started.", .{});
-    log.info("----------------------------------", .{});
+    @disableInstrumentation();
+    log.info("Test Framework started.", .{});
 
-    // Show arguments.
-    {
-        const allocator = init.arena.allocator();
-        const args = try init.minimal.args.toSlice(allocator);
-        defer allocator.free(args);
+    var init_var = init;
+    utest_init_ptr = &init_var;
 
-        log.info("Arguments: {d}", .{args.len});
-        for (args, 0..) |arg, i| {
-            log.info("  ARG#{d}: {s}", .{ i, arg });
+    var ok_count: usize = 0;
+    var skip_count: usize = 0;
+    var fail_count: usize = 0;
+
+    for (builtin.test_functions) |test_fn| {
+        log.info("RUN : {s}", .{test_fn.name});
+
+        if (test_fn.func()) |_| {
+            ok_count += 1;
+            log.info("OK  : {s}", .{test_fn.name});
+        } else |err| {
+            if (err != error.SkipZigTest) {
+                fail_count += 1;
+                log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
+            } else {
+                skip_count += 1;
+                log.info("SKIP: {s}", .{test_fn.name});
+            }
         }
     }
 
-    // Show environment variables.
-    {
-        log.info("Environment Variables: {d}", .{init.environ_map.count()});
-        var enviter = init.environ_map.iterator();
-        while (enviter.next()) |entry| {
-            log.info("  ENV: {s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
-        }
+    log.info("Summary: {d} passed, {d} skipped, {d} failed.", .{ ok_count, skip_count, fail_count });
+
+    if (fail_count > 0) {
+        std.process.exit(1);
+    } else {
+        std.process.exit(0);
     }
 }
 
@@ -86,4 +97,4 @@ const StackIterator = struct {
 
 const builtin = @import("builtin");
 const std = @import("std");
-const log = std.log.scoped(.init);
+const log = std.log.scoped(.utest);
