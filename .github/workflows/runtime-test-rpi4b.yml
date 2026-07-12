@@ -60,4 +60,5 @@ jobs:
             -Drtt \
             -Drestart \
             -Dsdcreate \
-            -Didle_watchdog=10
+            -Didle_watchdog=10 \
+            -Dinit=/boot/bin/utest
