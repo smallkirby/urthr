@@ -150,6 +150,7 @@ zig build test --summary all -Doptimize=Debug
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
 | `trace` | String (Comma-separated): `sdhc,net,syscall` | Enable trace outputs. | - |
 | `rtt` | Flag | Enable runtime tests. | `false` |
+| `init` | Path | Path to init binary to run on boot. | `/boot/bin/init` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 | `qemu` | Path | Path to QEMU (aarch64) directory. | `""` |
 | `qemu_log` | String (Comma-separated): `sd`, `usb`, `gic` | Enable specified QEMU verbose log outputs. Comma-separated list. | - |

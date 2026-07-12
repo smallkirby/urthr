@@ -94,6 +94,12 @@ pub fn build(b: *std.Build) !void {
         "Enable runtime tests in the kernel.",
     ) orelse false;
 
+    const init_path = b.option(
+        []const u8,
+        "init",
+        "Path to init binary to run on boot.",
+    ) orelse "/boot/bin/init";
+
     const restart = b.option(
         bool,
         "restart",
@@ -139,6 +145,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(board.BoardType, "board", board_type);
     options.addOption(bool, "serial_boot", serial_boot);
     options.addOption(bool, "enable_rtt", enable_rtt);
+    options.addOption([]const u8, "init", init_path);
     options.addOption(bool, "restart_on_panic", restart);
     options.addOption(u64, "idle_watchdog", idle_watchdog);
     options.addOption([]const u8, "version", version);

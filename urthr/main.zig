@@ -204,7 +204,11 @@ fn initialTask() !void {
     try urd.net.run();
 
     // Load init executable and enter userland.
-    try urd.task.enterUser("/boot/bin/init", &.{}, &.{});
+    _ = try urd.task.enterUser(
+        options.init,
+        &.{},
+        &.{},
+    );
 
     // Unreachable.
     log.warn("Initial task reached EOL.", .{});
