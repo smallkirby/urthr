@@ -125,7 +125,7 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
 
             inode.* = .{
                 .common = .{
-                    .number = calcInodeNumber(result.pos),
+                    .number = result.pos.toInodeNumber(),
                     .size = result.entry.file_size,
                     .ftype = if (result.entry.attr.directory) .directory else .regular,
                     .iops = inode_vtable,
@@ -205,7 +205,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) f
     // Construct inode.
     inode.* = .{
         .common = .{
-            .number = calcInodeNumber(entpos),
+            .number = entpos.toInodeNumber(),
             .size = 0,
             .ftype = ftype,
             .iops = inode_vtable,
@@ -219,22 +219,31 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) f
     return &inode.common;
 }
 
-/// Calculate inode number.
-///
-/// FAT32 does not have a real inode number.
-/// So we synthesize a unique number for each file based on its directory entry position.
-fn calcInodeNumber(pos: Position) u64 {
-    const index_offset: u8 = @intCast(pos.offset / @sizeOf(DirEntry));
-    const sector: u64 = @as(u56, @truncate(pos.sector));
-    return (sector << 8) + index_offset;
-}
-
 /// Unique identifier for a position within a disk.
 const Position = struct {
     /// Sector number.
     sector: usize,
     /// Offset in bytes within the sector.
     offset: usize,
+
+    /// Calculate inode number.
+    ///
+    /// FAT32 does not have a real inode number.
+    /// So we synthesize a unique number for each file based on its directory entry position.
+    fn toInodeNumber(self: Position) u64 {
+        const index_offset: u8 = @intCast(self.offset / @sizeOf(DirEntry));
+        const sector: u64 = @as(u56, @truncate(self.sector));
+        return (sector << 8) + index_offset;
+    }
+
+    /// Recover position from inode number.
+    fn fromInodeNumber(inum: fs.Inode.Number) Position {
+        const index_offset: usize = @intCast(inum & 0xFF);
+        return .{
+            .sector = @intCast(inum >> 8),
+            .offset = index_offset * @sizeOf(DirEntry),
+        };
+    }
 };
 
 /// Directory iterator.
@@ -460,6 +469,7 @@ const file_vtable = fs.File.Ops{
     .open = fopen,
     .iterate = fiterate,
     .read = fread,
+    .write = fwrite,
     .close = fclose,
     .poll = fpoll,
 };
@@ -521,7 +531,7 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
         iter.offset = diter.consumed;
         return .{
             .name = try allocator.dupe(u8, result.name),
-            .inum = calcInodeNumber(result.pos),
+            .inum = result.pos.toInodeNumber(),
             .type = if (result.entry.attr.directory) .directory else .regular,
         };
     } else return null;
@@ -578,6 +588,102 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
     }
 
     return bytes_read;
+}
+
+/// Write data to a regular file.
+///
+/// Extend the file size if necessary.
+/// If `offset` is beyond the current EOF, the gap is zero-filled.
+fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
+    const ctx = FileImpl.from(file);
+    const fat32 = ctx.fat32;
+    const inode = file.path.dentry.inode;
+    const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
+
+    if (buf.len == 0) return 0;
+
+    fat32.lock.lock();
+    defer fat32.lock.unlock();
+
+    const old_size = inode.size;
+    const dst_start = @min(offset, old_size);
+    const zero_len = offset - dst_start;
+    const total_len = zero_len + buf.len;
+
+    // Seek to the cluster that contains `dst_start`.
+    var clus = ctx.start_cluster; // cluster number of the current position in the file
+    var clus_file_offset: u64 = 0; // offset of the current cluster in the file
+    while (clus_file_offset + bytes_per_cluster <= dst_start) : (clus_file_offset += bytes_per_cluster) {
+        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
+    }
+
+    // Write sector by sector, zero-filling the gap or copying data.
+    var written: u64 = 0;
+    var cur_offset = dst_start;
+    var cur_clus = clus;
+    var cur_clus_file_offset = clus_file_offset;
+
+    while (written < total_len) {
+        const offset_in_clus = cur_offset - cur_clus_file_offset;
+        const sector_in_clus = offset_in_clus / sector_size;
+        const offset_in_sec = offset_in_clus % sector_size;
+
+        const lba = fat32.clusterToLba(cur_clus) + sector_in_clus;
+        const to_write = @min(sector_size - offset_in_sec, total_len - written);
+
+        // Read-modify-write unless we're overwriting the whole sector.
+        var sec_buf: [sector_size]u8 = undefined;
+        if (offset_in_sec != 0 or to_write < sector_size) {
+            try fat32.device.readBlock(lba, &sec_buf);
+        }
+
+        if (written < zero_len) {
+            const zero_copy = @min(to_write, zero_len - written);
+            @memset(sec_buf[offset_in_sec..][0..zero_copy], 0);
+            if (zero_copy < to_write) {
+                @memcpy(sec_buf[offset_in_sec + zero_copy ..][0 .. to_write - zero_copy], buf[0 .. to_write - zero_copy]);
+            }
+        } else {
+            const data_off = written - zero_len;
+            @memcpy(sec_buf[offset_in_sec..][0..to_write], buf[data_off..][0..to_write]);
+        }
+
+        try fat32.device.writeBlock(lba, &sec_buf);
+
+        written += to_write;
+        cur_offset += to_write;
+
+        // If we crossed a cluster boundary, follow or extend the FAT chain.
+        if (cur_offset - cur_clus_file_offset >= bytes_per_cluster) {
+            rtt.expect(cur_offset == cur_clus_file_offset + bytes_per_cluster);
+            cur_clus = try fat32.getNextCluster(cur_clus) orelse try fat32.allocateCluster(cur_clus);
+            cur_clus_file_offset += bytes_per_cluster;
+        }
+    }
+
+    // Update the directory entry.
+    const new_size = offset + buf.len;
+    if (new_size > old_size) {
+        inode.size = new_size;
+        try fat32.updateDirEntrySize(inode.number, new_size);
+    }
+
+    return buf.len;
+}
+
+/// Update the file size field of the on-disk directory entry.
+///
+/// Caller must hold `self.lock`.
+fn updateDirEntrySize(self: *Self, inum: fs.Inode.Number, new_size: usize) fs.Error!void {
+    const pos = Position.fromInodeNumber(inum);
+
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlock(pos.sector, &buf);
+
+    const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+    ent.file_size = @intCast(new_size);
+
+    try self.device.writeBlock(pos.sector, &buf);
 }
 
 // =============================================================
