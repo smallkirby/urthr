@@ -1,5 +1,22 @@
 extern var utest_init_ptr: ?*std.process.Init;
 
+const Tag = enum {
+    /// Run only the specified test.
+    only,
+
+    pub fn from(s: []const u8) ?Tag {
+        if (std.mem.containsAtLeast(u8, s, 1, "tag:ONLY")) {
+            return .only;
+        }
+
+        return null;
+    }
+};
+
+var ok_count: usize = 0;
+var skip_count: usize = 0;
+var fail_count: usize = 0;
+
 pub fn main(init: std.process.Init) !void {
     @disableInstrumentation();
     log.info("Test Framework started.", .{});
@@ -7,33 +24,51 @@ pub fn main(init: std.process.Init) !void {
     var init_var = init;
     utest_init_ptr = &init_var;
 
-    var ok_count: usize = 0;
-    var skip_count: usize = 0;
-    var fail_count: usize = 0;
+    // Find tag:ONLY tests.
+    const has_tag_only = for (builtin.test_functions) |test_fn| {
+        if (Tag.from(test_fn.name) == .only) {
+            break true;
+        }
+    } else false;
 
-    for (builtin.test_functions) |test_fn| {
-        log.info("RUN : {s}", .{test_fn.name});
-
-        if (test_fn.func()) |_| {
-            ok_count += 1;
-            log.info("OK  : {s}", .{test_fn.name});
-        } else |err| {
-            if (err != error.SkipZigTest) {
-                fail_count += 1;
-                log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
-            } else {
-                skip_count += 1;
-                log.info("SKIP: {s}", .{test_fn.name});
+    if (has_tag_only) {
+        // Run only the tag:ONLY tests.
+        log.info("Found tag:ONLY tests. Skipping other tests.", .{});
+        for (builtin.test_functions) |test_fn| {
+            if (Tag.from(test_fn.name) == .only) {
+                runSingle(test_fn);
             }
         }
+        std.process.exit(0);
+    } else {
+        // Run all tests.
+        for (builtin.test_functions) |test_fn| {
+            runSingle(test_fn);
+        }
     }
-
     log.info("Summary: {d} passed, {d} skipped, {d} failed.", .{ ok_count, skip_count, fail_count });
 
     if (fail_count > 0) {
         std.process.exit(1);
     } else {
         std.process.exit(0);
+    }
+}
+
+fn runSingle(test_fn: anytype) void {
+    log.info("RUN : {s}", .{test_fn.name});
+
+    if (test_fn.func()) |_| {
+        ok_count += 1;
+        log.info("OK  : {s}", .{test_fn.name});
+    } else |err| {
+        if (err != error.SkipZigTest) {
+            fail_count += 1;
+            log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
+        } else {
+            skip_count += 1;
+            log.info("SKIP: {s}", .{test_fn.name});
+        }
     }
 }
 

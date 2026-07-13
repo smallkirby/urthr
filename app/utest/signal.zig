@@ -11,9 +11,7 @@ test "simple" {
     const pid = linux.getpid();
     _ = linux.kill(pid, .TERM);
 
-    if (!signal_called) {
-        return error.SignalNotDelivered;
-    }
+    try testing.expectEqual(true, signal_called);
 }
 
 /// Whether signal handler is called.
@@ -31,4 +29,5 @@ fn onSignal(signo: linux.SIG) callconv(.c) void {
 
 const std = @import("std");
 const log = std.log;
+const testing = std.testing;
 const linux = std.os.linux;
