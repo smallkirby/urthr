@@ -23,7 +23,6 @@ const Test = struct {
         return try dir.createFile(ini.io, file_name, .{});
     }
 
-    // TODO: need to implement unlinkat syscall.
     pub fn deleteFile(_: *const Self) void {
         const ini = utest.getInit();
 
@@ -101,37 +100,34 @@ test "syscall: openat" {
 }
 
 test "openat resolves relative to a directory fd" {
-    // TODO: once deleteFile() is implemented, uncomment this.
-    return error.SkipZigTest;
+    const init = utest.getInit();
+    var t = Test.init();
 
-    //const init = utest.getInit();
-    //var t = Test.init();
+    const content = "0123456789";
+    {
+        const file = try t.createFile();
+        defer file.close(utest.getInit().io);
+        try file.writeStreamingAll(init.io, content);
+    }
 
-    //const content = "0123456789";
-    //{
-    //    const file = try t.createFile();
-    //    defer file.close(utest.getInit().io);
-    //    try file.writeStreamingAll(init.io, content);
-    //}
+    {
+        defer t.deleteFile();
 
-    //{
-    //    defer t.deleteFile();
+        const dir = try std.Io.Dir.openDirAbsolute(
+            init.io,
+            Test.base_dir,
+            .{},
+        );
+        defer dir.close(init.io);
 
-    //    const dir = try std.Io.Dir.openDirAbsolute(
-    //        init.io,
-    //        Test.base_dir,
-    //        .{},
-    //    );
-    //    defer dir.close(init.io);
+        const file = try dir.openFile(init.io, Test.file_name, .{});
+        defer file.close(init.io);
 
-    //    const file = try dir.openFile(init.io, Test.file_name, .{});
-    //    defer file.close(init.io);
-
-    //    var buf: [content.len]u8 = undefined;
-    //    var reader = file.reader(init.io, &.{});
-    //    try reader.interface.readSliceAll(&buf);
-    //    try testing.expectEqualSlices(u8, content, &buf);
-    //}
+        var buf: [content.len]u8 = undefined;
+        var reader = file.reader(init.io, &.{});
+        try reader.interface.readSliceAll(&buf);
+        try testing.expectEqualSlices(u8, content, &buf);
+    }
 }
 
 // =============================================================
@@ -176,54 +172,93 @@ test "syscall: write" {
 // stat
 
 test "syscall: fstat" {
-    // TODO: once deleteFile() is implemented, uncomment this.
-    return error.SkipZigTest;
+    const init = utest.getInit();
+    var t = Test.init();
 
-    //const init = utest.getInit();
-    //var t = Test.init();
+    const content = "0123456789";
+    const file = try t.createFile();
+    defer t.deleteFile();
+    defer file.close(utest.getInit().io);
+    try file.writeStreamingAll(init.io, content);
 
-    //const content = "0123456789";
-    //const file = try t.createFile();
-    //defer t.deleteFile();
-    //defer file.close(utest.getInit().io);
-    //try file.writeStreamingAll(init.io, content);
+    var statbuf: [4096]u8 = undefined;
+    try testing.expectEqual(0, std.os.linux.syscall2(
+        .fstat,
+        @intCast(file.handle),
+        @intFromPtr(&statbuf),
+    ));
 
-    //var statbuf: [4096]u8 = undefined;
-    //try testing.expectEqual(0, std.os.linux.syscall2(
-    //    .fstat,
-    //    @intCast(file.handle),
-    //    @intFromPtr(&statbuf),
-    //));
-    //std.log.debug("fuga", .{});
+    const Stat = extern struct {
+        /// Device ID.
+        st_dev: u64,
+        /// Inode number.
+        st_ino: u64,
+        /// File mode.
+        st_mode: u32,
+        /// Number of hard links.
+        st_nlink: u32,
+        /// User ID of owner.
+        st_uid: u32,
+        /// Group ID of owner.
+        st_gid: u32,
+        /// Device ID (if special file).
+        st_rdev: u64,
+        /// Total size, in bytes.
+        st_size: i64,
+        /// Block size for filesystem I/O.
+        st_blksize: i64,
+        /// Number of 512B blocks allocated.
+        st_blocks: i64,
+    };
+    const stat: *const Stat = @ptrCast(@alignCast(&statbuf));
+    try testing.expectEqual(0, stat.st_uid);
+    try testing.expectEqual(0, stat.st_gid);
+    try testing.expectEqual(512, stat.st_blksize);
+    try testing.expectEqual(content.len, @as(usize, @intCast(stat.st_size)));
+    try testing.expect(0 != stat.st_ino);
+}
 
-    //const Stat = extern struct {
-    //    /// Device ID.
-    //    st_dev: u64,
-    //    /// Inode number.
-    //    st_ino: u64,
-    //    /// File mode.
-    //    st_mode: u32,
-    //    /// Number of hard links.
-    //    st_nlink: u32,
-    //    /// User ID of owner.
-    //    st_uid: u32,
-    //    /// Group ID of owner.
-    //    st_gid: u32,
-    //    /// Device ID (if special file).
-    //    st_rdev: u64,
-    //    /// Total size, in bytes.
-    //    st_size: i64,
-    //    /// Block size for filesystem I/O.
-    //    st_blksize: i64,
-    //    /// Number of 512B blocks allocated.
-    //    st_blocks: i64,
-    //};
-    //const stat: *const Stat = @ptrCast(@alignCast(&statbuf));
-    //try testing.expectEqual(0, stat.st_uid);
-    //try testing.expectEqual(0, stat.st_gid);
-    //try testing.expectEqual(512, stat.st_blksize);
-    //try testing.expectEqual(content.len, @as(usize, @intCast(stat.st_size)));
-    //try testing.expect(0 != stat.st_ino);
+// =============================================================
+// unlink
+
+test "unlinking an open file keeps its data accessible until closed" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const content = "hello-unlink";
+    const wfile = try t.createFile();
+    try wfile.writeStreamingAll(init.io, content);
+    wfile.close(init.io);
+
+    const dir = try std.Io.Dir.openDirAbsolute(
+        init.io,
+        Test.base_dir,
+        .{},
+    );
+    defer dir.close(init.io);
+
+    const rfile = try dir.openFile(
+        init.io,
+        Test.file_name,
+        .{},
+    );
+    defer rfile.close(init.io);
+
+    // Remove the directory entry of one file while another file is still open.
+    t.deleteFile();
+
+    // The already-open fd must still be able to read back the data.
+    var buf: [content.len]u8 = undefined;
+    var reader = rfile.reader(init.io, &.{});
+    try reader.interface.readSliceAll(&buf);
+    try testing.expectEqualSlices(u8, content, &buf);
+
+    // Re-opening by name must now fail.
+    try testing.expectError(error.FileNotFound, dir.openFile(
+        init.io,
+        Test.file_name,
+        .{},
+    ));
 }
 
 // =============================================================

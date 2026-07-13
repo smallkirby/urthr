@@ -264,6 +264,27 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 }
 
 // =============================================================
+// Unlink
+// =============================================================
+
+// syscall: unlinkat
+pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, _: i32) ReturnType {
+    const allocator = urd.mem.bin;
+    const s = std.mem.span(pathname);
+
+    unlinkFileAt(dirfd, s, allocator) catch |err| return switch (err) {
+        urd.fs.Error.NotFound => .err(.noent),
+        urd.fs.Error.NotDirectory => .err(.notdir),
+        urd.fs.Error.NotFile => .err(.isdir),
+        urd.fs.Error.Unsupported => .err(.perm),
+        error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+
+    return .success(0);
+}
+
+// =============================================================
 // Stat
 // =============================================================
 
@@ -849,6 +870,29 @@ fn createFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error
         };
 
         return urd.fs.createAt(dir.path, pathname, allocator);
+    }
+}
+
+/// Remove a file at the specified path relative to the given directory file descriptor.
+fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
+    // Check if pathname is relative or absolute.
+    if (std.fs.path.isAbsolute(pathname)) {
+        // Absolute path. Ignore directory.
+        return urd.fs.unlink(pathname, allocator);
+    } else if (dirfd == cwd_fd) {
+        // Relative to CWD.
+        const cur = sched.getCurrent();
+        return urd.fs.unlinkAt(cur.fs.cwd, pathname, allocator);
+    } else {
+        // Relative to dirfd.
+        const cur = sched.getCurrent();
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return error.BadFileDescriptor;
+        } orelse {
+            return error.BadFileDescriptor;
+        };
+
+        return urd.fs.unlinkAt(dir.path, pathname, allocator);
     }
 }
 

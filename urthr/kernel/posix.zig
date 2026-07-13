@@ -35,6 +35,8 @@ pub const ErrorEnum = enum(i64) {
     nacces = -13,
     /// Not a directory.
     notdir = -20,
+    /// Is a directory.
+    isdir = -21,
     /// Invalid argument.
     inval = -22,
     /// Too many open files.

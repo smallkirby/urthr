@@ -13,6 +13,7 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("dup3",                24,     posix.fs.sysDup3),
     .new("fcntl",               25,     posix.fs.sysFcntl),
     .new("ioctl",               29,     posix.fs.sysIoctl),
+    .new("unlinkat",            35,     posix.fs.sysUnlinkAt),
     .new("chdir",               49,     posix.fs.sysChdir),
     .new("fchmodat",            53,     posix.fs.sysFchmodAt),
     .new("openat",              56,     posix.fs.sysOpenAt),
