@@ -157,3 +157,4 @@ zig build test --summary all -Doptimize=Debug
 | `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |
 | `graphic` | Flag | Enable graphical display window in QEMU. | `false` |
 | `idle_watchdog` | Integer | Terminate if the idle thread's execution time exceeds this threshold in seconds. | `0` (disabled) |
+| `allow_init_exit` | Flag | Allow the init process to exit. When run on QEMU, the exit code is propagated. | `false` |

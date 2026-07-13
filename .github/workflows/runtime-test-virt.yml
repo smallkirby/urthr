@@ -61,4 +61,5 @@ jobs:
             -Drestart \
             -Dsdcreate \
             -Didle_watchdog=10 \
-            -Dinit=/boot/bin/utest
+            -Dinit=/boot/bin/utest \
+            -Dallow_init_exit

@@ -76,6 +76,12 @@ pub fn build(b: *std.Build) !void {
         "Path to SD card to install the kernel image.",
     ) orelse null;
 
+    const allow_init_exit = b.option(
+        bool,
+        "allow_init_exit",
+        "Allow init process to exit.",
+    ) orelse false;
+
     const qemu_dir = b.option(
         []const u8,
         "qemu",
@@ -149,6 +155,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(bool, "restart_on_panic", restart);
     options.addOption(u64, "idle_watchdog", idle_watchdog);
     options.addOption([]const u8, "version", version);
+    options.addOption(bool, "allow_init_exit", allow_init_exit);
 
     const options_module = options.createModule();
 

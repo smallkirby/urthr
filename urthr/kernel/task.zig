@@ -325,6 +325,18 @@ pub fn exit(code: i32) noreturn {
     const cur = sched.getCurrent();
     cur.exit_status = code;
 
+    // Check if the current thread is init.
+    if (cur.tgid == 1 and cur.id == 1) {
+        @branchHint(.cold);
+
+        if (urd.allow_init_exit) {
+            log.info("Init process exited.", .{});
+            urd.eol(@intCast(code));
+        } else {
+            @panic("Init process exited.");
+        }
+    }
+
     // Release the fd table.
     cur.fs.fdtbl.deinit();
 

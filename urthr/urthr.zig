@@ -25,6 +25,8 @@ pub const LogFn = klog.LogFn;
 pub const version = options.version;
 /// Runtime tests enabled.
 pub const enable_rtt = options.enable_rtt;
+/// Allow init process to exit.
+pub const allow_init_exit = options.allow_init_exit;
 
 /// Reached end of life.
 ///
