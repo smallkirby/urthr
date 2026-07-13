@@ -16,6 +16,9 @@ pub fn getInit() std.process.Init {
 /// The path of this binary.
 pub const myname = "/boot/bin/utest";
 
+// Modules.
+pub const fs = @import("fs.zig");
+
 // =============================================================
 // Test References
 // =============================================================
