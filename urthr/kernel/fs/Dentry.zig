@@ -104,6 +104,23 @@ pub const Cache = struct {
         return result;
     }
 
+    /// Remove a dentry from the cache, releasing the reference to it.
+    ///
+    /// Caller must ensure that the dentry is cached.
+    pub fn remove(self: *Cache, parent: ?*Dentry, name: []const u8) void {
+        self._lock.lock();
+        defer self._lock.unlock();
+
+        if (self._map.fetchRemove(.{
+            .parent = parent,
+            .name = name,
+        })) |kv| {
+            kv.value.unref();
+        } else {
+            rtt.expect(false);
+        }
+    }
+
     /// Insert the dentry to the cache.
     pub fn insert(self: *Cache, entry: *Dentry) Error!void {
         entry.ref();
@@ -130,6 +147,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
+const rtt = common.rtt;
 const urd = @import("urthr");
 const SpinLock = urd.sync.SpinLock;
 const fs = urd.fs;

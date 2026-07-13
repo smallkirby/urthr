@@ -289,6 +289,46 @@ pub fn openAt(dir: Path, s: []const u8, allocator: Allocator) Error!*File {
     return File.open(path, allocator);
 }
 
+/// Remove a regular file at the specified path.
+///
+/// The directory entry is removed immediately,
+/// but the underlying storage is only reclaimed once the last open file referring to it is closed.
+pub fn unlink(s: []const u8, allocator: Allocator) Error!void {
+    const cwd = sched.getCurrent().fs.cwd;
+    const path = try resolvePath(cwd, s, allocator);
+    return unlinkImpl(path, s);
+}
+
+/// Remove a regular file relative to a directory.
+///
+/// The directory entry is removed immediately,
+/// but the underlying storage is only reclaimed once the last open file referring to it is closed.
+pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
+    if (std.fs.path.isAbsolute(s)) {
+        return Error.InvalidArgument;
+    }
+    if (dir.dentry.inode.ftype != .directory) {
+        return Error.NotDirectory;
+    }
+
+    const path = try resolvePath(dir, s, allocator);
+    return unlinkImpl(path, s);
+}
+
+/// Detach the directory entry.
+fn unlinkImpl(path: Path, s: []const u8) Error!void {
+    if (path.dentry.inode.ftype != .regular) {
+        return Error.NotFile;
+    }
+
+    // A regular file always has a parent.
+    const parent_dentry = path.dentry.parent.?;
+    const basename = std.fs.path.basenamePosix(s);
+
+    try parent_dentry.inode.unlink(path.dentry.inode);
+    dcache.remove(parent_dentry, basename);
+}
+
 /// Resolve a file path to a `Path`.
 fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))

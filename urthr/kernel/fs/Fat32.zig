@@ -88,6 +88,7 @@ fn fsGetLabel(ctx: *const anyopaque, allocator: Allocator) fs.Error![]const u8 {
 const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
     .create = &icreate,
+    .unlink = &iunlink,
     .deinit = &ideinit,
 };
 
@@ -99,6 +100,12 @@ const InodeImpl = struct {
     fat32: *Self,
     /// Cluster number of the inode.
     cluster: Cluster,
+    /// Whether the on-disk directory entry has been removed.
+    ///
+    /// Set by `iunlink`.
+    /// The cluster chain is only freed once this inode's refcount reaches zero
+    /// so files that are still open when unlinked remain readable until closed.
+    unlinked: bool = false,
 
     pub fn from(inode: *fs.Inode) *InodeImpl {
         return @fieldParentPtr("common", inode);
@@ -142,9 +149,45 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
 }
 
 /// Release resources associated with an inode.
+///
+/// If the inode was unlinked, the cluster chain holding its data is freed here.
 fn ideinit(inode: *fs.Inode) void {
     const ctx = InodeImpl.from(inode);
+
+    if (ctx.unlinked) switch (inode.ftype) {
+        .regular => ctx.fat32.freeCluster(ctx.cluster) catch |err| {
+            log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
+        },
+        .directory => urd.unimplemented("ideinit: directory"),
+    };
+
     ctx.fat32.allocator.destroy(ctx);
+}
+
+/// Remove the directory entry under `dir` that refers to `child`.
+///
+/// Only marks the on-disk directory entry as deleted.
+/// The cluster chain is released later in `ideinit` once `child`'s refcount reaches zero,
+/// so a file that is still open remains readable after this call.
+fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
+    rtt.expectEqual(.directory, dir.ftype);
+
+    const ctx = InodeImpl.from(child);
+    const self = ctx.fat32;
+    rtt.expectEqual(.regular, ctx.common.ftype);
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    const pos = Position.fromInodeNumber(child.number);
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlock(pos.sector, &buf);
+
+    const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+    ent.markDeleted();
+    try self.device.writeBlock(pos.sector, &buf);
+
+    ctx.unlinked = true;
 }
 
 /// Create a new file or directory under a directory inode.
@@ -859,9 +902,9 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
 fn freeCluster(self: *Self, clus: Cluster) fs.Error!void {
     var current = clus;
     while (true) {
-        const next = try self.getNextCluster(current) orelse break;
+        const next = try self.getNextCluster(current);
         try self.setFatEntry(current, fat_free_cluster);
-        current = next;
+        current = next orelse break;
     }
 }
 
@@ -1214,6 +1257,10 @@ const DirEntry = extern struct {
     /// File size in bytes.
     file_size: u32,
 
+    comptime {
+        urd.comptimeAssert(32 * 8 == @bitSizeOf(DirEntry), "Invalid size of DirEntry", .{});
+    }
+
     const Attributes = packed struct(u8) {
         /// Read-only.
         read_only: bool,
@@ -1250,18 +1297,22 @@ const DirEntry = extern struct {
         return self.name[0] == 0;
     }
 
+    /// Marker representing a deleted directory entry name.
+    const deleted_marker: u8 = 0xE5;
+
     /// Check if the entry is deleted.
     fn isDeleted(self: DirEntry) bool {
-        return self.name[0] == 0xE5;
+        return self.name[0] == deleted_marker;
+    }
+
+    /// Mark the entry as deleted.
+    fn markDeleted(self: *DirEntry) void {
+        self.name[0] = deleted_marker;
     }
 
     /// Get the starting cluster number of the entry.
     fn clusterNumber(self: DirEntry) u32 {
         return bits.concat(u32, self.first_cluster_high, self.first_cluster_low);
-    }
-
-    comptime {
-        urd.comptimeAssert(32 * 8 == @bitSizeOf(DirEntry), "Invalid size of DirEntry", .{});
     }
 };
 

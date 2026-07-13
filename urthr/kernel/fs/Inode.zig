@@ -25,6 +25,14 @@ pub const Ops = struct {
     ///
     /// null if the filesystem does not support file creation.
     create: ?*const fn (dir: *Inode, name: []const u8, ftype: fs.FileType, allocator: Allocator) Error!*Inode = null,
+
+    /// Remove the directory entry named `name` under `dir`.
+    ///
+    /// Implementation must not release the underlying storage of `child`
+    /// until the inode is `deinit()`-ed when there's not references to it anymore.
+    ///
+    /// null if the filesystem does not support file removal.
+    unlink: ?*const fn (dir: *Inode, child: *Inode) Error!void = null,
 };
 
 /// inode number type.
@@ -92,6 +100,17 @@ pub fn create(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode 
 
     if (self.iops.create) |f| {
         return f(self, name, .regular, allocator);
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Remove a file entry named `name` under this directory.
+pub fn unlink(self: *Self, child: *Inode) Error!void {
+    if (self.ftype != .directory) return Error.NotDirectory;
+
+    if (self.iops.unlink) |f| {
+        return f(self, child);
     } else {
         return Error.Unsupported;
     }
