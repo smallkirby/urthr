@@ -20,15 +20,17 @@ const Iovec = extern struct {
 // =============================================================
 
 /// syscall: openat
-pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: i32, mode: u32) ReturnType {
-    _ = mode;
-    _ = flags;
-
+pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    const file = openFileAt(dirfd, s, allocator) catch |err|
-        return mapOpenError(err);
+    const file = if (flags.creat)
+        createFileAt(dirfd, s, allocator) catch |err|
+            return mapOpenError(err)
+    else
+        openFileAt(dirfd, s, allocator) catch |err|
+            return mapOpenError(err);
+
     const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
         return .err(.mfile);
 
@@ -824,6 +826,29 @@ fn openFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{B
         };
 
         return urd.fs.openAt(dir.path, pathname, allocator);
+    }
+}
+
+/// Create a file at the specified path relative to the given directory file descriptor.
+fn createFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+    // Check if pathname is relative or absolute.
+    if (std.fs.path.isAbsolute(pathname)) {
+        // Absolute path. Ignore directory.
+        return urd.fs.create(pathname, allocator);
+    } else if (dirfd == cwd_fd) {
+        // Relative to CWD.
+        const cur = sched.getCurrent();
+        return urd.fs.createAt(cur.fs.cwd, pathname, allocator);
+    } else {
+        // Relative to dirfd.
+        const cur = sched.getCurrent();
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return error.BadFileDescriptor;
+        } orelse {
+            return error.BadFileDescriptor;
+        };
+
+        return urd.fs.createAt(dir.path, pathname, allocator);
     }
 }
 

@@ -172,6 +172,15 @@ pub fn create(s: []const u8, allocator: Allocator) Error!*File {
     else
         sched.getCurrent().fs.cwd;
 
+    return createAt(dir, basename, allocator);
+}
+
+/// Create a new regular file at the specified directory and open it.
+pub fn createAt(dir: Path, basename: []const u8, allocator: Allocator) Error!*File {
+    if (dir.dentry.inode.ftype != .directory) {
+        return Error.NotDirectory;
+    }
+
     // Create new file in the directory.
     const inode = try dir.dentry.inode.create(basename, allocator);
 
