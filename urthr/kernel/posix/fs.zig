@@ -35,6 +35,10 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
         file.unref();
         return .err(.notdir);
     }
+    if (file.getType() == .directory and (flags.wo or flags.rdwr)) {
+        file.unref();
+        return .err(.isdir);
+    }
 
     const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
         return .err(.mfile);
@@ -114,12 +118,12 @@ pub fn sysClose(fd: usize) ReturnType {
 }
 
 const OpenFlags = packed struct(i32) {
-    /// Read-only.
-    ro: bool = false,
     /// Write-only.
     wo: bool = false,
     /// Read and write.
     rdwr: bool = false,
+    /// Reserved.
+    _2: bool = false,
     /// Reserved.
     _3: u3 = 0,
     /// Create file if it does not exist.
