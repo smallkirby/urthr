@@ -31,6 +31,11 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
         openFileAt(dirfd, s, allocator) catch |err|
             return mapOpenError(err);
 
+    if (flags.directory and file.getType() != .directory) {
+        file.unref();
+        return .err(.notdir);
+    }
+
     const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
         return .err(.mfile);
 
@@ -130,7 +135,11 @@ const OpenFlags = packed struct(i32) {
     /// Nonblocking mode if possible.
     nonblock: bool = false,
     /// Reserved.
-    _12: u7 = 0,
+    _12: u2 = 0,
+    /// Fail unless the path resolves to a directory.
+    directory: bool = false,
+    /// Reserved.
+    _15: u4 = 0,
     /// Enable close-on-exec flag.
     cloexec: bool = false,
     /// Reserved.
