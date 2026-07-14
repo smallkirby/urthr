@@ -76,11 +76,10 @@ pub fn allocAt(self: *Self, min_fd: usize, file: *File, flags: FdFlags) Error!us
 pub fn close(self: *Self, fd: usize) Error!void {
     if (fd >= max_fds) return Error.InvalidFd;
 
-    if (self.entries[fd]) |file| {
-        file.unref();
-        self.entries[fd] = null;
-        self.fd_flags[fd] = .{};
-    }
+    const file = self.entries[fd] orelse return Error.InvalidFd;
+    file.unref();
+    self.entries[fd] = null;
+    self.fd_flags[fd] = .{};
 }
 
 /// Clone this table, taking a reference on each open file.
