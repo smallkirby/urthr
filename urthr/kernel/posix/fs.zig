@@ -24,12 +24,8 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    const file = if (flags.creat)
-        createFileAt(dirfd, s, allocator) catch |err|
-            return mapOpenError(err)
-    else
-        openFileAt(dirfd, s, allocator) catch |err|
-            return mapOpenError(err);
+    const file = resolveOpenFile(dirfd, s, flags, allocator) catch |err|
+        return mapOpenError(err);
 
     if (flags.directory and file.getType() != .directory) {
         file.unref();
@@ -828,6 +824,7 @@ fn mapOpenError(err: anyerror) ReturnType {
         urd.fs.Error.InvalidArgument => .err(.inval),
         urd.fs.Error.NotDirectory => .err(.notdir),
         urd.fs.Error.NotFound => .err(.noent),
+        urd.fs.Error.AlreadyExists => .err(.exist),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -838,6 +835,24 @@ fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
     const cur = sched.getCurrent();
     const file = cur.fs.fdtbl.get(fd) catch return error.BadFileDescriptor;
     return file orelse error.BadFileDescriptor;
+}
+
+/// Resolve the file to open honoring O_CREAT/O_EXCL semantics.
+fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+    if (!flags.creat) {
+        return openFileAt(dirfd, pathname, allocator);
+    }
+
+    if (openFileAt(dirfd, pathname, allocator)) |file| {
+        if (flags.excl) {
+            file.unref();
+            return urd.fs.Error.AlreadyExists;
+        }
+        return file;
+    } else |err| {
+        if (err != urd.fs.Error.NotFound) return err;
+        return createFileAt(dirfd, pathname, allocator);
+    }
 }
 
 /// Open a file at the specified path relative to the given directory file descriptor.

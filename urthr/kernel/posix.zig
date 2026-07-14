@@ -33,6 +33,8 @@ pub const ErrorEnum = enum(i64) {
     nomem = -12,
     /// Permission denied.
     nacces = -13,
+    /// File exists.
+    exist = -17,
     /// Not a directory.
     notdir = -20,
     /// Is a directory.
