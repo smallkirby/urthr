@@ -1,5 +1,7 @@
 comptime {
+    _ = @import("fs/close.zig");
     _ = @import("fs/cwd.zig");
+    _ = @import("fs/lseek.zig");
     _ = @import("fs/open.zig");
     _ = @import("fs/read.zig");
     _ = @import("fs/stat.zig");

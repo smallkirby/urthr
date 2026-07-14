@@ -48,8 +48,59 @@ test "syscall: fstat" {
     try testing.expect(0 != stat.st_ino);
 }
 
+test "fstat with an unopened fd fails with EBADF" {
+    var statbuf: [4096]u8 = undefined;
+    const ret = std.os.linux.syscall2(.fstat, 999, @intFromPtr(&statbuf));
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "fstatat a non-existent file fails with ENOENT" {
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall4(
+        .fstatat64,
+        @bitCast(@as(isize, linux.AT.FDCWD)),
+        @intFromPtr((Test.base_dir ++ "/no-such-file").ptr),
+        @intFromPtr(&statbuf),
+        0,
+    );
+    try testing.expectEqual(.NOENT, linux.errno(ret));
+}
+
+test "fstatat with an unopened dirfd fails with EBADF" {
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall4(
+        .fstatat64,
+        999,
+        @intFromPtr("somefile".ptr),
+        @intFromPtr(&statbuf),
+        0,
+    );
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
 // =============================================================
 // getdents
+
+test "getdents64 on a regular file fails with ENOTDIR" {
+    const init = utest.getInit();
+
+    const file = try std.Io.Dir.openFileAbsolute(
+        init.io,
+        utest.myname,
+        .{},
+    );
+    defer file.close(init.io);
+
+    var buf: [256]u8 = undefined;
+    const ret = linux.getdents64(@intCast(file.handle), &buf, buf.len);
+    try testing.expectEqual(.NOTDIR, linux.errno(ret));
+}
+
+test "getdents64 with an unopened fd fails with EBADF" {
+    var buf: [256]u8 = undefined;
+    const ret = linux.getdents64(999, &buf, buf.len);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
 
 test "getdents64 can find myself in /boot/bin" {
     const init = utest.getInit();

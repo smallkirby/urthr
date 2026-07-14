@@ -38,6 +38,33 @@ test "unlinking an open file keeps its data accessible until closed" {
     ));
 }
 
+test "unlinkat a non-existent file fails with ENOENT" {
+    const ret = linux.unlinkat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ "/no-such-file",
+        0,
+    );
+    try testing.expectEqual(.NOENT, linux.errno(ret));
+}
+
+test "unlinkat with an unopened dirfd fails with EBADF" {
+    const ret = linux.unlinkat(
+        999,
+        "somefile",
+        0,
+    );
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "unlinkat a directory fails with EISDIR" {
+    const ret = linux.unlinkat(
+        linux.AT.FDCWD,
+        "/boot/bin",
+        0,
+    );
+    try testing.expectEqual(.ISDIR, linux.errno(ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================

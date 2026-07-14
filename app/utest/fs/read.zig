@@ -14,6 +14,28 @@ test "syscall: read" {
     try testing.expectEqualSlices(u8, std.elf.MAGIC, &buf);
 }
 
+test "read with an unopened fd fails with EBADF" {
+    var buf: [4]u8 = undefined;
+    const ret = linux.read(999, &buf, buf.len);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "read with a negative fd fails with EBADF" {
+    var buf: [4]u8 = undefined;
+    const ret = linux.read(-1, &buf, buf.len);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "reading from a directory fd fails with EISDIR" {
+    const fd = linux.openat(linux.AT.FDCWD, "/boot", .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    var buf: [4]u8 = undefined;
+    const ret = linux.read(@intCast(fd), &buf, buf.len);
+    try testing.expectEqual(.ISDIR, linux.errno(ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================

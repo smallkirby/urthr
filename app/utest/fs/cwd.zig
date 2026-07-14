@@ -10,6 +10,16 @@ test "chdir" {
     try testing.expectEqualSlices(u8, target, try getcwd(&newbuf));
 }
 
+test "chdir to a non-existent path fails with ENOENT" {
+    const rc = linux.chdir(Test.base_dir ++ "/no-such-dir");
+    try testing.expectEqual(.NOENT, linux.errno(rc));
+}
+
+test "chdir to a regular file fails with ENOTDIR" {
+    const rc = linux.chdir(utest.myname);
+    try testing.expectEqual(.NOTDIR, linux.errno(rc));
+}
+
 // =============================================================
 // Helpers
 // =============================================================
