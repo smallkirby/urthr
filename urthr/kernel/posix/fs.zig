@@ -185,7 +185,8 @@ const Whence = enum(i32) {
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     const out = @as([*]const u8, @ptrFromInt(buf));
-    const n = file.write(out[0..count]) catch |e| return writeErr(e);
+    const n = file.write(out[0..count]) catch |e|
+        return writeError(e);
     return .success(@bitCast(n));
 }
 
@@ -196,7 +197,8 @@ pub fn sysWritev(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
 
     var total: usize = 0;
     for (iovs) |v| {
-        total += file.write(v.slice()) catch |e| return writeErr(e);
+        total += file.write(v.slice()) catch |e|
+            return writeError(e);
     }
 
     return .success(@bitCast(total));
@@ -214,17 +216,11 @@ pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, 
 
     var total: usize = 0;
     for (iovs) |v| {
-        total += file.write(v.slice()) catch |e| return writeErr(e);
+        total += file.write(v.slice()) catch |e|
+            return writeError(e);
     }
 
     return .success(@bitCast(total));
-}
-
-fn writeErr(e: urd.fs.Error) ReturnType {
-    return switch (e) {
-        error.BrokenPipe => .err(.pipe),
-        else => .err(.again),
-    };
 }
 
 // =============================================================
@@ -837,6 +833,15 @@ fn mapOpenError(err: anyerror) ReturnType {
 fn mapReadError(e: urd.fs.Error) ReturnType {
     return switch (e) {
         urd.fs.Error.NotFile => .err(.isdir),
+        else => .err(.again),
+    };
+}
+
+/// Convert write-related error to syscall return type.
+fn writeError(e: urd.fs.Error) ReturnType {
+    return switch (e) {
+        urd.fs.Error.NotFile => .err(.badf),
+        error.BrokenPipe => .err(.pipe),
         else => .err(.again),
     };
 }
