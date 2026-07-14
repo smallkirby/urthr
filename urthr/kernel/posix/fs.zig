@@ -235,7 +235,8 @@ fn writeErr(e: urd.fs.Error) ReturnType {
 pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     const out = @as([*]u8, @ptrFromInt(buf));
-    const n = file.read(out[0..count]) catch return .err(.again);
+    const n = file.read(out[0..count]) catch |e|
+        return mapReadError(e);
     return .success(@bitCast(n.len));
 }
 
@@ -246,7 +247,8 @@ pub fn sysReadv(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
 
     var total: usize = 0;
     for (iovs) |v| {
-        const n = file.read(v.slice()) catch return .err(.again);
+        const n = file.read(v.slice()) catch |e|
+            return mapReadError(e);
         total += n.len;
     }
 
@@ -265,7 +267,8 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 
     var total: usize = 0;
     for (iovs) |v| {
-        const r = file.read(v.slice()) catch return .err(.again);
+        const r = file.read(v.slice()) catch |e|
+            return mapReadError(e);
         total += r.len;
     }
 
@@ -826,6 +829,14 @@ fn mapOpenError(err: anyerror) ReturnType {
         urd.fs.Error.NotFound => .err(.noent),
         urd.fs.Error.AlreadyExists => .err(.exist),
         error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+}
+
+/// Convert read-related error to syscall return type.
+fn mapReadError(e: urd.fs.Error) ReturnType {
+    return switch (e) {
+        urd.fs.Error.NotFile => .err(.isdir),
         else => .err(.again),
     };
 }
