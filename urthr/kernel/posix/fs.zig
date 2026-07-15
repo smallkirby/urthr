@@ -80,6 +80,14 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
 
 /// syscall: pipe2
 pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
+    const allowed_flags = OpenFlags{
+        .nonblock = true,
+        .cloexec = true,
+    };
+    if (@as(i32, @bitCast(flags)) & ~@as(i32, @bitCast(allowed_flags)) != 0) {
+        return .err(.inval);
+    }
+
     const cur = sched.getCurrent();
     const fd_flags = FdFlags{ .cloexec = flags.cloexec };
 
@@ -153,7 +161,7 @@ const OpenFlags = packed struct(i32) {
     /// Enable close-on-exec flag.
     cloexec: bool = false,
     /// Reserved.
-    _14: u12 = 0,
+    _20: u12 = 0,
 };
 
 // =============================================================
