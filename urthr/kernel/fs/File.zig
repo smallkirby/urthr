@@ -142,6 +142,19 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
     return buf[0..num_read];
 }
 
+/// Read data from the file into the buffer at the given position, without advancing File's offset.
+pub fn pread(self: *Self, buf: []u8, pos: usize) Error![]u8 {
+    if (self.inode().ftype == .directory) return Error.NotFile;
+    if (!self.access.readable) return Error.BadAccess;
+
+    const num_read = try self.ops.read(
+        self,
+        buf,
+        pos,
+    );
+    return buf[0..num_read];
+}
+
 /// Write data from the buffer into the file.
 pub fn write(self: *Self, buf: []const u8) Error!usize {
     if (self.inode().ftype == .directory) return Error.NotFile;
@@ -155,6 +168,18 @@ pub fn write(self: *Self, buf: []const u8) Error!usize {
         );
         self.offset += @intCast(num_written);
         return num_written;
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Write data from the buffer into the file at the given position, without advancing File's offset.
+pub fn pwrite(self: *Self, buf: []const u8, pos: usize) Error!usize {
+    if (self.inode().ftype == .directory) return Error.NotFile;
+    if (!self.access.writable) return Error.BadAccess;
+
+    if (self.ops.write) |f| {
+        return f(self, buf, pos);
     } else {
         return Error.Unsupported;
     }

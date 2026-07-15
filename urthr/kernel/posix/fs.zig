@@ -207,17 +207,17 @@ pub fn sysWritev(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
 /// syscall: pwritev
 pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const offset = bits.concat(u64, offset_h, offset_l);
-    if (offset != 0) {
-        return .err(.nosys); // TODO: Not implemented.
-    }
 
     const file = getFile(fd) catch return .err(.badf);
     const iovs = iov[0..iovcnt];
 
+    var pos: usize = @intCast(offset);
     var total: usize = 0;
     for (iovs) |v| {
-        total += file.write(v.slice()) catch |e|
+        const n = file.pwrite(v.slice(), pos) catch |e|
             return writeError(e);
+        pos += n;
+        total += n;
     }
 
     return .success(@bitCast(total));
@@ -254,17 +254,16 @@ pub fn sysReadv(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const offset = bits.concat(u64, offset_h, offset_l);
-    if (offset != 0) {
-        return .err(.nosys); // TODO: Not implemented.
-    }
 
     const file = getFile(fd) catch return .err(.badf);
     const iovs = iov[0..iovcnt];
 
+    var pos: usize = @intCast(offset);
     var total: usize = 0;
     for (iovs) |v| {
-        const r = file.read(v.slice()) catch |e|
+        const r = file.pread(v.slice(), pos) catch |e|
             return mapReadError(e);
+        pos += r.len;
         total += r.len;
     }
 
