@@ -174,6 +174,7 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
     read_file.* = .{
         .path = .{ .dentry = rdentry, .mount = null },
         .offset = 0,
+        .access = .read_only,
         .ops = read_fops,
         .ctx = rctx,
         .allocator = allocator,
@@ -186,6 +187,7 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
     write_file.* = .{
         .path = .{ .dentry = wdentry, .mount = null },
         .offset = 0,
+        .access = .write_only,
         .ops = write_fops,
         .ctx = wctx,
         .allocator = allocator,
