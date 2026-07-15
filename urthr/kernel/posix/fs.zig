@@ -455,7 +455,10 @@ pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
 
         const dent_size = DirEnt64.calcSize(ent.name);
         if (count - consumed < dent_size) {
-            break;
+            if (consumed == 0)
+                return .err(.inval)
+            else
+                break;
         }
 
         DirEnt64.createCopy(
