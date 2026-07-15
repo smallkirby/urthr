@@ -56,6 +56,20 @@ test "dup3 with a negative newfd fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
+test "dup3 with a negative oldfd fails with EBADF" {
+    const ret = linux.dup3(-1, 50, 0);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "dup3 with a newfd beyond the fd table limit fails with EBADF" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const ret = linux.dup3(@intCast(fd), 1000, 0);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
 test "dup3 closes an already-open newfd before reuse" {
     const init = utest.getInit();
     var t = Test.init();

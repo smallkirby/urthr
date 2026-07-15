@@ -128,6 +128,22 @@ test "opening a directory with write access fails with EISDIR" {
     }
 }
 
+test "openat with O_DIRECTORY on a directory succeeds" {
+    const ret = linux.openat(
+        linux.AT.FDCWD,
+        "/boot",
+        .{ .DIRECTORY = true },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.close(@intCast(ret));
+}
+
+test "openat with a negative dirfd that is not AT_FDCWD fails with EBADF" {
+    const ret = linux.openat(-2, "somefile", .{}, 0);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
 test "openat with O_CREAT and O_EXCL on an existing file fails with EEXIST" {
     const init = utest.getInit();
     var t = Test.init();

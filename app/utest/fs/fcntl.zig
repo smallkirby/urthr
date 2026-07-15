@@ -73,6 +73,24 @@ test "fcntl F_GETFL/F_SETFL roundtrips status flags" {
     try testing.expect(got2 & O_NONBLOCK != 0);
 }
 
+test "fcntl with an unknown command fails with EINVAL" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const ret = linux.fcntl(@intCast(fd), 0x7FFF, 0);
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
+test "fcntl F_DUPFD with an out-of-range arg fails with EINVAL" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const ret = linux.fcntl(@intCast(fd), linux.F.DUPFD, std.math.maxInt(usize));
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================

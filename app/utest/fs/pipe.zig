@@ -68,6 +68,21 @@ test "writing to a pipe after the read-end is closed fails with EPIPE" {
     try testing.expectEqual(.PIPE, linux.errno(wret));
 }
 
+test "pipe2 with O_CLOEXEC sets the close-on-exec flag on both ends" {
+    var fds: [2]i32 = undefined;
+    const ret = linux.pipe2(&fds, .{ .CLOEXEC = true });
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.close(fds[0]);
+    defer _ = linux.close(fds[1]);
+
+    const FD_CLOEXEC = 1;
+    for (fds) |fd| {
+        const got = linux.fcntl(fd, linux.F.GETFD, 0);
+        try testing.expectEqual(.SUCCESS, linux.errno(got));
+        try testing.expectEqual(FD_CLOEXEC, got);
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
