@@ -36,6 +36,28 @@ test "reading from a directory fd fails with EISDIR" {
     try testing.expectEqual(.ISDIR, linux.errno(ret));
 }
 
+test "reading from a write-only-opened file fails with EBADF" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const wfile = try t.createFile();
+    wfile.close(init.io);
+    defer t.deleteFile();
+
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ "/" ++ Test.file_name,
+        .{ .ACCMODE = .WRONLY },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    var buf: [4]u8 = undefined;
+    const ret = linux.read(@intCast(fd), &buf, buf.len);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================
