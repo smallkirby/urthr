@@ -575,7 +575,7 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
             return .success(0);
         },
 
-        _ => return .err(.nosys),
+        _ => return .err(.inval),
     }
 }
 
