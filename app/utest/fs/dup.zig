@@ -1,3 +1,32 @@
+test "syscall: dup" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const dupfd = linux.dup(@intCast(fd));
+    try testing.expectEqual(.SUCCESS, linux.errno(dupfd));
+    defer _ = linux.close(@intCast(dupfd));
+    try testing.expect(dupfd != fd);
+
+    // Both fds share the same file offset.
+    var buf: [4]u8 = undefined;
+    const nread = linux.read(@intCast(dupfd), &buf, buf.len);
+    try testing.expectEqual(.SUCCESS, linux.errno(nread));
+    try testing.expectEqualSlices(u8, std.elf.MAGIC, &buf);
+    const pos = linux.lseek(@intCast(fd), 0, linux.SEEK.CUR);
+    try testing.expectEqual(@as(usize, 4), pos);
+}
+
+test "dup with an unopened fd fails with EBADF" {
+    const ret = linux.dup(999);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "dup with a negative fd fails with EBADF" {
+    const ret = linux.dup(-1);
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
 test "dup3 succeeds and both fds refer to the same file" {
     const init = utest.getInit();
     var t = Test.init();

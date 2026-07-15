@@ -83,6 +83,13 @@ test "pipe2 with O_CLOEXEC sets the close-on-exec flag on both ends" {
     }
 }
 
+test "pipe2 with an invalid flag bit fails with EINVAL" {
+    var fds: [2]i32 = undefined;
+    const O_CREAT = 0o100;
+    const ret = linux.syscall2(.pipe2, @intFromPtr(&fds), O_CREAT);
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================

@@ -72,6 +72,37 @@ test "fstatat with a regular-file fd as dirfd fails with ENOTDIR" {
     try testing.expectEqual(.NOTDIR, linux.errno(ret));
 }
 
+test "fstatat with a negative dirfd that is not AT_FDCWD fails with EBADF" {
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall4(
+        .fstatat64,
+        @bitCast(@as(isize, -2)),
+        @intFromPtr("somefile".ptr),
+        @intFromPtr(&statbuf),
+        0,
+    );
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "fstatat with a regular file as a non-final path component fails with ENOTDIR" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const file = try t.createFile();
+    defer t.deleteFile();
+    file.close(init.io);
+
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall4(
+        .fstatat64,
+        @bitCast(@as(isize, linux.AT.FDCWD)),
+        @intFromPtr((Test.base_dir ++ "/" ++ Test.file_name ++ "/subpath").ptr),
+        @intFromPtr(&statbuf),
+        0,
+    );
+    try testing.expectEqual(.NOTDIR, linux.errno(ret));
+}
+
 test "fstatat via a directory fd with a relative pathname succeeds" {
     const init = utest.getInit();
 

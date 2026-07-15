@@ -144,6 +144,23 @@ test "openat with a negative dirfd that is not AT_FDCWD fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
+test "openat with a regular file as a non-final path component fails with ENOTDIR" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const file = try t.createFile();
+    defer t.deleteFile();
+    file.close(init.io);
+
+    const ret = linux.openat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ "/" ++ Test.file_name ++ "/subpath",
+        .{},
+        0,
+    );
+    try testing.expectEqual(.NOTDIR, linux.errno(ret));
+}
+
 test "openat with O_CREAT and O_EXCL on an existing file fails with EEXIST" {
     const init = utest.getInit();
     var t = Test.init();
