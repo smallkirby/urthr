@@ -48,7 +48,7 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
         return .err(.inval);
     }
     if (newfd >= urd.fs.max_fds) {
-        return .err(.mfile);
+        return .err(.badf);
     }
 
     const file = getFile(oldfd) catch return .err(.badf);
