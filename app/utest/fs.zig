@@ -8,10 +8,15 @@ comptime {
     _ = @import("fs/lseek.zig");
     _ = @import("fs/open.zig");
     _ = @import("fs/pipe.zig");
+    _ = @import("fs/ppoll.zig");
+    _ = @import("fs/preadv.zig");
+    _ = @import("fs/pwritev.zig");
     _ = @import("fs/read.zig");
+    _ = @import("fs/readv.zig");
     _ = @import("fs/stat.zig");
     _ = @import("fs/unlink.zig");
     _ = @import("fs/write.zig");
+    _ = @import("fs/writev.zig");
 }
 
 pub const Test = struct {
