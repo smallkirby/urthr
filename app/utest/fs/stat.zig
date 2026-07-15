@@ -78,6 +78,22 @@ test "fstatat with an unopened dirfd fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
+test "fstatat with a regular-file fd as dirfd fails with ENOTDIR" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall4(
+        .fstatat64,
+        @intCast(fd),
+        @intFromPtr("somefile".ptr),
+        @intFromPtr(&statbuf),
+        0,
+    );
+    try testing.expectEqual(.NOTDIR, linux.errno(ret));
+}
+
 // =============================================================
 // getdents
 

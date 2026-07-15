@@ -20,6 +20,18 @@ test "chdir to a regular file fails with ENOTDIR" {
     try testing.expectEqual(.NOTDIR, linux.errno(rc));
 }
 
+test "getcwd with a zero-sized buffer fails with EINVAL" {
+    var buf: [1]u8 = undefined;
+    const rc = linux.getcwd(&buf, 0);
+    try testing.expectEqual(.INVAL, linux.errno(rc));
+}
+
+test "getcwd with a too-small buffer fails with ERANGE" {
+    var buf: [1]u8 = undefined;
+    const rc = linux.getcwd(&buf, buf.len);
+    try testing.expectEqual(.RANGE, linux.errno(rc));
+}
+
 // =============================================================
 // Helpers
 // =============================================================

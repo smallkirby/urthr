@@ -1,8 +1,13 @@
 comptime {
+    _ = @import("fs/chmod.zig");
     _ = @import("fs/close.zig");
     _ = @import("fs/cwd.zig");
+    _ = @import("fs/dup.zig");
+    _ = @import("fs/fcntl.zig");
+    _ = @import("fs/ioctl.zig");
     _ = @import("fs/lseek.zig");
     _ = @import("fs/open.zig");
+    _ = @import("fs/pipe.zig");
     _ = @import("fs/read.zig");
     _ = @import("fs/stat.zig");
     _ = @import("fs/unlink.zig");
