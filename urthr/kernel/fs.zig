@@ -33,6 +33,8 @@ pub const Error = error{
     BrokenPipe,
     /// The filesystem is full and cannot accommodate more data.
     NoSpace,
+    /// The file was not opened with the access mode required for the operation.
+    BadAccess,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;
@@ -160,7 +162,7 @@ pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!*Inode {
 }
 
 /// Create a new regular file at the specified path and open it.
-pub fn create(s: []const u8, allocator: Allocator) Error!*File {
+pub fn create(s: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
     const basename = std.fs.path.basenamePosix(s);
     if (basename.len == 0) {
         return Error.InvalidArgument;
@@ -172,11 +174,11 @@ pub fn create(s: []const u8, allocator: Allocator) Error!*File {
     else
         sched.getCurrent().fs.cwd;
 
-    return createAt(dir, basename, allocator);
+    return createAt(dir, basename, access, allocator);
 }
 
 /// Create a new regular file at the specified directory and open it.
-pub fn createAt(dir: Path, basename: []const u8, allocator: Allocator) Error!*File {
+pub fn createAt(dir: Path, basename: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
     if (dir.dentry.inode.ftype != .directory) {
         return Error.NotDirectory;
     }
@@ -202,6 +204,7 @@ pub fn createAt(dir: Path, basename: []const u8, allocator: Allocator) Error!*Fi
             .dentry = dentry,
             .mount = dir.mount,
         },
+        access,
         allocator,
     );
 }
@@ -267,17 +270,13 @@ pub fn getPath(path: Path, allocator: Allocator) Error![]u8 {
 }
 
 /// Open a file at the specified path.
-///
-/// TODO: attributes and options.
-pub fn open(s: []const u8, allocator: Allocator) Error!*File {
+pub fn open(s: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
     const path = try resolvePath(sched.getCurrent().fs.cwd, s, allocator);
-    return File.open(path, allocator);
+    return File.open(path, access, allocator);
 }
 
 /// Open a file relative to a directory.
-///
-/// TODO: attributes and options.
-pub fn openAt(dir: Path, s: []const u8, allocator: Allocator) Error!*File {
+pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
@@ -286,7 +285,7 @@ pub fn openAt(dir: Path, s: []const u8, allocator: Allocator) Error!*File {
     }
 
     const path = try resolvePath(dir, s, allocator);
-    return File.open(path, allocator);
+    return File.open(path, access, allocator);
 }
 
 /// Remove a regular file at the specified path.

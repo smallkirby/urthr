@@ -31,7 +31,7 @@ pub const LoadInfo = struct {
 ///
 /// TODO: support dynamic linking.
 pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
-    const file = try fs.open(filename, urd.mem.bin);
+    const file = try fs.open(filename, .read_only, urd.mem.bin);
     defer file.unref();
     if (file.size() < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
 

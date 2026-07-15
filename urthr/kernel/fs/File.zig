@@ -36,6 +36,24 @@ pub const Ops = struct {
     poll: *const fn (self: *File) Error!PollResult,
 };
 
+/// Access mode a file was opened with.
+pub const AccessMode = struct {
+    /// The file is readable.
+    readable: bool = true,
+    /// The file is writable.
+    writable: bool = true,
+
+    pub const write_only = AccessMode{
+        .readable = false,
+        .writable = true,
+    };
+
+    pub const read_only = AccessMode{
+        .readable = true,
+        .writable = false,
+    };
+};
+
 /// Context used in `iterate` operation.
 pub const IterResult = struct {
     /// Name of the dentry.
@@ -73,6 +91,8 @@ path: Path,
 offset: usize,
 /// File status flags.
 status_flags: u32 = 0,
+/// Access mode this file was opened with.
+access: AccessMode = .{},
 /// File operations.
 ops: Ops,
 /// Reference count.
@@ -83,7 +103,7 @@ ctx: *anyopaque,
 allocator: Allocator,
 
 /// Open a file at the specified path.
-pub fn open(path: fs.Path, allocator: Allocator) Error!*File {
+pub fn open(path: fs.Path, access: AccessMode, allocator: Allocator) Error!*File {
     path.dentry.ref();
     errdefer path.dentry.unref();
 
@@ -97,6 +117,7 @@ pub fn open(path: fs.Path, allocator: Allocator) Error!*File {
     file.* = .{
         .path = path,
         .offset = 0,
+        .access = access,
         .ops = node.fops,
         .allocator = allocator,
         .ctx = ctx,
@@ -109,6 +130,7 @@ pub fn open(path: fs.Path, allocator: Allocator) Error!*File {
 /// Read data from the file into the buffer.
 pub fn read(self: *Self, buf: []u8) Error![]u8 {
     if (self.inode().ftype == .directory) return Error.NotFile;
+    if (!self.access.readable) return Error.BadAccess;
 
     const num_read = try self.ops.read(
         self,
@@ -123,6 +145,7 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
 /// Write data from the buffer into the file.
 pub fn write(self: *Self, buf: []const u8) Error!usize {
     if (self.inode().ftype == .directory) return Error.NotFile;
+    if (!self.access.writable) return Error.BadAccess;
 
     if (self.ops.write) |f| {
         const num_written = try f(

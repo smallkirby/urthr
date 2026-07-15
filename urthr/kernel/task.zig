@@ -196,12 +196,12 @@ pub fn enterUser(
     const allocator = mem.bin;
 
     // Initialize stdin.
-    const tty = try urd.fs.open("/dev/tty", allocator);
+    const tty = try urd.fs.open("/dev/tty", .read_only, allocator);
     defer tty.unref();
     _ = try current.fs.fdtbl.set(0, tty);
 
     // Initialize stdout and stderr.
-    const console = try urd.fs.open("/dev/console", allocator);
+    const console = try urd.fs.open("/dev/console", .write_only, allocator);
     defer console.unref();
     _ = try current.fs.fdtbl.set(1, console);
     _ = try current.fs.fdtbl.set(2, console);

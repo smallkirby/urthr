@@ -323,7 +323,7 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flag
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    const file = openFileAt(dirfd, s, allocator) catch |err|
+    const file = openFileAt(dirfd, s, .{}, allocator) catch |err|
         return mapOpenError(err);
 
     statbuf.* = .{
@@ -626,7 +626,7 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType 
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    _ = openFileAt(dirfd, s, allocator) catch |err|
+    _ = openFileAt(dirfd, s, .{}, allocator) catch |err|
         return mapOpenError(err);
 
     return .success(0);
@@ -833,6 +833,7 @@ fn mapOpenError(err: anyerror) ReturnType {
 fn mapReadError(e: urd.fs.Error) ReturnType {
     return switch (e) {
         urd.fs.Error.NotFile => .err(.isdir),
+        urd.fs.Error.BadAccess => .err(.badf),
         else => .err(.again),
     };
 }
@@ -841,6 +842,7 @@ fn mapReadError(e: urd.fs.Error) ReturnType {
 fn writeError(e: urd.fs.Error) ReturnType {
     return switch (e) {
         urd.fs.Error.NotFile => .err(.badf),
+        urd.fs.Error.BadAccess => .err(.badf),
         error.BrokenPipe => .err(.pipe),
         else => .err(.again),
     };
@@ -855,11 +857,16 @@ fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
 
 /// Resolve the file to open honoring O_CREAT/O_EXCL semantics.
 fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+    const access: AccessMode = .{
+        .readable = !flags.wo,
+        .writable = flags.wo or flags.rdwr,
+    };
+
     if (!flags.creat) {
-        return openFileAt(dirfd, pathname, allocator);
+        return openFileAt(dirfd, pathname, access, allocator);
     }
 
-    if (openFileAt(dirfd, pathname, allocator)) |file| {
+    if (openFileAt(dirfd, pathname, access, allocator)) |file| {
         if (flags.excl) {
             file.unref();
             return urd.fs.Error.AlreadyExists;
@@ -867,20 +874,20 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, allocat
         return file;
     } else |err| {
         if (err != urd.fs.Error.NotFound) return err;
-        return createFileAt(dirfd, pathname, allocator);
+        return createFileAt(dirfd, pathname, access, allocator);
     }
 }
 
 /// Open a file at the specified path relative to the given directory file descriptor.
-fn openFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     // Check if pathname is relative or absolute.
     if (std.fs.path.isAbsolute(pathname)) {
         // Absolute path. Ignore directory.
-        return urd.fs.open(pathname, allocator);
+        return urd.fs.open(pathname, access, allocator);
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.openAt(cur.fs.cwd, pathname, allocator);
+        return urd.fs.openAt(cur.fs.cwd, pathname, access, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -890,20 +897,20 @@ fn openFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{B
             return error.BadFileDescriptor;
         };
 
-        return urd.fs.openAt(dir.path, pathname, allocator);
+        return urd.fs.openAt(dir.path, pathname, access, allocator);
     }
 }
 
 /// Create a file at the specified path relative to the given directory file descriptor.
-fn createFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn createFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     // Check if pathname is relative or absolute.
     if (std.fs.path.isAbsolute(pathname)) {
         // Absolute path. Ignore directory.
-        return urd.fs.create(pathname, allocator);
+        return urd.fs.create(pathname, access, allocator);
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.createAt(cur.fs.cwd, pathname, allocator);
+        return urd.fs.createAt(cur.fs.cwd, pathname, access, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -913,7 +920,7 @@ fn createFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error
             return error.BadFileDescriptor;
         };
 
-        return urd.fs.createAt(dir.path, pathname, allocator);
+        return urd.fs.createAt(dir.path, pathname, access, allocator);
     }
 }
 
@@ -956,4 +963,5 @@ const posix = urd.posix;
 const sched = urd.sched;
 const Event = urd.sync.Event;
 const FdFlags = urd.fs.FdTable.FdFlags;
+const AccessMode = urd.fs.File.AccessMode;
 const ReturnType = urd.syscall.ReturnType;
