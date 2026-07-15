@@ -316,14 +316,15 @@ pub fn sysFstat(fd: usize, statbuf: *Stat) ReturnType {
 }
 
 /// syscall: newfstatat
-pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flags: i32) ReturnType {
-    _ = flags; // TODO: should be implemented.
-
+pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    const file = openFileAt(dirfd, s, .{}, allocator) catch |err|
-        return mapOpenError(err);
+    const file = if (flags.empty_path and s.len == 0)
+        getFile(dirfd) catch return .err(.badf)
+    else
+        openFileAt(dirfd, s, .{}, allocator) catch |err|
+            return mapOpenError(err);
 
     statbuf.* = .{
         .st_dev = 0, // TODO
@@ -340,6 +341,24 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flag
 
     return .success(0);
 }
+
+/// Flags shared by `at`-suffixed syscalls.
+const AtFlags = packed struct(i32) {
+    /// Reserved.
+    _0: u8 = 0,
+    /// If pathname is a symbolic link, do not deference it.
+    symlink_nofollow: bool = false,
+    /// Remove the directory entry as a directory.
+    removedir: bool = false,
+    /// If pathname is a symbolic link, dereference it.
+    symlink_follow: bool = false,
+    /// Do not automount the terminal component of pathname.
+    no_automount: bool = false,
+    /// If pathname is empty, operate on dirfd itself.
+    empty_path: bool = false,
+    /// Reserved.
+    _13: u19 = 0,
+};
 
 const Stat = extern struct {
     /// Device ID.
