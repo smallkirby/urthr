@@ -61,6 +61,8 @@ pub fn alloc(self: *Self, file: *File) Error!usize {
 
 /// Allocate the lowest available file descriptor larger than or equalt to `min_fd` for the given file.
 pub fn allocAt(self: *Self, min_fd: usize, file: *File, flags: FdFlags) Error!usize {
+    if (min_fd >= max_fds) return Error.InvalidFd;
+
     for (self.entries[min_fd..], min_fd..) |slot, fd| {
         if (slot == null) {
             file.ref();
