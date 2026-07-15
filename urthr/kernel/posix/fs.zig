@@ -42,6 +42,16 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
     return .success(@bitCast(fd));
 }
 
+/// syscall: dup
+pub fn sysDup(oldfd: usize) ReturnType {
+    const file = getFile(oldfd) catch return .err(.badf);
+
+    const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
+        return .err(.mfile);
+
+    return .success(@intCast(fd));
+}
+
 /// syscall: dup3
 pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
     if (oldfd == newfd) {
