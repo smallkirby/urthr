@@ -81,6 +81,8 @@ pub const ReturnType = union(enum) {
     _s: i64,
     /// Error value.
     _e: ErrorEnum,
+    /// Arch-specific syscall handler should use the value in the saved context as return value.
+    _nop: void,
 
     pub fn success(value: i64) ReturnType {
         return .{ ._s = value };
@@ -90,10 +92,15 @@ pub const ReturnType = union(enum) {
         return .{ ._e = e };
     }
 
-    pub fn int(self: ReturnType) i64 {
+    pub fn nop() ReturnType {
+        return .{ ._nop = {} };
+    }
+
+    pub fn int(self: ReturnType) ?i64 {
         return switch (self) {
-            ._s => self._s,
-            ._e => @intFromEnum(self._e),
+            ._s => |v| v,
+            ._e => |e| @intFromEnum(e),
+            ._nop => null,
         };
     }
 };
@@ -105,7 +112,7 @@ pub fn init() void {
 }
 
 /// Call a system call handler corresponding to the given syscall number.
-fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) i64 {
+fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) ?i64 {
     if (nr >= num_syscall) {
         return @intFromEnum(ErrorEnum.nosys);
     }

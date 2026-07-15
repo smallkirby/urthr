@@ -48,8 +48,8 @@ const Signal = enum(i32) {
 pub fn sysRtSigReturn() ReturnType {
     urd.task.signal.sigreturn();
 
-    // Never returns to the caller.
-    return .success(0);
+    // Use the saved context value as the return value to user-space.
+    return .nop();
 }
 
 /// syscall: sigaltstack

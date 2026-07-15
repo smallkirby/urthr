@@ -1,4 +1,6 @@
 /// SVC handler function type.
+///
+/// When null is returned, X0 is not modified and returned as-is to user.
 const HandlerFn = fn (
     nr: u64,
     arg1: u64,
@@ -7,7 +9,7 @@ const HandlerFn = fn (
     arg4: u64,
     arg5: u64,
     arg6: u64,
-) i64;
+) ?i64;
 
 /// SVC dispatcher.
 var dispatcher: *const HandlerFn = undefined;
@@ -36,7 +38,7 @@ pub fn svc(ctx: *Context) void {
     defer am.msr(.tpidr_el0, @bitCast(tpidr_el0));
 
     // Dispatch system call.
-    const ret = dispatcher(
+    if (dispatcher(
         nr,
         arg1,
         arg2,
@@ -44,8 +46,9 @@ pub fn svc(ctx: *Context) void {
         arg4,
         arg5,
         arg6,
-    );
-    ctx.x0 = @bitCast(ret);
+    )) |ret| {
+        ctx.x0 = @bitCast(ret);
+    }
 
     // Deliver any pending signals before returning to userspace.
     isr.callEreturnHook();
