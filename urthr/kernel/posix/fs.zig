@@ -569,6 +569,7 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
                 flags,
             ) catch |err| return switch (err) {
                 error.TableFull => .err(.mfile),
+                error.InvalidFd => .err(.inval),
                 else => .err(.badf),
             };
             return .success(@intCast(newfd));
