@@ -54,6 +54,16 @@ pub const AccessMode = struct {
     };
 };
 
+/// Reference point for repositioning a file offset.
+pub const Whence = enum {
+    /// Offset is set to the given value.
+    set,
+    /// Offset is set to its current location plus the given value.
+    cur,
+    /// Offset is set to the size of the file plus the given value.
+    end,
+};
+
 /// Context used in `iterate` operation.
 pub const IterResult = struct {
     /// Name of the dentry.
@@ -93,6 +103,8 @@ offset: usize,
 status_flags: u32 = 0,
 /// Access mode this file was opened with.
 access: AccessMode = .{},
+/// Whether this file supports repositioning the file offset.
+seekable: bool = true,
 /// File operations.
 ops: Ops,
 /// Reference count.
@@ -183,6 +195,23 @@ pub fn pwrite(self: *Self, buf: []const u8, pos: usize) Error!usize {
     } else {
         return Error.Unsupported;
     }
+}
+
+/// Reposition the file offset.
+///
+/// Returns error if the file does not support seeking.
+pub fn seek(self: *Self, offset: i64, whence: Whence) Error!usize {
+    if (!self.seekable) return Error.IllegalSeek;
+
+    const new_offset: i64 = switch (whence) {
+        .set => offset,
+        .cur => @as(i64, @intCast(self.offset)) + offset,
+        .end => @as(i64, @intCast(self.size())) + offset,
+    };
+    if (new_offset < 0) return Error.InvalidArgument;
+
+    self.offset = @intCast(new_offset);
+    return self.offset;
 }
 
 /// Perform a device-specific control operation.

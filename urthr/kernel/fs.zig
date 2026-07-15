@@ -35,6 +35,10 @@ pub const Error = error{
     NoSpace,
     /// The file was not opened with the access mode required for the operation.
     BadAccess,
+    /// The file does not support repositioning the file offset.
+    IllegalSeek,
+    /// The argument is invalid.
+    InvalidArgument,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;

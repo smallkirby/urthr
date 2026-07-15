@@ -164,16 +164,20 @@ const OpenFlags = packed struct(i32) {
 pub fn sysLseek(fd: usize, offset: i64, whence: Whence) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
 
-    const new_offset: i64 = switch (whence) {
-        .set => offset,
-        .cur => @as(i64, @intCast(file.offset)) + offset,
-        .end => @as(i64, @intCast(file.size())) + offset,
+    const w: urd.fs.File.Whence = switch (whence) {
+        .set => .set,
+        .cur => .cur,
+        .end => .end,
         else => return .err(.inval),
     };
-    if (new_offset < 0) return .err(.inval);
 
-    file.offset = @intCast(new_offset);
-    return .success(@bitCast(new_offset));
+    const new_offset = file.seek(offset, w) catch |e| return switch (e) {
+        urd.fs.Error.IllegalSeek => .err(.spipe),
+        urd.fs.Error.InvalidArgument => .err(.inval),
+        else => .err(.inval),
+    };
+
+    return .success(@intCast(new_offset));
 }
 
 const Whence = enum(i32) {
