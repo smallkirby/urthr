@@ -17,6 +17,9 @@ var ok_count: usize = 0;
 var skip_count: usize = 0;
 var fail_count: usize = 0;
 
+/// List of failed test names.
+var fail_tests = std.array_list.Aligned([]const u8, null).empty;
+
 pub fn main(init: std.process.Init) !void {
     @disableInstrumentation();
     log.info("Test Framework started.", .{});
@@ -36,26 +39,29 @@ pub fn main(init: std.process.Init) !void {
         log.info("Found tag:ONLY tests. Skipping other tests.", .{});
         for (builtin.test_functions) |test_fn| {
             if (Tag.from(test_fn.name) == .only) {
-                runSingle(test_fn);
+                runSingle(test_fn, init.gpa);
             }
         }
         std.process.exit(0);
     } else {
         // Run all tests.
         for (builtin.test_functions) |test_fn| {
-            runSingle(test_fn);
+            runSingle(test_fn, init.gpa);
         }
     }
     log.info("Summary: {d} passed, {d} skipped, {d} failed.", .{ ok_count, skip_count, fail_count });
 
     if (fail_count > 0) {
+        for (fail_tests.items) |test_name| {
+            log.info("  - {s}", .{test_name});
+        }
         std.process.exit(1);
     } else {
         std.process.exit(0);
     }
 }
 
-fn runSingle(test_fn: anytype) void {
+fn runSingle(test_fn: anytype, allocator: Allocator) void {
     log.info("RUN : {s}", .{test_fn.name});
 
     if (test_fn.func()) |_| {
@@ -63,11 +69,12 @@ fn runSingle(test_fn: anytype) void {
         log.info("OK  : {s}", .{test_fn.name});
     } else |err| {
         if (err != error.SkipZigTest) {
-            fail_count += 1;
             log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
+            fail_count += 1;
+            fail_tests.append(allocator, test_fn.name) catch unreachable;
         } else {
-            skip_count += 1;
             log.info("SKIP: {s}", .{test_fn.name});
+            skip_count += 1;
         }
     }
 }
@@ -133,3 +140,4 @@ const StackIterator = struct {
 const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.utest);
+const Allocator = std.mem.Allocator;
