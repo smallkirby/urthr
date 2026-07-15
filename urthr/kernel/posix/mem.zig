@@ -127,6 +127,9 @@ pub fn sysMunmap(addr: usize, len: usize) ReturnType {
     if (addr % urd.mem.page_size != 0) {
         return .err(.inval);
     }
+    if (len == 0) {
+        return .err(.inval);
+    }
     if (len % urd.mem.page_size != 0) {
         return .err(.inval);
     }
