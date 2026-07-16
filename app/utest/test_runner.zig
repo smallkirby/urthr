@@ -3,10 +3,15 @@ extern var utest_init_ptr: ?*std.process.Init;
 const Tag = enum {
     /// Run only the specified test.
     only,
+    /// Skip this test.
+    skip,
 
     pub fn from(s: []const u8) ?Tag {
         if (std.mem.containsAtLeast(u8, s, 1, "tag:ONLY")) {
             return .only;
+        }
+        if (std.mem.containsAtLeast(u8, s, 1, "tag:SKIP")) {
+            return .skip;
         }
 
         return null;
@@ -63,6 +68,12 @@ pub fn main(init: std.process.Init) !void {
 
 fn runSingle(test_fn: anytype, allocator: Allocator) void {
     log.info("RUN : {s}", .{test_fn.name});
+
+    if (Tag.from(test_fn.name) == .skip) {
+        log.info("SKIP: {s}", .{test_fn.name});
+        skip_count += 1;
+        return;
+    }
 
     if (test_fn.func()) |_| {
         ok_count += 1;
