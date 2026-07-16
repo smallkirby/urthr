@@ -19,6 +19,9 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     if (flags == .abstime) {
         return .err(.nosys); // TODO: Not implemented.
     }
+    if (rqtp.nsec >= std.time.ns_per_s) {
+        return .err(.inval);
+    }
 
     // Block until the specified duration has passed.
     const us = rqtp.sec * std.time.us_per_s + rqtp.nsec / std.time.ns_per_us;
