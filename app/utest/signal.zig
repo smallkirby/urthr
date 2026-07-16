@@ -1,26 +1,35 @@
-test "simple" {
-    // Register a handler for SIGTERM.
-    const sa: linux.Sigaction = .{
-        .handler = .{ .handler = onSignal },
-        .mask = linux.sigemptyset(),
-        .flags = 0,
-    };
-    _ = linux.sigaction(.TERM, &sa, null);
-
-    // Send SIGTERM to self.
-    const pid = linux.getpid();
-    _ = linux.kill(pid, .TERM);
-
-    try testing.expectEqual(true, signal_called);
+comptime {
+    _ = @import("signal/kill.zig");
+    _ = @import("signal/rt_sigaction.zig");
+    _ = @import("signal/rt_sigprocmask.zig");
+    _ = @import("signal/sigaltstack.zig");
 }
 
-/// Whether signal handler is called.
-var signal_called: bool = false;
+pub const SigAction = extern struct {
+    /// Signal handler address.
+    handler: usize,
+    /// Flags.
+    flags: u32,
+    /// Padding.
+    _pad: u32 = 0,
+    /// Address of the sigreturn trampoline.
+    restorer: usize,
+    /// Signal mask to be applied when the handler is invoked.
+    mask: u64,
+};
 
-/// Signal handler.
-fn onSignal(signo: linux.SIG) callconv(.c) void {
-    log.info("Signal#{d} handler called", .{@intFromEnum(signo)});
-    signal_called = true;
+/// Number of bytes of the signal mask the kernel expects.
+pub const mask_size: usize = 8;
+
+/// Raw rt_sigaction syscall wrapper.
+pub fn sigAction(signum: i32, act: ?*const SigAction, oldact: ?*SigAction, sigsetsize: usize) usize {
+    return std.os.linux.syscall4(
+        .rt_sigaction,
+        @bitCast(@as(isize, signum)),
+        if (act) |p| @intFromPtr(p) else 0,
+        if (oldact) |p| @intFromPtr(p) else 0,
+        sigsetsize,
+    );
 }
 
 // =============================================================
@@ -28,6 +37,3 @@ fn onSignal(signo: linux.SIG) callconv(.c) void {
 // =============================================================
 
 const std = @import("std");
-const log = std.log;
-const testing = std.testing;
-const linux = std.os.linux;
