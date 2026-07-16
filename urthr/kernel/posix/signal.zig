@@ -64,7 +64,7 @@ pub fn sysSigAltStack(ss: usize, old_ss: usize) ReturnType {
 
 /// syscall: rt_sigaction
 pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigAction, sigsetsize: usize) ReturnType {
-    if (sigsetsize != 8) {
+    if (sigsetsize != @sizeOf(signal.Mask)) {
         return .err(.inval);
     }
     if (@intFromEnum(signum) <= 0 or @intFromEnum(signum) > signal.num_signals) {
@@ -132,14 +132,46 @@ pub fn sysKill(pid: i32, signum: Signal) ReturnType {
     return .success(0);
 }
 
-/// syscall: rt_sigprocmask
-pub fn sysRtSigProcMask(how: i32, set: usize, oldset: usize, sigsetsize: usize) ReturnType {
-    _ = how;
-    _ = set;
-    _ = oldset;
-    _ = sigsetsize;
+const How = enum(i32) {
+    /// Add `set` to the current blocked mask.
+    block = 0,
+    /// Remove `set` from the current blocked mask.
+    unblock = 1,
+    /// Replace the current blocked mask with `set`.
+    setmask = 2,
 
-    return .err(.nosys); // TODO: Not implemented.
+    _,
+};
+
+/// syscall: rt_sigprocmask
+pub fn sysRtSigProcMask(how: How, set: ?*const signal.Mask, oldset: ?*signal.Mask, sigsetsize: usize) ReturnType {
+    if (sigsetsize != @sizeOf(signal.Mask)) {
+        return .err(.inval);
+    }
+
+    const th = sched.getCurrent();
+
+    // Save old blocked mask if requested.
+    if (oldset) |old| {
+        old.* = th.sigstate.blocked;
+    }
+
+    if (set) |new| {
+        switch (how) {
+            .block => th.sigstate.blocked |= new.*,
+            .unblock => th.sigstate.blocked &= ~new.*,
+            .setmask => th.sigstate.blocked = new.*,
+            _ => return .err(.inval),
+        }
+
+        // SIGKILL and SIGSTOP cannot be blocked.
+        const unblockable =
+            (@as(signal.Mask, 1) << (@intFromEnum(Signal.kill) - 1)) |
+            (@as(signal.Mask, 1) << (@intFromEnum(Signal.stop) - 1));
+        th.sigstate.blocked &= ~unblockable;
+    }
+
+    return .success(0);
 }
 
 // =============================================================

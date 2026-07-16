@@ -1,4 +1,4 @@
-test "tag:SKIP succeeds for SIG_BLOCK with an empty set" {
+test "succeeds for SIG_BLOCK with an empty set" {
     const SIG_BLOCK: i32 = 0;
     var set: u64 = 0;
     const ret = linux.syscall4(
