@@ -56,6 +56,14 @@ test "reading from a pipe after the write-end is closed returns EOF" {
 }
 
 test "writing to a pipe after the read-end is closed fails with EPIPE" {
+    // Ignore EPIPE signal.
+    const sa: linux.Sigaction = .{
+        .handler = .{ .handler = linux.SIG.IGN },
+        .mask = linux.sigemptyset(),
+        .flags = 0,
+    };
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.sigaction(.PIPE, &sa, null)));
+
     var fds: [2]i32 = undefined;
     const ret = linux.pipe2(&fds, .{});
     try testing.expectEqual(.SUCCESS, linux.errno(ret));

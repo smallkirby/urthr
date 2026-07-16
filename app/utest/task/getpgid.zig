@@ -1,5 +1,8 @@
 test "returns the caller's own process group for pid=0" {
     const pid = linux.getpid();
+    // Set myself to a process group leader.
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.setpgid(0, 0)));
+
     const ret = linux.getpgid(0);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
     try testing.expectEqual(@as(usize, @intCast(pid)), ret);

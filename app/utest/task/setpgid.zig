@@ -4,6 +4,9 @@ test "fails with EINVAL for a negative pgid" {
 }
 
 test "on a session leader fails with EPERM" {
+    // Set myself to session leader.
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.setsid()));
+
     const ret = linux.setpgid(0, 0);
     try testing.expectEqual(.PERM, linux.errno(ret));
 }
