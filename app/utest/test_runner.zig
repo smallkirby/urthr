@@ -66,6 +66,17 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
+/// Exit code a child process uses to report its test's outcome to the parent.
+const TestResult = enum(u8) {
+    /// The test passed.
+    pass = 0,
+    /// The test failed.
+    fail = 1,
+    /// The test was skipped.
+    skip = 2,
+};
+
+/// Run a single test in its own forked process, isolating it from the rest of tests.
 fn runSingle(test_fn: anytype, allocator: Allocator) void {
     log.info("RUN : {s}", .{test_fn.name});
 
@@ -75,18 +86,61 @@ fn runSingle(test_fn: anytype, allocator: Allocator) void {
         return;
     }
 
-    if (test_fn.func()) |_| {
-        ok_count += 1;
-        log.info("OK  : {s}", .{test_fn.name});
-    } else |err| {
-        if (err != error.SkipZigTest) {
-            log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
+    const pid = linux.fork();
+    switch (linux.errno(pid)) {
+        .SUCCESS => {},
+        else => |err| {
+            log.err("Failed to fork test process: {t}", .{err});
+            @panic("utest failed.");
+        },
+    }
+
+    // Child.
+    if (pid == 0) {
+        if (test_fn.func()) |_| {
+            std.process.exit(@intFromEnum(TestResult.pass));
+        } else |err| {
+            if (err == error.SkipZigTest) {
+                std.process.exit(@intFromEnum(TestResult.skip));
+            } else {
+                log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
+                std.process.exit(@intFromEnum(TestResult.fail));
+            }
+        }
+        unreachable;
+    }
+
+    // Parent: wait for the child to finish.
+    var status: u32 = undefined;
+    const wret = linux.wait4(@intCast(pid), &status, 0, null);
+    if (linux.errno(wret) != .SUCCESS) {
+        log.err("Failed to wait for test process: {t}", .{linux.errno(wret)});
+        @panic("utest failed.");
+    }
+
+    if (!std.posix.W.IFEXITED(status)) {
+        log.err("Test process exited abnormally: status={d}", .{status});
+        @panic("utest failed.");
+    }
+
+    const result: TestResult = switch (std.posix.W.EXITSTATUS(status)) {
+        @intFromEnum(TestResult.pass) => .pass,
+        @intFromEnum(TestResult.skip) => .skip,
+        else => .fail,
+    };
+    switch (result) {
+        .pass => {
+            ok_count += 1;
+            log.info("OK  : {s}", .{test_fn.name});
+        },
+        .skip => {
+            skip_count += 1;
+            log.info("SKIP: {s}", .{test_fn.name});
+        },
+        .fail => {
             fail_count += 1;
             fail_tests.append(allocator, test_fn.name) catch unreachable;
-        } else {
-            log.info("SKIP: {s}", .{test_fn.name});
-            skip_count += 1;
-        }
+        },
     }
 }
 
@@ -150,5 +204,6 @@ const StackIterator = struct {
 
 const builtin = @import("builtin");
 const std = @import("std");
+const linux = std.os.linux;
 const log = std.log.scoped(.utest);
 const Allocator = std.mem.Allocator;
