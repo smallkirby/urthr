@@ -32,21 +32,21 @@ test "syscall: pwritev at offset 0" {
     try testing.expectEqualSlices(u8, part1 ++ part2, &buf);
 }
 
-test "pwritev with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     const part = "x";
     const iov = [_]posix.iovec_const{.{ .base = part.ptr, .len = part.len }};
     const ret = linux.pwritev(999, &iov, iov.len, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "pwritev with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     const part = "x";
     const iov = [_]posix.iovec_const{.{ .base = part.ptr, .len = part.len }};
     const ret = linux.pwritev(-1, &iov, iov.len, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "pwritev to a read-only-opened file fails with EBADF" {
+test "to a read-only-opened file fails with EBADF" {
     const init = utest.getInit();
     var t = Test.init();
 
@@ -69,7 +69,7 @@ test "pwritev to a read-only-opened file fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "pwritev at a nonzero offset writes without moving the file offset" {
+test "at a nonzero offset writes without moving the file offset" {
     const init = utest.getInit();
     var t = Test.init();
 

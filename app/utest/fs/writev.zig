@@ -36,21 +36,21 @@ test "syscall: writev" {
     try testing.expectEqualSlices(u8, part1 ++ part2, &buf);
 }
 
-test "writev with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     const part = "x";
     const iov = [_]posix.iovec_const{.{ .base = part.ptr, .len = part.len }};
     const ret = linux.writev(999, &iov, iov.len);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "writev with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     const part = "x";
     const iov = [_]posix.iovec_const{.{ .base = part.ptr, .len = part.len }};
     const ret = linux.writev(-1, &iov, iov.len);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "writev to a directory fd fails with EBADF" {
+test "to a directory fd fails with EBADF" {
     const fd = linux.openat(
         linux.AT.FDCWD,
         "/boot",
@@ -66,7 +66,7 @@ test "writev to a directory fd fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "writev to a read-only-opened file fails with EBADF" {
+test "to a read-only-opened file fails with EBADF" {
     const init = utest.getInit();
     var t = Test.init();
 

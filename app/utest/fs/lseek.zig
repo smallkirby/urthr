@@ -1,4 +1,4 @@
-test "lseek with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     const ret = linux.lseek(
         999,
         0,
@@ -7,7 +7,7 @@ test "lseek with an unopened fd fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "lseek with an invalid whence fails with EINVAL" {
+test "with an invalid whence fails with EINVAL" {
     const init = utest.getInit();
 
     const file = try std.Io.Dir.openFileAbsolute(
@@ -21,7 +21,7 @@ test "lseek with an invalid whence fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "lseek to a negative offset fails with EINVAL" {
+test "to a negative offset fails with EINVAL" {
     const init = utest.getInit();
 
     const file = try std.Io.Dir.openFileAbsolute(
@@ -35,7 +35,7 @@ test "lseek to a negative offset fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "lseek on a pipe fails with ESPIPE" {
+test "on a pipe fails with ESPIPE" {
     var fds: [2]i32 = undefined;
     const ret = linux.pipe2(&fds, .{});
     try testing.expectEqual(.SUCCESS, linux.errno(ret));

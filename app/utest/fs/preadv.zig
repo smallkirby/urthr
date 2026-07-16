@@ -15,21 +15,21 @@ test "syscall: preadv at offset 0" {
     try testing.expectEqualSlices(u8, std.elf.MAGIC, &buf);
 }
 
-test "preadv with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     var buf: [4]u8 = undefined;
     const iov = [_]posix.iovec{.{ .base = &buf, .len = buf.len }};
     const ret = linux.preadv(999, &iov, iov.len, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "preadv with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     var buf: [4]u8 = undefined;
     const iov = [_]posix.iovec{.{ .base = &buf, .len = buf.len }};
     const ret = linux.preadv(-1, &iov, iov.len, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "preadv from a write-only-opened file fails with EBADF" {
+test "from a write-only-opened file fails with EBADF" {
     const init = utest.getInit();
     var t = Test.init();
 
@@ -52,7 +52,7 @@ test "preadv from a write-only-opened file fails with EBADF" {
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "preadv at a nonzero offset reads without moving the file offset" {
+test "at a nonzero offset reads without moving the file offset" {
     const init = utest.getInit();
     var t = Test.init();
 

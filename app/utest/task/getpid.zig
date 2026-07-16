@@ -1,4 +1,4 @@
-test "getpid always succeeds and returns a positive value" {
+test "always succeeds and returns a positive value" {
     const pid = linux.getpid();
     try testing.expect(pid > 0);
 }

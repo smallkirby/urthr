@@ -1,4 +1,4 @@
-test "geteuid never fails" {
+test "never fails" {
     _ = linux.geteuid();
 }
 

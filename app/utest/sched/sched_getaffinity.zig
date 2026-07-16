@@ -1,4 +1,4 @@
-test "sched_getaffinity for the caller succeeds" {
+test "for the caller succeeds" {
     var set: linux.cpu_set_t = undefined;
     const ret = linux.sched_getaffinity(0, @sizeOf(linux.cpu_set_t), &set);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
@@ -7,7 +7,7 @@ test "sched_getaffinity for the caller succeeds" {
     try testing.expectEqual(true, isset(&set, 0));
 }
 
-test "sched_getaffinity for the caller's own pid succeeds" {
+test "for the caller's own pid succeeds" {
     const pid = linux.getpid();
     var set: linux.cpu_set_t = undefined;
     const ret = linux.sched_getaffinity(pid, @sizeOf(linux.cpu_set_t), &set);
@@ -17,7 +17,7 @@ test "sched_getaffinity for the caller's own pid succeeds" {
     try testing.expectEqual(true, isset(&set, 0));
 }
 
-test "sched_getaffinity fails with EINVAL when size is zero" {
+test "fails with EINVAL when size is zero" {
     var set: linux.cpu_set_t = undefined;
     const ret = linux.sched_getaffinity(0, 0, &set);
     try testing.expectEqual(.INVAL, linux.errno(ret));

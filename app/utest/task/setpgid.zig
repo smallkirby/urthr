@@ -1,9 +1,9 @@
-test "setpgid fails with EINVAL for a negative pgid" {
+test "fails with EINVAL for a negative pgid" {
     const ret = linux.syscall2(.setpgid, 0, @bitCast(@as(isize, -1)));
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "setpgid on a session leader fails with EPERM" {
+test "on a session leader fails with EPERM" {
     const ret = linux.setpgid(0, 0);
     try testing.expectEqual(.PERM, linux.errno(ret));
 }

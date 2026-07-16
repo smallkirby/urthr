@@ -1,4 +1,4 @@
-test "mmap fails with EINVAL when length is zero" {
+test "fails with EINVAL when length is zero" {
     const ret = mem.mmap(
         0,
         0,
@@ -8,7 +8,7 @@ test "mmap fails with EINVAL when length is zero" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "mmap fails with EINVAL when neither MAP_SHARED nor MAP_PRIVATE is set" {
+test "fails with EINVAL when neither MAP_SHARED nor MAP_PRIVATE is set" {
     const ret = mem.mmap(
         0,
         0x1000,
@@ -18,7 +18,7 @@ test "mmap fails with EINVAL when neither MAP_SHARED nor MAP_PRIVATE is set" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "mmap fails with EINVAL for an unaligned MAP_FIXED address" {
+test "fails with EINVAL for an unaligned MAP_FIXED address" {
     const ret = mem.mmap(
         1,
         0x1000,
@@ -28,7 +28,7 @@ test "mmap fails with EINVAL for an unaligned MAP_FIXED address" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "tag:SKIP mmap with a file descriptor succeeds" {
+test "tag:SKIP with a file descriptor succeeds" {
     const fd = linux.open(utest.myname, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
@@ -46,7 +46,7 @@ test "tag:SKIP mmap with a file descriptor succeeds" {
     _ = linux.munmap(@ptrFromInt(ret), 0x1000);
 }
 
-test "mmap with MAP_FIXED succeeds at a free page-aligned address" {
+test "with MAP_FIXED succeeds at a free page-aligned address" {
     const len = 0x1000;
 
     // Get a valid, currently-free page-aligned address via a normal mapping.

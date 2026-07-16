@@ -17,12 +17,12 @@ test "syscall: dup" {
     try testing.expectEqual(@as(usize, 4), pos);
 }
 
-test "dup with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     const ret = linux.dup(999);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "dup with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     const ret = linux.dup(-1);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }

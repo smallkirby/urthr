@@ -23,7 +23,7 @@ fn onSignal(signo: linux.SIG) callconv(.c) void {
     signal_called = true;
 }
 
-test "rt_sigaction fails with EINVAL for signal number 0" {
+test "fails with EINVAL for signal number 0" {
     const ret = signal.sigAction(
         0,
         null,
@@ -33,7 +33,7 @@ test "rt_sigaction fails with EINVAL for signal number 0" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "rt_sigaction fails with EINVAL for an out-of-range signal number" {
+test "fails with EINVAL for an out-of-range signal number" {
     const ret = signal.sigAction(
         999,
         null,
@@ -43,7 +43,7 @@ test "rt_sigaction fails with EINVAL for an out-of-range signal number" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "rt_sigaction fails with EINVAL for SIGKILL" {
+test "fails with EINVAL for SIGKILL" {
     const ret = signal.sigAction(
         @intFromEnum(linux.SIG.KILL),
         null,
@@ -53,7 +53,7 @@ test "rt_sigaction fails with EINVAL for SIGKILL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "rt_sigaction fails with EINVAL for SIGSTOP" {
+test "fails with EINVAL for SIGSTOP" {
     const ret = signal.sigAction(
         @intFromEnum(linux.SIG.STOP),
         null,
@@ -63,7 +63,7 @@ test "rt_sigaction fails with EINVAL for SIGSTOP" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "rt_sigaction fails with EINVAL for a wrong sigsetsize" {
+test "fails with EINVAL for a wrong sigsetsize" {
     const ret = signal.sigAction(
         @intFromEnum(linux.SIG.TERM),
         null,
@@ -73,7 +73,7 @@ test "rt_sigaction fails with EINVAL for a wrong sigsetsize" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "rt_sigaction can query the current action without changing it" {
+test "can query the current action without changing it" {
     var old: signal.SigAction = undefined;
     const ret = signal.sigAction(
         @intFromEnum(linux.SIG.USR1),

@@ -21,13 +21,13 @@ test "syscall: write" {
     try testing.expectEqual(@as(usize, content.len), ret);
 }
 
-test "write with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     const content = "urthr";
     const ret = linux.write(999, content, content.len);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "write with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     const content = "urthr";
     const ret = linux.write(-1, content, content.len);
     try testing.expectEqual(.BADF, linux.errno(ret));

@@ -1,9 +1,9 @@
-test "close with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     const ret = linux.close(999);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "close with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     const ret = linux.close(-1);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }

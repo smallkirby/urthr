@@ -21,21 +21,21 @@ test "syscall: readv" {
     try testing.expectEqualSlices(u8, std.elf.MAGIC[2..4], &buf2);
 }
 
-test "readv with an unopened fd fails with EBADF" {
+test "with an unopened fd fails with EBADF" {
     var buf: [4]u8 = undefined;
     const iov = [_]posix.iovec{.{ .base = &buf, .len = buf.len }};
     const ret = linux.readv(999, &iov, iov.len);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "readv with a negative fd fails with EBADF" {
+test "with a negative fd fails with EBADF" {
     var buf: [4]u8 = undefined;
     const iov = [_]posix.iovec{.{ .base = &buf, .len = buf.len }};
     const ret = linux.readv(-1, &iov, iov.len);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "readv from a directory fd fails with EISDIR" {
+test "from a directory fd fails with EISDIR" {
     const fd = linux.openat(linux.AT.FDCWD, "/boot", .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
@@ -46,7 +46,7 @@ test "readv from a directory fd fails with EISDIR" {
     try testing.expectEqual(.ISDIR, linux.errno(ret));
 }
 
-test "readv from a write-only-opened file fails with EBADF" {
+test "from a write-only-opened file fails with EBADF" {
     const init = utest.getInit();
     var t = Test.init();
 

@@ -1,29 +1,29 @@
-test "fcntl F_GETFD with an unopened fd fails with EBADF" {
+test "F_GETFD with an unopened fd fails with EBADF" {
     const ret = linux.fcntl(999, linux.F.GETFD, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "fcntl F_SETFD with an unopened fd fails with EBADF" {
+test "F_SETFD with an unopened fd fails with EBADF" {
     const ret = linux.fcntl(999, linux.F.SETFD, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "fcntl F_GETFL with an unopened fd fails with EBADF" {
+test "F_GETFL with an unopened fd fails with EBADF" {
     const ret = linux.fcntl(999, linux.F.GETFL, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "fcntl F_SETFL with an unopened fd fails with EBADF" {
+test "F_SETFL with an unopened fd fails with EBADF" {
     const ret = linux.fcntl(999, linux.F.SETFL, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "fcntl F_DUPFD with an unopened fd fails with EBADF" {
+test "F_DUPFD with an unopened fd fails with EBADF" {
     const ret = linux.fcntl(999, linux.F.DUPFD, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));
 }
 
-test "fcntl F_DUPFD duplicates the fd to the lowest available >= arg" {
+test "F_DUPFD duplicates the fd to the lowest available >= arg" {
     const fd = linux.open(utest.myname, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
@@ -37,7 +37,7 @@ test "fcntl F_DUPFD duplicates the fd to the lowest available >= arg" {
     try testing.expect(dup != fd);
 }
 
-test "fcntl F_GETFD/F_SETFD roundtrips the close-on-exec flag" {
+test "F_GETFD/F_SETFD roundtrips the close-on-exec flag" {
     const fd = linux.open(utest.myname, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
@@ -56,7 +56,7 @@ test "fcntl F_GETFD/F_SETFD roundtrips the close-on-exec flag" {
     try testing.expectEqual(FD_CLOEXEC, got2);
 }
 
-test "fcntl F_GETFL/F_SETFL roundtrips status flags" {
+test "F_GETFL/F_SETFL roundtrips status flags" {
     const fd = linux.open(utest.myname, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
@@ -73,7 +73,7 @@ test "fcntl F_GETFL/F_SETFL roundtrips status flags" {
     try testing.expect(got2 & O_NONBLOCK != 0);
 }
 
-test "fcntl with an unknown command fails with EINVAL" {
+test "with an unknown command fails with EINVAL" {
     const fd = linux.open(utest.myname, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
@@ -82,7 +82,7 @@ test "fcntl with an unknown command fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "fcntl F_DUPFD with an out-of-range arg fails with EINVAL" {
+test "F_DUPFD with an out-of-range arg fails with EINVAL" {
     const fd = linux.open(utest.myname, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));

@@ -1,4 +1,4 @@
-test "getsid returns the caller's own session id for pid=0" {
+test "returns the caller's own session id for pid=0" {
     const pid = linux.getpid();
     const ret = linux.getsid(0);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));

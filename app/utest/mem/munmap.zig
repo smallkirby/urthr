@@ -1,9 +1,9 @@
-test "munmap fails with EINVAL for an unaligned address" {
+test "fails with EINVAL for an unaligned address" {
     const ret = linux.munmap(@ptrFromInt(1), 0x1000);
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "munmap fails with EINVAL when length is zero" {
+test "fails with EINVAL when length is zero" {
     const len = 0x1000;
     const map_ret = mem.mmap(
         0,
@@ -18,7 +18,7 @@ test "munmap fails with EINVAL when length is zero" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "munmap fails with EINVAL for a length that is not page-aligned" {
+test "fails with EINVAL for a length that is not page-aligned" {
     const len = 0x1000;
     const map_ret = mem.mmap(
         0,

@@ -1,4 +1,4 @@
-test "wait4 fails with ECHILD when the caller has no children" {
+test "fails with ECHILD when the caller has no children" {
     var status: u32 = undefined;
     const ret = linux.wait4(
         linux.getpid(),
@@ -9,7 +9,7 @@ test "wait4 fails with ECHILD when the caller has no children" {
     try testing.expectEqual(.CHILD, linux.errno(ret));
 }
 
-test "wait4 with WNOHANG fails with ECHILD when the caller has no children" {
+test "with WNOHANG fails with ECHILD when the caller has no children" {
     const WNOHANG: u32 = 1;
     var status: u32 = undefined;
     const ret = linux.wait4(

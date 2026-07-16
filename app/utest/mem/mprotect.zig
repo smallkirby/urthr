@@ -1,4 +1,4 @@
-test "mprotect fails with EINVAL for an unaligned address" {
+test "fails with EINVAL for an unaligned address" {
     const ret = linux.mprotect(
         @ptrFromInt(1),
         0x1000,
@@ -7,7 +7,7 @@ test "mprotect fails with EINVAL for an unaligned address" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "mprotect succeeds with a zero length" {
+test "succeeds with a zero length" {
     const cur = linux.brk(0);
     const ret = linux.mprotect(
         @ptrFromInt(cur),
@@ -17,7 +17,7 @@ test "mprotect succeeds with a zero length" {
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
 }
 
-test "mprotect changes the protection of an existing anonymous mapping" {
+test "changes the protection of an existing anonymous mapping" {
     const len = 0x1000;
     const map_ret = mem.mmap(
         0,
