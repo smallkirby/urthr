@@ -28,7 +28,7 @@ test "sleeps for the requested relative duration" {
     try testing.expectEqual(@as(u32, 0), rem.nsec);
 }
 
-test "tag:SKIP with TIMER_ABSTIME succeeds for a past deadline" {
+test "with TIMER_ABSTIME succeeds for a past deadline" {
     const TIMER_ABSTIME: u32 = 1;
     const req: linux.timespec = .{ .sec = 0, .nsec = 0 };
     const ret = time.clockNanoSleep(time.CLOCK_REALTIME, TIMER_ABSTIME, &req, null);

@@ -16,11 +16,19 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     if (std.enums.tagName(@TypeOf(clock), clock) == null) {
         return .err(.inval);
     }
-    if (flags == .abstime) {
-        return .err(.nosys); // TODO: Not implemented.
-    }
     if (rqtp.nsec >= std.time.ns_per_s) {
         return .err(.inval);
+    }
+
+    // Block until the absolute deadline.
+    if (flags == .abstime) {
+        const deadline_ns: u64 = @as(u64, @intCast(rqtp.sec)) * std.time.ns_per_s + rqtp.nsec;
+        const now_ns = urd.time.getCurrentTimestamp();
+        if (deadline_ns > now_ns) {
+            const remaining_us = (deadline_ns - now_ns) / std.time.ns_per_us;
+            urd.time.sleepUs(remaining_us);
+        }
+        return .success(0);
     }
 
     // Block until the specified duration has passed.
