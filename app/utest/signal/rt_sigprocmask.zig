@@ -1,14 +1,66 @@
 test "succeeds for SIG_BLOCK with an empty set" {
-    const SIG_BLOCK: i32 = 0;
     var set: u64 = 0;
-    const ret = linux.syscall4(
-        .rt_sigprocmask,
-        @bitCast(@as(isize, SIG_BLOCK)),
-        @intFromPtr(&set),
-        0,
-        signal.mask_size,
-    );
+    const ret = signal.sigProcMask(signal.SIG_BLOCK, &set, null, signal.mask_size);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
+}
+
+test "SIG_BLOCK adds the given signals to the current mask" {
+    var set: u64 = signal.sigBit(.TERM);
+    var old: u64 = 0;
+
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, &set, null, signal.mask_size)));
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, null, &old, signal.mask_size)));
+    try testing.expectEqual(true, old & signal.sigBit(.TERM) != 0);
+}
+
+test "SIG_UNBLOCK removes the given signals from the current mask" {
+    var set: u64 = signal.sigBit(.TERM);
+    var old: u64 = 0;
+
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, &set, null, signal.mask_size)));
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_UNBLOCK, &set, null, signal.mask_size)));
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, null, &old, signal.mask_size)));
+    try testing.expectEqual(false, old & signal.sigBit(.TERM) != 0);
+}
+
+test "SIG_SETMASK replaces the current mask" {
+    var first: u64 = signal.sigBit(.TERM);
+    var second: u64 = signal.sigBit(.USR1);
+    var old: u64 = 0;
+
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, &first, null, signal.mask_size)));
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_SETMASK, &second, null, signal.mask_size)));
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, null, &old, signal.mask_size)));
+    try testing.expectEqual(false, old & signal.sigBit(.TERM) != 0);
+    try testing.expectEqual(true, old & signal.sigBit(.USR1) != 0);
+}
+
+test "querying with a null set returns the current mask without changing it" {
+    var old: u64 = undefined;
+    const ret = signal.sigProcMask(signal.SIG_SETMASK, null, &old, signal.mask_size);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+}
+
+test "fails with EINVAL for an invalid how value" {
+    var set: u64 = 0;
+    const ret = signal.sigProcMask(999, &set, null, signal.mask_size);
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
+test "fails with EINVAL for a wrong sigsetsize" {
+    var set: u64 = 0;
+    const ret = signal.sigProcMask(signal.SIG_BLOCK, &set, null, signal.mask_size + 1);
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
+test "SIGKILL and SIGSTOP cannot be blocked" {
+    var set: u64 = signal.sigBit(.KILL) | signal.sigBit(.STOP);
+    var old: u64 = 0;
+
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, &set, null, signal.mask_size)));
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, null, &old, signal.mask_size)));
+    try testing.expectEqual(false, old & signal.sigBit(.KILL) != 0);
+    try testing.expectEqual(false, old & signal.sigBit(.STOP) != 0);
 }
 
 // =============================================================
