@@ -63,11 +63,41 @@ test "SIGKILL and SIGSTOP cannot be blocked" {
     try testing.expectEqual(false, old & signal.sigBit(.STOP) != 0);
 }
 
+test "a blocked signal is not delivered until it is unblocked" {
+    handler_called = false;
+
+    const sa: linux.Sigaction = .{
+        .handler = .{ .handler = onSignal },
+        .mask = linux.sigemptyset(),
+        .flags = 0,
+    };
+    _ = linux.sigaction(.USR1, &sa, null);
+
+    // Block SIGUSR1, then send it to self. It must stay pending and undelivered.
+    var set: u64 = signal.sigBit(.USR1);
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_BLOCK, &set, null, signal.mask_size)));
+    _ = linux.kill(linux.getpid(), .USR1);
+    try testing.expectEqual(false, handler_called);
+
+    // Unblocking must deliver the pending signal.
+    try testing.expectEqual(.SUCCESS, linux.errno(signal.sigProcMask(signal.SIG_UNBLOCK, &set, null, signal.mask_size)));
+    try testing.expectEqual(true, handler_called);
+}
+
+/// Whether the signal handler in the test above was called.
+var handler_called: bool = false;
+
+fn onSignal(signo: linux.SIG) callconv(.c) void {
+    log.info("Signal#{d} handler called", .{@intFromEnum(signo)});
+    handler_called = true;
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
+const log = std.log;
 const testing = std.testing;
 const linux = std.os.linux;
 const utest = @import("../utest.zig");
