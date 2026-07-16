@@ -320,8 +320,6 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
 
 /// Exit the current process with the given exit code.
 pub fn exit(code: i32) noreturn {
-    log.debug("Process exiting with code {d}", .{code});
-
     const cur = sched.getCurrent();
     cur.exit_status = code;
 
