@@ -22,6 +22,16 @@ pub const BoardType = enum {
         return null;
     }
 
+    /// Get the CPU architecture of this board.
+    pub fn arch(self: BoardType) std.Target.Cpu.Arch {
+        return switch (self) {
+            .rpi4b,
+            .rpi5,
+            .virt,
+            => .aarch64,
+        };
+    }
+
     /// Get the binary name for this board.
     ///
     /// The binary is loaded by the firmware at boot time.

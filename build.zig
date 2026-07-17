@@ -2,22 +2,6 @@ const zon = @import("build.zig.zon");
 const version = zon.version;
 
 pub fn build(b: *std.Build) !void {
-    const target = b.resolveTargetQuery(.{
-        .cpu_arch = .aarch64,
-        .abi = .none,
-        .os_tag = .freestanding,
-        .ofmt = .elf,
-        .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
-            .strict_align,
-            .el3,
-        }),
-        .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
-            .neon,
-            .fp_armv8,
-        }),
-    });
-    const optimize = b.standardOptimizeOption(.{});
-
     // =============================================================
     // Options
     // =============================================================
@@ -141,6 +125,29 @@ pub fn build(b: *std.Build) !void {
     options.addOption(bool, "allow_init_exit", allow_init_exit);
 
     const options_module = options.createModule();
+
+    // =============================================================
+    // Targets
+    // =============================================================
+
+    const target = switch (board_type.arch()) {
+        .aarch64 => b.resolveTargetQuery(.{
+            .cpu_arch = .aarch64,
+            .abi = .none,
+            .os_tag = .freestanding,
+            .ofmt = .elf,
+            .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+                .strict_align,
+                .el3,
+            }),
+            .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+                .neon,
+                .fp_armv8,
+            }),
+        }),
+        else => unreachable,
+    };
+    const optimize = b.standardOptimizeOption(.{});
 
     // =============================================================
     // Modules
@@ -330,20 +337,24 @@ pub fn build(b: *std.Build) !void {
         });
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = urthr_ld;
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("dd", dd_module);
         exe.root_module.addImport("urthr", urthr_module);
         exe.root_module.addImport("options", options_module);
+        switch (board_type.arch()) {
+            .aarch64 => {
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
+            },
+            else => unreachable,
+        }
 
         exe.step.dependOn(&pp_urthr.step);
-
         break :blk exe;
     };
     b.installArtifact(urthr);
@@ -376,17 +387,21 @@ pub fn build(b: *std.Build) !void {
         });
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = wyrd_ld;
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
-        exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
         exe.root_module.addImport("boot", boot_module);
         exe.root_module.addImport("common", common_module);
         exe.root_module.addImport("arch", arch_module);
         exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("dd", dd_module);
         exe.root_module.addImport("options", options_module);
+        switch (board_type.arch()) {
+            .aarch64 => {
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
+            },
+            else => unreachable,
+        }
 
         exe.step.dependOn(&pp_wyrd.step);
-
         break :blk exe;
     };
     b.installArtifact(wyrd);
@@ -466,16 +481,19 @@ pub fn build(b: *std.Build) !void {
     // =============================================================
 
     {
-        const user_target = b.resolveTargetQuery(.{
-            .cpu_arch = .aarch64,
-            .os_tag = .linux,
-            .abi = .gnu,
-            .ofmt = .elf,
-            .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
-                .neon,
-                .fp_armv8,
+        const user_target = switch (board_type.arch()) {
+            .aarch64 => b.resolveTargetQuery(.{
+                .cpu_arch = .aarch64,
+                .os_tag = .linux,
+                .abi = .gnu,
+                .ofmt = .elf,
+                .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+                    .neon,
+                    .fp_armv8,
+                }),
             }),
-        });
+            else => unreachable,
+        };
 
         // =============================================================
         // init
@@ -576,10 +594,10 @@ pub fn build(b: *std.Build) !void {
     // =============================================================
 
     {
-        const qemu_bin = b.fmt(
-            "{s}/qemu-system-aarch64",
-            .{qemu_dir},
-        );
+        const qemu_bin = switch (board_type.arch()) {
+            .aarch64 => b.fmt("{s}/qemu-system-aarch64", .{qemu_dir}),
+            else => unreachable,
+        };
         const qemu = Qemu{
             .qemu = qemu_bin,
             .machine = board_type,
