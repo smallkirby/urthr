@@ -2,6 +2,8 @@ const zon = @import("build.zig.zon");
 const version = zon.version;
 
 pub fn build(b: *std.Build) !void {
+    var iu = InstallUtil.init(b);
+
     // =============================================================
     // Options
     // =============================================================
@@ -149,6 +151,14 @@ pub fn build(b: *std.Build) !void {
     };
     const optimize = b.standardOptimizeOption(.{});
 
+    // Set installation paths for the target and host.
+    try iu.set(.target, .{
+        .root = @tagName(board_type),
+    });
+    try iu.set(.host, .{
+        .root = "host",
+    });
+
     // =============================================================
     // Modules
     // =============================================================
@@ -255,7 +265,7 @@ pub fn build(b: *std.Build) !void {
 
         break :blk exe;
     };
-    b.installArtifact(srboot);
+    iu.installArtifact(srboot, .host, .bin);
 
     const mkfont = blk: {
         const exe = b.addExecutable(.{
@@ -269,7 +279,7 @@ pub fn build(b: *std.Build) !void {
 
         break :blk exe;
     };
-    b.installArtifact(mkfont);
+    iu.installArtifact(mkfont, .host, .bin);
 
     // =============================================================
     // Preprocess
@@ -281,9 +291,7 @@ pub fn build(b: *std.Build) !void {
         const out = run.addOutputFileArg("constants.autogen.h");
 
         // Install generated header for debug.
-        b.getInstallStep().dependOn(
-            &b.addInstallHeaderFile(out, "constants.autogen.h").step,
-        );
+        iu.installFile(out, "constants.autogen.h", .target, .include);
 
         break :blk out;
     };
@@ -357,17 +365,20 @@ pub fn build(b: *std.Build) !void {
         exe.step.dependOn(&pp_urthr.step);
         break :blk exe;
     };
-    b.installArtifact(urthr);
+    iu.installArtifact(urthr, .target, .bin);
 
+    // Raw Urthr image.
     const urthr_bin = blk: {
         const objcopy = b.addObjCopy(urthr.getEmittedBin(), .{
             .format = .bin,
         });
         objcopy.step.dependOn(&urthr.step);
-
-        const bin = b.addInstallBinFile(objcopy.getOutput(), "urthr.img");
-
-        break :blk bin;
+        break :blk iu.createInstallFile(
+            objcopy.getOutput(),
+            "urthr.img",
+            .target,
+            .bin,
+        );
     };
 
     // =============================================================
@@ -404,17 +415,20 @@ pub fn build(b: *std.Build) !void {
         exe.step.dependOn(&pp_wyrd.step);
         break :blk exe;
     };
-    b.installArtifact(wyrd);
+    iu.installArtifact(wyrd, .target, .bin);
 
+    // Raw Wyrd image.
     const wyrd_bin = blk: {
         const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
             .format = .bin,
         });
         objcopy.step.dependOn(&wyrd.step);
-
-        const bin = b.addInstallBinFile(objcopy.getOutput(), "wyrd.img");
-
-        break :blk bin;
+        break :blk iu.createInstallFile(
+            objcopy.getOutput(),
+            "wyrd.img",
+            .target,
+            .bin,
+        );
     };
 
     // =============================================================
@@ -430,7 +444,12 @@ pub fn build(b: *std.Build) !void {
 
         if (serial_boot) {
             // Wryd serial is the booter.
-            break :blk b.addInstallBinFile(wyrd_bin.source, booter_name);
+            break :blk iu.createInstallFile(
+                wyrd_bin.source,
+                booter_name,
+                .target,
+                .bin,
+            );
         } else {
             // Wyrd + Urthr image is the booter.
             const run = b.addRunArtifact(mkimg);
@@ -446,7 +465,12 @@ pub fn build(b: *std.Build) !void {
             run.addArg("--output");
             const out = run.addOutputFileArg(booter_name);
 
-            break :blk b.addInstallBinFile(out, booter_name);
+            break :blk iu.createInstallFile(
+                out,
+                booter_name,
+                .target,
+                .bin,
+            );
         }
     };
     booter.step.dependOn(&wyrd_bin.step);
@@ -472,7 +496,12 @@ pub fn build(b: *std.Build) !void {
         run.addArg("--output");
         const out = run.addOutputFileArg(remote_name);
 
-        const bin = b.addInstallBinFile(out, remote_name);
+        const bin = iu.createInstallFile(
+            out,
+            remote_name,
+            .target,
+            .bin,
+        );
         b.getInstallStep().dependOn(&bin.step);
     }
 
@@ -511,7 +540,7 @@ pub fn build(b: *std.Build) !void {
 
             break :blk exe;
         };
-        b.installArtifact(init);
+        iu.installArtifact(init, .target, .bin);
 
         // =============================================================
         // utest
@@ -533,7 +562,7 @@ pub fn build(b: *std.Build) !void {
 
             break :blk exe;
         };
-        b.installArtifact(utest);
+        iu.installArtifact(utest, .target, .bin);
 
         // =============================================================
         // BootFS
@@ -551,21 +580,24 @@ pub fn build(b: *std.Build) !void {
             "bash",
             "scripts/create_disk.bash",
         });
-        run.addArg("zig-out/bootfs/boot");
+        run.addArg(b.fmt("zig-out/{s}/bootfs/boot", .{@tagName(board_type)}));
         const img = run.addOutputFileArg("bootfs.img");
         for (apps) |app| {
-            const artifact = b.addInstallArtifact(app, .{
-                .dest_dir = .{ .override = .{ .custom = "bootfs/boot/bin" } },
-            });
+            const artifact = iu.createInstallArtifact(app, .target, .bootfs);
             run.step.dependOn(&artifact.step);
             run.addFileInput(artifact.emitted_bin.?);
         }
 
-        bootfs.dependOn(&b.addInstallFile(img, "bootfs.img").step);
+        bootfs.dependOn(&iu.createInstallFile(
+            img,
+            "bootfs.img",
+            .target,
+            .root,
+        ).step);
 
         if (sdcreate) {
             b.getInstallStep().dependOn(bootfs);
-            sdin = try std.fmt.allocPrint(b.allocator, "{s}/bootfs.img", .{b.install_path});
+            sdin = try std.fmt.allocPrint(b.allocator, "{s}/bootfs.img", .{iu.getInstallPath(.target, .root)});
         }
     }
 
@@ -575,8 +607,11 @@ pub fn build(b: *std.Build) !void {
 
     {
         // Install booter as an appropriate name for the board.
-        b.getInstallStep().dependOn(
-            &b.addInstallBinFile(booter.source, board_type.outname()).step,
+        iu.installFile(
+            booter.source,
+            board_type.outname(),
+            .target,
+            .bin,
         );
 
         // Copy to the SD card if specified.
@@ -604,8 +639,8 @@ pub fn build(b: *std.Build) !void {
             .graphic = if (enable_graphic) .display else .none,
             .memory = "2G",
             .kernel = b.fmt(
-                "{s}/bin/{s}",
-                .{ b.install_path, booter.dest_rel_path },
+                "{s}/{s}",
+                .{ iu.getInstallPath(.target, .bin), booter.dest_rel_path },
             ),
             .serial = if (serial) |s| blk: {
                 break :blk if (std.mem.eql(u8, s, "pts")) .pts else .stdio;
@@ -676,6 +711,92 @@ pub fn build(b: *std.Build) !void {
     docs.dependOn(&urthr_docs.step);
     docs.dependOn(&wyrd_docs.step);
 }
+
+const InstallUtil = struct {
+    const Self = @This();
+
+    /// Build instance.
+    b: *std.Build,
+    /// Installation target map.
+    targets: std.AutoHashMap(Target, InstallPath),
+
+    const Target = enum {
+        /// Host tools.
+        host,
+        /// Target artifacts.
+        target,
+    };
+
+    const Sub = enum {
+        /// Root directory.
+        root,
+        /// Binary directory.
+        bin,
+        /// BootFS raw directory.
+        bootfs,
+        /// Include directory for auto-generated headers.
+        include,
+    };
+
+    // Target specific installation information.
+    const InstallPath = struct {
+        root: []const u8,
+    };
+
+    pub fn init(b: *std.Build) Self {
+        return .{
+            .b = b,
+            .targets = .init(b.allocator),
+        };
+    }
+
+    pub fn set(self: *Self, target: Target, paths: InstallPath) !void {
+        try self.targets.put(target, paths);
+    }
+
+    /// Create a step to install the artifact without appending it to the install step.
+    pub fn createInstallArtifact(self: *Self, artifact: *std.Build.Step.Compile, target: Target, sub: Sub) *std.Build.Step.InstallArtifact {
+        return self.b.addInstallArtifact(artifact, .{
+            .dest_dir = .{ .override = .{ .custom = self.getPath(target, sub) } },
+        });
+    }
+
+    /// Append the artifact to the install step.
+    pub fn installArtifact(self: *Self, artifact: *std.Build.Step.Compile, target: Target, sub: Sub) void {
+        self.b.getInstallStep().dependOn(&self.createInstallArtifact(artifact, target, sub).step);
+    }
+
+    /// Create a file to be installed without appending it to the install step.
+    pub fn createInstallFile(self: *Self, artifact: std.Build.LazyPath, name: []const u8, target: Target, sub: Sub) *std.Build.Step.InstallFile {
+        return self.b.addInstallFileWithDir(
+            artifact,
+            .{ .custom = self.getPath(target, sub) },
+            name,
+        );
+    }
+
+    /// Append the file to the install step.
+    pub fn installFile(self: *Self, artifact: std.Build.LazyPath, name: []const u8, target: Target, sub: Sub) void {
+        self.b.getInstallStep().dependOn(&self.createInstallFile(artifact, name, target, sub).step);
+    }
+
+    fn getPath(self: *Self, target: Target, sub: Sub) []const u8 {
+        const map = self.targets.get(target) orelse @panic("Unrecognized target");
+        return switch (sub) {
+            .root => map.root,
+            .bin => self.b.fmt("{s}/bin", .{map.root}),
+            .bootfs => self.b.fmt("{s}/bootfs/boot/bin", .{map.root}),
+            .include => self.b.fmt("{s}/include", .{map.root}),
+        };
+    }
+
+    /// Get installation path for the given target.
+    ///
+    /// Example: `zig-out/rpi4b/bin`, but `zig-out` part is determined by user option.
+    pub fn getInstallPath(self: *Self, target: Target, sub: Sub) []const u8 {
+        return self.b.fmt("{s}/{s}", .{ self.b.install_path, self.getPath(target, sub) });
+    }
+};
 
 /// Create a new preprocess "Run" and return its artifact.
 fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const LazyPath) struct { LazyPath, *InstallFile } {
