@@ -22,34 +22,17 @@ pub fn build(b: *std.Build) !void {
     // Options
     // =============================================================
 
-    const s_board = b.option(
-        []const u8,
+    const board_type = b.option(
+        board.BoardType,
         "board",
         "Target board type",
-    ) orelse "rpi4b";
-    const board_type = board.BoardType.from(s_board) orelse {
-        std.log.err("Unsupported board type: {s}", .{s_board});
-        return error.InvalidBoardType;
-    };
+    ) orelse .rpi4b;
 
-    const s_log_level = b.option(
-        []const u8,
+    const log_level = b.option(
+        std.log.Level,
         "log_level",
-        "log_level",
-    ) orelse "info";
-    const log_level: std.log.Level = b: {
-        const eql = std.mem.eql;
-        break :b if (eql(u8, s_log_level, "debug"))
-            .debug
-        else if (eql(u8, s_log_level, "info"))
-            .info
-        else if (eql(u8, s_log_level, "warn"))
-            .warn
-        else if (eql(u8, s_log_level, "error"))
-            .err
-        else
-            @panic("Invalid log level");
-    };
+        "Log level",
+    ) orelse .info;
 
     const traces = b.option(
         []const u8,
