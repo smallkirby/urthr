@@ -2,6 +2,7 @@ const zon = @import("build.zig.zon");
 const version = zon.version;
 
 pub fn build(b: *std.Build) !void {
+    const optimize = b.standardOptimizeOption(.{});
     var iu = InstallUtil.init(b);
 
     // =============================================================
@@ -132,7 +133,7 @@ pub fn build(b: *std.Build) !void {
     // Targets
     // =============================================================
 
-    const target = switch (board_type.arch()) {
+    const bl_target = switch (board_type.arch()) {
         .aarch64 => b.resolveTargetQuery(.{
             .cpu_arch = .aarch64,
             .abi = .none,
@@ -147,9 +148,36 @@ pub fn build(b: *std.Build) !void {
                 .fp_armv8,
             }),
         }),
+        .x86_64 => b.resolveTargetQuery(.{
+            .cpu_arch = .x86_64,
+            .os_tag = .uefi,
+        }),
         else => unreachable,
     };
-    const optimize = b.standardOptimizeOption(.{});
+    const kernel_target = switch (board_type.arch()) {
+        .aarch64 => b.resolveTargetQuery(.{
+            .cpu_arch = .aarch64,
+            .abi = .none,
+            .os_tag = .freestanding,
+            .ofmt = .elf,
+            .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+                .strict_align,
+                .el3,
+            }),
+            .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
+                .neon,
+                .fp_armv8,
+            }),
+        }),
+        .x86_64 => b.resolveTargetQuery(.{
+            .cpu_arch = .x86_64,
+            .abi = .none,
+            .os_tag = .freestanding,
+            .ofmt = .elf,
+        }),
+        else => unreachable,
+    };
+    const tools_target = b.standardTargetOptions(.{});
 
     // Set installation paths for the target and host.
     try iu.set(.target, .{
@@ -217,8 +245,6 @@ pub fn build(b: *std.Build) !void {
     // =============================================================
     // Tools
     // =============================================================
-
-    const tools_target = b.standardTargetOptions(.{});
 
     const mkimg = blk: {
         const exe = b.addExecutable(.{
@@ -337,8 +363,10 @@ pub fn build(b: *std.Build) !void {
             .name = "urthr",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("urthr/main.zig"),
-                .target = target,
+                .target = kernel_target,
                 .optimize = optimize,
+                .code_model = if (board_type.arch() == .x86_64) .large else .default,
+                .pic = if (board_type.arch() == .x86_64) true else null,
             }),
             .linkage = .static,
             .use_llvm = true,
@@ -358,6 +386,11 @@ pub fn build(b: *std.Build) !void {
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
+            },
+            .x86_64 => {
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/head.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/switch.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/thread.S"));
             },
             else => unreachable,
         }
@@ -389,14 +422,17 @@ pub fn build(b: *std.Build) !void {
         const exe = b.addExecutable(.{
             .name = "wyrd",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("wyrd/main.zig"),
-                .target = target,
+                .root_source_file = switch (board_type.arch()) {
+                    .aarch64 => b.path("wyrd/aarch64/main.zig"),
+                    .x86_64 => b.path("wyrd/x64/main.zig"),
+                    else => unreachable,
+                },
+                .target = bl_target,
                 .optimize = optimize,
             }),
             .linkage = .static,
             .use_llvm = true,
         });
-        exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = wyrd_ld;
         exe.root_module.addImport("boot", boot_module);
         exe.root_module.addImport("common", common_module);
@@ -406,9 +442,11 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("options", options_module);
         switch (board_type.arch()) {
             .aarch64 => {
+                exe.entry = .{ .symbol_name = "_start" };
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
             },
+            .x86_64 => {},
             else => unreachable,
         }
 
@@ -419,16 +457,29 @@ pub fn build(b: *std.Build) !void {
 
     // Raw Wyrd image.
     const wyrd_bin = blk: {
-        const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
-            .format = .bin,
-        });
-        objcopy.step.dependOn(&wyrd.step);
-        break :blk iu.createInstallFile(
-            objcopy.getOutput(),
-            "wyrd.img",
-            .target,
-            .bin,
-        );
+        switch (board_type.arch()) {
+            .aarch64 => {
+                const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
+                    .format = .bin,
+                });
+                objcopy.step.dependOn(&wyrd.step);
+                break :blk iu.createInstallFile(
+                    objcopy.getOutput(),
+                    "wyrd.img",
+                    .target,
+                    .bin,
+                );
+            },
+            .x86_64 => {
+                break :blk iu.createInstallFile(
+                    wyrd.getEmittedBin(),
+                    "efi/boot/BOOTX64.EFI",
+                    .target,
+                    .esp,
+                );
+            },
+            else => unreachable,
+        }
     };
 
     // =============================================================
@@ -482,7 +533,7 @@ pub fn build(b: *std.Build) !void {
     // =============================================================
 
     // Remote: the second binary sent via serial by srboot.
-    if (serial_boot) {
+    const remote = if (serial_boot or board_type == .q35) blk: {
         const remote_name = "remote";
 
         const run = b.addRunArtifact(mkimg);
@@ -503,7 +554,9 @@ pub fn build(b: *std.Build) !void {
             .bin,
         );
         b.getInstallStep().dependOn(&bin.step);
-    }
+
+        break :blk bin;
+    } else null;
 
     // =============================================================
     // Applications / BootFS
@@ -520,6 +573,12 @@ pub fn build(b: *std.Build) !void {
                     .neon,
                     .fp_armv8,
                 }),
+            }),
+            .x86_64 => b.resolveTargetQuery(.{
+                .cpu_arch = .x86_64,
+                .os_tag = .linux,
+                .abi = .gnu,
+                .ofmt = .elf,
             }),
             else => unreachable,
         };
@@ -624,6 +683,24 @@ pub fn build(b: *std.Build) !void {
         }
     }
 
+    // Create EFI system partition if target is Q35.
+    if (board_type == .q35) {
+        // Copy booter image to ESP.
+        const cp_remote = iu.createInstallFile(
+            remote.?.source,
+            "efi/boot/remote",
+            .target,
+            .esp,
+        );
+
+        // Create ESP image.
+        const run = b.addSystemCommand(&.{ "bash", "scripts/create_esp.bash" });
+        run.addArg(iu.getInstallPath(.target, .esp));
+        run.addArg(b.fmt("{s}/esp.img", .{iu.getInstallPath(.target, .root)}));
+        run.step.dependOn(&cp_remote.step);
+        b.getInstallStep().dependOn(&run.step);
+    }
+
     // =============================================================
     // Run on QEMU
     // =============================================================
@@ -631,7 +708,12 @@ pub fn build(b: *std.Build) !void {
     {
         const qemu_bin = switch (board_type.arch()) {
             .aarch64 => b.fmt("{s}/qemu-system-aarch64", .{qemu_dir}),
+            .x86_64 => b.fmt("{s}/qemu-system-x86_64", .{qemu_dir}),
             else => unreachable,
+        };
+        const drive = switch (board_type) {
+            .q35 => b.fmt("{s}/esp.img", .{iu.getInstallPath(.target, .root)}),
+            else => null,
         };
         const qemu = Qemu{
             .qemu = qemu_bin,
@@ -646,6 +728,7 @@ pub fn build(b: *std.Build) !void {
                 break :blk if (std.mem.eql(u8, s, "pts")) .pts else .stdio;
             } else .stdio,
             .sd = sdin,
+            .drive = drive,
             .verbose_logs = qemu_log,
             .wait_gdb = wait_qemu,
         };
@@ -736,6 +819,8 @@ const InstallUtil = struct {
         bootfs,
         /// Include directory for auto-generated headers.
         include,
+        /// EFI System Partition root.
+        esp,
     };
 
     // Target specific installation information.
@@ -787,6 +872,7 @@ const InstallUtil = struct {
             .bin => self.b.fmt("{s}/bin", .{map.root}),
             .bootfs => self.b.fmt("{s}/bootfs/boot/bin", .{map.root}),
             .include => self.b.fmt("{s}/include", .{map.root}),
+            .esp => self.b.fmt("{s}/esp", .{map.root}),
         };
     }
 
@@ -894,6 +980,8 @@ const Qemu = struct {
     },
     /// Path to SD card image file.
     sd: ?[]const u8,
+    /// Path to drive image file.
+    drive: ?[]const u8,
     /// QEMU verbose log outputs.
     verbose_logs: []const u8,
     /// Wait for GDB connection on startup.
@@ -904,6 +992,7 @@ const Qemu = struct {
             .rpi4b => "raspi4b",
             .rpi5 => "raspi5",
             .virt => "virt-9.0,gic-version=3,secure=on,virtualization=on",
+            .q35 => "q35",
         };
 
         var args = std.array_list.Aligned([]const u8, null).empty;
@@ -923,16 +1012,24 @@ const Qemu = struct {
                 "-smp",
                 "4",
             }),
+            .q35 => try args.appendSlice(allocator, &.{
+                "-bios",
+                "/usr/share/ovmf/OVMF.fd", // TODO
+                "-drive",
+                try std.fmt.allocPrint(allocator, "file={s},format=raw,if=virtio,media=disk", .{self.drive.?}),
+            }),
             else => {},
         }
         try args.appendSlice(allocator, &.{
             "-m",
             self.memory,
         });
-        try args.appendSlice(allocator, &.{
-            "-kernel",
-            self.kernel,
-        });
+        if (self.machine != .q35) {
+            try args.appendSlice(allocator, &.{
+                "-kernel",
+                self.kernel,
+            });
+        }
         switch (self.graphic) {
             .none => try args.appendSlice(allocator, &.{"-nographic"}),
             .display => try args.appendSlice(allocator, &.{ "-display", "gtk" }),
@@ -979,6 +1076,7 @@ const Qemu = struct {
                     "-drive",
                     try std.fmt.allocPrint(allocator, "file={s},format=raw,if=none,media=disk,id=disk", .{sd_path}),
                 }),
+                .q35 => unreachable,
             }
         }
         switch (self.machine) {

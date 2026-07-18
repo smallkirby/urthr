@@ -183,8 +183,10 @@ const MkImage = struct {
             total += @sizeOf(UrthrHeader);
             total += (try self.urthr.stat(self.io)).size;
 
-            if (memmap.loader_reserved.start - memmap.loader < total) {
-                return error.ImageTooLarge;
+            if (@hasDecl(memmap, "loader_reserved")) {
+                if (memmap.loader_reserved.start - memmap.loader < total) {
+                    return error.ImageTooLarge;
+                }
             }
         }
 

@@ -1,0 +1,3 @@
+.global switchContext
+switchContext:
+  hlt

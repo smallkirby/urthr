@@ -21,7 +21,7 @@ pub fn main() uefi.Status {
 }
 
 /// Path to Urthr kernel ELF on the EFI System Partition.
-const kernel_path = "efi\\boot\\urthr.elf";
+const kernel_path = "efi\\boot\\remote";
 
 /// Physical address to load kernel image.
 const kphys = 0x40_0000; // TODO

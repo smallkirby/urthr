@@ -218,10 +218,74 @@ pub const Termios = if (builtin.cpu.arch.isAARCH64()) extern struct {
         t.cc[cc.vtime] = 0;
         return t;
     }
+} else if (builtin.cpu.arch.isX86()) extern struct {
+    /// Input modes.
+    iflag: Iflag,
+    /// Output modes.
+    oflag: Oflag,
+    /// Control modes.
+    cflag: Cflag,
+    /// Local modes.
+    lflag: Lflag,
+    /// Line dediscipline special characters.
+    line: u8,
+    /// Control characters.
+    cc: [32]u8,
+
+    // TODO
+    fn default() Termios {
+        var t = std.mem.zeroes(Termios);
+        t.iflag.icrnl = true;
+        t.oflag.opost = true;
+        t.oflag.onlcr = true;
+        t.cflag.cread = true;
+        t.cflag.csize = 0b11; // CS8
+        t.lflag.isig = true;
+        t.lflag.icanon = true;
+        t.lflag.echo = true;
+        t.lflag.echoe = true;
+        t.cc[cc.vintr] = 3; // Ctrl+C
+        t.cc[cc.verase] = 127; // DEL
+        t.cc[cc.veof] = 4; // Ctrl+D
+        t.cc[cc.vmin] = 1;
+        t.cc[cc.vtime] = 0;
+        return t;
+    }
 } else extern struct {};
 
 /// Input modes.
 const Iflag = if (builtin.cpu.arch.isAARCH64()) packed struct(u32) {
+    /// Ignore BREAK condition on input.
+    ignbrk: bool = false,
+    /// Ignore a BREAK.
+    brkint: bool = false,
+    /// Ignore framing errors and parity errors.
+    ignpar: bool = false,
+    /// Mark parity and framing errors.
+    parmrk: bool = false,
+    /// Enable input parity checking.
+    inpck: bool = false,
+    /// Strip off eighth bit.
+    istrip: bool = false,
+    /// Translate NL to CR on input.
+    inlcr: bool = false,
+    /// Ignore CR on input.
+    igncr: bool = false,
+    /// Translate CR to NL on input.
+    icrnl: bool = false,
+    /// Enable XON/XOFF flow control on output.
+    ixon: bool = false,
+    /// Enable XON/XOFF flow control on input.
+    ixoff: bool = false,
+    /// Typing any character will restart stopped output.
+    ixany: bool = false,
+    /// Ring bell when input queue is full.
+    imaxbel: bool = false,
+    /// Input is UTF-8.
+    iutf8: bool = false,
+    /// Reserved.
+    _15: u18 = 0,
+} else if (builtin.cpu.arch.isX86()) packed struct(u32) {
     /// Ignore BREAK condition on input.
     ignbrk: bool = false,
     /// Ignore a BREAK.
@@ -286,6 +350,37 @@ const Oflag = if (builtin.cpu.arch.isAARCH64()) packed struct(u32) {
     ffdly: u1 = 0,
     /// Reserved.
     _16: u16 = 0,
+} else if (builtin.cpu.arch.isX86()) packed struct(u32) {
+    /// Enable implementation-defined output processing.
+    opost: bool = false,
+    /// Map lowercase characters to uppercase.
+    olcuc: bool = false,
+    /// Map NL to CR-NL on output.
+    onlcr: bool = false,
+    /// Map CR to NL on output.
+    ocrnl: bool = false,
+    /// Don't output CR at column 0.
+    onocr: bool = false,
+    /// NL is assumed to do the CR function.
+    onlret: bool = false,
+    /// Send fill characters for a delay, rather than using a timer.
+    ofill: bool = false,
+    /// Fill character is DEL.
+    ofdel: bool = false,
+    /// Newline delay mask.
+    nldly: u1 = 0,
+    /// CR delay mask.
+    crdly: u2 = 0,
+    /// Horizontal tab delay mask.
+    tabdly: u2 = 0,
+    /// Backspace delay mask.
+    bsdly: u1 = 0,
+    /// Vertical tab delay mask.
+    vtdly: u1 = 0,
+    /// Form feed delay mask.
+    ffdly: u1 = 0,
+    /// Reserved.
+    _16: u16 = 0,
 } else struct {};
 
 /// Control modes.
@@ -314,10 +409,72 @@ const Cflag = if (builtin.cpu.arch.isAARCH64()) packed struct(u32) {
     cmspar: bool = false,
     /// Enable RTS/CTS HW flow control.
     crtscts: bool = false,
+} else if (builtin.cpu.arch.isX86()) packed struct(u32) {
+    /// Reserved.
+    _0: u4 = 0,
+    /// Character size mask.
+    csize: u2 = 0,
+    /// Set 2 stop bits, rather than 1.
+    cstopb: bool = false,
+    /// Enable receiver.
+    cread: bool = false,
+    /// Enable parity generation on output and parity checking for input.
+    parenb: bool = false,
+    /// Parity for input and output is odd.
+    parodd: bool = false,
+    /// Lower modem control lines after last process closes the device.
+    hupcl: bool = false,
+    /// Ignore modem control lines.
+    clocal: bool = false,
+    /// Reserved.
+    _12: u17 = 0,
+    ///
+    addrb: bool = false,
+    /// Use stick parity.
+    cmspar: bool = false,
+    /// Enable RTS/CTS HW flow control.
+    crtscts: bool = false,
 } else struct {};
 
 /// Local modes.
 const Lflag = if (builtin.cpu.arch.isAARCH64()) packed struct(u32) {
+    /// When any of INTR, QUIT, SUSP, or DSUSP are received, generate a signal.
+    isig: bool = false,
+    /// Enable canonical mode.
+    icanon: bool = false,
+    /// When ICANON is set, terminal is uppercase only.
+    xcase: bool = false,
+    /// Echo input characters.
+    echo: bool = false,
+    /// If ICANON is set, ERASE erases the preceding input character, WERASE erases the preceding word, and KILL erases the entire line.
+    echoe: bool = false,
+    /// If ICANON is set, KILL erases the current line.
+    echok: bool = false,
+    /// If ICANON is set, echo NL even if ECHO is not set.
+    echonl: bool = false,
+    /// Disable flushing the input and output queues when generating signals.
+    noflsh: bool = false,
+    /// Send SIGTTOU to the process group of a background process which tries to write to its controlling terminal.
+    tostop: bool = false,
+    /// If ECHO is set, terminal special characters other than TAB, NL, START, and STOP are echoed as ^X.
+    echoctl: bool = false,
+    /// If ICANON and ECHO are set, characters are printed as they are being erased.
+    echoprt: bool = false,
+    /// If ICANON is set, KILL is echoed by erasing each character on the line.
+    echoke: bool = false,
+    /// Output is being flushed.
+    flusho: bool = false,
+    /// Reserved.
+    _13: u1 = 0,
+    /// All characters in the input queue are reprinted when the next character is read.
+    pendin: bool = false,
+    /// Enable implementation-defined input processing.
+    iexten: bool = false,
+    ///
+    extproc: bool = false,
+    /// Reserved.
+    _17: u15 = 0,
+} else if (builtin.cpu.arch.isX86()) packed struct(u32) {
     /// When any of INTR, QUIT, SUSP, or DSUSP are received, generate a signal.
     isig: bool = false,
     /// Enable canonical mode.
