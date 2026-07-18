@@ -4,9 +4,10 @@
 
 ![Lint](https://github.com/smallkirby/urthr/actions/workflows/lint.yml/badge.svg)
 ![Unit Tests](https://github.com/smallkirby/urthr/actions/workflows/unittest.yml/badge.svg)
-![Build Rpi5](https://github.com/smallkirby/urthr/actions/workflows/build.yml/badge.svg)
+![Build Rpi5](https://github.com/smallkirby/urthr/actions/workflows/build-rpi5.yml/badge.svg)
 ![Runtime Test RPi4b](https://github.com/smallkirby/urthr/actions/workflows/runtime-test-rpi4b.yml/badge.svg)
 ![Runtime Test QEMU virt](https://github.com/smallkirby/urthr/actions/workflows/runtime-test-virt.yml/badge.svg)
+![Build Q35](https://github.com/smallkirby/urthr/actions/workflows/build-q35.yml/badge.svg)
 
 <p align="center">
   <strong><em>
