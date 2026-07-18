@@ -23,9 +23,6 @@ pub fn main() uefi.Status {
 /// Path to Urthr kernel ELF on the EFI System Partition.
 const kernel_path = "efi\\boot\\remote";
 
-/// Physical address to load kernel image.
-const kphys = 0x40_0000; // TODO
-
 fn zmain() !void {
     // Initialize SimpleTextOutput.
     const con_out = uefi.system_table.con_out orelse {
@@ -77,7 +74,8 @@ fn zmain() !void {
 
     // Load Urthr kernel.
     log.info("Loading Urthr kernel.", .{});
-    const header = try MemSkuld.load(kimage);
+    const linfo = try MemSkuld.load(bs, kimage);
+    const header = linfo.header;
 
     // Parse Urthr header and map the kernel.
     const kentry = blk: {
@@ -91,7 +89,7 @@ fn zmain() !void {
         log.info("  Checksum : {s}", .{std.fmt.bytesToHex(header.checksum[0..], .upper)});
 
         // Map the kernel to the specified virtual address.
-        break :blk try mapKernel(bs, header);
+        break :blk try mapKernel(bs, header, linfo.kphys);
     };
 
     // Clean up.
@@ -168,7 +166,7 @@ fn toUcs2(comptime s: [:0]const u8) [s.len:0]u16 {
 }
 
 /// Map the Urthr kernel into memory and return the entry point.
-fn mapKernel(bs: *BootServices, header: UrthrHeader) !*KernelEntry {
+fn mapKernel(bs: *BootServices, header: UrthrHeader, kphys: usize) !*KernelEntry {
     // Set the page table to be writable.
     try mmu.setLv4Writable(bs);
 
@@ -190,13 +188,26 @@ fn mapKernel(bs: *BootServices, header: UrthrHeader) !*KernelEntry {
     return @ptrFromInt(header.entry);
 }
 
+/// Result of loading the Urthr kernel image into physical memory.
+const LoadInfo = struct {
+    /// Urthr header.
+    header: UrthrHeader,
+    /// Physical address the kernel was loaded at.
+    kphys: usize,
+};
+
 /// Urthr kernel loader that loads the image from the given memory.
 const MemSkuld = struct {
-    pub fn load(image: []const u8) !UrthrHeader {
+    pub fn load(bs: *BootServices, image: []const u8) !LoadInfo {
         const header: *const UrthrHeader = @ptrCast(@alignCast(image.ptr));
         if (!header.valid()) {
             return error.InvalidHeader;
         }
+
+        // Find and allocate contiguous physical memory to load the kernel into.
+        const kpages = util.roundup(header.mem_size, mmu.page_size_4k) / mmu.page_size_4k;
+        const mem = try bs.allocatePages(.any, .loader_data, kpages);
+        const kphys = @intFromPtr(mem.ptr);
 
         // Copy to the load address while decoding if needed.
         const source = image[@sizeOf(UrthrHeader)..];
@@ -222,7 +233,7 @@ const MemSkuld = struct {
             return error.InvalidChecksum;
         }
 
-        return header.*;
+        return .{ .header = header.*, .kphys = kphys };
     }
 };
 
