@@ -5,6 +5,9 @@
 .global _start
 
 _start:
+  # Save argument.
+  movq  %rdi, %r15
+
   # Clear BSS.
   cld
   lea   __bss_start(%rip), %rdi
@@ -18,6 +21,7 @@ _start:
   lea   _boot_stack(%rip), %rsp
 
   # Jump to kernel entry point.
+  movq  %r15, %rdi
   lea   kmain(%rip), %rax
   call  *%rax
 

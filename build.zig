@@ -229,6 +229,7 @@ pub fn build(b: *std.Build) !void {
     {
         board_module.addImport("common", common_module);
         board_module.addImport("arch", arch_module);
+        board_module.addImport("boot", boot_module);
         board_module.addImport("dd", dd_module);
         board_module.addImport("urthr", urthr_module);
         board_module.addImport("options", options_module);

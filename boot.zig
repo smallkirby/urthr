@@ -71,8 +71,66 @@ pub const UrthrHeader = extern struct {
     }
 };
 
+/// Information passed to Urthr kernel from Wyrd bootloader.
+pub const BootInfo = switch (builtin.cpu.arch) {
+    .aarch64 => void,
+
+    .x86_64 => extern struct {
+        /// Located at .boot_services_data.
+        memory_map: MemoryMap,
+
+        const uefi = std.os.uefi;
+
+        /// Memory map provided by UEFI.
+        pub const MemoryMap = extern struct {
+            buffer_size: usize,
+            descriptors: [*]uefi.tables.MemoryDescriptor,
+            map_size: usize,
+            map_key: uefi.tables.MemoryMapKey,
+            descriptor_size: usize,
+            descriptor_version: u32,
+        };
+
+        /// Memory descriptor iterator.
+        pub const MemoryDescriptorIterator = struct {
+            const Self = @This();
+            const Md = uefi.tables.MemoryDescriptor;
+
+            descriptors: [*]Md,
+            current: *Md,
+            descriptor_size: usize,
+            total_size: usize,
+
+            pub fn new(map: MemoryMap) Self {
+                return Self{
+                    .descriptors = map.descriptors,
+                    .current = @ptrCast(map.descriptors),
+                    .descriptor_size = map.descriptor_size,
+                    .total_size = map.map_size,
+                };
+            }
+
+            pub fn next(self: *Self) ?*Md {
+                const ret = self.peek() orelse return null;
+                self.current = @ptrFromInt(@intFromPtr(self.current) + self.descriptor_size);
+                return ret;
+            }
+
+            pub fn peek(self: *Self) ?*Md {
+                if (@intFromPtr(self.current) >= @intFromPtr(self.descriptors) + self.total_size) {
+                    return null;
+                }
+                return self.current;
+            }
+        };
+    },
+
+    else => @compileError("Unsupported architecture"),
+};
+
 // =============================================================
 // Imports
 // =============================================================
 
+const builtin = @import("builtin");
 const std = @import("std");

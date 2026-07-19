@@ -8,7 +8,7 @@ pub const std_options = std.Options{
 };
 
 /// Kernel entry point signature.
-const KernelEntry = fn () callconv(.c) noreturn;
+const KernelEntry = fn (boot_info: usize) callconv(.{ .x86_64_sysv = .{} }) noreturn;
 
 /// Entry point for Skuld bootloader.
 pub fn main() uefi.Status {
@@ -109,7 +109,10 @@ fn zmain() !void {
 
     // Jump to the kernel entry point.
     {
-        kentry();
+        const info = BootInfo{
+            .memory_map = map,
+        };
+        kentry(@intFromPtr(&info));
     }
 
     // Unreachable.
@@ -146,16 +149,6 @@ fn getMemoryMap(bs: *BootServices) !MemoryMap {
         .descriptor_version = slice.info.descriptor_version,
     };
 }
-
-/// Memory map provided by UEFI.
-pub const MemoryMap = extern struct {
-    buffer_size: usize,
-    descriptors: [*]uefi.tables.MemoryDescriptor,
-    map_size: usize,
-    map_key: uefi.tables.MemoryMapKey,
-    descriptor_size: usize,
-    descriptor_version: u32,
-};
 
 /// Convert ASCII string to UCS-2 slice.
 fn toUcs2(comptime s: [:0]const u8) [s.len:0]u16 {
@@ -248,6 +241,8 @@ const BootServices = uefi.tables.BootServices;
 const File = uefi.protocol.File;
 const boot = @import("boot");
 const UrthrHeader = boot.UrthrHeader;
+const BootInfo = boot.BootInfo;
+const MemoryMap = BootInfo.MemoryMap;
 const common = @import("common");
 const units = common.units;
 const util = common.util;

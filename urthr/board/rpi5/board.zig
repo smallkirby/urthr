@@ -19,7 +19,7 @@ const gem_mac = net.ether.MacAddr.encode("B8:27:EB:00:00:00");
 var xhc: ?*dd.usb.Xhc = null;
 
 /// Get available memory region that we can use for booting the kernel.
-pub fn getBootRegion(comptime size: usize) common.Range {
+pub fn getBootRegion(comptime size: usize, _: anytype) common.Range {
     urd.comptimeAssert(
         memmap.loader + size <= memmap.loader_reserved.start,
         \\Region reserved for boot-time allocator overwraps the bootloader region.

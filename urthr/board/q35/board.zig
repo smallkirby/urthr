@@ -12,8 +12,29 @@ pub const num_cpus = 1;
 var exception_handler: ?ExceptionHandler = null;
 
 /// Get available memory region that we can use for booting the kernel.
-pub fn getBootRegion(comptime _: usize) common.Range {
-    urd.unimplemented("");
+pub fn getBootRegion(comptime size: usize, binfo_ptr: anytype) common.Range {
+    const boot_info: *const BootInfo = @ptrFromInt(binfo_ptr);
+    const map = boot_info.memory_map;
+
+    const MemoryDescriptorIterator = BootInfo.MemoryDescriptorIterator;
+    const efi_page_size = 4096;
+    var desc_iter = MemoryDescriptorIterator.new(map);
+    var desc = desc_iter.next();
+    while (desc) |d| : (desc = desc_iter.next()) {
+        if (d.type != .conventional_memory) {
+            continue;
+        }
+        if (d.number_of_pages * efi_page_size < size) {
+            continue;
+        }
+
+        return .{
+            .start = d.physical_start,
+            .end = d.physical_start + size,
+        };
+    }
+
+    @panic("No available memory region found.");
 }
 
 /// Early board initialization.
@@ -158,6 +179,7 @@ const std = @import("std");
 const log = std.log.scoped(.q35);
 const arch = @import("arch").impl;
 const common = @import("common");
+const BootInfo = @import("boot").BootInfo;
 const rtt = common.rtt;
 const util = common.util;
 const Console = common.Console;

@@ -9,7 +9,7 @@ pub const std_options = std.Options{
 pub const panic = @import("kernel/panic.zig").panic_fn;
 
 /// Zig entry point for Urthr kernel.
-export fn kmain() callconv(.c) noreturn {
+export fn kmain(boot_info: usize) callconv(.c) noreturn {
     // Early board initialization.
     board.boot();
 
@@ -24,15 +24,14 @@ export fn kmain() callconv(.c) noreturn {
     log.info("Booting Urthr...", .{});
 
     // Init early page allocator.
-    // We assume loader < loader reserved < kernel,
-    // and the loader region is larger than 1 MiB.
     {
         const boot_worksize = 1 * units.mib;
-        const pa_reserved = board.getBootRegion(boot_worksize);
+        const pa_reserved = board.getBootRegion(boot_worksize, boot_info);
         urd.mem.boot.init(pa_reserved.start, pa_reserved.size());
         log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
     }
 
+    // Run main boot sequence.
     zmain() catch |err| {
         log.err("ERROR: {}", .{err});
     };
