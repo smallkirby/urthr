@@ -69,14 +69,27 @@ const CacheOp = enum {
 };
 
 pub const intr = struct {
-    /// Mask all exceptions.
+    /// Mask all maskable interrupts.
+    ///
+    /// Returns the previous RFLAGS so it can be restored later.
     pub fn maskAll() u64 {
-        @panic("unimplemented");
+        return asm volatile (
+            \\pushfq
+            \\cli
+            \\popq %[flags]
+            : [flags] "=r" (-> u64),
+            :
+            : .{ .memory = true });
     }
 
     /// Set exception mask.
-    pub fn setMask(_: u64) void {
-        @panic("unimplemented");
+    pub fn setMask(flags: u64) void {
+        asm volatile (
+            \\pushq %[flags]
+            \\popfq
+            :
+            : [flags] "r" (flags),
+            : .{ .memory = true, .cc = true });
     }
 
     /// Set the exception handler function.

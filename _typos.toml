@@ -32,3 +32,6 @@ flate = "flate"
 sme = "sme"
 # GITS Translater Register
 translater = "translater"
+# 16550 UART
+thr = "thr"
+thre = "thre"

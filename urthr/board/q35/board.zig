@@ -14,7 +14,8 @@ pub const num_cpus = 1;
 ///
 /// Expects all virtual address range is identity-mapped.
 pub fn boot() void {
-    urd.unimplemented("");
+    dd.uart16550.setBase(0x3F8);
+    dd.uart16550.init(1_843_200, 115_200); // 1.8432 MHz, 115200 bps
 }
 
 /// Map new I/O memory regions.
@@ -100,7 +101,13 @@ pub fn getBlockDevice() ?common.block.Device {
 ///
 /// This is a zero cost operation with no runtime overhead.
 pub fn getConsole() Console {
-    urd.unimplemented("");
+    return .{
+        .vtable = .{
+            .putc = console.putc,
+            .flush = console.flush,
+        },
+        .ctx = &.{},
+    };
 }
 
 /// Get the regions that must be identity-mapped during boot.
@@ -114,6 +121,17 @@ pub inline fn getTempMaps() []const common.Range {
 pub fn reset(_: u8) void {
     urd.unimplemented("");
 }
+
+/// Wrapper functions for console API.
+const console = struct {
+    fn putc(_: *anyopaque, c: u8) void {
+        return dd.uart16550.putc(c);
+    }
+
+    fn flush(_: *anyopaque) void {
+        return dd.uart16550.flush();
+    }
+};
 
 // =============================================================
 // Imports
