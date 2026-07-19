@@ -8,7 +8,7 @@ pub const user = Range{
 };
 
 pub const linear = Range{
-    .start = 0xFFFF_0000_0000_0000,
+    .start = 0xFFFF_8000_0000_0000,
     .end = 0xFFFF_C000_0000_0000,
 };
 
