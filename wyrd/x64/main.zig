@@ -189,6 +189,28 @@ const LoadInfo = struct {
     kphys: usize,
 };
 
+/// Allocate `pages` pages of physical memory aligned to `alignment` bytes.
+fn alignedAllocPages(bs: *BootServices, mem_type: uefi.tables.MemoryType, pages: usize, alignment: usize) ![]align(4096) uefi.Page {
+    const align_pages = alignment / mmu.page_size_4k;
+    const over_pages = pages + align_pages - 1;
+
+    // Allocate over-sized memory and free it to get an aligned address.
+    const mem = try bs.allocatePages(
+        .any,
+        mem_type,
+        over_pages,
+    );
+    const aligned_addr = std.mem.alignForward(usize, @intFromPtr(mem.ptr), alignment);
+    try bs.freePages(mem);
+
+    // Allocate at aligned address.
+    return bs.allocatePages(
+        .{ .address = @ptrFromInt(aligned_addr) },
+        mem_type,
+        pages,
+    );
+}
+
 /// Urthr kernel loader that loads the image from the given memory.
 const MemWyrd = struct {
     pub fn load(bs: *BootServices, image: []const u8) !LoadInfo {
@@ -199,7 +221,12 @@ const MemWyrd = struct {
 
         // Find and allocate contiguous physical memory to load the kernel into.
         const kpages = util.roundup(header.mem_size, mmu.page_size_4k) / mmu.page_size_4k;
-        const mem = try bs.allocatePages(.any, .loader_data, kpages);
+        const mem = try alignedAllocPages(
+            bs,
+            .loader_data,
+            kpages,
+            mmu.page_size_2mb,
+        );
         const kphys = @intFromPtr(mem.ptr);
 
         // Copy to the load address while decoding if needed.
