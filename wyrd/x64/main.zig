@@ -1,4 +1,4 @@
-//! Skuld: UEFI bootloader for x64 Urthr OS.
+//! Wyrd: UEFI bootloader for x64 Urthr OS.
 
 /// Override the standard options.
 pub const std_options = std.Options{
@@ -10,7 +10,7 @@ pub const std_options = std.Options{
 /// Kernel entry point signature.
 const KernelEntry = fn (boot_info: usize) callconv(.{ .x86_64_sysv = .{} }) noreturn;
 
-/// Entry point for Skuld bootloader.
+/// Entry point for Wyrd bootloader.
 pub fn main() uefi.Status {
     zmain() catch |e| {
         log.err("Failed to boot: {t}", .{e});
@@ -32,7 +32,7 @@ fn zmain() !void {
 
     // Initialize logging.
     klog.init(con_out);
-    log.info("Booting Skuld.", .{});
+    log.info("Booting Wyrd.", .{});
 
     // Get boot services.
     log.info("Locating boot services.", .{});
@@ -74,7 +74,7 @@ fn zmain() !void {
 
     // Load Urthr kernel.
     log.info("Loading Urthr kernel.", .{});
-    const linfo = try MemSkuld.load(bs, kimage);
+    const linfo = try MemWyrd.load(bs, kimage);
     const header = linfo.header;
 
     // Parse Urthr header and map the kernel.
@@ -190,7 +190,7 @@ const LoadInfo = struct {
 };
 
 /// Urthr kernel loader that loads the image from the given memory.
-const MemSkuld = struct {
+const MemWyrd = struct {
     pub fn load(bs: *BootServices, image: []const u8) !LoadInfo {
         const header: *const UrthrHeader = @ptrCast(@alignCast(image.ptr));
         if (!header.valid()) {
@@ -235,7 +235,7 @@ const MemSkuld = struct {
 // =============================================================
 
 const std = @import("std");
-const log = std.log.scoped(.skuld);
+const log = std.log.scoped(.wyrd);
 const uefi = std.os.uefi;
 const BootServices = uefi.tables.BootServices;
 const File = uefi.protocol.File;
