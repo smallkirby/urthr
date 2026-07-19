@@ -47,10 +47,13 @@ pub fn boot() void {
     dd.uart16550.init(1_843_200, 115_200); // 1.8432 MHz, 115200 bps
 }
 
-/// Map new I/O memory regions.
-pub fn remap(_: IoAllocator) IoAllocator.Error!void {
-    urd.unimplemented("");
+/// Get the regions that must be identity-mapped during boot.
+pub inline fn getTempMaps() []const common.Range {
+    return &.{};
 }
+
+/// Map new I/O memory regions.
+pub fn remap(_: IoAllocator) IoAllocator.Error!void {}
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {
@@ -146,11 +149,6 @@ pub fn getConsole() Console {
         },
         .ctx = &.{},
     };
-}
-
-/// Get the regions that must be identity-mapped during boot.
-pub inline fn getTempMaps() []const common.Range {
-    urd.unimplemented("");
 }
 
 /// Trigger a system cold reset.
