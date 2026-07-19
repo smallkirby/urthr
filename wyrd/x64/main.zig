@@ -99,11 +99,6 @@ fn zmain() !void {
     // Get memory map.
     var map = try getMemoryMap(bs);
 
-    // Jump to the kernel entry point.
-    {
-        kentry();
-    }
-
     // Exit boot services.
     log.info("Exiting boot services.", .{});
     bs.exitBootServices(uefi.handle, map.map_key) catch |e| {
@@ -111,6 +106,11 @@ fn zmain() !void {
         map = try getMemoryMap(bs);
         try bs.exitBootServices(uefi.handle, map.map_key);
     };
+
+    // Jump to the kernel entry point.
+    {
+        kentry();
+    }
 
     // Unreachable.
     while (true) {
