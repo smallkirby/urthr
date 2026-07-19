@@ -8,6 +8,9 @@ pub const ExceptionHandler = *const fn (u64) ?void;
 /// Number of CPU cores in the system.
 pub const num_cpus = 1;
 
+/// Exception handler called when an IRQ occurs.
+var exception_handler: ?ExceptionHandler = null;
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -78,8 +81,12 @@ pub fn getRandom(_: []u8) void {
 }
 
 /// Set the exception handler for IRQs.
-pub fn initIrqGlobal(_: anytype) void {
-    urd.unimplemented("");
+pub fn initIrqGlobal(f: ExceptionHandler) void {
+    // Set exception handler stub.
+    exception_handler = f;
+
+    // Set exception handler.
+    arch.intr.setHandler(handleIrq);
 }
 
 /// Initialize GIC for the calling AP.
@@ -90,6 +97,11 @@ pub fn initIrqLocal() common.mem.PageAllocator.Error!void {
 /// Enable an interrupt by ID.
 pub fn enableIrq(_: usize) void {
     urd.unimplemented("");
+}
+
+/// IRQ handler function.
+fn handleIrq() ?void {
+    urd.unimplemented("handleIrq");
 }
 
 /// Get the block device interface.

@@ -93,7 +93,7 @@ pub const intr = struct {
     }
 
     /// Set the exception handler function.
-    pub fn setHandler(_: anytype) void {
-        @panic("unimplemented");
+    pub fn setHandler(handler: exception.HandlerSignature) void {
+        exception.setHandler(handler);
     }
 };
