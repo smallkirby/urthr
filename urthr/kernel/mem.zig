@@ -23,7 +23,7 @@ pub const size_2mib = common.mem.size_2mib;
 pub const size_1gib = common.mem.size_1gib;
 
 /// Init task's page table.
-var init_pt: arch.mmu.PageTablePair = .{};
+var init_as: arch.mmu.AddressSpace = .{};
 
 /// Initialize memory management.
 ///
@@ -31,15 +31,15 @@ var init_pt: arch.mmu.PageTablePair = .{};
 pub fn init() Error!void {
     const allocator = boot.interface();
 
-    // Allocate kernel root page table and init task's user page table.
-    init_pt = try arch.mmu.createPageTablePair(allocator);
+    // Allocate kernel root address space and init task's user address space.
+    init_as = try arch.mmu.createAddressSpace(allocator);
 
     // Kernel mapping: 2MiB granule, RWX, normal.
     log.debug("Mapping kernel.", .{});
     {
         rtt.expectEqual(0, pmap.kernel % size_2mib);
         rtt.expectEqual(0, vmap.kernel.start % size_2mib);
-        try arch.mmu.map2mb(init_pt, .{
+        try arch.mmu.map2mb(init_as, .{
             .pa = pmap.kernel,
             .va = vmap.kernel.start,
             .size = util.roundup(kernelSize(), 2 * units.mib),
@@ -52,7 +52,7 @@ pub fn init() Error!void {
     log.debug("Mapping linear memory.", .{});
     {
         for (pmap.drams) |dram| {
-            try arch.mmu.map1gb(init_pt, .{
+            try arch.mmu.map1gb(init_as, .{
                 .pa = dram.start,
                 .va = vmap.linear.start + dram.start,
                 .size = dram.size(),
@@ -66,7 +66,7 @@ pub fn init() Error!void {
     log.debug("Mapping device memory.", .{});
     {
         for (board.getTempMaps()) |range| {
-            try arch.mmu.map4kb(init_pt, .{
+            try arch.mmu.map4kb(init_as, .{
                 .pa = range.start,
                 .va = range.start,
                 .size = range.size(),
@@ -76,9 +76,9 @@ pub fn init() Error!void {
         }
     }
 
-    // Switch to the new page table.
+    // Switch to the new address space.
     log.debug("Switching to new page table.", .{});
-    arch.mmu.enable(init_pt, allocator);
+    arch.mmu.enable(init_as, allocator);
 }
 
 /// Initialize allocators.
@@ -97,8 +97,7 @@ pub fn initAllocators() Error!void {
     buddy_impl.init(&avails, &reserveds, log.debug);
 
     // Update page table virtual address.
-    init_pt.l0.?._tbl = page.translateV(init_pt.l0.?._tbl);
-    init_pt.l1.?._tbl = page.translateV(init_pt.l1.?._tbl);
+    arch.mmu.relocate(&init_as, page);
 
     // Bin allocator.
     bin_impl.init(page);
@@ -141,19 +140,16 @@ pub fn remapBoard() Error!void {
     try board.remap(phys_impl.interface);
 }
 
-/// Get the kernel page table.
+/// Get the kernel address space.
 ///
-/// The returned table pair does not contain the user page table.
-pub fn getKernelPageTable() arch.mmu.PageTablePair {
-    return .{
-        .l0 = null,
-        .l1 = init_pt.l1,
-    };
+/// The returned address space does not contain the user mapping.
+pub fn getKernelPageTable() arch.mmu.AddressSpace {
+    return init_as.kernelOnly();
 }
 
-/// Get the initial task's page table.
-pub fn getInitPageTablePair() arch.mmu.PageTablePair {
-    return init_pt;
+/// Get the initial task's address space.
+pub fn getInitAddressSpace() arch.mmu.AddressSpace {
+    return init_as;
 }
 
 /// Check if the given address is a user-space address.

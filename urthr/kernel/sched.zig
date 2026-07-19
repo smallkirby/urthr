@@ -130,7 +130,7 @@ fn blockCurrentImpl(caller_lock: ?*SpinLock) void {
     next.state = .running;
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
+    arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
 
     // Release locks before switching.
     lock.unlock();
@@ -169,7 +169,7 @@ pub fn reschedule() void {
     setCurrent(next);
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
+    arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
 
     // Release lock before switching. IRQs remain disabled until restored.
     lock.unlock();
@@ -204,7 +204,7 @@ pub fn exitCurrent() noreturn {
     next.state = .running;
 
     // Switch user-space page table if needed.
-    arch.mmu.switchUserTable(next.vmm.pgtbl.l0, urd.mem.page);
+    arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
 
     // Release lock before switching. IRQs remain disabled.
     lock.unlock();

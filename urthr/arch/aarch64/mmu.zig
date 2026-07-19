@@ -57,25 +57,43 @@ const Granule = enum {
     }
 };
 
-/// Describes a pair of page tables.
-pub const PageTablePair = struct {
-    /// Virtual address of the page table for lower VA range.
-    l0: ?PageTable = null,
-    /// Virtual address of the page table for higher VA range.
-    l1: ?PageTable = null,
+/// Describes a virtual address space.
+///
+/// Internal fields are an aarch64-specific detail
+/// and must not be accessed outside this file.
+pub const AddressSpace = struct {
+    /// Table for the lower VA range.
+    _l0: ?PageTable = null,
+    /// Table for the higher VA range.
+    _l1: ?PageTable = null,
 
     /// Select the page table for the given virtual address.
-    pub fn select(self: PageTablePair, va: usize) PageTable {
+    pub fn select(self: AddressSpace, va: usize) PageTable {
         const top = va >> 48;
         if (top == 0) {
-            rtt.expect(self.l0 != null);
-            return self.l0.?;
+            rtt.expect(self._l0 != null);
+            return self._l0.?;
         } else if (top == 0xFFFF) {
-            rtt.expect(self.l1 != null);
-            return self.l1.?;
+            rtt.expect(self._l1 != null);
+            return self._l1.?;
         } else {
             @panic("Non-canonical address to select page table.");
         }
+    }
+
+    /// Returns whether this address space has no user table.
+    pub fn isKernelOnly(self: AddressSpace) bool {
+        return self._l0 == null;
+    }
+
+    /// Returns a copy of this address space with the user table dropped.
+    pub fn kernelOnly(self: AddressSpace) AddressSpace {
+        return .{ ._l1 = self._l1 };
+    }
+
+    /// Returns a copy of this address space with the user table replaced.
+    pub fn withUserTable(self: AddressSpace, user: PageTable) AddressSpace {
+        return .{ ._l0 = user, ._l1 = self._l1 };
     }
 };
 
@@ -94,46 +112,55 @@ pub fn createPageTable(allocator: PageAllocator) Error!PageTable {
     return .{ ._tbl = try allocNewTable(allocator, TableDesc) };
 }
 
-/// Allocate a new pair of root page tables.
-pub fn createPageTablePair(allocator: PageAllocator) Error!PageTablePair {
+/// Allocate a new address space with fresh kernel and user root tables.
+pub fn createAddressSpace(allocator: PageAllocator) Error!AddressSpace {
     return .{
-        .l0 = try createPageTable(allocator),
-        .l1 = try createPageTable(allocator),
+        ._l0 = try createPageTable(allocator),
+        ._l1 = try createPageTable(allocator),
     };
 }
 
+/// Fix up the table addresses held by the address space.
+///
+/// This function is intended to be called after identity-mapping is unmapped
+/// to fix up the virtual address of the page tables.
+pub fn relocate(pt: *AddressSpace, allocator: PageAllocator) void {
+    if (pt._l0) |*t| t._tbl = allocator.translateV(t._tbl);
+    if (pt._l1) |*t| t._tbl = allocator.translateV(t._tbl);
+}
+
 /// Maps the VA to PA using 4KiB pages.
-pub fn map4kb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+pub fn map4kb(pt: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
     return mapImpl(pt.select(arg.va), arg, .@"4kb", opts, allocator);
 }
 
 /// Maps the VA to PA using 2MiB pages.
-pub fn map2mb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+pub fn map2mb(pt: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
     return mapImpl(pt.select(arg.va), arg, .@"2mb", opts, allocator);
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(pt: PageTablePair, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
+pub fn map1gb(pt: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: PageAllocator) Error!void {
     return mapImpl(pt.select(arg.va), arg, .@"1gb", opts, allocator);
 }
 
 /// Changes permissions of an existing VA range using 4KiB pages.
-pub fn remap4kb(pt: PageTablePair, va: usize, size: usize, perm: Permission, allocator: PageAllocator) Error!void {
+pub fn remap4kb(pt: AddressSpace, va: usize, size: usize, perm: Permission, allocator: PageAllocator) Error!void {
     return remapImpl(pt.select(va), va, size, .@"4kb", perm, allocator);
 }
 
 /// Unmaps the VA range using 4KiB pages.
-pub fn unmap4kb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
+pub fn unmap4kb(pt: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
     return unmapImpl(pt.select(va), va, size, .@"4kb", allocator);
 }
 
 /// Unmaps the VA range using 2MiB pages.
-pub fn unmap2mb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
+pub fn unmap2mb(pt: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
     return unmapImpl(pt.select(va), va, size, .@"2mb", allocator);
 }
 
 /// Unmaps the VA range using 1GiB pages.
-pub fn unmap1gb(pt: PageTablePair, va: usize, size: usize, allocator: PageAllocator) Error!void {
+pub fn unmap1gb(pt: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
     return unmapImpl(pt.select(va), va, size, .@"1gb", allocator);
 }
 
@@ -242,12 +269,12 @@ fn lookupEntry(root: []TableDesc, va: usize, level: Level, allocator: PageAlloca
 }
 
 /// Enable MMU.
-pub fn enable(pt: PageTablePair, allocator: PageAllocator) void {
-    rtt.expect(pt.l0 != null);
-    rtt.expect(pt.l1 != null);
+pub fn enable(pt: AddressSpace, allocator: PageAllocator) void {
+    rtt.expect(pt._l0 != null);
+    rtt.expect(pt._l1 != null);
 
-    const l0_0_phys = pt.l0.?.phys(allocator);
-    const l0_1_phys = pt.l1.?.phys(allocator);
+    const l0_0_phys = pt._l0.?.phys(allocator);
+    const l0_1_phys = pt._l1.?.phys(allocator);
 
     // Configure TCR_EL1.
     const tcr = regs.Tcr{
@@ -304,13 +331,13 @@ pub fn enable(pt: PageTablePair, allocator: PageAllocator) void {
     );
 }
 
-/// Switch the user-space page table (TTBR0_EL1) to the given page table.
+/// Switch the user-space page table (TTBR0_EL1) to the user table.
 ///
-/// If `l0` is null, TTBR0_EL1 is cleared.
+/// If `as` has no user address space, TTBR0_EL1 is cleared.
 /// TLB is flushed after the switch.
-pub fn switchUserTable(l0: ?PageTable, allocator: PageAllocator) void {
+pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
     am.msr(.ttbr0_el1, regs.Ttbr0El1{
-        .addr = if (l0) |tbl| @intCast(tbl.phys(allocator)) else 0,
+        .addr = if (as._l0) |tbl| @intCast(tbl.phys(allocator)) else 0,
         .asid = 0,
     });
 

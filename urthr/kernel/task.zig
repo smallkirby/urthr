@@ -130,11 +130,11 @@ pub fn execve(
     const old_vm = current.vmm;
     const new_vm = try Vmm.new(allocator, mem.getKernelPageTable());
     current.vmm = new_vm;
-    arch.mmu.switchUserTable(new_vm.pgtbl.l0, mem.page);
+    arch.mmu.switchAddressSpace(new_vm.as, mem.page);
     // Rollback VM on failure.
     errdefer {
         current.vmm = old_vm;
-        arch.mmu.switchUserTable(old_vm.pgtbl.l0, mem.page);
+        arch.mmu.switchAddressSpace(old_vm.as, mem.page);
         new_vm.deinit(allocator);
     }
 

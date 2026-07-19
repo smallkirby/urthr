@@ -21,16 +21,31 @@ pub const MapOptions = struct {
     exact: bool = true,
 };
 
-/// Describes a pair of page tables.
-pub const PageTablePair = struct {
-    /// Virtual address of the page table for lower VA range.
-    l0: ?PageTable = null,
-    /// Virtual address of the page table for higher VA range.
-    l1: ?PageTable = null,
+/// Describes a virtual address space.
+///
+/// Internal fields are arch-specific and must not be accessed outside this file.
+pub const AddressSpace = struct {
+    _l0: ?PageTable = null,
+    _l1: ?PageTable = null,
 
     /// Select the page table for the given virtual address.
-    pub fn select(_: PageTablePair, _: usize) PageTable {
+    pub fn select(_: AddressSpace, _: usize) PageTable {
         @panic("unimplemented");
+    }
+
+    /// Returns whether this address space has no user (lower VA range) table.
+    pub fn isKernelOnly(self: AddressSpace) bool {
+        return self._l0 == null;
+    }
+
+    /// Returns a copy of this address space with the user table dropped.
+    pub fn kernelOnly(self: AddressSpace) AddressSpace {
+        return .{ ._l1 = self._l1 };
+    }
+
+    /// Returns a copy of this address space with the user table replaced.
+    pub fn withUserTable(self: AddressSpace, user: PageTable) AddressSpace {
+        return .{ ._l0 = user, ._l1 = self._l1 };
     }
 };
 
@@ -48,56 +63,64 @@ pub fn createPageTable(_: PageAllocator) Error!PageTable {
     @panic("unimplemented");
 }
 
-/// Allocate a new pair of root page tables.
-pub fn createPageTablePair(_: PageAllocator) Error!PageTablePair {
+/// Allocate a new address space with fresh kernel and user root tables.
+pub fn createAddressSpace(_: PageAllocator) Error!AddressSpace {
+    @panic("unimplemented");
+}
+
+/// Fix up the table addresses held by the address space.
+///
+/// This function is intended to be called after identity-mapping is unmapped
+/// to fix up the virtual address of the page tables.
+pub fn relocate(_: *AddressSpace, _: PageAllocator) void {
     @panic("unimplemented");
 }
 
 /// Maps the VA to PA using 4KiB pages.
-pub fn map4kb(_: PageTablePair, _: MapArgument, _: MapOptions, _: PageAllocator) Error!void {
+pub fn map4kb(_: AddressSpace, _: MapArgument, _: MapOptions, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Maps the VA to PA using 2MiB pages.
-pub fn map2mb(_: PageTablePair, _: MapArgument, _: MapOptions, _: PageAllocator) Error!void {
+pub fn map2mb(_: AddressSpace, _: MapArgument, _: MapOptions, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Maps the VA to PA using 1GiB pages.
-pub fn map1gb(_: PageTablePair, _: MapArgument, _: MapOptions, _: PageAllocator) Error!void {
+pub fn map1gb(_: AddressSpace, _: MapArgument, _: MapOptions, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Changes permissions of an existing VA range using 4KiB pages.
-pub fn remap4kb(_: PageTablePair, _: usize, _: usize, _: Permission, _: PageAllocator) Error!void {
+pub fn remap4kb(_: AddressSpace, _: usize, _: usize, _: Permission, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Unmaps the VA range using 4KiB pages.
-pub fn unmap4kb(_: PageTablePair, _: usize, _: usize, _: PageAllocator) Error!void {
+pub fn unmap4kb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Unmaps the VA range using 2MiB pages.
-pub fn unmap2mb(_: PageTablePair, _: usize, _: usize, _: PageAllocator) Error!void {
+pub fn unmap2mb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Unmaps the VA range using 1GiB pages.
-pub fn unmap1gb(_: PageTablePair, _: usize, _: usize, _: PageAllocator) Error!void {
+pub fn unmap1gb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!void {
     @panic("unimplemented");
 }
 
 /// Enable MMU.
-pub fn enable(_: PageTablePair, _: PageAllocator) void {
+pub fn enable(_: AddressSpace, _: PageAllocator) void {
     @panic("unimplemented");
 }
 
-/// Switch the user-space page table (TTBR0_EL1) to the given page table.
+/// Switch the user-space address space to the user address space of `pt`.
 ///
-/// If `l0` is null, TTBR0_EL1 is cleared.
+/// If `pt` has no user table, the user table is cleared.
 /// TLB is flushed after the switch.
-pub fn switchUserTable(_: ?PageTable, _: PageAllocator) void {
+pub fn switchAddressSpace(_: AddressSpace, _: PageAllocator) void {
     @panic("unimplemented");
 }
 

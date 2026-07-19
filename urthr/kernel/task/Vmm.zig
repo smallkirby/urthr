@@ -13,8 +13,8 @@ pub const Error = error{
     AlreadyMapped,
 } || common.mem.PageAllocator.Error || arch.mmu.Error;
 
-/// Page table for this task.
-pgtbl: arch.mmu.PageTablePair,
+/// Address space.
+as: arch.mmu.AddressSpace,
 /// Tree of virtual memory areas.
 tree: VmTree = .{},
 /// Program break.
@@ -28,8 +28,8 @@ refcnt: usize = 1,
 const mmap_base: usize = 0x0000_0040_0000_0000;
 
 /// Create a new instance.
-pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!*Self {
-    rtt.expectEqual(null, pgtbl.l0);
+pub fn new(allocator: Allocator, as: arch.mmu.AddressSpace) Allocator.Error!*Self {
+    rtt.expect(as.isKernelOnly());
 
     const vmm = try allocator.create(Self);
     errdefer allocator.destroy(vmm);
@@ -39,10 +39,7 @@ pub fn new(allocator: Allocator, pgtbl: arch.mmu.PageTablePair) Allocator.Error!
     ) catch return error.OutOfMemory;
 
     vmm.* = .{
-        .pgtbl = .{
-            .l0 = upgtbl,
-            .l1 = pgtbl.l1,
-        },
+        .as = as.withUserTable(upgtbl),
     };
 
     return vmm;
@@ -78,7 +75,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
     const child = try new(
         allocator,
-        .{ .l1 = self.pgtbl.l1 },
+        self.as.kernelOnly(),
     );
     errdefer child.deinit(allocator);
 
@@ -92,12 +89,12 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
         while (offset < vma.size) : (offset += urd.mem.page_size) {
             const va = vma.start + offset;
             const parent_pa = arch.mmu.translateWalk(
-                self.pgtbl.select(va),
+                self.as.select(va),
                 va,
                 urd.mem.page,
             ) orelse continue;
             const child_pa = arch.mmu.translateWalk(
-                child.pgtbl.select(va),
+                child.as.select(va),
                 va,
                 urd.mem.page,
             ) orelse unreachable;
@@ -138,7 +135,7 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
 
         // Map the pages to the given virtual address.
         const va = vaddr + i * urd.mem.page_size;
-        try arch.mmu.map4kb(self.pgtbl, .{
+        try arch.mmu.map4kb(self.as, .{
             .va = va,
             .pa = @intFromPtr(page.ptr),
             .size = size,
@@ -146,7 +143,7 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
             .attr = .normal,
         }, .{ .exact = true }, urd.mem.page);
         errdefer arch.mmu.unmap4kb(
-            self.pgtbl,
+            self.as,
             va,
             urd.mem.page_size,
             urd.mem.page,
@@ -190,7 +187,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     for (0..size / urd.mem.page_size) |i| {
         const va = vaddr + i * urd.mem.page_size;
         const pa = arch.mmu.translateWalk(
-            self.pgtbl.select(va),
+            self.as.select(va),
             va,
             urd.mem.page,
         ) orelse {
@@ -202,7 +199,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
         urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
         // Unmap the page.
         arch.mmu.unmap4kb(
-            self.pgtbl,
+            self.as,
             va,
             urd.mem.page_size,
             urd.mem.page,
@@ -222,7 +219,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
 
     // Update page table mapping.
     try arch.mmu.remap4kb(
-        self.pgtbl,
+        self.as,
         vaddr,
         size,
         perm,

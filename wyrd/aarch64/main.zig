@@ -72,7 +72,7 @@ export fn kmain() callconv(.c) noreturn {
     }
 
     // Allocate temporary page table that should be replaced later by Urthr.
-    const pt = arch.mmu.createPageTablePair(allocator.interface()) catch {
+    const as = arch.mmu.createAddressSpace(allocator.interface()) catch {
         @panic("Failed to allocate page table.");
     };
 
@@ -80,7 +80,7 @@ export fn kmain() callconv(.c) noreturn {
     {
         // Identity mapping for DRAM.
         const dram = board.memmap.drams[0];
-        arch.mmu.map1gb(pt, .{
+        arch.mmu.map1gb(as, .{
             .pa = dram.start,
             .va = dram.start,
             .size = dram.size(),
@@ -93,7 +93,7 @@ export fn kmain() callconv(.c) noreturn {
 
         // Identity mapping for UART.
         const uart = board.memmap.pl011;
-        arch.mmu.map1gb(pt, .{
+        arch.mmu.map1gb(as, .{
             .pa = uart.start,
             .va = uart.start,
             .size = uart.size(),
@@ -105,7 +105,7 @@ export fn kmain() callconv(.c) noreturn {
         log.info("Identity-mapped (UART): 0x{X:0>8} - 0x{X:0>8}", .{ uart.start, uart.end });
 
         // Enable MMU.
-        arch.mmu.enable(pt, allocator.interface());
+        arch.mmu.enable(as, allocator.interface());
         log.info("MMU enabled.", .{});
     }
 
@@ -134,7 +134,7 @@ export fn kmain() callconv(.c) noreturn {
         log.info("  Checksum : {s}", .{std.fmt.bytesToHex(header.checksum[0..], .upper)});
 
         // Map the kernel to the specified virtual address.
-        break :blk mapKernel(pt, header);
+        break :blk mapKernel(as, header);
     };
 
     // Jump to the kernel entry point.
@@ -151,14 +151,14 @@ export fn kmain() callconv(.c) noreturn {
 }
 
 /// Map the Urthr kernel into memory and return the entry point.
-fn mapKernel(pt: arch.mmu.PageTablePair, header: UrthrHeader) *KernelEntry {
+fn mapKernel(as: arch.mmu.AddressSpace, header: UrthrHeader) *KernelEntry {
     // Map kernel region.
     const page_size = 4 * units.kib;
     const va = util.rounddown(header.load_at, page_size);
     const pa = util.rounddown(board.memmap.kernel, page_size);
     const size = (board.memmap.kernel + header.mem_size) - pa;
     const aligned_size = util.roundup(size, page_size);
-    arch.mmu.map4kb(pt, .{
+    arch.mmu.map4kb(as, .{
         .pa = pa,
         .va = va,
         .size = aligned_size,

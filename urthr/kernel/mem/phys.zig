@@ -202,7 +202,7 @@ fn mapPage(virt: Virt, phys: Phys, max: usize, attr: Attribute) Error!usize {
 }
 
 fn unmapPage(virt: Virt, max: usize) Error!usize {
-    const pt = mem.getInitPageTablePair();
+    const pt = mem.getInitAddressSpace();
     const allocator = mem.page;
 
     // Unmap using 1GiB pages if possible.
