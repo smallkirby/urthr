@@ -11,6 +11,11 @@ pub const num_cpus = 1;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
+/// Get available memory region that we can use for booting the kernel.
+pub fn getBootRegion(comptime _: usize) common.Range {
+    urd.unimplemented("");
+}
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.

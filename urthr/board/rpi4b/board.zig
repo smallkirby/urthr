@@ -12,6 +12,23 @@ pub const num_cpus = 4;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
+/// Get available memory region that we can use for booting the kernel.
+pub fn getBootRegion(comptime size: usize) common.Range {
+    urd.comptimeAssert(
+        memmap.loader + size <= memmap.loader_reserved.start,
+        \\Region reserved for boot-time allocator overwraps the bootloader region.
+        \\  Loader Start + Work Buffer = 0x{X:0>8}
+        \\  Loader Reserved Start      = 0x{X:0>8}
+    ,
+        .{ memmap.loader + size, memmap.loader_reserved.start },
+    );
+
+    return common.Range{
+        .start = memmap.loader,
+        .end = memmap.loader + size,
+    };
+}
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like GPIO and UART.
@@ -355,6 +372,7 @@ const options = @import("options");
 const common = @import("common");
 const bits = common.bits;
 const rtt = common.rtt;
+const units = common.units;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
 const urd = @import("urthr");

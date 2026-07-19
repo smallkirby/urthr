@@ -24,6 +24,23 @@ var ecam: dd.pci.EcamHost = undefined;
 /// xHC device.
 var xhc: ?*dd.usb.Xhc = null;
 
+/// Get available memory region that we can use for booting the kernel.
+pub fn getBootRegion(comptime size: usize) common.Range {
+    urd.comptimeAssert(
+        memmap.loader + size <= memmap.loader_reserved.start,
+        \\Region reserved for boot-time allocator overwraps the bootloader region.
+        \\  Loader Start + Work Buffer = 0x{X:0>8}
+        \\  Loader Reserved Start      = 0x{X:0>8}
+    ,
+        .{ memmap.loader + size, memmap.loader_reserved.start },
+    );
+
+    return common.Range{
+        .start = memmap.loader,
+        .end = memmap.loader + size,
+    };
+}
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
