@@ -19,7 +19,7 @@ _start:
 
   # Jump to kernel entry point.
   lea   kmain(%rip), %rax
-  jmp   *%rax
+  call  *%rax
 
 .Lhang:
   hlt
