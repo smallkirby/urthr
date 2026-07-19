@@ -110,6 +110,7 @@ fn zmain() !void {
     // Jump to the kernel entry point.
     {
         const info = BootInfo{
+            .kphys = linfo.kphys,
             .memory_map = map,
         };
         kentry(@intFromPtr(&info));

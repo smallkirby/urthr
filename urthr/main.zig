@@ -32,7 +32,7 @@ export fn kmain(boot_info: usize) callconv(.c) noreturn {
     }
 
     // Run main boot sequence.
-    zmain() catch |err| {
+    zmain(boot_info) catch |err| {
         log.err("ERROR: {}", .{err});
     };
 
@@ -42,10 +42,10 @@ export fn kmain(boot_info: usize) callconv(.c) noreturn {
 }
 
 /// Zig calling convention entry.
-fn zmain() !void {
+fn zmain(boot_info: usize) !void {
     // Initialize mappings.
     log.info("Initializing MMU.", .{});
-    try urd.mem.init();
+    try urd.mem.init(boot_info);
 
     // Deinit loader.
     board.deinitLoader();

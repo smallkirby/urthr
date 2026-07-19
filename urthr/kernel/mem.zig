@@ -28,7 +28,7 @@ var init_as: arch.mmu.AddressSpace = .{};
 /// Initialize memory management.
 ///
 /// This kernel creates new MMU mapping.
-pub fn init() Error!void {
+pub fn init(boot_info: anytype) Error!void {
     const allocator = boot.interface();
 
     // Allocate kernel root address space and init task's user address space.
@@ -37,10 +37,11 @@ pub fn init() Error!void {
     // Kernel mapping: 2MiB granule, RWX, normal.
     log.debug("Mapping kernel.", .{});
     {
-        rtt.expectEqual(0, pmap.kernel % size_2mib);
+        const kphys = board.getKernelPaddr(boot_info);
+        rtt.expectEqual(0, kphys % size_2mib);
         rtt.expectEqual(0, vmap.kernel.start % size_2mib);
         try arch.mmu.map2mb(init_as, .{
-            .pa = pmap.kernel,
+            .pa = kphys,
             .va = vmap.kernel.start,
             .size = util.roundup(kernelSize(), 2 * units.mib),
             .perm = .kernel_rwx,
@@ -51,7 +52,7 @@ pub fn init() Error!void {
     // Linear mapping: 1GiB granule, RW, normal.
     log.debug("Mapping linear memory.", .{});
     {
-        for (pmap.drams) |dram| {
+        for (board.getDramRegion(boot_info)) |dram| {
             try arch.mmu.map1gb(init_as, .{
                 .pa = dram.start,
                 .va = vmap.linear.start + dram.start,

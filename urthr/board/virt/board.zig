@@ -41,6 +41,23 @@ pub fn getBootRegion(comptime size: usize, _: anytype) common.Range {
     };
 }
 
+/// Get the physical address kernel was loaded at.
+pub fn getKernelPaddr(_: anytype) usize {
+    return memmap.kernel;
+}
+
+/// Get the DRAM region.
+pub fn getDramRegion(_: anytype) []const common.Range {
+    return &memmap.drams;
+}
+
+/// Get the regions that must be identity-mapped during boot.
+pub inline fn getTempMaps() []const common.Range {
+    return &[_]common.Range{
+        memmap.pl011,
+    };
+}
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -403,13 +420,6 @@ pub fn getConsole() Console {
             .flush = console.flush,
         },
         .ctx = &.{},
-    };
-}
-
-/// Get the regions that must be identity-mapped during boot.
-pub inline fn getTempMaps() []const common.Range {
-    return &[_]common.Range{
-        memmap.pl011,
     };
 }
 

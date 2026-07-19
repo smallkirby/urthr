@@ -76,6 +76,8 @@ pub const BootInfo = switch (builtin.cpu.arch) {
     .aarch64 => void,
 
     .x86_64 => extern struct {
+        /// Physical address Urthr kernel was loaded at.
+        kphys: usize,
         /// Located at .boot_services_data.
         memory_map: MemoryMap,
 

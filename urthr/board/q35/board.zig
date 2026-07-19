@@ -37,6 +37,40 @@ pub fn getBootRegion(comptime size: usize, binfo_ptr: anytype) common.Range {
     @panic("No available memory region found.");
 }
 
+/// Get the physical address kernel was loaded at.
+pub fn getKernelPaddr(binfo_ptr: usize) usize {
+    const boot_info: *const BootInfo = @ptrFromInt(binfo_ptr);
+    return boot_info.kphys;
+}
+
+/// Get the DRAM region.
+pub fn getDramRegion(binfo_ptr: usize) []const common.Range {
+    const boot_info: *const BootInfo = @ptrFromInt(binfo_ptr);
+    const map = boot_info.memory_map;
+
+    const MemoryDescriptorIterator = BootInfo.MemoryDescriptorIterator;
+    const efi_page_size = 4096;
+
+    // Find the tail region except reserved memory.
+    var tail: usize = 0;
+    var desc_iter = MemoryDescriptorIterator.new(map);
+    var desc = desc_iter.next();
+    while (desc) |d| : (desc = desc_iter.next()) {
+        if (d.type == .reserved_memory_type) {
+            continue;
+        }
+
+        tail = @min(tail, d.physical_start + d.number_of_pages * efi_page_size);
+    }
+
+    return &[_]common.Range{.{ .start = 0, .end = tail }};
+}
+
+/// Get the regions that must be identity-mapped during boot.
+pub inline fn getTempMaps() []const common.Range {
+    return &.{};
+}
+
 /// Early board initialization.
 ///
 /// Sets up essential peripherals like UART.
@@ -45,11 +79,6 @@ pub fn getBootRegion(comptime size: usize, binfo_ptr: anytype) common.Range {
 pub fn boot() void {
     dd.uart16550.setBase(0x3F8);
     dd.uart16550.init(1_843_200, 115_200); // 1.8432 MHz, 115200 bps
-}
-
-/// Get the regions that must be identity-mapped during boot.
-pub inline fn getTempMaps() []const common.Range {
-    return &.{};
 }
 
 /// Map new I/O memory regions.
