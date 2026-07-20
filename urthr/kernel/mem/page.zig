@@ -77,16 +77,20 @@ pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.Log
             rtt.expectEqual(0, reserved_start & page_mask);
             rtt.expectEqual(0, reserved_end & page_mask);
 
+            if (reserved_start >= end) break;
             if (reserved_end <= cur) continue;
 
-            const cur_size = reserved_start - cur;
+            // Clamp to `cur` in case the reserved region starts before it.
+            const clamped_start = @max(reserved_start, cur);
+            const cur_size = clamped_start - cur;
             if (cur_size != 0) {
                 arena.addRegion(cur, cur + cur_size);
             }
-            cur = reserved_end;
+            // Clamp to `end` in case the reserved region extends past this avail region.
+            cur = @min(reserved_end, end);
         }
 
-        if (cur != end) {
+        if (cur < end) {
             arena.addRegion(cur, end);
         }
     }
