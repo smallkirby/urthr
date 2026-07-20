@@ -54,11 +54,16 @@ pub fn getDramRegion() []const common.Range {
     return &memmap.drams;
 }
 
-/// Get the regions that must be identity-mapped during boot.
-pub inline fn getTempMaps() []const common.Range {
+/// Get the I/O regions that must be identity-mapped during boot.
+pub inline fn getIoTempMaps() []const common.Range {
     return &[_]common.Range{
         memmap.pl011,
     };
+}
+
+/// Get the normal-memory regions that must be identity-mapped during boot.
+pub inline fn getNormalTempMaps() []const common.Range {
+    return &.{};
 }
 
 /// Early board initialization.
@@ -73,7 +78,7 @@ pub fn boot() void {
 }
 
 /// Map new I/O memory regions.
-pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
+pub fn remapIo(allocator: IoAllocator) IoAllocator.Error!void {
     // PL011 UART.
     dd.pl011.setBase(try allocator.reserveAndRemap(
         "PL011",
@@ -84,6 +89,9 @@ pub fn remap(allocator: IoAllocator) IoAllocator.Error!void {
     ));
     try allocator.iounmap(memmap.pl011.start, memmap.pl011.size());
 }
+
+/// Move new normal memory regions.
+pub fn remapNormal(_: PageAllocator, _: PageAllocator) common.mem.Error!void {}
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}

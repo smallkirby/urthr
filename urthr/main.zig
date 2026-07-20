@@ -62,7 +62,7 @@ fn zmain() !void {
     try urd.mem.initResources();
 
     // Remap board I/O memory.
-    log.info("Remapping board I/O memory.", .{});
+    log.info("Remapping board I/O and Normal memory.", .{});
     try urd.mem.remapBoard();
 
     // Initialize per-CPU data.

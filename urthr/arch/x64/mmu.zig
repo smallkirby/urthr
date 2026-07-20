@@ -78,8 +78,8 @@ pub fn createAddressSpace(allocator: PageAllocator) Error!AddressSpace {
 ///
 /// This function is intended to be called after identity-mapping is unmapped
 /// to fix up the virtual address of the page tables.
-pub fn relocate(_: *AddressSpace, _: PageAllocator) void {
-    @panic("unimplemented");
+pub fn relocate(as: *AddressSpace, allocator: PageAllocator) void {
+    if (as._root) |*t| t._tbl = allocator.translateV(t._tbl);
 }
 
 /// Maps the VA to PA using 4KiB pages.

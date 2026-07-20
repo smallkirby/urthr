@@ -12,11 +12,12 @@ pub const num_cpus = 1;
 var exception_handler: ?ExceptionHandler = null;
 
 /// Boot info handed over by the bootloader.
-var boot_info: *const BootInfo = undefined;
+var boot_info: BootInfo = undefined;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
-    boot_info = @ptrFromInt(binfo_ptr);
+    const info: *const BootInfo = @ptrFromInt(binfo_ptr);
+    boot_info = info.*;
 }
 
 /// Get available memory region that we can use for booting the kernel.
@@ -49,6 +50,8 @@ pub fn getKernelPaddr() usize {
     return boot_info.kphys;
 }
 
+var dram_region: [1]common.Range = undefined;
+
 /// Get the DRAM region.
 pub fn getDramRegion() []const common.Range {
     const map = boot_info.memory_map;
@@ -68,12 +71,23 @@ pub fn getDramRegion() []const common.Range {
         tail = @max(tail, d.physical_start + d.number_of_pages * efi_page_size);
     }
 
-    return &[_]common.Range{.{ .start = 0, .end = tail }};
+    dram_region[0] = .{ .start = 0, .end = tail };
+    return &dram_region;
 }
 
-/// Get the regions that must be identity-mapped during boot.
-pub inline fn getTempMaps() []const common.Range {
+/// Get the I/O regions that must be identity-mapped during boot.
+pub inline fn getIoTempMaps() []const common.Range {
     return &.{};
+}
+
+/// Get the normal-memory regions that must be identity-mapped during boot.
+pub inline fn getNormalTempMaps() []const common.Range {
+    const base = @intFromPtr(boot_info.memory_map.descriptors);
+    const end = base + boot_info.memory_map.buffer_size;
+    return &[_]common.Range{.{
+        .start = util.rounddown(base, PageAllocator.page_size),
+        .end = util.roundup(end, PageAllocator.page_size),
+    }};
 }
 
 /// Early board initialization.
@@ -87,7 +101,34 @@ pub fn boot() void {
 }
 
 /// Map new I/O memory regions.
-pub fn remap(_: IoAllocator) IoAllocator.Error!void {}
+pub fn remapIo(_: IoAllocator) IoAllocator.Error!void {}
+
+/// Move the memory map provided by EFI, out of its identity mapping.
+pub fn remapNormal(old: PageAllocator, new: PageAllocator) common.mem.Error!void {
+    const range = getNormalTempMaps()[0];
+    const page_size = PageAllocator.page_size;
+    const map_size = range.size();
+    const npages = util.roundup(map_size, page_size) / page_size;
+
+    // Copy the descriptors out of the temporary identity mapping.
+    const buf = try new.allocPagesV(npages);
+    const src: [*]const u8 = @ptrFromInt(old.translateV(range.start));
+    @memcpy(buf[0..map_size], src[0..map_size]);
+    boot_info.memory_map.descriptors = @ptrCast(buf.ptr);
+
+    // Tear down the temporary identity mapping and reclaim the physical pages.
+    const as = mem.getInitAddressSpace();
+    try arch.mmu.unmap4kb(
+        as,
+        range.start,
+        npages * page_size,
+        new,
+    );
+    for (0..npages) |i| {
+        const page_ptr: [*]u8 = @ptrFromInt(range.start + i * page_size);
+        new.freePagesP(page_ptr[0..page_size]);
+    }
+}
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {

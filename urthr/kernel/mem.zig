@@ -63,16 +63,30 @@ pub fn init() Error!void {
         }
     }
 
-    // Temporary device identity mapping: 4KiB granule, RW, device.
-    log.debug("Mapping device memory.", .{});
+    // Temporary I/O identity mapping: 4KiB granule, RW, device.
+    log.debug("Mapping device temp memory.", .{});
     {
-        for (board.getTempMaps()) |range| {
+        for (board.getIoTempMaps()) |range| {
             try arch.mmu.map4kb(init_as, .{
                 .pa = range.start,
                 .va = range.start,
                 .size = range.size(),
                 .perm = .kernel_rw,
                 .attr = .device,
+            }, .{}, allocator);
+        }
+    }
+
+    // Temporary normal-memory identity mapping: 4KiB granule, RW, normal.
+    log.debug("Mapping normal temp memory.", .{});
+    {
+        for (board.getNormalTempMaps()) |range| {
+            try arch.mmu.map4kb(init_as, .{
+                .pa = range.start,
+                .va = range.start,
+                .size = range.size(),
+                .perm = .kernel_rw,
+                .attr = .normal,
             }, .{}, allocator);
         }
     }
@@ -138,9 +152,10 @@ pub fn initResources() Error!void {
     }
 }
 
-/// Remap the I/O memory regions of the board.
+/// Remap the I/O and normal temp regions of the board.
 pub fn remapBoard() Error!void {
-    try board.remap(phys_impl.interface);
+    try board.remapIo(phys_impl.interface);
+    try board.remapNormal(boot.interface(), page);
 }
 
 /// Get the kernel address space.
