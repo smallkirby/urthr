@@ -103,18 +103,18 @@ pub fn remap4kb(_: AddressSpace, _: usize, _: usize, _: Permission, _: PageAlloc
 }
 
 /// Unmaps the VA range using 4KiB pages.
-pub fn unmap4kb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!void {
-    @panic("unimplemented");
+pub fn unmap4kb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"4kb", allocator);
 }
 
 /// Unmaps the VA range using 2MiB pages.
-pub fn unmap2mb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!void {
-    @panic("unimplemented");
+pub fn unmap2mb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"2mb", allocator);
 }
 
 /// Unmaps the VA range using 1GiB pages.
-pub fn unmap1gb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!void {
-    @panic("unimplemented");
+pub fn unmap1gb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"1gb", allocator);
 }
 
 /// Enable MMU.
@@ -241,6 +241,66 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
     }
 
     flushAll();
+}
+
+/// Unmaps the given virtual address range using the given granule size.
+fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: PageAllocator) Error!void {
+    const granule = mg.granule();
+    const level = mg.level();
+
+    if (size % size_4k != 0) {
+        return Error.InvalidMapping;
+    }
+    if (va % granule != 0) {
+        return Error.InvalidMapping;
+    }
+    if (size % granule != 0) {
+        return Error.InvalidMapping;
+    }
+
+    for (0..size / granule) |i| {
+        try lookupInvalidate(
+            root._tbl,
+            va + i * granule,
+            level,
+            allocator,
+        );
+    }
+
+    flushAll();
+}
+
+/// Lookup the page table entry for the given virtual address and invalidate it.
+fn lookupInvalidate(root: []TableEntry, va: usize, level: Level, allocator: PageAllocator) Error!void {
+    const entry = try lookupEntry(
+        root,
+        va,
+        level,
+        allocator,
+    );
+    entry.present = false;
+}
+
+/// Lookup an existing page table entry for the given virtual address.
+fn lookupEntry(root: []TableEntry, va: usize, level: Level, allocator: PageAllocator) Error!*PageEntry {
+    var tbl = root;
+
+    var cur_level: Level = 0;
+    while (cur_level < level) : (cur_level += 1) {
+        const entry = &tbl[getIndex(cur_level, va)];
+        if (!entry.present) {
+            return Error.InvalidMapping;
+        }
+        if (entry.ps) {
+            return Error.InvalidMapping;
+        }
+        tbl = allocator.translateV(getTable(TableEntry, entry.next()));
+    }
+
+    const leaf: *PageEntry = @ptrCast(&tbl[getIndex(level, va)]);
+    if (!leaf.present) return Error.InvalidMapping;
+
+    return leaf;
 }
 
 /// Lookup the page table entry for the given virtual address.
