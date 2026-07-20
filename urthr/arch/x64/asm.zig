@@ -25,6 +25,36 @@ pub fn wrmsr(comptime msr: SystemReg, value: regs.Type(msr)) void {
         : .{});
 }
 
+pub inline fn lgdt(gdtr: u64) void {
+    asm volatile (
+        \\lgdt (%[gdtr])
+        :
+        : [gdtr] "r" (gdtr),
+    );
+}
+
+pub inline fn lidt(idtr: u64) void {
+    asm volatile (
+        \\lidt (%[idtr])
+        :
+        : [idtr] "r" (idtr),
+    );
+}
+
+pub fn sgdt() u80 {
+    var gdtr: u80 = undefined;
+    asm volatile (
+        \\sgdt %[gdtr]
+        : [gdtr] "=m" (gdtr),
+        :
+        : .{ .memory = true });
+    return gdtr;
+}
+
+pub inline fn sti() void {
+    asm volatile ("sti" ::: .{ .cc = true });
+}
+
 // =============================================================
 // Imports
 // =============================================================

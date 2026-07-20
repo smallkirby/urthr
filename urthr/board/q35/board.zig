@@ -86,7 +86,7 @@ pub fn remap(_: IoAllocator) IoAllocator.Error!void {}
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {
-    urd.unimplemented("");
+    arch.gdt.globalInit();
 }
 
 /// Initialize peripherals.
