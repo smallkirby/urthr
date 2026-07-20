@@ -106,7 +106,7 @@ pub const intr = struct {
     }
 
     /// Set the exception handler function.
-    pub fn setHandler(handler: exception.HandlerSignature) void {
+    pub fn setHandler(handler: exception.Handler) void {
         exception.setHandler(handler);
     }
 };

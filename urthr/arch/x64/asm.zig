@@ -1,3 +1,7 @@
+pub inline fn hlt() void {
+    asm volatile ("hlt");
+}
+
 pub fn rdmsr(comptime msr: SystemReg) regs.Type(msr) {
     var eax: u32 = undefined;
     var edx: u32 = undefined;

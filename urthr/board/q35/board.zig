@@ -211,6 +211,7 @@ const spurious_vector: u8 = 0xFF;
 
 /// Initialize interrupts for the calling AP.
 pub fn initIrqLocal() PageAllocator.Error!void {
+    arch.exception.initLocal();
     arch.lapic.enable(spurious_vector);
 }
 
@@ -220,8 +221,12 @@ pub fn enableIrq(_: usize) void {
 }
 
 /// IRQ handler function.
-fn handleIrq() ?void {
-    urd.unimplemented("handleIrq");
+fn handleIrq(vector: u64) ?void {
+    if (exception_handler) |f| {
+        return f(vector);
+    } else {
+        return null;
+    }
 }
 
 /// Get the block device interface.
