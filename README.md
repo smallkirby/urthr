@@ -49,7 +49,7 @@ For the supported features on each board, see [Features](#features).
 | | Broadcom STB PCIe Controller | o | - | - |
 | | Power Management | o | o | o |
 | | RP1 Sourthbridge | o | - | - |
-| Arch | GICv2 | - | - | x |
+| Arch | GICv2 | o | o | - |
 | | GICv3 | - | - | o |
 | | SMP | o | o | o |
 | | PSCI | o | - | o |
