@@ -6,6 +6,7 @@
 ///
 /// Entries must be sorted in alphabetical order in each group.
 const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type, u64 }){
+    .{ .apic_base, ApicBase, 0x0000_001B },
     .{ .efer, Efer, 0xC000_0080 },
 };
 
@@ -116,6 +117,22 @@ pub const Cr4 = packed struct(u64) {
 // =============================================================
 // Register definitions
 // =============================================================
+
+/// IA32_APIC_BASE.
+pub const ApicBase = packed struct(u64) {
+    /// Reserved.
+    _0: u8 = 0,
+    /// Whether the running CPU is the bootstrap processor.
+    bsp: bool,
+    /// Reserved.
+    _9: u2 = 0,
+    /// APIC global enable.
+    en: bool,
+    /// Physical base address of the local APIC, shifted right by 12 bits.
+    base: u20,
+    /// Reserved.
+    _32: u32 = 0,
+};
 
 /// IA32_EFER.
 pub const Efer = packed struct(u64) {

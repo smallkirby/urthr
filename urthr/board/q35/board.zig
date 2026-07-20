@@ -143,7 +143,7 @@ pub fn initPeripherals1() common.mem.Error!void {
     {
         const lapic = try urd.mem.phys.reserveAndRemap(
             "LAPIC",
-            0xFEE0_0000,
+            arch.lapic.getBase(),
             0x1000,
             null,
             .device,
@@ -201,11 +201,17 @@ pub fn initIrqGlobal(f: ExceptionHandler) void {
 
     // Set exception handler.
     arch.intr.setHandler(handleIrq);
+
+    // Disable the legacy PIC in favor of the local/IO APIC.
+    arch.pic.disable();
 }
+
+/// Vector delivered by the local APIC for spurious interrupts.
+const spurious_vector: u8 = 0xFF;
 
 /// Initialize interrupts for the calling AP.
 pub fn initIrqLocal() PageAllocator.Error!void {
-    urd.unimplemented("");
+    arch.lapic.enable(spurious_vector);
 }
 
 /// Enable an interrupt by ID.
