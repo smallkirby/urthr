@@ -25,31 +25,27 @@ pub const MapOptions = struct {
 ///
 /// Internal fields are arch-specific and must not be accessed outside this file.
 pub const AddressSpace = struct {
-    /// Table for the lower VA range.
-    _l0: ?PageTable = null,
-    /// Table for the higher VA range.
-    ///
-    /// This table is just used to hold the kernel mapping.
-    _l1: ?PageTable = null,
+    /// The single root table shared by both VA halves.
+    _root: ?PageTable = null,
+    /// Whether the lower VA half of the root table currently holds a user mapping.
+    _has_user: bool = false,
 
     /// Select the page table for the given virtual address.
     pub fn select(self: AddressSpace, va: usize) PageTable {
         rtt.expect(isCanonical(va));
-        if (va >> 47 == 0) {
-            return self._l0 orelse @panic("user table not present");
-        } else {
-            return self._l1 orelse @panic("kernel table not present");
-        }
+        return self._root orelse @panic("table not present");
     }
 
-    /// Returns whether this address space has no user (lower VA range) table.
+    /// Returns whether this address space has no user (lower VA range) mapping.
     pub fn isKernelOnly(self: AddressSpace) bool {
-        return self._l0 == null;
+        return !self._has_user;
     }
 
-    /// Returns a copy of this address space with the user table dropped.
+    /// Returns a copy of this address space with the user mapping dropped.
+    ///
+    /// The returned address space still shares the same root table.
     pub fn kernelOnly(self: AddressSpace) AddressSpace {
-        return .{ ._l1 = self._l1 };
+        return .{ ._root = self._root, ._has_user = false };
     }
 
     /// Returns a copy of this address space with the user table replaced.
@@ -73,12 +69,9 @@ pub fn createPageTable(allocator: PageAllocator) Error!PageTable {
     return .{ ._tbl = try allocNewTable(allocator, TableEntry) };
 }
 
-/// Allocate a new address space with fresh kernel and user root tables.
+/// Allocate a new address space with a fresh root table.
 pub fn createAddressSpace(allocator: PageAllocator) Error!AddressSpace {
-    return .{
-        ._l0 = try createPageTable(allocator),
-        ._l1 = try createPageTable(allocator),
-    };
+    return .{ ._root = try createPageTable(allocator) };
 }
 
 /// Fix up the table addresses held by the address space.
@@ -126,8 +119,7 @@ pub fn unmap1gb(_: AddressSpace, _: usize, _: usize, _: PageAllocator) Error!voi
 
 /// Enable MMU.
 pub fn enable(as: AddressSpace, allocator: PageAllocator) void {
-    rtt.expect(as._l0 != null);
-    rtt.expect(as._l1 != null);
+    rtt.expect(as._root != null);
 
     // Enable NX bits.
     var efer = am.rdmsr(.efer);
@@ -137,7 +129,7 @@ pub fn enable(as: AddressSpace, allocator: PageAllocator) void {
     // Load CR3.
     const cr3 = Cr3{
         .pcid = 0, // TODO
-        .phys = @truncate(as._l1.?.phys(allocator) >> page_shift_4k),
+        .phys = @truncate(as._root.?.phys(allocator) >> page_shift_4k),
         .lam57 = false,
         .lam48 = false,
     };
