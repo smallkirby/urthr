@@ -57,41 +57,13 @@ pub fn callEreturnHook() void {
 // Exception handlers
 // =============================================================
 
-/// Serial writer that does not take a lock to prevent deadlock.
-pub const UnsafeWriter = struct {
-    writer: std.Io.Writer = .{
-        .vtable = &writer_vtable,
-        .buffer = &.{},
-    },
-
-    const writer_vtable = std.Io.Writer.VTable{
-        .drain = drain,
-    };
-
-    fn drain(_: *std.Io.Writer, data: []const []const u8, _: usize) !usize {
-        var written: usize = 0;
-        for (data) |bytes| {
-            written += console.print(bytes);
-        }
-        return written;
-    }
-
-    pub fn new() UnsafeWriter {
-        return .{};
-    }
-
-    pub fn log(self: *UnsafeWriter, comptime fmt: []const u8, args: anytype) void {
-        self.writer.print(fmt ++ "\n", args) catch {};
-    }
-};
-
 /// Console instance used to print exception information.
 ///
 /// Must be set by the kernel before any exception occurs.
 var console: Console = undefined;
 
 fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
-    var w = UnsafeWriter.new();
+    var w = UnsafeWriter.init(console);
     const mpidr = am.mrsi(.mpidr_el1);
 
     w.log("", .{});
@@ -318,6 +290,7 @@ pub const Context = extern struct {
 const std = @import("std");
 const common = @import("common");
 const Console = common.Console;
+const UnsafeWriter = common.UnsafeWriter;
 const am = @import("asm.zig");
 const regs = @import("register.zig");
 const StackIterator = @import("StackIterator.zig");
