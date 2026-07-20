@@ -1015,7 +1015,7 @@ const Qemu = struct {
             }),
             .q35 => try args.appendSlice(allocator, &.{
                 "-cpu",
-                "qemu64,+fsgsbase",
+                "qemu64,+fsgsbase,+invtsc",
                 "-bios",
                 "/usr/share/ovmf/OVMF.fd", // TODO
                 "-drive",

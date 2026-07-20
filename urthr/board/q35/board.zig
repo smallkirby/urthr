@@ -139,7 +139,17 @@ pub fn deinitLoader() void {
 ///
 /// This function is called before exceptions are enabled.
 pub fn initPeripherals1() common.mem.Error!void {
-    urd.unimplemented("");
+    // APIC.
+    {
+        const lapic = try urd.mem.phys.reserveAndRemap(
+            "LAPIC",
+            0xFEE0_0000,
+            0x1000,
+            null,
+            .device,
+        );
+        arch.lapic.setBase(lapic);
+    }
 }
 
 /// Initialize peripherals phase 2.
@@ -193,8 +203,8 @@ pub fn initIrqGlobal(f: ExceptionHandler) void {
     arch.intr.setHandler(handleIrq);
 }
 
-/// Initialize GIC for the calling AP.
-pub fn initIrqLocal() common.mem.PageAllocator.Error!void {
+/// Initialize interrupts for the calling AP.
+pub fn initIrqLocal() PageAllocator.Error!void {
     urd.unimplemented("");
 }
 
