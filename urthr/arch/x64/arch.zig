@@ -39,12 +39,20 @@ pub fn getCoreId() usize {
 
 /// Get the value that is unique to each core.
 pub fn getPerCpuBase() usize {
-    @panic("unimplemented");
+    return asm volatile (
+        \\rdgsbase %[addr]
+        : [addr] "=r" (-> usize),
+        :
+        : .{ .memory = true });
 }
 
 /// Set the value that is unique to each core.
-pub fn setPerCpuBase(_: usize) void {
-    @panic("unimplemented");
+pub fn setPerCpuBase(addr: usize) void {
+    asm volatile (
+        \\wrgsbase %[addr]
+        :
+        : [addr] "r" (addr),
+        : .{ .memory = true });
 }
 
 /// Set system call handler function.
@@ -98,3 +106,12 @@ pub const intr = struct {
         exception.setHandler(handler);
     }
 };
+
+// =============================================================
+// Imports
+// =============================================================
+
+// Force evaluate symbols exported but not referenced in Zig.
+comptime {
+    _ = @import("head.zig");
+}

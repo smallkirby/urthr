@@ -20,6 +20,9 @@ _start:
   # Set stack pointer.
   lea   _boot_stack(%rip), %rsp
 
+  # Setup.
+  callq  setupHead
+
   # Jump to kernel entry point.
   movq  %r15, %rdi
   lea   kmain(%rip), %rax
