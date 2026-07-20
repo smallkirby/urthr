@@ -11,9 +11,16 @@ pub const num_cpus = 1;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
+/// Boot info handed over by the bootloader.
+var boot_info: *const BootInfo = undefined;
+
+/// Stash the loader-provided boot info for later use.
+pub fn setBoardInfo(binfo_ptr: usize) void {
+    boot_info = @ptrFromInt(binfo_ptr);
+}
+
 /// Get available memory region that we can use for booting the kernel.
-pub fn getBootRegion(comptime size: usize, binfo_ptr: anytype) common.Range {
-    const boot_info: *const BootInfo = @ptrFromInt(binfo_ptr);
+pub fn getBootRegion(comptime size: usize) common.Range {
     const map = boot_info.memory_map;
 
     const MemoryDescriptorIterator = BootInfo.MemoryDescriptorIterator;
@@ -38,14 +45,12 @@ pub fn getBootRegion(comptime size: usize, binfo_ptr: anytype) common.Range {
 }
 
 /// Get the physical address kernel was loaded at.
-pub fn getKernelPaddr(binfo_ptr: usize) usize {
-    const boot_info: *const BootInfo = @ptrFromInt(binfo_ptr);
+pub fn getKernelPaddr() usize {
     return boot_info.kphys;
 }
 
 /// Get the DRAM region.
-pub fn getDramRegion(binfo_ptr: usize) []const common.Range {
-    const boot_info: *const BootInfo = @ptrFromInt(binfo_ptr);
+pub fn getDramRegion() []const common.Range {
     const map = boot_info.memory_map;
 
     const MemoryDescriptorIterator = BootInfo.MemoryDescriptorIterator;

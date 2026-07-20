@@ -12,8 +12,11 @@ pub const num_cpus = 4;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
+/// Stash the loader-provided boot info for later use.
+pub fn setBoardInfo(_: usize) void {}
+
 /// Get available memory region that we can use for booting the kernel.
-pub fn getBootRegion(comptime size: usize, _: anytype) common.Range {
+pub fn getBootRegion(comptime size: usize) common.Range {
     urd.comptimeAssert(
         memmap.loader + size <= memmap.loader_reserved.start,
         \\Region reserved for boot-time allocator overwraps the bootloader region.
@@ -30,12 +33,12 @@ pub fn getBootRegion(comptime size: usize, _: anytype) common.Range {
 }
 
 /// Get the physical address kernel was loaded at.
-pub fn getKernelPaddr(_: anytype) usize {
+pub fn getKernelPaddr() usize {
     return memmap.kernel;
 }
 
 /// Get the DRAM region.
-pub fn getDramRegion(_: anytype) []const common.Range {
+pub fn getDramRegion() []const common.Range {
     return &memmap.drams;
 }
 

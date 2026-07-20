@@ -10,6 +10,9 @@ pub const panic = @import("kernel/panic.zig").panic_fn;
 
 /// Zig entry point for Urthr kernel.
 export fn kmain(boot_info: usize) callconv(.c) noreturn {
+    // Stash the loader-provided boot info.
+    board.setBoardInfo(boot_info);
+
     // Early board initialization.
     board.boot();
 
@@ -26,13 +29,13 @@ export fn kmain(boot_info: usize) callconv(.c) noreturn {
     // Init early page allocator.
     {
         const boot_worksize = 1 * units.mib;
-        const pa_reserved = board.getBootRegion(boot_worksize, boot_info);
+        const pa_reserved = board.getBootRegion(boot_worksize);
         urd.mem.boot.init(pa_reserved.start, pa_reserved.size());
         log.info("Early allocator reserved 0x{X:0>8} - 0x{X:0>8}", .{ pa_reserved.start, pa_reserved.end });
     }
 
     // Run main boot sequence.
-    zmain(boot_info) catch |err| {
+    zmain() catch |err| {
         log.err("ERROR: {}", .{err});
     };
 
@@ -42,10 +45,10 @@ export fn kmain(boot_info: usize) callconv(.c) noreturn {
 }
 
 /// Zig calling convention entry.
-fn zmain(boot_info: usize) !void {
+fn zmain() !void {
     // Initialize mappings.
     log.info("Initializing MMU.", .{});
-    try urd.mem.init(boot_info);
+    try urd.mem.init();
 
     // Deinit loader.
     board.deinitLoader();

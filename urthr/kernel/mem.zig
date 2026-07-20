@@ -28,7 +28,7 @@ var init_as: arch.mmu.AddressSpace = .{};
 /// Initialize memory management.
 ///
 /// This kernel creates new MMU mapping.
-pub fn init(boot_info: anytype) Error!void {
+pub fn init() Error!void {
     const allocator = boot.interface();
 
     // Allocate kernel root address space and init task's user address space.
@@ -37,7 +37,7 @@ pub fn init(boot_info: anytype) Error!void {
     // Kernel mapping: 2MiB granule, RWX, normal.
     log.debug("Mapping kernel.", .{});
     {
-        const kphys = board.getKernelPaddr(boot_info);
+        const kphys = board.getKernelPaddr();
         rtt.expectEqual(0, kphys % size_2mib);
         rtt.expectEqual(0, vmap.kernel.start % size_2mib);
         try arch.mmu.map2mb(init_as, .{
@@ -52,7 +52,7 @@ pub fn init(boot_info: anytype) Error!void {
     // Linear mapping: 1GiB granule, RW, normal.
     log.debug("Mapping linear memory.", .{});
     {
-        for (board.getDramRegion(boot_info)) |dram| {
+        for (board.getDramRegion()) |dram| {
             try arch.mmu.map1gb(init_as, .{
                 .pa = dram.start,
                 .va = vmap.linear.start + dram.start,
@@ -85,17 +85,18 @@ pub fn init(boot_info: anytype) Error!void {
 /// Initialize allocators.
 pub fn initAllocators() Error!void {
     // Page allocator.
-    const avails = board.memmap.drams;
+    const kphys = board.getKernelPaddr();
+    const avails = board.getDramRegion();
     var reserveds = [_]Range{
         // Kernel image
         .{
-            .start = pmap.kernel,
-            .end = pmap.kernel + kernelSize(),
+            .start = kphys,
+            .end = kphys + kernelSize(),
         },
         // Early allocator region
         boot.getUsedRegion(),
     };
-    buddy_impl.init(&avails, &reserveds, log.debug);
+    buddy_impl.init(avails, &reserveds, log.debug);
 
     // Update page table virtual address.
     arch.mmu.relocate(&init_as, page);
@@ -115,9 +116,10 @@ pub fn initAllocators() Error!void {
 /// Initialize memory resources.
 pub fn initResources() Error!void {
     const allocator = phys;
+    const kphys = board.getKernelPaddr();
 
     // DRAM
-    for (pmap.drams, 0..) |dram, i| {
+    for (board.getDramRegion(), 0..) |dram, i| {
         const res = try allocator.reserve(
             "System RAM",
             dram.start,
@@ -128,7 +130,7 @@ pub fn initResources() Error!void {
         if (i == 0) {
             _ = try allocator.reserve(
                 "Kernel Image",
-                pmap.kernel,
+                kphys,
                 kernelSize(),
                 res,
             );
@@ -243,7 +245,6 @@ const PageAllocator = common.mem.PageAllocator;
 const IoAllocator = common.mem.IoAllocator;
 const Range = common.Range;
 const urd = @import("urthr");
-const pmap = board.memmap;
 const bin_impl = @import("mem/bin.zig");
 const buddy_impl = @import("mem/page.zig");
 const phys_impl = @import("mem/phys.zig");
