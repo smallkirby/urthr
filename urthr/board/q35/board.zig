@@ -60,7 +60,7 @@ pub fn getDramRegion(binfo_ptr: usize) []const common.Range {
             continue;
         }
 
-        tail = @min(tail, d.physical_start + d.number_of_pages * efi_page_size);
+        tail = @max(tail, d.physical_start + d.number_of_pages * efi_page_size);
     }
 
     return &[_]common.Range{.{ .start = 0, .end = tail }};
