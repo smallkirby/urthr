@@ -67,20 +67,49 @@ const Mprot = packed struct(u32) {
 pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, offset: usize) ReturnType {
     const cur = sched.getCurrent();
 
-    if (fd != -1) {
-        return .err(.nosys); // Not supported
+    if (flags.shared or flags.shared_validate) {
+        return .err(.nosys); // MAP_SHARED is not supported.
     }
-    if (!flags.private or !flags.anonymous) {
-        return .err(.inval); // Not supported
+    if (!flags.private) {
+        return .err(.inval); // MAP_PRIVATE or MAP_SHARED must be specified.
+    }
+    if (fd == -1 and !flags.anonymous) {
+        return .err(.inval); // Invalid combination.
+    }
+    if (fd != -1 and flags.anonymous) {
+        return .err(.inval); // Invalid combination.
     }
 
     if (len == 0) {
         return .err(.inval);
     }
+    if (offset % urd.mem.page_size != 0) {
+        return .err(.inval); // Offset must be page-aligned.
+    }
 
     const aligned_len = std.mem.alignForward(usize, len, urd.mem.page_size);
     const perm = prot.permission();
-    _ = offset;
+
+    // Check backing type.
+    const backing: task.Vmm.Backing = blk: {
+        if (fd == -1) break :blk .anon;
+        if (fd < 0) return .err(.badf);
+
+        // Open backing file and check access permissions.
+        const file = if (cur.fs.fdtbl.get(@intCast(fd))) |file|
+            if (file) |f| f else return .err(.badf)
+        else |_| {
+            return .err(.badf);
+        };
+        if (!file.access.readable) {
+            return .err(.nacces);
+        }
+
+        break :blk .{ .file = .{
+            .file = file,
+            .offset = offset,
+        } };
+    };
 
     if (flags.fixed) {
         if (addr == 0 or addr % urd.mem.page_size != 0) {
@@ -92,8 +121,13 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
             urd.unimplemented("mmap MAP_FIXED for partially overlapping region.");
         };
 
-        // Map the pages to the exact given virtual address.
-        _ = cur.vmm.map(addr, aligned_len, perm) catch |e| switch (e) {
+        // Allocate virtual pages (not backed yet) at the exact address.
+        _ = cur.vmm.reserve(
+            addr,
+            aligned_len,
+            perm,
+            backing,
+        ) catch |e| switch (e) {
             error.OutOfMemory => return .err(.nomem),
             else => return .err(.inval),
         };
@@ -102,7 +136,12 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
     } else {
         // Use addr as a hint if page-aligned and non-zero.
         if (addr != 0 and addr % urd.mem.page_size == 0) {
-            if (cur.vmm.map(addr, aligned_len, perm)) |_| {
+            if (cur.vmm.reserve(
+                addr,
+                aligned_len,
+                perm,
+                backing,
+            )) |_| {
                 cur.vmm.mmap_hint = addr + aligned_len;
                 return .success(@bitCast(addr));
             } else |_| {
@@ -111,13 +150,18 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
         }
     }
 
-    // Map to an arbitrary address.
-    const mapped = cur.vmm.mapAnon(aligned_len, perm) catch |e| switch (e) {
+    // Allocate virtual pages at an arbitrary address.
+    const mapped = cur.vmm.reserve(
+        null,
+        aligned_len,
+        perm,
+        backing,
+    ) catch |e| switch (e) {
         error.OutOfMemory => return .err(.nomem),
         else => return .err(.inval),
     };
 
-    return .success(@bitCast(mapped));
+    return .success(@bitCast(@intFromPtr(mapped.ptr)));
 }
 
 /// syscall: munmap
