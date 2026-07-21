@@ -337,10 +337,10 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
     return th;
 }
 
-/// Exit the current process with the given exit code.
-pub fn exit(code: i32) noreturn {
+/// Exit the current process with the given exit code or signal.
+pub fn exit(status: thread.ExitStatus) noreturn {
     const cur = sched.getCurrent();
-    cur.exit_status = code;
+    cur.exit_status = status;
 
     // Check if the current thread is init.
     if (cur.tgid == 1 and cur.id == 1) {
@@ -348,7 +348,10 @@ pub fn exit(code: i32) noreturn {
 
         if (urd.allow_init_exit) {
             log.info("Init process exited.", .{});
-            urd.eol(@intCast(code));
+            urd.eol(switch (status) {
+                .code => |c| @intCast(c),
+                .signal => 1,
+            });
         } else {
             @panic("Init process exited.");
         }
@@ -391,8 +394,8 @@ pub fn exit(code: i32) noreturn {
 const WaitResult = struct {
     /// PID of the reaped child.
     pid: u32,
-    /// Raw exit status from exit_group.
-    exit_status: i32,
+    /// Raw exit status.
+    exit_status: thread.ExitStatus,
 };
 
 /// Wait for a child thread to exit and reap it.

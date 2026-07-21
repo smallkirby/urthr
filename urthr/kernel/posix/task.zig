@@ -1,6 +1,6 @@
 /// syscall: exit_group
 pub fn sysExitGroup(code: i32) ReturnType {
-    task.exit(code);
+    task.exit(.{ .code = code });
 }
 
 /// syscall: wait4
@@ -13,7 +13,10 @@ pub fn sysWait4(pid: i32, wstatus: *allowzero i32, options: WaitOptions, _: usiz
     } orelse return .success(0);
 
     if (@intFromPtr(wstatus) != 0) {
-        wstatus.* = (result.exit_status & 0xff) << 8;
+        wstatus.* = switch (result.exit_status) {
+            .code => |c| (c & 0xFF) << 8,
+            .signal => |s| @intCast(@intFromEnum(s) & 0x7F),
+        };
     }
 
     return .success(@intCast(result.pid));

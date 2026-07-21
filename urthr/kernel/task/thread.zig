@@ -24,7 +24,7 @@ pub const Thread = struct {
     stack: ?[]u8 = null,
 
     /// Exit status of this thread. Valid only when the state is `dead`.
-    exit_status: i32 = 0,
+    exit_status: ExitStatus = .{ .code = 0 },
     /// Completion to signal on exit or execve when created by a vfork.
     vfork_done: ?*VforkWaiter = null,
 
@@ -75,6 +75,14 @@ pub const State = enum {
     blocked,
     /// Thread has finished execution and is waiting to be cleaned up.
     dead,
+};
+
+/// Exit status.
+pub const ExitStatus = union(enum) {
+    /// Normal exit status.
+    code: i32,
+    /// Signal that terminated this thread.
+    signal: Signal,
 };
 
 /// Wait-queue used by a parent to wait for a vfork-cloned child.
@@ -138,3 +146,4 @@ const sync = urd.sync;
 const CondVar = urd.sync.CondVar;
 const SpinLock = sync.SpinLock;
 const signal = @import("signal.zig");
+const Signal = signal.Signal;

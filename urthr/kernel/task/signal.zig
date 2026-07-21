@@ -7,7 +7,7 @@ const SigInt = u32;
 /// Signal numbers.
 ///
 /// POSIX-compliant.
-const Signal = enum(SigInt) {
+pub const Signal = enum(SigInt) {
     /// Hangup detected on controlling terminal or death of controlling process.
     hang = 1,
     /// Interrupt from keyboard.
@@ -34,6 +34,8 @@ const Signal = enum(SigInt) {
     ttin = 21,
     /// Background process attempting write.
     ttou = 22,
+
+    _,
 };
 comptime {
     for (std.enums.values(Signal)) |sig| {
@@ -88,7 +90,7 @@ pub fn deliver() void {
         if (deliverable == 0) break;
 
         const bit: u6 = @intCast(@ctz(deliverable));
-        const signo: SigInt = bit + 1;
+        const signo: Signal = @enumFromInt(bit + 1);
         const action = th.sigstate.actions[bit];
 
         // Clear pending bit.
@@ -99,14 +101,19 @@ pub fn deliver() void {
 
         // Default action if the handler is set to default.
         if (action.handler == Action.sig_default) {
-            getDefaultHandler(@enumFromInt(signo))();
+            getDefaultHandler(signo)(signo);
             continue;
         }
 
         // Construct sigframe for user-space handler.
-        setupSigFrame(ctx, th, signo, action) catch {
-            log.err("Failed to setup sigframe for signal#{d}", .{signo});
-            task.exit(-1);
+        setupSigFrame(
+            ctx,
+            th,
+            @intFromEnum(signo),
+            action,
+        ) catch {
+            log.err("Failed to setup sigframe for signal#{t}", .{signo});
+            task.exit(.{ .code = -1 });
         };
         th.sigstate.blocked |= action.mask | (@as(Mask, 1) << bit);
 
@@ -283,15 +290,15 @@ fn generateTrampoline() Trampoline {
 // =============================================================
 
 /// Get a default handler for the given signal number.
-fn getDefaultHandler(signo: Signal) *const fn () void {
+fn getDefaultHandler(signo: Signal) *const fn (Signal) void {
     return switch (signo) {
         else => defaultAbort,
     };
 }
 
 /// Default signal handler to abort.
-fn defaultAbort() void {
-    task.exit(-1);
+fn defaultAbort(signo: Signal) void {
+    task.exit(.{ .signal = signo });
 }
 
 // =============================================================
