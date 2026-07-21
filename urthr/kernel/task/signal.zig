@@ -16,6 +16,8 @@ const Signal = enum(SigInt) {
     quit = 3,
     /// Kill signal.
     kill = 9,
+    /// Segmentation fault.
+    segv = 11,
     /// Broken pipe.
     pipe = 13,
     /// Termination signal.

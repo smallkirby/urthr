@@ -69,6 +69,11 @@ pub fn setEreturnHook(_: anytype) void {
     @panic("unimplemented");
 }
 
+/// Set page fault handler function.
+pub fn setPageFaultHandler(_: anytype) void {
+    @panic("unimplemented");
+}
+
 /// Cache operation type.
 const CacheOp = enum {
     /// Invalidate cache lines.

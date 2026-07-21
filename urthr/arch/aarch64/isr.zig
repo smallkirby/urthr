@@ -8,13 +8,25 @@ var in_handling: bool = false;
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
 
+/// Function pointer to the registered exception handler.
+var handler: ?HandlerSignature = null;
+
+/// Function pointer to the registered page fault handler.
+var pagefault_handler: ?PageFaultHandler = null;
+
 /// Exception handler function signature.
 ///
 /// Returns null if the exception cannot be handled.
 pub const HandlerSignature = *const fn () ?void;
 
-/// Function pointer to the registered exception handler.
-var handler: ?HandlerSignature = null;
+/// Page fault handler function signature.
+///
+/// Returns true if the fault was handled.
+/// In that case, the faulting instruction can be safely retried,
+/// or a signal has been queued for delivery).
+///
+/// Returns false if the fault is unrecoverable.
+pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType) bool;
 
 /// ERET hook function signature.
 pub const EreturnHook = *const fn () void;
@@ -41,6 +53,11 @@ pub fn setTerminator(f: @TypeOf(terminator)) void {
 /// Set the exception handler function.
 pub fn setHandler(h: HandlerSignature) void {
     handler = h;
+}
+
+/// Set the page fault handler function.
+pub fn setPageFaultHandler(h: PageFaultHandler) void {
+    pagefault_handler = h;
 }
 
 /// Set hook called before every return to EL0.
@@ -204,9 +221,27 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
         // System call.
         .svc_a64 => return svc.svc(ctx),
 
+        // Data abort.
+        .dabort_lower => return handleDataAbort(ctx),
+
         // Unhandled.
         else => return defaultHandler(ctx, "Synchronous, Lower EL, A64"),
     }
+}
+
+/// Handle a data abort taken from EL0.
+fn handleDataAbort(ctx: *Context) void {
+    const esr = am.mrs(.esr_el1);
+    const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
+    const far = am.mrsi(.far_el1);
+
+    if (pagefault_handler) |f| {
+        if (f(far, if (iss.wnr == .write) .write else .read)) {
+            callEreturnHook();
+            return;
+        }
+    }
+    return defaultHandler(ctx, "Synchronous, Lower EL, A64 (Data Abort)");
 }
 
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {

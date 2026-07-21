@@ -77,6 +77,11 @@ pub fn setEreturnHook(f: exception.EreturnHook) void {
     exception.setEreturnHook(f);
 }
 
+/// Set page fault handler function.
+pub fn setPageFaultHandler(f: exception.PageFaultHandler) void {
+    exception.setPageFaultHandler(f);
+}
+
 /// Cache operation type.
 const CacheOp = enum {
     /// Invalidate cache lines.

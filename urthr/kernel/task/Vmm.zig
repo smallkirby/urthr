@@ -11,7 +11,11 @@ const Self = @This();
 pub const Error = error{
     /// The specified virtual memory range is already mapped.
     AlreadyMapped,
-} || common.mem.PageAllocator.Error || arch.mmu.Error;
+    /// The faulting address is not backed by any virtual memory area.
+    NoSuchMapping,
+    /// The access type is not permitted by the virtual memory area's permission.
+    PermissionDenied,
+} || common.mem.PageAllocator.Error || arch.mmu.Error || urd.fs.Error;
 
 /// Address space.
 as: arch.mmu.AddressSpace,
@@ -82,9 +86,16 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
     var it = self.tree.iterator();
     while (it.next()) |node| {
         const vma = node.container();
-        _ = try child.map(vma.start, vma.size, vma.perm);
 
-        // Copy page contents from parent to child.
+        // Reserve the same VMA in the child without eagerly allocating pages.
+        _ = try child.reserve(
+            vma.start,
+            vma.size,
+            vma.perm,
+            vma.backing,
+        );
+
+        // Copy only the pages that are already present in the parent.
         var offset: usize = 0;
         while (offset < vma.size) : (offset += urd.mem.page_size) {
             const va = vma.start + offset;
@@ -92,15 +103,20 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
                 self.as.select(va),
                 va,
                 urd.mem.page,
-            ) orelse continue;
-            const child_pa = arch.mmu.translateWalk(
-                child.as.select(va),
-                va,
-                urd.mem.page,
-            ) orelse unreachable;
+            ) orelse continue; // if not mapped, just continue.
+
+            const page = try urd.mem.page.allocPagesP(1);
+            errdefer urd.mem.page.freePagesP(page);
+            try arch.mmu.map4kb(child.as, .{
+                .va = va,
+                .pa = @intFromPtr(page.ptr),
+                .size = urd.mem.page_size,
+                .perm = vma.perm,
+                .attr = .normal,
+            }, .{ .exact = true }, urd.mem.page);
 
             const src = urd.mem.page.translateV(@as([*]u8, @ptrFromInt(parent_pa))[0..urd.mem.page_size]);
-            const dst = urd.mem.page.translateV(@as([*]u8, @ptrFromInt(child_pa))[0..urd.mem.page_size]);
+            const dst = urd.mem.page.translateV(@as([]u8, page));
             @memcpy(dst, src);
         }
     }
@@ -111,7 +127,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
     return child;
 }
 
-/// Maps the given user-space virtual address.
+/// Allocates physical pages and maps to the given user-space virtual address.
 ///
 /// Returns a user slice to the mapped memory.
 ///
@@ -138,7 +154,7 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
         try arch.mmu.map4kb(self.as, .{
             .va = va,
             .pa = @intFromPtr(page.ptr),
-            .size = size,
+            .size = urd.mem.page_size,
             .perm = perm,
             .attr = .normal,
         }, .{ .exact = true }, urd.mem.page);
@@ -174,6 +190,122 @@ pub fn mapAnon(self: *Self, size: usize, perm: Permission) Error!usize {
     self.mmap_hint = va + size;
 
     return va;
+}
+
+/// Reserves the given user-space virtual address range
+/// without allocating any backing physical pages.
+///
+/// The pages backing this range are populated lazily on first access.
+///
+/// The given address and size must be page-aligned.
+pub fn reserve(
+    self: *Self,
+    vaddr: usize,
+    size: usize,
+    perm: Permission,
+    backing: Backing,
+) Error![]u8 {
+    rtt.expectEqual(0, vaddr % urd.mem.page_size);
+    rtt.expectEqual(0, size % urd.mem.page_size);
+
+    // Check if the given virtual memory range is already mapped.
+    if (self.tree.lowerBound(vaddr)) |node| {
+        if (node.container().start < vaddr + size) {
+            return Error.AlreadyMapped;
+        }
+    }
+
+    // Create a virtual memory area and insert it into the tree.
+    const vma = try urd.mem.bin.create(VmArea);
+    errdefer urd.mem.bin.destroy(vma);
+    vma.* = .{
+        .start = vaddr,
+        .size = size,
+        .perm = perm,
+        .backing = backing,
+    };
+    switch (backing) {
+        .anon => {},
+        .file => |fb| fb.file.ref(),
+    }
+    self.insertToVmTree(vma);
+
+    return @as([*]u8, @ptrFromInt(vaddr))[0..size];
+}
+
+/// Reserves an anonymous or file-backed region,
+/// choosing the virtual address automatically.
+///
+/// Returns the chosen virtual address.
+pub fn reserveAnon(
+    self: *Self,
+    size: usize,
+    perm: Permission,
+    backing: Backing,
+) Error!usize {
+    rtt.expectEqual(0, size % urd.mem.page_size);
+
+    const va = self.findFreeRegion(
+        self.mmap_hint,
+        size,
+    );
+    const actual = try self.reserve(
+        va,
+        size,
+        perm,
+        backing,
+    );
+    rtt.expectEqual(va, @intFromPtr(actual.ptr));
+
+    self.mmap_hint = va + size;
+    return va;
+}
+
+/// Backs the page containing `va` on demand in response to a page fault.
+///
+/// If the page is already backed, this function is nop.
+pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void {
+    const page_va = std.mem.alignBackward(usize, va, urd.mem.page_size);
+
+    const vma = if (self.tree.find(va)) |n| n.container() else {
+        return Error.NoSuchMapping;
+    };
+    if (!vma.perm.ur or (access == .write and !vma.perm.uw)) {
+        return Error.PermissionDenied;
+    }
+
+    // Already backed. Nothing to do.
+    if (arch.mmu.translateWalk(
+        self.as.select(page_va),
+        page_va,
+        urd.mem.page,
+    ) != null) {
+        return;
+    }
+
+    // Allocate a physical page.
+    const page = try urd.mem.page.allocPagesP(1);
+    errdefer urd.mem.page.freePagesP(page);
+    const kview = urd.mem.page.translateV(@as([]u8, page));
+
+    // Set contents of the page based on the backing type.
+    switch (vma.backing) {
+        .anon => @memset(kview, 0),
+        .file => |fb| {
+            const file_off = fb.offset + (page_va - vma.start);
+            const nread = try fb.file.pread(kview, file_off);
+            if (nread.len < kview.len) @memset(kview[nread.len..], 0);
+        },
+    }
+
+    // Map the page into the user address space.
+    try arch.mmu.map4kb(self.as, .{
+        .va = page_va,
+        .pa = @intFromPtr(page.ptr),
+        .size = urd.mem.page_size,
+        .perm = vma.perm,
+        .attr = .normal,
+    }, .{ .exact = true }, urd.mem.page);
 }
 
 /// Unmap the given user-space virtual address range.
@@ -213,27 +345,35 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
 /// Changes permissions for an existing virtual memory range.
 ///
 /// The given address and size must be page-aligned and backed by existing mappings.
+///
+/// When returns an error, it's not ensured that the permissions of the whole range are changed.
 pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
 
-    // Update page table mapping.
-    try arch.mmu.remap4kb(
-        self.as,
-        vaddr,
-        size,
-        perm,
-        urd.mem.page,
-    );
-
-    // Update VMA tree.
+    // Verify the whole range is backed by VMAs and update their permission.
     var scan: usize = vaddr;
     const end = vaddr + size;
     while (scan < end) {
-        const node = self.tree.find(scan) orelse break;
+        const node = self.tree.find(scan) orelse return Error.NoSuchMapping;
         const vma = node.container();
         vma.perm = perm;
         scan = vma.start + vma.size;
+    }
+
+    // Update permission of pages that are already backed.
+    var off: usize = 0;
+    while (off < size) : (off += urd.mem.page_size) {
+        arch.mmu.remap4kb(
+            self.as,
+            vaddr + off,
+            urd.mem.page_size,
+            perm,
+            urd.mem.page,
+        ) catch |e| switch (e) {
+            error.InvalidMapping => continue, // not mapped, skip it.
+            else => return e,
+        };
     }
 }
 
@@ -290,10 +430,16 @@ fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
             // Trim right of VMA.
             if (vma_end > end) {
                 const right = try urd.mem.bin.create(VmArea);
+                const backing = vma.getBackingAt(end);
+                switch (backing) {
+                    .anon => {},
+                    .file => |fb| fb.file.ref(),
+                }
                 right.* = .{
                     .start = end,
                     .size = vma_end - end,
                     .perm = vma.perm,
+                    .backing = backing,
                 };
                 self.tree.insert(right);
             }
@@ -304,12 +450,14 @@ fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
             self.tree.delete(vma);
             vma.start = end;
             vma.size = vma_end - end;
+            vma.backing = vma.getBackingAt(end);
             self.tree.insert(vma);
             scan = end;
         } else {
             // VMA is fully contained within the unmap region.
             scan = vma_end;
             self.tree.delete(vma);
+            vma.unrefBacking();
             urd.mem.bin.destroy(vma);
         }
     }
@@ -336,6 +484,22 @@ const VmTree = RbTree(
     VmArea.compareByKey,
 );
 
+/// Describes what backs the contents of a virtual memory area.
+pub const Backing = union(enum) {
+    /// Backed by zero-filled anonymous memory.
+    anon,
+    /// Backed by a region of a file.
+    file: FileBacking,
+};
+
+/// File backing information for a `VmArea`.
+const FileBacking = struct {
+    /// File this area is backed by. A reference is held for as long as the VMA exists.
+    file: *urd.fs.File,
+    /// Offset in the file corresponding to the start of the VMA.
+    offset: usize,
+};
+
 /// Single contiguous virtual memory area with the same permissions.
 ///
 /// This struct describes a single contiguous virtual memory area,
@@ -347,6 +511,8 @@ const VmArea = struct {
     size: usize,
     /// Permissions of the area.
     perm: Permission,
+    /// What backs the contents of this area.
+    backing: Backing = .anon,
 
     /// Node to construct RB tree of virtual memory areas.
     _rbnode: VmTree.Node = .{},
@@ -363,6 +529,26 @@ const VmArea = struct {
         if (key < a.start) return .lt;
         if (key >= a.start + a.size) return .gt;
         return .eq;
+    }
+
+    /// Drops this area's reference to its backing resource.
+    fn unrefBacking(self: *VmArea) void {
+        switch (self.backing) {
+            .anon => {},
+            .file => |fb| fb.file.unref(),
+        }
+    }
+
+    /// Returns this area's backing, adjusted as if the area started at `at`.
+    fn getBackingAt(self: *const VmArea, at: usize) Backing {
+        rtt.expect(self.start <= at and at <= self.start + self.size);
+        return switch (self.backing) {
+            .anon => .anon,
+            .file => |fb| .{ .file = .{
+                .file = fb.file,
+                .offset = fb.offset + (at - self.start),
+            } },
+        };
     }
 };
 

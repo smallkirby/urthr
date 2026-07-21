@@ -165,6 +165,9 @@ fn zmain() !void {
     log.info("Initializing syscall subsystem.", .{});
     urd.syscall.init();
 
+    // Initialize the task subsystem.
+    urd.task.init();
+
     // Spawn the initial kernel thread.
     log.info("Spawning initial task.", .{});
     _ = try urd.task.kspawn("init", initialTask, .{});

@@ -28,6 +28,25 @@ var zombie_list: ThreadList = .{};
 /// Protects the zombie list.
 var zombie_lock: SpinLock = .{};
 
+/// Initialize the task subsystem.
+pub fn init() void {
+    // Set #PF handler.
+    arch.setPageFaultHandler(handlePageFault);
+}
+
+/// Handle a page fault.
+///
+/// Backs the faulting page on demand, or delivers a signal if the access cannot be satisfied.
+fn handlePageFault(far: usize, access: common.mem.AccessType) bool {
+    const th = sched.getCurrent();
+
+    th.vmm.faultIn(far, access) catch {
+        signal.push(.segv);
+    };
+
+    return true;
+}
+
 /// Spawn a new kernel thread with the given entry function and arguments.
 ///
 /// Entry function can have any signature.
@@ -566,6 +585,7 @@ fn callThreadFunction(comptime f: anytype, args: anytype) void {
 const std = @import("std");
 const log = std.log.scoped(.task);
 const Allocator = std.mem.Allocator;
+const common = @import("common");
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const SpinLock = urd.sync.SpinLock;

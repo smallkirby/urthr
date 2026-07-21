@@ -24,6 +24,14 @@ pub const size_2mib = 2 * units.mib;
 /// Size in bytes of 1GiB.
 pub const size_1gib = 1 * units.gib;
 
+/// Kind of memory access.
+pub const AccessType = enum {
+    /// Read access.
+    read,
+    /// Write access.
+    write,
+};
+
 /// Memory permission.
 pub const Permission = struct {
     /// User readable.
