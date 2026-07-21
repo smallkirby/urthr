@@ -192,25 +192,29 @@ pub fn mapAnon(self: *Self, size: usize, perm: Permission) Error!usize {
     return va;
 }
 
-/// Reserves the given user-space virtual address range
-/// without allocating any backing physical pages.
+/// Reserves a user-space virtual address range without allocating any backing physical pages.
+///
+/// If `vaddr` is null, a free address is chosen automatically
+/// Otherwise the range is reserved at exactly `vaddr`.
 ///
 /// The pages backing this range are populated lazily on first access.
 ///
 /// The given address and size must be page-aligned.
 pub fn reserve(
     self: *Self,
-    vaddr: usize,
+    vaddr: ?usize,
     size: usize,
     perm: Permission,
     backing: Backing,
 ) Error![]u8 {
-    rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
 
+    const va = vaddr orelse self.findFreeRegion(self.mmap_hint, size);
+    rtt.expectEqual(0, va % urd.mem.page_size);
+
     // Check if the given virtual memory range is already mapped.
-    if (self.tree.lowerBound(vaddr)) |node| {
-        if (node.container().start < vaddr + size) {
+    if (self.tree.lowerBound(va)) |node| {
+        if (node.container().start < va + size) {
             return Error.AlreadyMapped;
         }
     }
@@ -219,7 +223,7 @@ pub fn reserve(
     const vma = try urd.mem.bin.create(VmArea);
     errdefer urd.mem.bin.destroy(vma);
     vma.* = .{
-        .start = vaddr,
+        .start = va,
         .size = size,
         .perm = perm,
         .backing = backing,
@@ -230,35 +234,12 @@ pub fn reserve(
     }
     self.insertToVmTree(vma);
 
-    return @as([*]u8, @ptrFromInt(vaddr))[0..size];
-}
+    // Advance the hint if the address is chosen automatically.
+    if (vaddr == null) {
+        self.mmap_hint = va + size;
+    }
 
-/// Reserves an anonymous or file-backed region,
-/// choosing the virtual address automatically.
-///
-/// Returns the chosen virtual address.
-pub fn reserveAnon(
-    self: *Self,
-    size: usize,
-    perm: Permission,
-    backing: Backing,
-) Error!usize {
-    rtt.expectEqual(0, size % urd.mem.page_size);
-
-    const va = self.findFreeRegion(
-        self.mmap_hint,
-        size,
-    );
-    const actual = try self.reserve(
-        va,
-        size,
-        perm,
-        backing,
-    );
-    rtt.expectEqual(va, @intFromPtr(actual.ptr));
-
-    self.mmap_hint = va + size;
-    return va;
+    return @as([*]u8, @ptrFromInt(va))[0..size];
 }
 
 /// Backs the page containing `va` on demand in response to a page fault.
