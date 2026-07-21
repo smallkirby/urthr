@@ -338,6 +338,8 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
         sched.getCurrent().fs.root
     else
         base;
+    // Whether `cur.dentry` holds a reference acquired by this function.
+    var owned = false;
 
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
@@ -353,7 +355,9 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
                     // At the root of a mount.
                     if (mnt.parent) |parent_mnt| {
                         const parent_dentry = mnt.mntpoint.parent orelse mnt.mntpoint;
+                        if (owned) cur.dentry.unref();
                         cur = .{ .dentry = parent_dentry, .mount = parent_mnt };
+                        owned = false;
                     } else {
                         // Reached the root of root filesystem. Stay here.
                     }
@@ -361,21 +365,25 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
                 }
             }
 
-            cur = .{
-                .dentry = cur.dentry.parent orelse cur.dentry,
-                .mount = cur.mount,
-            };
+            const parent_dentry = cur.dentry.parent orelse cur.dentry;
+            if (owned) cur.dentry.unref();
+            cur = .{ .dentry = parent_dentry, .mount = cur.mount };
+            owned = false;
             continue;
         }
 
         // Check if the current dentry is a mount point.
         if (cur.dentry.mount) |mnt| {
+            if (owned) cur.dentry.unref();
             cur = .{ .dentry = mnt.root, .mount = mnt };
+            owned = false;
         }
 
         // Check dcache first.
         if (dcache.lookup(cur.dentry, c.name)) |d| {
+            if (owned) cur.dentry.unref();
             cur = .{ .dentry = d, .mount = cur.mount };
+            owned = true;
             continue;
         }
 
@@ -391,13 +399,20 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
         const dentry = try Dentry.create(c.name, child, cur.dentry, allocator);
         try dcache.insert(dentry);
 
+        if (owned) cur.dentry.unref();
         cur = .{ .dentry = dentry, .mount = cur.mount };
+        owned = true;
     }
 
     // Handle the case where the final path component is itself a mount point.
     if (cur.dentry.mount) |mnt| {
+        if (owned) cur.dentry.unref();
         cur = .{ .dentry = mnt.root, .mount = mnt };
+        owned = false;
     }
+
+    // Drop the transient reference acquired while resolving.
+    if (owned) cur.dentry.unref();
 
     return cur;
 }
