@@ -49,8 +49,22 @@ pub const AddressSpace = struct {
     }
 
     /// Returns a copy of this address space with the user table replaced.
-    pub fn withUserTable(_: AddressSpace, _: PageTable) AddressSpace {
-        @panic("unimplemented: withUserTable");
+    ///
+    /// Allocates a fresh root table using the given allocator.
+    /// Then, copies kernel page table to the new one and installs the given user page table.
+    ///
+    /// This function does not clean up the old user table.
+    pub fn installUserTable(self: AddressSpace, user: PageTable, allocator: PageAllocator) Error!AddressSpace {
+        const ktbl = self._root orelse @panic("kernel table not present");
+        const newtbl = try allocNewTable(allocator, TableEntry);
+
+        @memcpy(newtbl[0..root_half_ents], user._tbl[0..root_half_ents]);
+        @memcpy(newtbl[root_half_ents..], ktbl._tbl[root_half_ents..]);
+
+        return .{
+            ._root = .{ ._tbl = newtbl },
+            ._has_user = true,
+        };
     }
 };
 
@@ -418,6 +432,8 @@ const size_1gib = 1 << page_shift_1g;
 
 /// The number of entries in a page table.
 const num_ents = size_4k / @sizeOf(TableEntry);
+/// The number of entries covering one canonical VA half in the root (PML4) table.
+const root_half_ents = num_ents / 2;
 
 /// Entry that references the next-level page table.
 const TableEntry = packed struct(u64) {
