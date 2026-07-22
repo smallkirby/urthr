@@ -7,6 +7,7 @@
 /// Entries must be sorted in alphabetical order in each group.
 const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type, u64 }){
     .{ .apic_base, ApicBase, 0x0000_001B },
+    .{ .tsc_deadline, TscDeadline, 0x0000_06E0 },
     .{ .efer, Efer, 0xC000_0080 },
 };
 
@@ -132,6 +133,11 @@ pub const ApicBase = packed struct(u64) {
     base: u20,
     /// Reserved.
     _32: u32 = 0,
+};
+
+/// IA32_TSC_DEADLINE.
+pub const TscDeadline = packed struct(u64) {
+    value: u64,
 };
 
 /// IA32_EFER.

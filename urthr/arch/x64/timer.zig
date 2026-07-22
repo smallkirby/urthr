@@ -40,41 +40,56 @@ pub fn getCount() u64 {
 }
 
 /// Spin-wait for the given number of nanoseconds.
-pub fn spinWaitNano(_: u64) void {
-    @panic("unimplemented");
+pub fn spinWaitNano(ns: u64) void {
+    spinWait(ns);
 }
 
 /// Spin-wait for the given number of microseconds.
-pub fn spinWaitMicro(_: u64) void {
-    @panic("unimplemented");
+pub fn spinWaitMicro(us: u64) void {
+    spinWait(us * std.time.ns_per_us);
 }
 
 /// Spin-wait for the given number of milliseconds.
-pub fn spinWaitMilli(_: u64) void {
-    @panic("unimplemented");
+pub fn spinWaitMilli(ms: u64) void {
+    spinWait(ms * std.time.ns_per_ms);
 }
 
 /// Spin-wait for the given number of nanoseconds.
-fn spinWait(_: u64) void {
-    @panic("unimplemented");
+fn spinWait(ns: u64) void {
+    const start: u128 = getCount();
+    const freq = @as(u128, getFreq());
+    const target = start + (@as(u128, ns) * freq) / 1_000_000_000;
+
+    while (@as(u128, getCount()) < target) {
+        std.atomic.spinLoopHint();
+    }
 }
 
-/// Non-secure EL1 Physical Timer PPI interrupt ID.
-pub const ppi_intid: u16 = 30;
+/// Vector delivered by the local APIC when the TSC-Deadline timer fires.
+pub const ppi_intid: u16 = 0x30;
 
 /// Set the timer deadline.
-pub fn setDeadline(_: u32) void {
-    @panic("unimplemented");
+pub fn setDeadline(ticks: u32) void {
+    am.wrmsri(.tsc_deadline, getCount() + ticks);
 }
 
-/// Enable the physical timer and unmask interrupts.
+/// Enable the local APIC timer in TSC-Deadline mode and unmask interrupts.
 pub fn enable() void {
-    @panic("unimplemented");
+    // Check if TSC-Deadline timer mode is supported.
+    const ecx = cpuid.Leaf.version_info.query(null).ecx;
+    const tsc_deadline_support = (ecx & (1 << 24)) != 0;
+    if (!tsc_deadline_support) {
+        @panic("CPU does not support the TSC-Deadline timer mode");
+    }
+
+    // Enable the local APIC timer.
+    lapic.setTimerLvt(ppi_intid, false);
 }
 
-/// Disable the physical timer and mask interrupts.
+/// Disable the local APIC timer and mask interrupts.
 pub fn disable() void {
-    @panic("unimplemented");
+    lapic.setTimerLvt(ppi_intid, true);
+    am.wrmsr(.tsc_deadline, 0);
 }
 
 // =============================================================
@@ -87,12 +102,15 @@ const timer_vtable = Timer.Vtable{
 
 /// Create a timer instance.
 pub fn createTimer() Timer {
-    @panic("unimplemented");
+    return .{
+        ._ctx = &.{},
+        .vtable = timer_vtable,
+    };
 }
 
 /// Get the current tick and convert it to microseconds.
 fn timerGetCurrent(_: *anyopaque) u64 {
-    @panic("unimplemented");
+    return (getCount() * 1_000_000) / getFreq();
 }
 
 // =============================================================
@@ -105,3 +123,4 @@ const Timer = common.Timer;
 const cpuid = @import("cpuid.zig");
 const pit = @import("pit.zig");
 const am = @import("asm.zig");
+const lapic = @import("lapic.zig");

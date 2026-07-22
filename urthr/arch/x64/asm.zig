@@ -29,6 +29,10 @@ pub fn wrmsr(comptime msr: SystemReg, value: regs.Type(msr)) void {
         : .{});
 }
 
+pub fn wrmsri(comptime msr: SystemReg, value: std.meta.Int(.unsigned, @bitSizeOf(regs.Type(msr)))) void {
+    return wrmsr(msr, @bitCast(value));
+}
+
 pub inline fn lgdt(gdtr: u64) void {
     asm volatile (
         \\lgdt (%[gdtr])
@@ -92,5 +96,6 @@ pub inline fn rdrand() ?u64 {
 // Imports
 // =============================================================
 
+const std = @import("std");
 const regs = @import("register.zig");
 const SystemReg = regs.SystemReg;

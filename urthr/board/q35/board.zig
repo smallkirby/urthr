@@ -155,9 +155,7 @@ pub fn initPeripherals1() common.mem.Error!void {
 /// Initialize peripherals phase 2.
 ///
 /// This function is called after exceptions are enabled.
-pub fn initPeripherals2() urd.mem.Error!void {
-    urd.unimplemented("");
-}
+pub fn initPeripherals2() urd.mem.Error!void {}
 
 /// Initialize peripherals.
 ///
@@ -231,8 +229,16 @@ pub fn enableIrq(_: usize) void {
 
 /// IRQ handler function.
 fn handleIrq(vector: u64) ?void {
+    defer arch.lapic.eoi();
+
     if (exception_handler) |f| {
-        return f(vector);
+        const ret = f(vector);
+
+        if (urd.sched.shouldReschedule()) {
+            urd.sched.reschedule();
+        }
+
+        return ret;
     } else {
         return null;
     }
