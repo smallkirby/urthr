@@ -166,14 +166,14 @@ pub fn initPeripherals3() common.mem.Error!void {
 }
 
 /// Prepare for waking up secondary cores.
-pub fn prepareSubcoreWakeup() urd.mem.Error!void {
-    urd.unimplemented("");
-}
+///
+/// TODO: supports secondary cores.
+pub fn prepareSubcoreWakeup() urd.mem.Error!void {}
 
 /// De-initialize resources used for waking up secondary cores.
-pub fn deinitSubcoreWakeup() void {
-    urd.unimplemented("");
-}
+///
+/// TODO: supports secondary cores.
+pub fn deinitSubcoreWakeup() void {}
 
 /// Wakeup a secondary core.
 ///
@@ -223,9 +223,9 @@ pub fn initIrqLocal() PageAllocator.Error!void {
 }
 
 /// Enable an interrupt by ID.
-pub fn enableIrq(_: usize) void {
-    urd.unimplemented("");
-}
+///
+/// TODO: supports I/O APIC.
+pub fn enableIrq(_: usize) void {}
 
 /// IRQ handler function.
 fn handleIrq(vector: u64) ?void {
@@ -245,8 +245,10 @@ fn handleIrq(vector: u64) ?void {
 }
 
 /// Get the block device interface.
+///
+/// TODO: supports block device.
 pub fn getBlockDevice() ?common.block.Device {
-    urd.unimplemented("");
+    return null;
 }
 
 /// Get console instance.

@@ -22,6 +22,11 @@ pub fn getBase() usize {
     return @as(usize, am.rdmsr(.apic_base).base) << 12;
 }
 
+/// Get the local APIC ID of the calling CPU.
+pub fn getId() u8 {
+    return lapic.read(Id).id;
+}
+
 /// Enable the local APIC for the calling CPU.
 ///
 /// `spurious_vector` is the vector delivered for spurious interrupts.

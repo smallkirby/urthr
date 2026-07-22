@@ -39,7 +39,7 @@ pub fn barrier(_: BarrierDomain, _: BarrierType) void {
 
 /// Get the Unique ID of the current core.
 pub fn getCoreId() usize {
-    @panic("unimplemented");
+    return lapic.getId();
 }
 
 /// Get the value that is unique to each core.
