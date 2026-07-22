@@ -65,31 +65,56 @@ fn spinWait(ns: u64) void {
     }
 }
 
-/// Vector delivered by the local APIC when the TSC-Deadline timer fires.
+/// Vector delivered by the local APIC when the timer fires.
 pub const ppi_intid: u16 = 0x30;
 
+/// Local APIC timer mode actually in use.
+var mode: lapic.TimerMode = .tsc_deadline;
+
+/// Local APIC countdown frequency in Hz.
+var apic_freq: u64 = undefined;
+
 /// Set the timer deadline.
+///
+/// `ticks` is represented in TSC ticks regardless of the timer mode in use.
 pub fn setDeadline(ticks: u32) void {
-    am.wrmsri(.tsc_deadline, getCount() + ticks);
+    switch (mode) {
+        .tsc_deadline => am.wrmsri(.tsc_deadline, getCount() + ticks),
+        .one_shot => {
+            // Translate the TSC-tick deadline into local APIC countdown ticks.
+            const ns = (@as(u64, ticks) * std.time.ns_per_s) / getFreq();
+            const apic_ticks: u32 = @intCast((ns * apic_freq) / std.time.ns_per_s);
+            lapic.setInitialCount(apic_ticks);
+        },
+        .periodic => @panic("Local APIC timer periodic mode is not supported"),
+    }
 }
 
-/// Enable the local APIC timer in TSC-Deadline mode and unmask interrupts.
+/// Enable the local APIC timer and unmask interrupts.
 pub fn enable() void {
     // Check if TSC-Deadline timer mode is supported.
     const ecx = cpuid.Leaf.version_info.query(null).ecx;
     const tsc_deadline_support = (ecx & (1 << 24)) != 0;
-    if (!tsc_deadline_support) {
-        @panic("CPU does not support the TSC-Deadline timer mode");
-    }
 
-    // Enable the local APIC timer.
-    lapic.setTimerLvt(ppi_intid, false);
+    if (tsc_deadline_support) {
+        mode = .tsc_deadline;
+        lapic.setTimerLvt(ppi_intid, false, .tsc_deadline);
+    } else {
+        mode = .one_shot;
+        lapic.setDivide(.div1);
+        apic_freq = pit.calibrateApic(50);
+        lapic.setTimerLvt(ppi_intid, false, .one_shot);
+    }
 }
 
 /// Disable the local APIC timer and mask interrupts.
 pub fn disable() void {
-    lapic.setTimerLvt(ppi_intid, true);
-    am.wrmsr(.tsc_deadline, 0);
+    lapic.setTimerLvt(ppi_intid, true, mode);
+    switch (mode) {
+        .tsc_deadline => am.wrmsr(.tsc_deadline, 0),
+        .one_shot => lapic.setInitialCount(0),
+        .periodic => unreachable,
+    }
 }
 
 // =============================================================

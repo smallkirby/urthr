@@ -49,6 +49,44 @@ pub fn calibrateTsc(ms: u32) u64 {
     return (end - start) * 1_000 / ms;
 }
 
+/// Calibrate the local APIC timer's (divide-by-1) countdown frequency against PIT channel 2.
+///
+/// Blocks for approximately `ms` milliseconds.
+/// `ms` must be small enough that the resulting count fits in 16 bits.
+pub fn calibrateApic(ms: u32) u64 {
+    const count: u16 = @intCast(base_freq / 1000 * ms);
+
+    // Enable the channel 2 gate and disable the speaker output.
+    const prev = pit.read(Chan2Control);
+    pit.modify(Chan2Control, .{
+        .gate = true,
+        .speaker = false,
+    });
+
+    // Program channel 2 for a one-shot count.
+    pit.writez(ModeCommand, .{
+        .mode = .mode0,
+        .access = .lohi,
+        .channel = 2,
+    });
+    pit.writei(Chan2Data, @as(u8, @truncate(count)));
+    pit.writei(Chan2Data, @as(u8, @truncate(count >> 8)));
+
+    // Arm the APIC timer with the largest possible count.
+    lapic.setInitialCount(std.math.maxInt(u32));
+
+    // Channel 2's output starts low and goes high when the count reaches zero.
+    while (!pit.read(Chan2Control).out) {
+        std.atomic.spinLoopHint();
+    }
+    const elapsed = std.math.maxInt(u32) - lapic.getCurrentCount();
+
+    // Restore the previous channel 2 control state.
+    pit.write(Chan2Control, prev);
+
+    return (@as(u64, elapsed) * 1_000) / ms;
+}
+
 // =============================================================
 // Registers
 // =============================================================
@@ -119,3 +157,4 @@ const common = @import("common");
 const pio = common.pio;
 const std = @import("std");
 const am = @import("asm.zig");
+const lapic = @import("lapic.zig");

@@ -5,6 +5,9 @@ var lapic = mmio.Module(.{ .natural = u32 }, &.{
     .{ 0x00B0, Eoi },
     .{ 0x00F0, Svr },
     .{ 0x0320, LvtTimer },
+    .{ 0x0380, InitialCount },
+    .{ 0x0390, CurrentCount },
+    .{ 0x03E0, DivideConfig },
 }){};
 
 // =============================================================
@@ -38,13 +41,37 @@ pub fn eoi() void {
     lapic.writez(Eoi, .{});
 }
 
-/// Configure the LVT Timer register in TSC-Deadline mode.
-pub fn setTimerLvt(vector: u8, masked: bool) void {
+/// Configure the LVT Timer register.
+pub fn setTimerLvt(vector: u8, masked: bool, mode: TimerMode) void {
     lapic.writez(LvtTimer, .{
         .vector = vector,
         .mask = masked,
-        .timer_mode = .tsc_deadline,
+        .timer_mode = mode,
     });
+}
+
+/// Set the divide value used by the timer's countdown registers.
+pub fn setDivide(divide: Divide) void {
+    const mode = lapic.read(LvtTimer).timer_mode;
+    rtt.expect(mode == .one_shot or mode == .periodic);
+
+    lapic.writez(DivideConfig, .{ .divide = divide });
+}
+
+/// Set the Initial Count Register.
+pub fn setInitialCount(count: u32) void {
+    const mode = lapic.read(LvtTimer).timer_mode;
+    rtt.expect(mode == .one_shot or mode == .periodic);
+
+    lapic.writez(InitialCount, .{ .count = count });
+}
+
+/// Read the Current Count Register.
+pub fn getCurrentCount() u32 {
+    const mode = lapic.read(LvtTimer).timer_mode;
+    rtt.expect(mode == .one_shot or mode == .periodic);
+
+    return lapic.read(CurrentCount).count;
 }
 
 // =============================================================
@@ -113,11 +140,42 @@ pub const TimerMode = enum(u2) {
     tsc_deadline = 0b10,
 };
 
+/// Initial Count Register.
+pub const InitialCount = packed struct(u32) {
+    count: u32,
+};
+
+/// Current Count Register.
+pub const CurrentCount = packed struct(u32) {
+    count: u32,
+};
+
+/// Divide Configuration Register.
+pub const DivideConfig = packed struct(u32) {
+    /// Divide value.
+    divide: Divide,
+    /// Reserved.
+    _4: u28 = 0,
+};
+
+/// Timer divide value.
+pub const Divide = enum(u4) {
+    div2 = 0b0000,
+    div4 = 0b0001,
+    div8 = 0b0010,
+    div16 = 0b0011,
+    div32 = 0b1000,
+    div64 = 0b1001,
+    div128 = 0b1010,
+    div1 = 0b1011,
+};
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const common = @import("common");
+const rtt = common.rtt;
 const mmio = common.mmio;
 const am = @import("asm.zig");
