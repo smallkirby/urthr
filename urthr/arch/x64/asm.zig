@@ -71,6 +71,23 @@ pub inline fn rdtsc() u64 {
     return (@as(u64, high) << 32) | low;
 }
 
+/// Loads a hardware generated random value.
+///
+/// Returns null if the CPU failed to generate a random value.
+pub inline fn rdrand() ?u64 {
+    var val: u64 = undefined;
+    var ok: u8 = undefined;
+    asm volatile (
+        \\rdrand %[val]
+        \\setc %[ok]
+        : [val] "=r" (val),
+          [ok] "=r" (ok),
+        :
+        : .{});
+
+    return if (ok != 0) val else null;
+}
+
 // =============================================================
 // Imports
 // =============================================================

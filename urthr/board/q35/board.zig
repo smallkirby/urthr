@@ -190,8 +190,17 @@ pub fn wakeSubcore(_: usize, _: usize, _: usize) urd.mem.Error!void {
 }
 
 /// Fill the given buffer with random data.
-pub fn getRandom(_: []u8) void {
-    urd.unimplemented("");
+pub fn getRandom(buf: []u8) void {
+    if (!arch.rng.isSupported()) {
+        @panic("CPU does not support RNG");
+    }
+
+    for (buf) |*byte| {
+        if (arch.rng.getRandom()) |val| {
+            byte.* = @truncate(val);
+            break;
+        }
+    }
 }
 
 /// Set the exception handler for IRQs.
