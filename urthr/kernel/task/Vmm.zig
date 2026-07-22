@@ -43,10 +43,7 @@ pub fn new(allocator: Allocator, as: arch.mmu.AddressSpace) Allocator.Error!*Sel
     ) catch return error.OutOfMemory;
 
     vmm.* = .{
-        .as = as.installUserTable(
-            upgtbl,
-            urd.mem.page,
-        ) catch return error.OutOfMemory,
+        .as = as.installUserTable(upgtbl),
     };
 
     return vmm;

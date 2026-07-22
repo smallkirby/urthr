@@ -48,21 +48,15 @@ pub const AddressSpace = struct {
         return .{ ._root = self._root, ._has_user = false };
     }
 
-    /// Returns a copy of this address space with the user table replaced.
-    ///
-    /// Allocates a fresh root table using the given allocator.
-    /// Then, copies kernel page table to the new one and installs the given user page table.
-    ///
-    /// This function does not clean up the old user table.
-    pub fn installUserTable(self: AddressSpace, user: PageTable, allocator: PageAllocator) Error!AddressSpace {
-        const ktbl = self._root orelse @panic("kernel table not present");
-        const newtbl = try allocNewTable(allocator, TableEntry);
+    /// Returns a copy of this address space installed with the given user table.
+    pub fn installUserTable(self: AddressSpace, user: PageTable) AddressSpace {
+        rtt.expect(!self._has_user);
 
-        @memcpy(newtbl[0..root_half_ents], user._tbl[0..root_half_ents]);
-        @memcpy(newtbl[root_half_ents..], ktbl._tbl[root_half_ents..]);
+        const ktbl = self._root orelse @panic("kernel table not present");
+        @memcpy(user._tbl[root_half_ents..], ktbl._tbl[root_half_ents..]);
 
         return .{
-            ._root = .{ ._tbl = newtbl },
+            ._root = user,
             ._has_user = true,
         };
     }

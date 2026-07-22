@@ -91,10 +91,10 @@ pub const AddressSpace = struct {
         return .{ ._l1 = self._l1 };
     }
 
-    /// Returns a copy of this address space with the user table replaced.
+    /// Returns a copy of this address space installed with the given user table.
     ///
     /// This function does not clean up the old user table.
-    pub fn installUserTable(self: AddressSpace, user: PageTable, _: PageAllocator) Error!AddressSpace {
+    pub fn installUserTable(self: AddressSpace, user: PageTable) AddressSpace {
         return .{ ._l0 = user, ._l1 = self._l1 };
     }
 };
