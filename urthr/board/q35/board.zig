@@ -161,9 +161,7 @@ pub fn initPeripherals2() urd.mem.Error!void {}
 ///
 /// This function is called after initial task is spawned.
 /// This function can spawn new threads.
-pub fn initPeripherals3() common.mem.Error!void {
-    urd.unimplemented("");
-}
+pub fn initPeripherals3() common.mem.Error!void {}
 
 /// Prepare for waking up secondary cores.
 ///

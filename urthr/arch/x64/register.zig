@@ -9,6 +9,9 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type, u64 }){
     .{ .apic_base, ApicBase, 0x0000_001B },
     .{ .tsc_deadline, TscDeadline, 0x0000_06E0 },
     .{ .efer, Efer, 0xC000_0080 },
+    .{ .star, Star, 0xC000_0081 },
+    .{ .lstar, Lstar, 0xC000_0082 },
+    .{ .fmask, Fmask, 0xC000_0084 },
 };
 
 // =============================================================
@@ -119,6 +122,64 @@ pub const Cr4 = packed struct(u64) {
 // Register definitions
 // =============================================================
 
+/// RFLAGS
+pub const Rflags = packed struct(u64) {
+    /// Carry flag.
+    cf: bool,
+    /// Reserved.
+    _1: u1 = 1,
+    /// Parity flag.
+    pf: bool,
+    /// Reserved.
+    _3: u1 = 0,
+    /// Auxiliary carry flag.
+    af: bool,
+    /// Reserved.
+    _5: u1 = 0,
+    /// Zero flag.
+    zf: bool,
+    /// Sign flag.
+    sf: bool,
+    /// Trap flag.
+    tf: bool,
+    /// Interrupt enable flag.
+    ie: bool,
+    /// Direction flag.
+    df: bool,
+    /// Overflow flag.
+    of: bool,
+    /// IOPL (I/O privilege level).
+    iopl: u2,
+    /// Nested task flag.
+    nt: bool,
+    /// Reserved. Must be 0.
+    md: u1 = 0,
+    /// Resume flag.
+    rf: bool,
+    /// Virtual 8086 mode flag.
+    vm: bool,
+    /// Alignment check.
+    ac: bool,
+    /// Virtual interrupt flag.
+    vif: bool,
+    /// Virtual interrupt pending.
+    vip: bool,
+    /// CPUID support.
+    id: bool,
+    /// Reserved.
+    _22: u8 = 0,
+    /// Reserved.
+    aes: bool,
+    /// Alternate instruction set enabled.
+    ai: bool,
+    /// Reserved.
+    _32: u32 = 0,
+};
+
+// =============================================================
+// MSRs
+// =============================================================
+
 /// IA32_APIC_BASE.
 pub const ApicBase = packed struct(u64) {
     /// Reserved.
@@ -138,6 +199,32 @@ pub const ApicBase = packed struct(u64) {
 /// IA32_TSC_DEADLINE.
 pub const TscDeadline = packed struct(u64) {
     value: u64,
+};
+
+/// IA32_STAR.
+pub const Star = packed struct(u64) {
+    /// Reserved.
+    _0: u32 = 0,
+    /// CS/SS selectors loaded on SYSCALL.
+    ///
+    /// CS is set to this value, SS is set to this value + 8.
+    syscall_sel: u16,
+    /// CS/SS selectors loaded on SYSRET.
+    ///
+    /// SS is set to this value + 8, CS is set to this value + 16.
+    sysret_sel: u16,
+};
+
+/// IA32_LSTAR.
+pub const Lstar = packed struct(u64) {
+    /// Target RIP for 64-bit mode calling program.
+    addr: u64,
+};
+
+/// IA32_FMASK.
+pub const Fmask = packed struct(u64) {
+    /// RFLAGS bits cleared on SYSCALL entry.
+    mask: u64,
 };
 
 /// IA32_EFER.
