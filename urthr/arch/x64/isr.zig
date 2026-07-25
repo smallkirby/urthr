@@ -3,8 +3,11 @@
 /// ISR signature.
 pub const Isr = fn () callconv(.naked) void;
 
+/// CPU context saved during an interrupt.
+pub const Context = intr.Context;
+
 /// Zig entry point of the interrupt handler.
-export fn intrZigEntry(ctx: *CpuContext) callconv(.c) void {
+export fn intrZigEntry(ctx: *Context) callconv(.c) void {
     intr.dispatch(ctx);
 }
 
@@ -128,6 +131,4 @@ export fn isrCommon() callconv(.naked) void {
 // =============================================================
 
 const std = @import("std");
-
 const intr = @import("exception.zig");
-const CpuContext = intr.Context;

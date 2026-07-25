@@ -186,6 +186,10 @@ fn isDeliverable(_: SigInt, ctx: *const Context) bool {
             return ctx.sp_el0 != 0; // only deliver when returning to EL0
         },
 
+        .x86_64 => {
+            return ctx.rsp != 0; // only deliver when returning to Ring-3.
+        },
+
         else => @compileError("Unsupported architecture."),
     }
 }
@@ -221,6 +225,10 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             ctx.pc = action.handler;
             ctx.sp_el0 = @intFromPtr(frame);
             ctx.x30 = trampoline;
+        },
+
+        .x86_64 => {
+            @panic("Unsupported: setupSigFrame");
         },
 
         else => @compileError("Unsupported architecture."),
@@ -276,6 +284,18 @@ fn generateTrampoline() Trampoline {
                     asm volatile (
                         \\movz x8, #139 // rt_sigreturn
                         \\svc  #0
+                    );
+                }
+            }.f,
+        },
+
+        .x86_64 => .{
+            .size = 0, // TODO
+            .code = struct {
+                fn f() callconv(.naked) noreturn {
+                    asm volatile (
+                        \\movq $15, %rax // sigreturn
+                        \\syscall
                     );
                 }
             }.f,

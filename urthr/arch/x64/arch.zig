@@ -61,18 +61,18 @@ pub fn setPerCpuBase(addr: usize) void {
 }
 
 /// Set system call handler function.
-pub fn setSystemCallHandler(_: anytype) void {
-    @panic("unimplemented");
+pub fn setSystemCallHandler(f: anytype) void {
+    svc.setHandler(f);
 }
 
 /// Set hook called before every return to EL0.
-pub fn setEreturnHook(_: anytype) void {
-    @panic("unimplemented");
+pub fn setEreturnHook(f: anytype) void {
+    exception.setEreturnHook(f);
 }
 
 /// Set page fault handler function.
 pub fn setPageFaultHandler(_: anytype) void {
-    @panic("unimplemented");
+    // TODO: support #PF handler.
 }
 
 /// Cache operation type.
@@ -125,3 +125,5 @@ pub const intr = struct {
 comptime {
     _ = @import("head.zig");
 }
+
+const svc = @import("svc.zig");

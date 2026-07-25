@@ -11,6 +11,8 @@ const num_reserved_exceptions = 32;
 ///
 /// Returns null if the interrupt cannot be handled.
 pub const Handler = *const fn (vector: u64) ?void;
+/// ERET hook function signature.
+pub const EreturnHook = *const fn () void;
 
 /// Interrupt Descriptor Table.
 var idt: Idt align(idt_align) = undefined;
@@ -18,6 +20,8 @@ var idt: Idt align(idt_align) = undefined;
 var handler: ?Handler = null;
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
+/// Hook called before returning to EL0.
+var eret_hook: ?EreturnHook = null;
 
 /// Whether we are currently handling an exception.
 /// TODO: should be per-CPU.
@@ -47,6 +51,11 @@ pub fn setTerminator(f: @TypeOf(terminator)) void {
 /// Set the interrupt handler function.
 pub fn setHandler(h: Handler) void {
     handler = h;
+}
+
+/// Set the hook called before returning to Ring-3.
+pub fn setEreturnHook(f: EreturnHook) void {
+    eret_hook = f;
 }
 
 /// Dispatch an interrupt to the registered handler.

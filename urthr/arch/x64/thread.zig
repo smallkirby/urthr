@@ -1,4 +1,4 @@
-const IsrContext = void;
+const IsrContext = isr.Context;
 
 /// Initialize the thread stack.
 pub fn initStack(_: []u8, _: anytype, _: anytype) []u8 {
@@ -40,3 +40,4 @@ pub extern fn enterUserland(pc: usize, sp: usize, kstack: usize) callconv(.c) no
 // =============================================================
 
 const std = @import("std");
+const isr = @import("isr.zig");
