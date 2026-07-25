@@ -266,13 +266,14 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
     // Initialize kernel stack with a copy of the parent's ISR context.
     const kstack = try mem.page.allocBytesV(thread.default_stack_size);
     errdefer mem.page.freeBytesV(kstack);
+    const pctx = sched.getCurrentCtx();
     const usp = if (stack != 0)
         stack
     else
-        arch.thread.getUserStackPointer();
+        arch.thread.userStackPointerOf(pctx);
     const sp = arch.thread.initStackFork(
         kstack,
-        sched.getCurrentCtx(),
+        pctx,
         usp,
     );
 

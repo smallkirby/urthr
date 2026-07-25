@@ -12,6 +12,7 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type, u64 }){
     .{ .star, Star, 0xC000_0081 },
     .{ .lstar, Lstar, 0xC000_0082 },
     .{ .fmask, Fmask, 0xC000_0084 },
+    .{ .fs_base, FsBase, 0xC000_0100 },
 };
 
 // =============================================================
@@ -174,6 +175,11 @@ pub const Rflags = packed struct(u64) {
     ai: bool,
     /// Reserved.
     _32: u32 = 0,
+};
+
+/// IA32_FS_BASE.
+pub const FsBase = packed struct(u64) {
+    addr: u64,
 };
 
 // =============================================================

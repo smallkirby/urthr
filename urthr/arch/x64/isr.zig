@@ -102,9 +102,15 @@ export fn isrCommon() callconv(.naked) void {
 
         // Restore the stack.
         \\movq 8(%%rsp), %%rsp
-    );
 
-    // Restore general-purpose registers, error code, and vector from the stack.
+        // Return from ISR context.
+        \\jmp isrReturn
+    );
+}
+
+/// Restore general-purpose registers from a context at the top of the stack,
+/// discard the vector and error code, and return from the interrupt.
+export fn isrReturn() callconv(.naked) noreturn {
     asm volatile (
         \\popq %%r15
         \\popq %%r14

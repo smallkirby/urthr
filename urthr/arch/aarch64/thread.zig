@@ -110,9 +110,11 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize)
     return stack[0..(addr - @intFromPtr(stack.ptr))];
 }
 
-/// Get the current user stack pointer.
-pub fn getUserStackPointer() usize {
-    return @bitCast(am.mrsi(.sp_el0));
+/// Get the user stack pointer recorded in the given ISR context.
+///
+/// Valid only when called from a syscall handler.
+pub fn userStackPointerOf(ctx: *const IsrContext) usize {
+    return ctx.sp_el0;
 }
 
 /// Get the ISR context saved on the given kernel stack.
