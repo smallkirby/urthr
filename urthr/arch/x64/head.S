@@ -20,6 +20,9 @@ _start:
   # Set stack pointer.
   lea   _boot_stack(%rip), %rsp
 
+  # Terminate the frame pointer chain.
+  xorq  %rbp, %rbp
+
   # Setup.
   callq  setupHead
 
