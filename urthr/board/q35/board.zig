@@ -143,10 +143,10 @@ pub fn initPeripherals1() common.mem.Error!void {
     {
         const allocator = urd.mem.page;
 
-        const rsdp = acpi.rsdp.Rsdp.parse(allocator.translateV(boot_info.rsdp)) orelse {
+        const rsdp = acpi.rsdp.parse(allocator.translateV(boot_info.rsdp)) orelse {
             @panic("Invalid RSDP structure.");
         };
-        const xsdt = try acpi.xsdt.Xsdt.parse(
+        const xsdt = try acpi.xsdt.parse(
             rsdp.xsdt_address,
             allocator,
         ) orelse {

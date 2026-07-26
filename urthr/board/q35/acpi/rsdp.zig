@@ -28,40 +28,6 @@ pub const Rsdp = extern struct {
         }
     }
 
-    /// Parse RSDP structure pointed to by `ptr`.
-    ///
-    /// Returns null if the structure is invalid.
-    pub fn parse(ptr: usize) ?Rsdp {
-        var self: Rsdp = undefined;
-        @memcpy(
-            std.mem.asBytes(&self)[0..size()],
-            @as([*]const u8, @ptrFromInt(ptr))[0..size()],
-        );
-
-        if (!std.mem.eql(u8, "RSD PTR ", &self.signature)) {
-            log.err("Invalid signature.", .{});
-            return null;
-        }
-        if (self.revision != 2) {
-            log.err("Unsupported revision: {d}", .{self.revision});
-            return null;
-        }
-        if (self.length != size()) {
-            log.err("Invalid length: {d}", .{self.length});
-            return null;
-        }
-        if (self.calcSum(20) != 0) {
-            log.err("Invalid checksum.", .{});
-            return null;
-        }
-        if (self.calcSum(size()) != 0) {
-            log.err("Invalid extended checksum.", .{});
-            return null;
-        }
-
-        return self;
-    }
-
     /// Calculate the sum of RSDP bytes.
     fn calcSum(self: *const Rsdp, len: usize) u8 {
         const ptr: [*]const u8 = @ptrCast(self);
@@ -77,6 +43,40 @@ pub const Rsdp = extern struct {
         return @offsetOf(Rsdp, "__end");
     }
 };
+
+/// Parse RSDP structure pointed to by `ptr`.
+///
+/// Returns null if the structure is invalid.
+pub fn parse(ptr: usize) ?Rsdp {
+    var self: Rsdp = undefined;
+    @memcpy(
+        std.mem.asBytes(&self)[0..Rsdp.size()],
+        @as([*]const u8, @ptrFromInt(ptr))[0..Rsdp.size()],
+    );
+
+    if (!std.mem.eql(u8, "RSD PTR ", &self.signature)) {
+        log.err("Invalid signature.", .{});
+        return null;
+    }
+    if (self.revision != 2) {
+        log.err("Unsupported revision: {d}", .{self.revision});
+        return null;
+    }
+    if (self.length != Rsdp.size()) {
+        log.err("Invalid length: {d}", .{self.length});
+        return null;
+    }
+    if (self.calcSum(20) != 0) {
+        log.err("Invalid checksum.", .{});
+        return null;
+    }
+    if (self.calcSum(Rsdp.size()) != 0) {
+        log.err("Invalid extended checksum.", .{});
+        return null;
+    }
+
+    return self;
+}
 
 // =============================================================
 // Imports
