@@ -139,6 +139,14 @@ pub fn deinitLoader() void {
 ///
 /// This function is called before exceptions are enabled.
 pub fn initPeripherals1() common.mem.Error!void {
+    // Parse ACPI structures.
+    {
+        const allocator = urd.mem.page;
+        _ = acpi.rsdp.Rsdp.parse(allocator.translateV(boot_info.rsdp)) orelse {
+            @panic("Invalid RSDP structure.");
+        };
+    }
+
     // APIC.
     {
         const lapic = try urd.mem.phys.reserveAndRemap(
@@ -298,3 +306,5 @@ const Pair = common.Pair;
 const urd = @import("urthr");
 const mem = urd.mem;
 const dd = @import("dd");
+
+const acpi = @import("acpi.zig");

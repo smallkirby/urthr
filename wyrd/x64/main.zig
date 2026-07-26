@@ -96,6 +96,11 @@ fn zmain() !void {
     try kernel_file.close();
     try root_dir.close();
 
+    // Find RSDP address.
+    const rsdp = getRsdp() orelse {
+        return error.RsdpNotFound;
+    };
+
     // Get memory map.
     var map = try getMemoryMap(bs);
 
@@ -112,6 +117,7 @@ fn zmain() !void {
         const info = BootInfo{
             .kphys = linfo.kphys,
             .memory_map = map,
+            .rsdp = rsdp,
         };
         kentry(@intFromPtr(&info));
     }
@@ -210,6 +216,16 @@ fn alignedAllocPages(bs: *BootServices, mem_type: uefi.tables.MemoryType, pages:
         mem_type,
         pages,
     );
+}
+
+/// Search Configuration Table entries for RSDP.
+fn getRsdp() ?usize {
+    for (0..uefi.system_table.number_of_table_entries) |i| {
+        const entry = uefi.system_table.configuration_table[i];
+        if (std.meta.eql(entry.vendor_guid, uefi.tables.ConfigurationTable.acpi_20_table_guid)) {
+            return @intFromPtr(entry.vendor_table);
+        }
+    } else return null;
 }
 
 /// Urthr kernel loader that loads the image from the given memory.

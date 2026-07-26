@@ -80,6 +80,8 @@ pub const BootInfo = switch (builtin.cpu.arch) {
         kphys: usize,
         /// Located at .boot_services_data.
         memory_map: MemoryMap,
+        /// RSDP address.
+        rsdp: usize,
 
         const uefi = std.os.uefi;
 
