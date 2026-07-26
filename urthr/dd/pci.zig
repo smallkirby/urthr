@@ -272,12 +272,14 @@ fn Io(Module: type) type {
         // BAR
 
         /// Parse BARs of the device.
+        ///
+        /// Note that the index of the returned value does not necessarily match the BAR index.
         pub fn parseBars(self: Self, out: []BarInfo) []const BarInfo {
             const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
 
             var out_idx: usize = 0;
             var skip: bool = false;
-            for (out, 0..) |*buf, i| {
+            for (0..out.len) |i| {
                 if (skip) {
                     skip = false;
                     continue;
@@ -296,7 +298,7 @@ fn Io(Module: type) type {
 
                 if (bits.isset(value, 0)) {
                     // I/O space BAR.
-                    buf.* = .{
+                    out[out_idx] = .{
                         .index = i,
                         .type = .io,
                         .address = value & 0xFFFF_FFFC,
@@ -309,7 +311,7 @@ fn Io(Module: type) type {
                     const mask = self.read(bar_offset);
                     self.write(bar_offset, value);
 
-                    buf.* = .{
+                    out[out_idx] = .{
                         .index = i,
                         .type = .mem32,
                         .address = value & mask,
@@ -329,7 +331,7 @@ fn Io(Module: type) type {
                     const mask64 = bits.concat(u64, next_mask, mask & 0xFFFF_FFF0);
                     const addr64 = bits.concat(u64, next_value, value & 0xFFFF_FFF0) & mask64;
 
-                    buf.* = .{
+                    out[out_idx] = .{
                         .index = i,
                         .type = .mem64,
                         .address = addr64,
@@ -437,6 +439,8 @@ pub const BarType = enum {
 
 /// PCI Capability IDs.
 pub const CapId = enum(u8) {
+    /// Vendor-specific.
+    vndr = 0x09,
     /// MSI-X
     msix = 0x11,
 
