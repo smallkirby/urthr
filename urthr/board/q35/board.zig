@@ -152,11 +152,15 @@ pub fn initPeripherals1() common.mem.Error!void {
         ) orelse {
             @panic("Invalid XSDT structure.");
         };
+
         const mcfgp = xsdt.find(.mcfg) orelse {
             @panic("MCFG table not found.");
         };
+        const mcfg = try acpi.mcfg.parse(mcfgp, allocator) orelse {
+            @panic("Invalid MCFG structure.");
+        };
 
-        _ = mcfgp;
+        _ = mcfg;
     }
 
     // APIC.
