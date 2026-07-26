@@ -1,4 +1,5 @@
 pub const memmap = @import("memmap.zig");
+pub const sync = @import("sync.zig");
 
 /// Function signature of exception handler.
 ///
@@ -13,6 +14,9 @@ var exception_handler: ?ExceptionHandler = null;
 
 /// Boot info handed over by the bootloader.
 var boot_info: BootInfo = undefined;
+
+/// PCIe ECAM.
+var ecam: ?dd.pci.EcamHost = null;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -143,6 +147,7 @@ pub fn initPeripherals1() common.mem.Error!void {
     {
         const allocator = urd.mem.page;
 
+        // Find XSDT table.
         const rsdp = acpi.rsdp.parse(allocator.translateV(boot_info.rsdp)) orelse {
             @panic("Invalid RSDP structure.");
         };
@@ -153,14 +158,31 @@ pub fn initPeripherals1() common.mem.Error!void {
             @panic("Invalid XSDT structure.");
         };
 
+        // Find MCFG table.
         const mcfgp = xsdt.find(.mcfg) orelse {
             @panic("MCFG table not found.");
         };
+        log.debug("MCFG table @ 0x{X}", .{mcfgp});
         const mcfg = try acpi.mcfg.parse(mcfgp, allocator) orelse {
             @panic("Invalid MCFG structure.");
         };
 
-        _ = mcfg;
+        // Find PCIe ECAM region.
+        if (mcfg.entries.len == 0) {
+            @panic("No PCIe ECAM region found.");
+        }
+        {
+            const ent = &mcfg.entries[0];
+            const unit = 0x10_0000;
+            const pci = try urd.mem.phys.reserveAndRemap(
+                "PCIe ECAM",
+                ent.base + unit * @as(u64, ent.start_bus),
+                (@as(u64, ent.end_bus - ent.start_bus) + 1) * unit,
+                null,
+                .device,
+            );
+            ecam = dd.pci.EcamHost.init(pci);
+        }
     }
 
     // APIC.
