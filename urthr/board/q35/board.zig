@@ -142,9 +142,21 @@ pub fn initPeripherals1() common.mem.Error!void {
     // Parse ACPI structures.
     {
         const allocator = urd.mem.page;
-        _ = acpi.rsdp.Rsdp.parse(allocator.translateV(boot_info.rsdp)) orelse {
+
+        const rsdp = acpi.rsdp.Rsdp.parse(allocator.translateV(boot_info.rsdp)) orelse {
             @panic("Invalid RSDP structure.");
         };
+        const xsdt = try acpi.xsdt.Xsdt.parse(
+            rsdp.xsdt_address,
+            allocator,
+        ) orelse {
+            @panic("Invalid XSDT structure.");
+        };
+        const mcfgp = xsdt.find(.mcfg) orelse {
+            @panic("MCFG table not found.");
+        };
+
+        _ = mcfgp;
     }
 
     // APIC.
