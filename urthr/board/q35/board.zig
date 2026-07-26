@@ -18,6 +18,9 @@ var boot_info: BootInfo = undefined;
 /// PCIe ECAM.
 var ecam: ?dd.pci.EcamHost = null;
 
+/// Virtio block device instance.
+var virtio_blk_dev: ?dd.VirtioBlk = null;
+
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
     const info: *const BootInfo = @ptrFromInt(binfo_ptr);
@@ -201,7 +204,97 @@ pub fn initPeripherals1() common.mem.Error!void {
 /// Initialize peripherals phase 2.
 ///
 /// This function is called after exceptions are enabled.
-pub fn initPeripherals2() urd.mem.Error!void {}
+pub fn initPeripherals2() urd.mem.Error!void {
+    // virtio
+    if (ecam) |*e| outer: {
+        const hc = e.interface();
+
+        // Scan for a virtio-blk device.
+        var scan_buf: [16]dd.pci.ScanResult = undefined;
+        const results = hc.scan(0, &scan_buf);
+        const virtio_dev = for (results) |res| {
+            if (res.vendor_id == dd.virtio.pci.vendor_id and
+                (res.device_id == dd.VirtioBlk.pci_device_id_legacy or
+                    res.device_id == dd.VirtioBlk.pci_device_id_modern))
+            {
+                break res;
+            }
+        } else {
+            log.warn("No virtio-blk PCI device found.", .{});
+            break :outer;
+        };
+
+        // Parse BARs of the virtio-blk device.
+        const io = hc.getTypedIo(virtio_dev.addr, dd.pci.HeaderType0);
+        var barbuf: [6]dd.pci.BarInfo = undefined;
+        const bars = io.parseBars(&barbuf);
+        log.info(
+            "virtio-blk PCI device#{X}:{X}:{X}, ID=0x{X:0>4}, {d} BARs",
+            .{ virtio_dev.addr.bus, virtio_dev.addr.device, virtio_dev.addr.function, virtio_dev.device_id, bars.len },
+        );
+
+        // Locate the virtio-pci configuration structures via the capability list.
+        const caps = dd.virtio.pci.findCaps(hc, virtio_dev.addr);
+        const region_ccfg = caps.common orelse {
+            log.warn("common config capability not found.", .{});
+            break :outer;
+        };
+        const region_notify = caps.notify orelse {
+            log.warn("notify config capability not found.", .{});
+            break :outer;
+        };
+        const region_dcfg = caps.device orelse {
+            log.warn("device config capability not found.", .{});
+            break :outer;
+        };
+
+        // Map every distinct BAR referenced by the capabilities.
+        var barmap: dd.virtio.pci.BarMap = .{};
+        for ([_]usize{ region_ccfg.bar, region_notify.region.bar, region_dcfg.bar }) |idx| {
+            if (barmap.virt[idx] != 0) continue;
+
+            const bar_info = for (bars) |b| {
+                if (b.index == idx) break b;
+            } else {
+                log.warn("BAR#{d} not found.", .{idx});
+                break :outer;
+            };
+
+            barmap.virt[idx] = try urd.mem.phys.reserveAndRemap(
+                "virtio-pci BAR",
+                bar_info.address,
+                bar_info.size(),
+                null,
+                .device,
+            );
+        }
+
+        // Bring up the transport and initialize virtio-blk device.
+        const pci_dev = (dd.virtio.pci.init(
+            hc,
+            virtio_dev.addr,
+            caps,
+            barmap,
+            urd.mem.page,
+            urd.mem.bin,
+        ) catch |err| {
+            log.warn("Failed to initialize virtio-pci device: {t}", .{err});
+            break :outer;
+        }) orelse {
+            log.warn("Failed to initialize virtio-pci device.", .{});
+            break :outer;
+        };
+
+        virtio_blk_dev = dd.VirtioBlk.init(
+            pci_dev.interface(),
+            urd.mem.page,
+            urd.mem.bin,
+        ) catch |err| {
+            log.warn("Failed to initialize virtio-blk: {t}", .{err});
+            break :outer;
+        };
+    }
+}
 
 /// Initialize peripherals.
 ///
@@ -289,10 +382,11 @@ fn handleIrq(vector: u64) ?void {
 }
 
 /// Get the block device interface.
-///
-/// TODO: supports block device.
 pub fn getBlockDevice() ?common.block.Device {
-    return null;
+    return if (virtio_blk_dev) |*dev|
+        dev.interface()
+    else
+        null;
 }
 
 /// Get console instance.

@@ -413,7 +413,7 @@ const ConfigGeneration = packed struct(u32) {
 // =============================================================
 
 const std = @import("std");
-const log = std.log.scoped(.virtio_mmio);
+const log = std.log.scoped(.vmmio);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;

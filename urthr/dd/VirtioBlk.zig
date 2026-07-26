@@ -26,6 +26,11 @@ const sector_size = 512;
 /// Index of the request queue.
 const queue_index = 0;
 
+/// PCI device ID of a legacy virtio-blk device.
+pub const pci_device_id_legacy: u16 = 0x1001;
+/// PCI device ID of a modern virtio-blk device.
+pub const pci_device_id_modern: u16 = 0x1042;
+
 // =============================================================
 // API
 // =============================================================

@@ -4,6 +4,8 @@
 
 /// MMIO transport.
 pub const mmio = @import("virtio/mmio.zig");
+/// PCI transport.
+pub const pci = @import("virtio/pci.zig");
 
 pub const Error = error{
     /// Invalid or unrecognized device.
