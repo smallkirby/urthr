@@ -14,7 +14,8 @@ const IsrContext = isr.Context;
 
 /// Initialize the thread stack.
 pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
-    var addr: usize = @intFromPtr(stack.ptr) + stack.len;
+    const bottom: usize = @intFromPtr(stack.ptr) + stack.len;
+    var addr: usize = bottom;
 
     addr -= @sizeOf(IsrContext);
     const ic: *align(16) IsrContext = @ptrFromInt(addr);
@@ -38,6 +39,7 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
         .rip = @intFromPtr(entry),
         .cs = @as(u16, @bitCast(cs)),
         .rflags = @as(u64, @bitCast(rflags)),
+        .rsp = bottom - 8,
         .ss = @as(u16, @bitCast(ss)),
     });
 

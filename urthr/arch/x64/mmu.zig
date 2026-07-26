@@ -106,8 +106,8 @@ pub fn map1gb(as: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: P
 }
 
 /// Changes permissions of an existing VA range using 4KiB pages.
-pub fn remap4kb(_: AddressSpace, _: usize, _: usize, _: Permission, _: PageAllocator) Error!void {
-    @panic("unimplemented");
+pub fn remap4kb(as: AddressSpace, va: usize, size: usize, perm: Permission, allocator: PageAllocator) Error!void {
+    return remapImpl(as.select(va), va, size, .@"4kb", perm, allocator);
 }
 
 /// Unmaps the VA range using 4KiB pages.
@@ -152,13 +152,45 @@ pub fn enable(as: AddressSpace, allocator: PageAllocator) void {
 ///
 /// If `pt` has no user table, the user table is cleared.
 /// TLB is flushed after the switch.
-pub fn switchAddressSpace(_: AddressSpace, _: PageAllocator) void {
-    @panic("unimplemented");
+pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
+    const root = as._root orelse @panic("address space has no root table");
+    const cr3 = Cr3{
+        .pcid = 0, // TODO
+        .phys = @truncate(root.phys(allocator) >> page_shift_4k),
+        .lam57 = false,
+        .lam48 = false,
+    };
+    asm volatile (
+        \\mov %[cr3], %%cr3
+        :
+        : [cr3] "r" (cr3),
+        : .{ .memory = true });
 }
 
 /// Translate the given virtual address to physical address by walking the page tables.
-pub fn translateWalk(_: PageTable, _: usize, _: PageAllocator) ?usize {
-    @panic("unimplemented");
+pub fn translateWalk(pt: PageTable, va: usize, allocator: PageAllocator) ?usize {
+    var tbl = pt._tbl;
+
+    var cur_level: usize = 0;
+    while (cur_level <= 3) : (cur_level += 1) {
+        const tentry: *const TableEntry = &tbl[getIndex(@intCast(cur_level), va)];
+        const pentry: *const PageEntry = @ptrCast(tentry);
+
+        if (!tentry.present) {
+            return null;
+        }
+
+        if (cur_level == 3 or pentry.ps) {
+            const offset_bits: u6 = @intCast(page_shift_4k + (3 - cur_level) * 9);
+            const offset_mask = (@as(usize, 1) << offset_bits) - 1;
+            return (@as(usize, pentry.phys) << page_shift_4k) | (va & offset_mask);
+        }
+
+        // Descend to the next level.
+        tbl = allocator.translateV(getTable(TableEntry, tentry.next()));
+    }
+
+    return null;
 }
 
 /// Get the physical address corresponding to the given virtual address.
@@ -246,6 +278,36 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
             .phys = @truncate(cur_pa >> page_shift_4k),
             .xd = !(arg.perm.kx or arg.perm.ux),
         };
+    }
+
+    flushAll();
+}
+
+/// Changes permissions of an existing virtual address range using the given granule size.
+fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, allocator: PageAllocator) Error!void {
+    const granule = mg.granule();
+    const level = mg.level();
+
+    if (size % size_4k != 0) {
+        return Error.InvalidMapping;
+    }
+    if (va % granule != 0) {
+        return Error.InvalidMapping;
+    }
+    if (size % granule != 0) {
+        return Error.InvalidMapping;
+    }
+
+    for (0..size / granule) |i| {
+        const entry = try lookupEntry(
+            root._tbl,
+            va + i * granule,
+            level,
+            allocator,
+        );
+        entry.rw = perm.kw or perm.uw;
+        entry.us = perm.ur or perm.uw;
+        entry.xd = !(perm.kx or perm.ux);
     }
 
     flushAll();

@@ -22,7 +22,10 @@ pub fn halt() void {
 }
 
 /// Memory barrier domain.
-pub const BarrierDomain = enum {};
+pub const BarrierDomain = enum {
+    /// Full system.
+    full,
+};
 
 /// Memory barrier type.
 pub const BarrierType = enum {
@@ -33,8 +36,11 @@ pub const BarrierType = enum {
 };
 
 /// Issue a memory barrier.
-pub fn barrier(_: BarrierDomain, _: BarrierType) void {
-    @panic("unimplemented");
+pub fn barrier(_: BarrierDomain, typ: BarrierType) void {
+    switch (typ) {
+        .release => asm volatile ("sfence" ::: .{ .memory = true }),
+        .acquire => asm volatile ("lfence" ::: .{ .memory = true }),
+    }
 }
 
 /// Get the Unique ID of the current core.
