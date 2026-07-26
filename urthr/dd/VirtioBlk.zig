@@ -13,7 +13,7 @@ pub const Error = error{
 } || common.mem.Error;
 
 /// Virtio device instance.
-dev: *virtio,
+dev: virtio.Device,
 /// Block device configuration.
 config: Config,
 /// Memory allocator.
@@ -30,17 +30,10 @@ const queue_index = 0;
 // API
 // =============================================================
 
-/// Initialize the virtio-blk device at the given MMIO base address.
+/// Initialize the virtio-blk device.
 ///
 /// The block device "manages" the given allocators.
-pub fn init(base: usize, page_allocator: PageAllocator, allocator: Allocator) Error!Self {
-    // Initialize virtio device.
-    const dev = virtio.init(base, .block, page_allocator, allocator) catch |err|
-        switch (err) {
-            virtio.Error.InvalidDevice, virtio.Error.OutOfMemory => return Error.InvalidDevice,
-            else => return Error.DeviceError,
-        } orelse return Error.InvalidDevice;
-
+pub fn init(dev: virtio.Device, page_allocator: PageAllocator, allocator: Allocator) Error!Self {
     // Read device configuration.
     const config = readConfig(dev);
     log.info("capacity: {d} sectors ({d} MiB)", .{
@@ -203,7 +196,7 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
 }
 
 /// Read virtio-blk device configuration.
-fn readConfig(dev: *virtio) Config {
+fn readConfig(dev: virtio.Device) Config {
     return .{
         .capacity = dev.readConfig(u64, 0),
         .size_max = dev.readConfig(u32, 8),

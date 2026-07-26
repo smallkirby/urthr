@@ -151,7 +151,7 @@ pub fn initPeripherals1() common.mem.Error!void {
 pub fn initPeripherals2() urd.mem.Error!void {
     // virtio
     {
-        const virtio_size = dd.virtio.mmio_space_size;
+        const virtio_size = dd.virtio.mmio.space_size;
 
         // Scan for virtio-blk device.
         const virtio_base = try urd.mem.phys.reserveAndRemap(
@@ -166,8 +166,18 @@ pub fn initPeripherals2() urd.mem.Error!void {
         for (0..(memmap.virtio.size() / virtio_size)) |i| {
             const base = virtio_base + i * virtio_size;
 
-            virtio_blk_dev = dd.VirtioBlk.init(
+            const dev = if (dd.virtio.mmio.init(
                 base,
+                .block,
+                urd.mem.page,
+                urd.mem.bin,
+            )) |result| if (result) |dev| dev else {
+                continue;
+            } else |_| {
+                continue;
+            };
+            virtio_blk_dev = dd.VirtioBlk.init(
+                dev.interface(),
                 urd.mem.page,
                 urd.mem.bin,
             ) catch continue;
@@ -180,11 +190,17 @@ pub fn initPeripherals2() urd.mem.Error!void {
         for (0..(memmap.virtio.size() / virtio_size)) |i| {
             const base = virtio_base + i * virtio_size;
 
-            virtio_rng_dev = dd.VirtioRng.init(
+            const dev = if (dd.virtio.mmio.init(
                 base,
+                .entropy,
                 urd.mem.page,
                 urd.mem.bin,
-            ) catch continue;
+            )) |result| if (result) |dev| dev else {
+                continue;
+            } else |_| {
+                continue;
+            };
+            virtio_rng_dev = dd.VirtioRng.init(dev.interface()) catch continue;
 
             log.info("Found virtio-rng device#{d}", .{i});
             break;

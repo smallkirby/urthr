@@ -12,24 +12,13 @@ pub const Error = error{
 };
 
 /// Virtio device instance.
-dev: *virtio,
+dev: virtio.Device,
 
 /// Index of the request queue.
 const queue_index = 0;
 
-/// Initialize a virtio RNG device at the given MMIO base address.
-pub fn init(base: usize, page_allocator: PageAllocator, allocator: Allocator) Error!Self {
-    // Validate the virtio device.
-    const dev = virtio.init(
-        base,
-        .entropy,
-        page_allocator,
-        allocator,
-    ) catch |err| (return switch (err) {
-        virtio.Error.InvalidDevice => Error.InvalidDevice,
-        else => Error.DeviceError,
-    }) orelse return Error.InvalidDevice;
-
+/// Initialize a virtio RNG device.
+pub fn init(dev: virtio.Device) Error!Self {
     // Setup the request queue.
     dev.setupQueue(queue_index) catch |err| return switch (err) {
         virtio.Error.OutOfMemory => Error.OutOfMemory,
