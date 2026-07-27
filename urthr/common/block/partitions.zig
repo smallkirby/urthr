@@ -134,6 +134,7 @@ pub const Mbr = struct {
     /// List partitions of the given block device.
     pub fn listPartitions(dev: Device, allocator: Allocator) block.Error![]Partition {
         var results = std.array_list.Aligned(Partition, null).empty;
+        errdefer results.deinit(allocator);
 
         // Read the MBR sector.
         var buf: [size]u8 = undefined;
@@ -143,8 +144,8 @@ pub const Mbr = struct {
         // Note that tables are not aligned.
         const tables: [*]align(1) const TableEntry = @ptrCast(@alignCast(&buf[offset_partition_table]));
         for (tables[0..4]) |*table| {
-            // Skip empty partitions.
-            if (table.type == .empty) continue;
+            // Skip empty and GPT protective partitions.
+            if (table.type == .empty or table.type == .protective_mbr) continue;
 
             try results.append(allocator, .{
                 .parent = dev,
@@ -168,24 +169,137 @@ pub const Mbr = struct {
 
 /// GUID Partition Table (GPT) partitioning scheme.
 pub const Gpt = struct {
+    /// Size of a GPT header sector in bytes.
+    const size = 512;
+    /// LBA of the GPT header.
+    const header_lba: block.Lba = 1;
+    /// GPT header signature.
+    const signature = "EFI PART";
+
     /// Check if the given device uses GPT partitioning scheme.
-    pub fn isMine(_: Device) block.Error!bool {
-        @panic("Gpt.isMine: Not implemented");
+    pub fn isMine(dev: Device) block.Error!bool {
+        var buf: [size]u8 = undefined;
+        try dev.readBlock(header_lba, &buf);
+
+        return std.mem.eql(u8, buf[0..signature.len], signature);
     }
 
     /// List partitions of the given block device.
-    pub fn listPartitions(_: Device, _: Allocator) block.Error![]Partition {
-        @panic("Gpt.listPartitions: Not implemented");
+    pub fn listPartitions(dev: Device, allocator: Allocator) block.Error![]Partition {
+        var results = std.array_list.Aligned(Partition, null).empty;
+        errdefer results.deinit(allocator);
+
+        // Read GPT header.
+        var hbuf: [size]u8 = undefined;
+        try dev.readBlock(header_lba, &hbuf);
+        const header = GptHeader.from(&hbuf);
+
+        // Find the partition entry array.
+        const entry_lba = header.read(.entry, u64);
+        const num_entries = header.read(.num_entries, u32);
+        const entry_size = header.read(.entry_size, u32);
+        if (entry_size == 0 or entry_size > size) {
+            return block.Error.UnsupportedPartition;
+        }
+        const entries_per_block = size / entry_size;
+
+        // Iterate over partition entries.
+        var entries_read: u32 = 0;
+        var lba = entry_lba;
+        while (entries_read < num_entries) : (lba += 1) {
+            var buf: [size]u8 = undefined;
+            try dev.readBlock(lba, &buf);
+
+            // Iterate over entries in a block read.
+            var i: usize = 0;
+            while (i < entries_per_block and entries_read < num_entries) : ({
+                i += 1;
+                entries_read += 1;
+            }) {
+                const off = i * entry_size;
+                const entry = PartitionEntry.from(buf[off..]);
+
+                // Skip empty entries.
+                if (entry.read(.type_guid, u128) == 0) {
+                    continue;
+                }
+
+                const start_lba = entry.read(.start_lba, u64);
+                const end_lba = entry.read(.end_lba, u64);
+                try results.append(allocator, .{
+                    .parent = dev,
+                    .lba = start_lba,
+                    .nsecs = end_lba - start_lba + 1,
+                });
+            }
+        }
+
+        return results.toOwnedSlice(allocator);
     }
+
+    /// Partition Table Header located at LBA-1.
+    const GptHeader = struct {
+        /// Contents of the GPT header sector.
+        buf: []const u8,
+
+        fn from(buf: []const u8) GptHeader {
+            return .{ .buf = buf };
+        }
+
+        fn read(self: GptHeader, field: Fields, comptime T: type) T {
+            const offset: usize = @intFromEnum(field);
+            return std.mem.readInt(T, self.buf[offset..][0..@sizeOf(T)], .little);
+        }
+
+        /// Offset of GPT header fields.
+        const Fields = enum(usize) {
+            /// Identifies GPT header. Must be "EFI PART".
+            signature = 0,
+            /// The starting LBA of GUID Partition Entry array.
+            entry = 72,
+            /// The number of Partition Entries in the GUID Partition Entry array.
+            num_entries = 80,
+            /// The size in bytes of each GUID Partition Entry.
+            entry_size = 84,
+        };
+    };
+
+    /// Partition Table Entry.
+    const PartitionEntry = struct {
+        /// Contents of the partition entry.
+        buf: []const u8,
+
+        fn from(buf: []const u8) PartitionEntry {
+            return .{ .buf = buf };
+        }
+
+        fn read(self: PartitionEntry, field: Fields, comptime T: type) T {
+            const offset: usize = @intFromEnum(field);
+            return std.mem.readInt(T, self.buf[offset..][0..@sizeOf(T)], .little);
+        }
+
+        /// Offset of partition entry fields.
+        const Fields = enum(usize) {
+            /// Unique ID that defines the purpose and type of the partition.
+            type_guid = 0,
+            /// GUID that is unique for every partition entry.
+            unique_guid = 16,
+            /// Starting LBA of the partition.
+            start_lba = 32,
+            /// Ending LBA of the partition.
+            end_lba = 40,
+        };
+    };
 };
 
 /// List partitions of the given block device.
 pub fn listPartitions(dev: Device, allocator: Allocator) block.Error![]Partition {
-    if (try Mbr.isMine(dev)) {
-        return try Mbr.listPartitions(dev, allocator);
-    }
+    // GPT must be checked first so that the protective MBR is not misinterpreted.
     if (try Gpt.isMine(dev)) {
         return try Gpt.listPartitions(dev, allocator);
+    }
+    if (try Mbr.isMine(dev)) {
+        return try Mbr.listPartitions(dev, allocator);
     }
 
     return block.Error.UnsupportedPartition;
@@ -198,6 +312,8 @@ pub fn listPartitions(dev: Device, allocator: Allocator) block.Error![]Partition
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
+const bits = common.bits;
 const block = common.block;
+const mmio = common.mmio;
 const rtt = common.rtt;
 const Device = block.Device;
