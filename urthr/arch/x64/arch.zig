@@ -82,8 +82,8 @@ pub fn setEreturnHook(f: anytype) void {
 }
 
 /// Set page fault handler function.
-pub fn setPageFaultHandler(_: anytype) void {
-    // TODO: support #PF handler.
+pub fn setPageFaultHandler(f: exception.PageFaultHandler) void {
+    exception.setPageFaultHandler(f);
 }
 
 /// Cache operation type.

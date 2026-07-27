@@ -13,6 +13,14 @@ const num_reserved_exceptions = 32;
 pub const Handler = *const fn (vector: u64) ?void;
 /// ERET hook function signature.
 pub const EreturnHook = *const fn () void;
+/// Page fault handler function signature.
+///
+/// Returns true if the fault was handled.
+/// In that case, the faulting instruction can be safely retried,
+/// or a signal has been queued for delivery).
+///
+/// Returns false if the fault is unrecoverable.
+pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType) bool;
 
 /// Interrupt Descriptor Table.
 var idt: Idt align(idt_align) = undefined;
@@ -22,6 +30,8 @@ var handler: ?Handler = null;
 var terminator: ?*const fn (u8) void = null;
 /// Hook called before returning to Ring-3.
 var eret_hook: ?EreturnHook = null;
+/// Function pointer to the registered page fault handler.
+var pagefault_handler: ?PageFaultHandler = null;
 
 /// Whether we are currently handling an exception.
 /// TODO: should be per-CPU.
@@ -53,6 +63,11 @@ pub fn setHandler(h: Handler) void {
     handler = h;
 }
 
+/// Set the page fault handler function.
+pub fn setPageFaultHandler(h: PageFaultHandler) void {
+    pagefault_handler = h;
+}
+
 /// Set the hook called before returning to Ring-3.
 pub fn setEreturnHook(f: EreturnHook) void {
     eret_hook = f;
@@ -67,6 +82,20 @@ pub fn callEreturnHook() void {
 ///
 /// Called from the ISR common stub.
 pub fn dispatch(ctx: *Context) void {
+    // Handle page fault exceptions specially.
+    if (ctx.vector == @intFromEnum(Exception.pf)) {
+        const ec: PfErrorCode = @bitCast(@as(u32, @truncate(ctx.ec)));
+        const far = am.readCr2();
+
+        if (pagefault_handler) |f| {
+            if (f(far, if (ec.write) .write else .read)) {
+                callEreturnHook();
+                return;
+            }
+        }
+    }
+
+    // Dispatch to the registered handler.
     if (ctx.vector >= num_reserved_exceptions) {
         if (handler) |f| {
             if (f(ctx.vector)) |_| {
@@ -77,6 +106,22 @@ pub fn dispatch(ctx: *Context) void {
 
     defaultHandler(ctx);
 }
+
+/// Page fault error code layout.
+const PfErrorCode = packed struct(u32) {
+    /// If false, the fault was caused by a non-present page.
+    present: bool,
+    /// The access causing the fault was a write.
+    write: bool,
+    /// A used-mode access caused the fault.
+    user: bool,
+    /// The fault was caused by a reserved bit set in a page directory.
+    rsvd: bool,
+    /// The fault was caused by an instruction fetch.
+    inst: bool,
+    /// Reserved.
+    _u5: u27,
+};
 
 // =============================================================
 // Default handler
