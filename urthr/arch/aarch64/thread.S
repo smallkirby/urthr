@@ -1,8 +1,8 @@
 .section  .text
-.global   enterUserland
+.global   enterUserlandAsm
 
-// enterUserland(pc: usize, sp: usize, kstack: usize) noreturn
-enterUserland:
+// enterUserlandAsm(pc: usize, sp: usize, kstack: usize) noreturn
+enterUserlandAsm:
   // Set up registers for eret.
   msr elr_el1, x0
   msr sp_el0,  x1

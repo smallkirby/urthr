@@ -1,6 +1,6 @@
-// switchContext(old: *usize, new: *const usize)
-.global switchContext
-switchContext:
+// switchContextAsm(old: *usize, new: *const usize)
+.global switchContextAsm
+switchContextAsm:
   // Save callee-saved registers to current stack.
   pushq %rbp
   pushq %rbx

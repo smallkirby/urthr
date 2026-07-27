@@ -17,6 +17,11 @@ pub fn globalInit() void {
     tests.earlyTss();
 }
 
+/// Set the kernel stack used on transitions from Ring-3 to Ring-0.
+pub fn setKernelStack(addr: usize) void {
+    early.tss.setRsp(0, addr);
+}
+
 /// Load kernel segment selectors.
 fn loadKernelGdt(gdtr: Gdtr) void {
     am.lgdt(@intFromPtr(&gdtr));

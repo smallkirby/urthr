@@ -125,7 +125,10 @@ pub fn isrContextOf(kstack: []u8) *IsrContext {
 }
 
 /// Switch context from the old thread to the new thread.
-pub extern fn switchContext(old: *usize, new: *const usize) callconv(.c) void;
+pub fn switchContext(old: *usize, new: *const usize, _: usize) void {
+    switchContextAsm(old, new);
+}
+extern fn switchContextAsm(old: *usize, new: *const usize) callconv(.c) void;
 
 /// Set the thread pointer (TPIDR_EL0) for TLS.
 pub fn setThreadPointer(tp: usize) void {
@@ -135,7 +138,10 @@ pub fn setThreadPointer(tp: usize) void {
 /// Drop from EL1 to EL0 and start executing at the given user PC with the given user SP.
 ///
 /// Does not return.
-pub extern fn enterUserland(pc: usize, sp: usize, kstack: usize) callconv(.c) noreturn;
+pub fn enterUserland(pc: usize, sp: usize, kstack: usize) noreturn {
+    enterUserlandAsm(pc, sp, kstack);
+}
+extern fn enterUserlandAsm(pc: usize, sp: usize, kstack: usize) callconv(.c) noreturn;
 
 /// Thread entry trampoline function.
 fn trampoline() callconv(.naked) noreturn {

@@ -1,8 +1,8 @@
 //! Context switch implementation for AArch64.
 
-// switchContext(old: *usize, new: *const usize)
-.global switchContext
-switchContext:
+// switchContextAsm(old: *usize, new: *const usize)
+.global switchContextAsm
+switchContextAsm:
   // Save callee-saved registers to current stack.
   stp x19, x20, [sp, #-16]!
   stp x21, x22, [sp, #-16]!

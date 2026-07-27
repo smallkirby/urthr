@@ -137,10 +137,15 @@ fn blockCurrentImpl(caller_lock: ?*SpinLock) void {
     if (caller_lock) |l| l.unlock();
 
     // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp);
+    arch.thread.switchContext(&cur.sp, &next.sp, kstackTopOf(next));
 
     // Update the last switch-in timestamp.
     updateLastExecTimestamp();
+}
+
+/// Top of the given thread's kernel stack, or 0 if it has none.
+fn kstackTopOf(th: *Thread) usize {
+    return if (th.stack) |kstack| @intFromPtr(kstack.ptr) + kstack.len else 0;
 }
 
 /// Yield the current thread to allow other threads to run.
@@ -175,7 +180,7 @@ pub fn reschedule() void {
     lock.unlock();
 
     // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp);
+    arch.thread.switchContext(&cur.sp, &next.sp, kstackTopOf(next));
 
     // Update the last switch-in timestamp.
     updateLastExecTimestamp();
@@ -210,7 +215,7 @@ pub fn exitCurrent() noreturn {
     lock.unlock();
 
     // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp);
+    arch.thread.switchContext(&cur.sp, &next.sp, kstackTopOf(next));
 
     // This thread should not be scheduled again.
     unreachable;

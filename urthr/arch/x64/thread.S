@@ -1,8 +1,8 @@
 .section  .text
 
-// enterUserland(pc: usize, sp: usize, kstack: usize) noreturn
-.global   enterUserland
-enterUserland:
+// enterUserlandAsm(pc: usize, sp: usize, kstack: usize) noreturn
+.global   enterUserlandAsm
+enterUserlandAsm:
   // Reset RSP to the bottom of the kernel stack.
   movq %rdx, %rsp
 
