@@ -42,6 +42,11 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
     return .success(@bitCast(fd));
 }
 
+/// syscall: open
+pub fn sysOpen(pathname: [*:0]const u8, flags: OpenFlags, mode: u32) ReturnType {
+    return sysOpenAt(cwd_fd, pathname, flags, mode);
+}
+
 /// syscall: dup
 pub fn sysDup(oldfd: usize) ReturnType {
     const file = getFile(oldfd) catch return .err(.badf);

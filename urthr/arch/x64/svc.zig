@@ -52,10 +52,6 @@ export fn svc(ctx: *Context) callconv(.c) void {
     const arg5 = ctx.r8;
     const arg6 = ctx.r9;
 
-    // Save and restore user thread pointer.
-    const fs_base = am.rdmsr(.fs_base);
-    defer am.wrmsr(.fs_base, fs_base);
-
     if (dispatcher(
         nr,
         arg1,

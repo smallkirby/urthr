@@ -60,6 +60,16 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
     return .success(@bitCast(@as(u64, child.tgid)));
 }
 
+/// syscall: fork
+pub fn sysFork() ReturnType {
+    const child = task.clone(.{
+        .vm = false,
+        .suspend_parent = false,
+    }, 0) catch return .err(.nomem);
+
+    return .success(@bitCast(@as(u64, child.tgid)));
+}
+
 /// Linux compatible flags for clone syscall.
 const CloneFlags = packed struct(u64) {
     /// Signal to send to the parent on child termination.
@@ -130,6 +140,25 @@ pub fn sysExecve(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: 
 pub fn sysSetTidAddress(_: usize) ReturnType {
     return .err(.nosys);
 }
+
+/// syscall: arch_prctl
+pub fn sysArchPrctl(op: ArchPrctlOp, addr: u64) ReturnType {
+    switch (op) {
+        .set_fs => {
+            arch.thread.setThreadPointer(addr);
+            return .success(0);
+        },
+        else => return .err(.inval),
+    }
+}
+
+/// Operations for arch_prctl syscall.
+const ArchPrctlOp = enum(u32) {
+    /// Set the 64-bit base for the FS register.
+    set_fs = 0x1002,
+
+    _,
+};
 
 /// syscall: getpid
 pub fn sysGetPid() ReturnType {
@@ -233,5 +262,6 @@ const Permission = common.mem.Permission;
 const urd = @import("urthr");
 const sched = urd.sched;
 const task = urd.task;
+const arch = @import("arch").impl;
 const sig = urd.task.signal;
 const ReturnType = urd.syscall.ReturnType;
