@@ -133,7 +133,7 @@ pub fn initResources() Error!void {
     const kphys = board.getKernelPaddr();
 
     // DRAM
-    for (board.getDramRegion(), 0..) |dram, i| {
+    for (board.getDramRegion()) |dram| {
         const res = try allocator.reserve(
             "System RAM",
             dram.start,
@@ -141,7 +141,7 @@ pub fn initResources() Error!void {
             null,
         );
 
-        if (i == 0) {
+        if (dram.start <= kphys and kphys < dram.start + dram.size()) {
             _ = try allocator.reserve(
                 "Kernel Image",
                 kphys,

@@ -57,29 +57,50 @@ pub fn getKernelPaddr() usize {
     return boot_info.kphys;
 }
 
-var dram_region: [1]common.Range = undefined;
+var dram_region: [64]common.Range = undefined;
 
-/// Get the DRAM region.
+/// Get the list of usable DRAM regions.
 pub fn getDramRegion() []const common.Range {
     const map = boot_info.memory_map;
 
     const MemoryDescriptorIterator = BootInfo.MemoryDescriptorIterator;
     const efi_page_size = 4096;
 
-    // Find the tail region except reserved memory.
-    var tail: usize = 0;
+    // Find all usable DRAM regions.
+    var count: usize = 0;
     var desc_iter = MemoryDescriptorIterator.new(map);
     var desc = desc_iter.next();
     while (desc) |d| : (desc = desc_iter.next()) {
-        if (d.type == .reserved_memory_type) {
+        switch (d.type) {
+            .loader_code,
+            .loader_data,
+            .boot_services_code,
+            .boot_services_data,
+            .conventional_memory,
+            => {},
+            else => continue,
+        }
+
+        const start = d.physical_start;
+        const end = start + d.number_of_pages * efi_page_size;
+
+        // Merge adjacent regions.
+        if (count > 0 and dram_region[count - 1].end == start) {
+            dram_region[count - 1].end = end;
             continue;
         }
 
-        tail = @max(tail, d.physical_start + d.number_of_pages * efi_page_size);
+        dram_region[count] = .{ .start = start, .end = end };
+        count += 1;
+
+        // Discard any remaining regions if we exceed the maximum count.
+        if (count == dram_region.len) {
+            log.warn("Too many usable DRAM regions.", .{});
+            break;
+        }
     }
 
-    dram_region[0] = .{ .start = 0, .end = tail };
-    return &dram_region;
+    return dram_region[0..count];
 }
 
 /// Get the I/O regions that must be identity-mapped during boot.
