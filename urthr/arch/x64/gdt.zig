@@ -17,9 +17,17 @@ pub fn globalInit() void {
     tests.earlyTss();
 }
 
+/// Per-CPU mirror of the current thread's kernel stack top.
+export var ksp_top: usize linksection(".data..percpu") = 0;
+
 /// Set the kernel stack used on transitions from Ring-3 to Ring-0.
 pub fn setKernelStack(addr: usize) void {
+    // Update TSS's RSP0.
     early.tss.setRsp(0, addr);
+
+    // Record the kernel stack top in the per-CPU variable.
+    const ksp: *usize = @ptrFromInt(arch.getPerCpuBase() +% @intFromPtr(&ksp_top));
+    ksp.* = addr;
 }
 
 /// Load kernel segment selectors.
@@ -674,3 +682,4 @@ const rtt = common.rtt;
 const units = common.units;
 const util = common.util;
 const am = @import("asm.zig");
+const arch = @import("arch.zig");

@@ -110,6 +110,7 @@ pub const ReturnType = union(enum) {
 pub fn init() void {
     arch.setSystemCallHandler(invoke);
     arch.setEreturnHook(urd.task.signal.deliver);
+    arch.initSyscall();
 }
 
 /// Call a system call handler corresponding to the given syscall number.

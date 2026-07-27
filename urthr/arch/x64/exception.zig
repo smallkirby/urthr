@@ -20,7 +20,7 @@ var idt: Idt align(idt_align) = undefined;
 var handler: ?Handler = null;
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
-/// Hook called before returning to EL0.
+/// Hook called before returning to Ring-3.
 var eret_hook: ?EreturnHook = null;
 
 /// Whether we are currently handling an exception.
@@ -56,6 +56,11 @@ pub fn setHandler(h: Handler) void {
 /// Set the hook called before returning to Ring-3.
 pub fn setEreturnHook(f: EreturnHook) void {
     eret_hook = f;
+}
+
+/// Call the registered ERET hook, if any.
+pub fn callEreturnHook() void {
+    if (eret_hook) |f| f();
 }
 
 /// Dispatch an interrupt to the registered handler.

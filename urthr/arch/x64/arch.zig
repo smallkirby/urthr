@@ -66,6 +66,11 @@ pub fn setPerCpuBase(addr: usize) void {
         : .{ .memory = true });
 }
 
+/// Enable syscall architectural features.
+pub fn initSyscall() void {
+    svc.init();
+}
+
 /// Set system call handler function.
 pub fn setSystemCallHandler(f: anytype) void {
     svc.setHandler(f);

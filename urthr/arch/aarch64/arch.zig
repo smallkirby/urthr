@@ -67,6 +67,9 @@ pub fn setPerCpuBase(addr: usize) void {
     am.msr(.tpidr_el1, addr);
 }
 
+/// No-op on AArch64.
+pub fn initSyscall() void {}
+
 /// Set system call handler function.
 pub fn setSystemCallHandler(f: anytype) void {
     svc.setHandler(f);
