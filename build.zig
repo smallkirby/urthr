@@ -563,7 +563,7 @@ pub fn build(b: *std.Build) !void {
     // Applications / BootFS
     // =============================================================
 
-    {
+    const apps = outer: {
         const user_target = switch (board_type.arch()) {
             .aarch64 => b.resolveTargetQuery(.{
                 .cpu_arch = .aarch64,
@@ -659,7 +659,9 @@ pub fn build(b: *std.Build) !void {
             b.getInstallStep().dependOn(bootfs);
             sdin = try std.fmt.allocPrint(b.allocator, "{s}/bootfs.img", .{iu.getInstallPath(.target, .root)});
         }
-    }
+
+        break :outer apps;
+    };
 
     // =============================================================
     // Install
@@ -700,6 +702,12 @@ pub fn build(b: *std.Build) !void {
         run.addArg(b.fmt("{s}/esp.img", .{iu.getInstallPath(.target, .root)}));
         run.step.dependOn(&cp_remote.step);
         b.getInstallStep().dependOn(&run.step);
+
+        // Copy apps.
+        for (apps) |app| {
+            const artifact = iu.createInstallArtifact(app, .target, .esp_bin);
+            run.step.dependOn(&artifact.step);
+        }
     }
 
     // =============================================================
@@ -822,6 +830,8 @@ const InstallUtil = struct {
         include,
         /// EFI System Partition root.
         esp,
+        /// Binary directory within the EFI System Partition.
+        esp_bin,
     };
 
     // Target specific installation information.
@@ -874,6 +884,7 @@ const InstallUtil = struct {
             .bootfs => self.b.fmt("{s}/bootfs/boot/bin", .{map.root}),
             .include => self.b.fmt("{s}/include", .{map.root}),
             .esp => self.b.fmt("{s}/esp", .{map.root}),
+            .esp_bin => self.b.fmt("{s}/esp/bin", .{map.root}),
         };
     }
 
