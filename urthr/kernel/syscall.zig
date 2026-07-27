@@ -5,7 +5,11 @@
 /// NOTE that this table is referenced only at comptime to construct runtime constants.
 ///
 /// TODO: should be arch-specific.
-const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
+const entries =
+// =============================================================
+// Aarch64
+// =============================================================
+if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     // =============================================================
     // POSIX system calls.
 
@@ -64,6 +68,69 @@ const entries = if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     // Debug system calls.
 
     .new("ping",        512,    sysPing),
+}
+
+// =============================================================
+// x64
+// =============================================================
+else if (builtin.cpu.arch.isX86())[_]Descriptor{
+    // =============================================================
+    // POSIX system calls.
+
+    .new("read",                  0,    posix.fs.sysRead),
+    .new("write",                 1,    posix.fs.sysWrite),
+    .new("close",                 3,    posix.fs.sysClose),
+    .new("fstat",                 5,    posix.fs.sysFstat),
+    .new("lseek",                 8,    posix.fs.sysLseek),
+    .new("mmap",                  9,    posix.mem.sysMmap),
+    .new("mprotect",             10,    posix.mem.sysMprotect),
+    .new("munmap",               11,    posix.mem.sysMunmap),
+    .new("brk",                  12,    posix.mem.sysBrk),
+    .new("rt_sigaction",         13,    posix.signal.sysRtSigAction),
+    .new("rt_sigprocmask",       14,    posix.signal.sysRtSigProcMask),
+    .new("ioctl",                16,    posix.fs.sysIoctl),
+    .new("readv",                19,    posix.fs.sysReadv),
+    .new("writev",               20,    posix.fs.sysWritev),
+    .new("dup",                  32,    posix.fs.sysDup),
+    .new("getpid",               39,    posix.task.sysGetPid),
+    .new("clone",                56,    posix.task.sysClone),
+    .new("execve",               59,    posix.task.sysExecve),
+    .new("wait4",                61,    posix.task.sysWait4),
+    .new("kill",                 62,    posix.signal.sysKill),
+    .new("uname",                63,    posix.system.sysUname),
+    .new("fcntl",                72,    posix.fs.sysFcntl),
+    .new("getcwd",               79,    posix.fs.sysGetCwd),
+    .new("chdir",                80,    posix.fs.sysChdir),
+    .new("getuid",               102,   posix.task.sysGetUid),
+    .new("geteuid",              107,   posix.task.sysGetEuid),
+    .new("setpgid",              109,   posix.task.sysSetPgid),
+    .new("getppid",              110,   posix.task.sysGetPpid),
+    .new("setsid",               112,   posix.task.sysSetsid),
+    .new("getpgid",              121,   posix.task.sysGetPgid),
+    .new("getsid",               124,   posix.task.sysGetsid),
+    .new("sigaltstack",          131,   posix.signal.sysSigAltStack),
+    .new("gettid",               186,   posix.task.sysGetTid),
+    .new("sched_getaffinity",    204,   posix.sched.sysSchedGetAffinity),
+    .new("set_tid_address",      218,   posix.task.sysSetTidAddress),
+    .new("getdents64",           217,   posix.fs.sysGetDents64),
+    .new("clock_gettime",        228,   posix.time.sysClockGetTime),
+    .new("clock_nanosleep",      230,   posix.time.sysClockNanoSleep),
+    .new("exit_group",           231,   posix.task.sysExitGroup),
+    .new("openat",               257,   posix.fs.sysOpenAt),
+    .new("newfstatat",           262,   posix.fs.sysNewFstatAt),
+    .new("unlinkat",             263,   posix.fs.sysUnlinkAt),
+    .new("fchmodat",             268,   posix.fs.sysFchmodAt),
+    .new("ppoll",                271,   posix.fs.sysPpoll),
+    .new("dup3",                 292,   posix.fs.sysDup3),
+    .new("pipe2",                293,   posix.fs.sysPipe2),
+    .new("preadv",               295,   posix.fs.sysPreadv),
+    .new("pwritev",              296,   posix.fs.sysPwritev),
+    .new("prlimit64",            302,   posix.task.sysPrlimit64),
+
+    // =============================================================
+    // Debug system calls.
+
+    .new("ping",                 512,   sysPing),
 }
 else [_]Descriptor{}
 ;
