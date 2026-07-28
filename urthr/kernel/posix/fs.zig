@@ -136,37 +136,71 @@ pub fn sysClose(fd: usize) ReturnType {
     return .success(0);
 }
 
-const OpenFlags = packed struct(i32) {
-    /// Write-only.
-    wo: bool = false,
-    /// Read and write.
-    rdwr: bool = false,
-    /// Reserved.
-    _2: bool = false,
-    /// Reserved.
-    _3: u3 = 0,
-    /// Create file if it does not exist.
-    creat: bool = false,
-    /// Error if O_CREAT and the file exists.
-    excl: bool = false,
-    /// Even if the path refers to TTY, do not open it as a controlling TTY device.
-    noctty: bool = false,
-    /// Truncate file to zero length if it already exists.
-    trunc: bool = false,
-    /// Append mode.
-    append: bool = false,
-    /// Nonblocking mode if possible.
-    nonblock: bool = false,
-    /// Reserved.
-    _12: u2 = 0,
-    /// Fail unless the path resolves to a directory.
-    directory: bool = false,
-    /// Reserved.
-    _15: u4 = 0,
-    /// Enable close-on-exec flag.
-    cloexec: bool = false,
-    /// Reserved.
-    _20: u12 = 0,
+const OpenFlags = switch (builtin.cpu.arch) {
+    .x86_64 => packed struct(i32) {
+        /// Write-only.
+        wo: bool = false,
+        /// Read and write.
+        rdwr: bool = false,
+        /// Reserved.
+        _2: bool = false,
+        /// Reserved.
+        _3: u3 = 0,
+        /// Create file if it does not exist.
+        creat: bool = false,
+        /// Error if O_CREAT and the file exists.
+        excl: bool = false,
+        /// Even if the path refers to TTY, do not open it as a controlling TTY device.
+        noctty: bool = false,
+        /// Truncate file to zero length if it already exists.
+        trunc: bool = false,
+        /// Append mode.
+        append: bool = false,
+        /// Nonblocking mode if possible.
+        nonblock: bool = false,
+        /// Reserved.
+        _12: u4 = 0,
+        /// Fail unless the path resolves to a directory.
+        directory: bool = false,
+        /// Reserved.
+        _17: u2 = 0,
+        /// Enable close-on-exec flag.
+        cloexec: bool = false,
+        /// Reserved.
+        _20: u12 = 0,
+    },
+    else => packed struct(i32) {
+        /// Write-only.
+        wo: bool = false,
+        /// Read and write.
+        rdwr: bool = false,
+        /// Reserved.
+        _2: bool = false,
+        /// Reserved.
+        _3: u3 = 0,
+        /// Create file if it does not exist.
+        creat: bool = false,
+        /// Error if O_CREAT and the file exists.
+        excl: bool = false,
+        /// Even if the path refers to TTY, do not open it as a controlling TTY device.
+        noctty: bool = false,
+        /// Truncate file to zero length if it already exists.
+        trunc: bool = false,
+        /// Append mode.
+        append: bool = false,
+        /// Nonblocking mode if possible.
+        nonblock: bool = false,
+        /// Reserved.
+        _12: u2 = 0,
+        /// Fail unless the path resolves to a directory.
+        directory: bool = false,
+        /// Reserved.
+        _15: u4 = 0,
+        /// Enable close-on-exec flag.
+        cloexec: bool = false,
+        /// Reserved.
+        _20: u12 = 0,
+    },
 };
 
 // =============================================================
@@ -1001,6 +1035,7 @@ fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error
 // =============================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 const log = std.log.scoped(.pxfs);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
