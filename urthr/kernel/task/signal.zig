@@ -142,6 +142,20 @@ pub fn sigreturn() void {
             break :blk frame.saved_mask;
         },
 
+        .x86_64 => blk: {
+            const frame: *const SigFrame = @ptrFromInt(ctx.rsp);
+
+            // Restore R15–RDI.
+            const ctx_regs: *[15]u64 = @ptrCast(ctx);
+            ctx_regs.* = frame.regs;
+            // Restore RSP, RIP, RFLAGS.
+            ctx.rsp = frame.rsp;
+            ctx.rip = frame.rip;
+            ctx.rflags = frame.rflags;
+
+            break :blk frame.saved_mask;
+        },
+
         else => @compileError("Unsupported architecture."),
     };
 
@@ -170,6 +184,21 @@ pub const SigFrame = switch (builtin.cpu.arch) {
         pc: u64,
         /// PSTATE.
         pstate: u64,
+        /// Signal mask to restore on sigreturn.
+        saved_mask: Mask,
+        /// Signal number that caused this frame.
+        signo: SigInt,
+    },
+
+    .x86_64 => extern struct {
+        /// General-purpose registers R15–RDI.
+        regs: [15]u64,
+        /// User RSP.
+        rsp: u64,
+        /// User RIP at signal entry.
+        rip: u64,
+        /// RFLAGS.
+        rflags: u64,
         /// Signal mask to restore on sigreturn.
         saved_mask: Mask,
         /// Signal number that caused this frame.
@@ -228,7 +257,29 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
         },
 
         .x86_64 => {
-            @panic("Unsupported: setupSigFrame");
+            // Align the frame so that RSP is 16-byte aligned.
+            const frame_addr = (ctx.rsp - @sizeOf(SigFrame)) & ~@as(u64, 0xF);
+            const frame: *SigFrame = @ptrFromInt(frame_addr);
+            const regs: *const [15]u64 = @ptrCast(ctx);
+
+            // Save user context into the sigframe.
+            frame.* = .{
+                .regs = regs.*,
+                .rsp = ctx.rsp,
+                .rip = ctx.rip,
+                .rflags = ctx.rflags,
+                .saved_mask = th.sigstate.blocked,
+                .signo = signo,
+            };
+
+            // Push the trampoline address as the return address for the handler.
+            const ret_slot: *u64 = @ptrFromInt(frame_addr - @sizeOf(u64));
+            ret_slot.* = trampoline;
+
+            // Modify user context to execute the signal handler.
+            ctx.rdi = signo;
+            ctx.rip = action.handler;
+            ctx.rsp = frame_addr - @sizeOf(u64);
         },
 
         else => @compileError("Unsupported architecture."),
@@ -290,11 +341,11 @@ fn generateTrampoline() Trampoline {
         },
 
         .x86_64 => .{
-            .size = 0, // TODO
+            .size = 7,
             .code = struct {
                 fn f() callconv(.naked) noreturn {
                     asm volatile (
-                        \\movq $15, %rax // sigreturn
+                        \\movl $15, %eax // rt_sigreturn
                         \\syscall
                     );
                 }

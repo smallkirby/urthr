@@ -89,6 +89,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("brk",                  12,    posix.mem.sysBrk),
     .new("rt_sigaction",         13,    posix.signal.sysRtSigAction),
     .new("rt_sigprocmask",       14,    posix.signal.sysRtSigProcMask),
+    .new("rt_sigreturn",         15,    posix.signal.sysRtSigReturn),
     .new("ioctl",                16,    posix.fs.sysIoctl),
     .new("readv",                19,    posix.fs.sysReadv),
     .new("writev",               20,    posix.fs.sysWritev),
