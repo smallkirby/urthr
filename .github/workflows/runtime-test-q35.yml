@@ -1,4 +1,4 @@
-name: Build (QEMU Q35 Machine)
+name: Runtime Tests (QEMU Q35 Machine)
 
 on:
   push:
