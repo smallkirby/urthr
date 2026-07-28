@@ -59,6 +59,10 @@ pub fn sgdt() u80 {
     return gdtr;
 }
 
+pub inline fn cli() void {
+    asm volatile ("cli" ::: .{ .cc = true });
+}
+
 pub inline fn sti() void {
     asm volatile ("sti" ::: .{ .cc = true });
 }

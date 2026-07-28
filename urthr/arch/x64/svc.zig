@@ -44,6 +44,9 @@ pub fn init() void {
 
 /// Zig entry point of the SYSCALL handler.
 export fn svc(ctx: *Context) callconv(.c) void {
+    am.sti();
+    defer am.cli();
+
     const nr = ctx.rax;
     const arg1 = ctx.rdi;
     const arg2 = ctx.rsi;

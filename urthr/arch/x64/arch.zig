@@ -122,6 +122,11 @@ pub const intr = struct {
             : .{ .memory = true, .cc = true });
     }
 
+    /// Unmask all maskable interrupts.
+    pub fn unmaskAll() void {
+        am.sti();
+    }
+
     /// Set the exception handler function.
     pub fn setHandler(handler: exception.Handler) void {
         exception.setHandler(handler);
@@ -138,3 +143,4 @@ comptime {
 }
 
 const svc = @import("svc.zig");
+const am = @import("asm.zig");

@@ -378,6 +378,9 @@ const spurious_vector: u8 = 0xFF;
 pub fn initIrqLocal() PageAllocator.Error!void {
     arch.exception.initLocal();
     arch.lapic.enable(spurious_vector);
+
+    // Unmask all maskable interrupts.
+    arch.intr.unmaskAll();
 }
 
 /// Enable an interrupt by ID.
