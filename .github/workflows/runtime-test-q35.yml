@@ -46,11 +46,15 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - name: Build (Q35)
+      - name: Runtime Tests (Q35)
         run: |
-          zig build install --summary all \
+          zig build run --summary all \
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
             -Dboard=q35 \
+            -Dqemu=/usr/bin \
+            -Drtt \
             -Drestart \
-            -Drtt
+            -Didle_watchdog=30 \
+            -Dinit=/boot/bin/utest \
+            -Dallow_init_exit
