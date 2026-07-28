@@ -323,7 +323,7 @@ pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, _: i32) ReturnType {
 // =============================================================
 
 /// syscall: fstat
-pub fn sysFstat(fd: usize, statbuf: *Stat) ReturnType {
+pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
 
     statbuf.* = .{
@@ -343,7 +343,7 @@ pub fn sysFstat(fd: usize, statbuf: *Stat) ReturnType {
 }
 
 /// syscall: newfstatat
-pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *Stat, flags: AtFlags) ReturnType {
+pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) Stat, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
