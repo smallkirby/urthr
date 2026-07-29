@@ -49,6 +49,14 @@ pub inline fn lidt(idtr: u64) void {
     );
 }
 
+pub fn str() u16 {
+    return asm volatile (
+        \\str %[tr]
+        : [tr] "={ax}" (-> u16),
+        :
+        : .{ .rax = true });
+}
+
 pub fn sgdt() u80 {
     var gdtr: u80 = undefined;
     asm volatile (

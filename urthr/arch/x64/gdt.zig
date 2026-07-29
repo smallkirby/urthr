@@ -1,20 +1,38 @@
 //! GDT and TSS management.
+//!
+//! GDT is shared across all CPUs.
+//! TSS is per-CPU and each CPU is assigned its own TSS descriptor slot in the GDT.
+
+/// Upper bound on the number of CPUs supported.
+const max_cpus = 16;
 
 /// Initialize boot-time GDT and TSS.
 pub fn globalInit() void {
-    // Load GDTR.
+    // Initialize GDTR.
     early.gdt.init();
+
+    // Set up this BSP's TSS.
+    localInit(0);
+}
+
+/// Initialize the GDT and TSS for the calling CPU.
+pub fn localInit(cpu: usize) void {
+    rtt.expect(cpu < max_cpus);
+
+    // Load the shared GDTR into this core.
     early.gdt.load();
 
     // Load TR.
-    early.tss.init();
-    early.tss.setIst(1, @intFromPtr(&early.istack) + @sizeOf(Istack));
-    early.tss.load(&early.gdt);
+    early.tss[cpu].init();
+    early.tss[cpu].setIst(1, @intFromPtr(&early.istacks[cpu]) + @sizeOf(Istack));
+    early.tss[cpu].load(&early.gdt, tssIndex(cpu));
 
     // Testing
-    tests.gdtEntries();
-    tests.earlyTssDesc(@intFromPtr(&early.tss));
-    tests.earlyTss();
+    if (cpu == 0) {
+        tests.gdtEntries();
+        tests.earlyTssDesc(@intFromPtr(&early.tss[0]));
+        tests.earlyTss();
+    }
 }
 
 /// Per-CPU mirror of the current thread's kernel stack top.
@@ -22,12 +40,26 @@ export var ksp_top: usize linksection(".data..percpu") = 0;
 
 /// Set the kernel stack used on transitions from Ring-3 to Ring-0.
 pub fn setKernelStack(addr: usize) void {
-    // Update TSS's RSP0.
-    early.tss.setRsp(0, addr);
+    // Update the calling CPU's TSS RSP0.
+    currentTss().setRsp(0, addr);
 
     // Record the kernel stack top in the per-CPU variable.
     const ksp: *usize = @ptrFromInt(arch.getPerCpuBase() +% @intFromPtr(&ksp_top));
     ksp.* = addr;
+}
+
+/// Get the TSS of the calling CPU.
+///
+/// Determined by reading the currently-loaded TSS selector.
+fn currentTss() *Tss {
+    const tr: SegSel = @bitCast(am.str());
+    const cpu = (@intFromEnum(tr.index) - @intFromEnum(SegIndex.kernel_tss_base)) / 2;
+    return &early.tss[cpu];
+}
+
+/// Get the TSS descriptor index assigned to the given logical CPU.
+fn tssIndex(cpu: usize) SegIndex {
+    return @enumFromInt(@intFromEnum(SegIndex.kernel_tss_base) + 2 * cpu);
 }
 
 /// Load kernel segment selectors.
@@ -87,32 +119,31 @@ fn loadKernelCs() void {
         : .{ .rax = true });
 }
 
-/// Load the kernel TSS selector to TR.
-fn loadKernelTss() void {
+/// Load the given TSS selector to TR.
+fn loadKernelTss(sel: SegSel) void {
     asm volatile (
-        \\mov %[kernel_tss], %%di
+        \\mov %[sel], %%di
         \\ltr %%di
         :
-        : [kernel_tss] "n" (@as(u16, @bitCast(SegSel{
-            .rpl = 0,
-            .index = .kernel_tss,
-          }))),
+        : [sel] "r" (@as(u16, @bitCast(sel))),
         : .{ .di = true });
 }
 
 /// Boot-time variables.
 const early = struct {
     /// Boot-time GDT.
+    ///
+    /// Shared across all CPUs.
     var gdt: Gdt align(aligns.gdt) = undefined;
 
-    /// Boot-time TSS.
+    /// Per-CPU TSS.
     ///
-    /// This provides only IST1.
+    /// Each provides only IST1.
     /// This does not provide RSPx.
-    var tss: Tss align(aligns.tss) = undefined;
+    var tss: [max_cpus]Tss align(aligns.tss) = undefined;
 
-    /// Boot-time interrupt stack.
-    var istack: Istack align(aligns.ist) = [_]u8{0} ** @sizeOf(Istack);
+    /// Per-CPU interrupt stack.
+    var istacks: [max_cpus]Istack align(aligns.ist) = [_]Istack{[_]u8{0} ** istack_size} ** max_cpus;
 };
 
 /// Size in bytes of interrupt stack.
@@ -151,10 +182,12 @@ pub const SegIndex = enum(u13) {
     user_ds = 0x05,
     /// User code segment.
     user_cs = 0x06,
-    /// Kernel TSS.
+    /// Kernel TSS of CPU#0.
     ///
     /// TSS descriptor occupies two entries.
-    kernel_tss = 0x08,
+    kernel_tss_base = 0x08,
+
+    _,
 };
 
 /// Segment selector.
@@ -340,8 +373,8 @@ const Gdt = extern struct {
     /// Descriptor table type.
     const DescriptorTable = [num_gdt]SegDesc;
 
-    /// Maximum number of GDT entries.
-    const num_gdt = 0x10;
+    /// The number of GDT entries.
+    const num_gdt = @intFromEnum(SegIndex.kernel_tss_base) + 2 * max_cpus;
 
     /// Segment descriptor table.
     _data: DescriptorTable,
@@ -385,7 +418,7 @@ const Gdt = extern struct {
     }
 
     /// Set a TSS descriptor at the given index.
-    pub fn setTss(self: *Self, index: SegIndex, tss: TssDesc) void {
+    fn setTss(self: *Self, index: SegIndex, tss: TssDesc) void {
         const to: *TssDesc = @ptrCast(@alignCast(&self._data[@intFromEnum(index)]));
         to.* = tss;
     }
@@ -536,14 +569,11 @@ pub const Tss = extern struct {
 
     /// Cast a given pointer to a TSS.
     pub fn from(ptr: anytype) *Tss {
-        const self: *Self = @ptrCast(@alignCast(ptr));
-        rtt.expectEqual(0, @intFromPtr(self) % aligns.tss);
-        return self;
+        return @ptrCast(@alignCast(ptr));
     }
 
     /// Initialize this TSS with default values.
     pub fn init(self: *Self) void {
-        rtt.expectEqual(0, @intFromPtr(self) % aligns.tss);
         self.* = .{};
     }
 
@@ -577,12 +607,12 @@ pub const Tss = extern struct {
         }
     }
 
-    /// Set this TSS into GDT and load TR.
-    pub fn load(self: *const Self, gdt: *Gdt) void {
+    /// Set this TSS into GDT at the given descriptor slot, then load TR.
+    pub fn load(self: *const Self, gdt: *Gdt, index: SegIndex) void {
         const tss_desc = TssDesc.new(@intFromPtr(self));
-        gdt.setTss(.kernel_tss, tss_desc);
+        gdt.setTss(index, tss_desc);
 
-        loadKernelTss();
+        loadKernelTss(.{ .rpl = 0, .index = index });
     }
 };
 
@@ -638,7 +668,7 @@ const tests = struct {
                 base_high, // base high
             });
 
-            const tss = early.gdt.getTss(.kernel_tss);
+            const tss = early.gdt.getTss(.kernel_tss_base);
             const tss_low: u64 = @truncate(@as(u128, @bitCast(tss)));
             const tss_high: u64 = @truncate(@as(u128, @bitCast(tss)) >> 64);
             rtt.expectEqual(expected_tss_low, tss_low);
@@ -649,20 +679,16 @@ const tests = struct {
     fn earlyTss() void {
         if (options.enable_rtt) {
             // Check if IST1 is set correctly.
-            const tss_ptr: *u64 = @ptrCast(&early.tss);
+            const tss_ptr: *u64 = @ptrCast(&early.tss[0]);
             const tss_ist1_low_ptr: *u32 = @ptrFromInt(@intFromPtr(tss_ptr) + 0x24);
             const tss_ist1_high_ptr: *u32 = @ptrFromInt(@intFromPtr(tss_ptr) + 0x28);
             const tss_ist1 = bits.concat(u64, tss_ist1_high_ptr.*, tss_ist1_low_ptr.*);
-            rtt.expectEqual(@intFromPtr(&early.istack) + @sizeOf(Istack), tss_ist1);
+            rtt.expectEqual(@intFromPtr(&early.istacks[0]) + @sizeOf(Istack), tss_ist1);
 
             // Check if TR is set correctly.
-            const tr: SegSel = @bitCast(asm volatile (
-                \\str %[tr]
-                : [tr] "={ax}" (-> u16),
-                :
-                : .{ .rax = true }));
+            const tr: SegSel = @bitCast(am.str());
             rtt.expectEqual(SegSel{
-                .index = .kernel_tss,
+                .index = .kernel_tss_base,
                 .ti = .gdt,
                 .rpl = 0,
             }, tr);
