@@ -522,9 +522,18 @@ pub fn getConsole() Console {
 
 /// Trigger a system cold reset.
 ///
-/// This function returns before the reset actually happens.
-pub fn reset(_: u8) void {
-    urd.unimplemented("");
+/// QEMU exit code becomes `status << 1 | 1`.
+pub fn reset(status: u8) void {
+    asm volatile (
+        \\outb %[value], %[port]
+        :
+        : [value] "{al}" (status),
+          [port] "N{d}" (0xF4),
+        : .{ .memory = true });
+
+    while (true) {
+        arch.halt();
+    }
 }
 
 /// Wrapper functions for console API.

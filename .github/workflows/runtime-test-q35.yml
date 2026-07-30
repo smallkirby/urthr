@@ -48,6 +48,18 @@ jobs:
 
       - name: Runtime Tests (Q35)
         run: |
+          zig build install --summary all \
+            -Dlog_level=debug \
+            -Doptimize=${{ matrix.BUILD_TYPE }} \
+            -Dboard=q35 \
+            -Dqemu=/usr/bin \
+            -Drtt \
+            -Drestart \
+            -Didle_watchdog=30 \
+            -Dinit=/boot/bin/utest \
+            -Dallow_init_exit
+
+          set +e
           zig build run --summary all \
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
@@ -58,3 +70,10 @@ jobs:
             -Didle_watchdog=30 \
             -Dinit=/boot/bin/utest \
             -Dallow_init_exit
+
+          status=$?
+          if [ $status -eq 1 ]; then
+            exit 0
+          else
+            exit $((status >> 1))
+          fi

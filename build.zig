@@ -1100,6 +1100,10 @@ const Qemu = struct {
             .rpi4b, .virt => try args.appendSlice(allocator, &.{
                 "-semihosting",
             }),
+            .q35 => try args.appendSlice(allocator, &.{
+                "-device",
+                "isa-debug-exit,iobase=0xF4,iosize=0x04",
+            }),
             else => {},
         }
         if (self.wait_gdb) {
