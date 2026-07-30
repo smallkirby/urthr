@@ -1,9 +1,12 @@
 //! Local APIC.
 
 var lapic = mmio.Module(.{ .natural = u32 }, &.{
-    .{ 0x0010, Id },
+    .{ 0x0020, Id },
     .{ 0x00B0, Eoi },
     .{ 0x00F0, Svr },
+    .{ 0x0280, Esr },
+    .{ 0x0300, IcrLow },
+    .{ 0x0310, IcrHigh },
     .{ 0x0320, LvtTimer },
     .{ 0x0380, InitialCount },
     .{ 0x0390, CurrentCount },
@@ -79,6 +82,71 @@ pub fn getCurrentCount() u32 {
     return lapic.read(CurrentCount).count;
 }
 
+/// Wake up a secondary core by sending IPIs.
+pub fn wakeCore(dest_apic_id: u8, entry: usize) void {
+    const vector: u8 = @intCast(entry >> 12);
+
+    clearErrors();
+
+    // INIT assert.
+    lapic.writez(IcrHigh, .{
+        .dest = dest_apic_id,
+    });
+    lapic.writez(IcrLow, .{
+        .vector = 0,
+        .delivery_mode = .init,
+        .level = .assert,
+        .trigger_mode = .level,
+    });
+    lapic.waitFor(IcrLow, .{ .delivery_status = .idle }, null);
+
+    // INIT deassert.
+    lapic.writez(IcrHigh, .{
+        .dest = dest_apic_id,
+    });
+    lapic.writez(IcrLow, .{
+        .vector = 0,
+        .delivery_mode = .init,
+        .level = .deassert,
+        .trigger_mode = .level,
+    });
+    lapic.waitFor(IcrLow, .{ .delivery_status = .idle }, null);
+
+    // Sleep for 10ms.
+    timer.spinWaitMilli(10);
+    rtt.expectEqual(std.mem.zeroes(Esr), readErrors());
+
+    // Send two SIPIs.
+    clearErrors();
+    for (0..2) |_| {
+        lapic.writez(IcrHigh, .{
+            .dest = dest_apic_id,
+        });
+        lapic.writez(IcrLow, .{
+            .vector = vector,
+            .delivery_mode = .startup,
+            .level = .assert,
+        });
+        lapic.waitFor(IcrLow, .{ .delivery_status = .idle }, null);
+
+        timer.spinWaitMicro(200);
+    }
+
+    rtt.expectEqual(std.mem.zeroes(Esr), readErrors());
+}
+
+/// Clear the Error Status Register without reading it.
+fn clearErrors() void {
+    lapic.writez(Esr, .{});
+    lapic.writez(Esr, .{});
+}
+
+/// Read the Error Status Register since the last call.
+fn readErrors() Esr {
+    lapic.writez(Esr, .{});
+    return lapic.read(Esr);
+}
+
 // =============================================================
 // Registers
 // =============================================================
@@ -110,6 +178,100 @@ pub const Svr = packed struct(u32) {
 /// EOI Register.
 pub const Eoi = packed struct(u32) {
     _: u32 = 0,
+};
+
+/// Error Status Register.
+pub const Esr = packed struct(u32) {
+    /// Checksum error for a message sent on APIC bus.
+    send_checksum: bool,
+    /// Checksum error for a message received on APIC bus.
+    rcv_checksum: bool,
+    /// Message the local APIC sent was not accepted by any APIC on the APIC bus.
+    send_accept: bool,
+    /// Message the local APIC received was not accepted by any APIC.
+    rcv_accept: bool,
+    /// Attempt to send an IPI with the lowest-priority delivery mode and the APIC does not support it.
+    redirectable: bool,
+    /// Illegal vector in the message that it's sending.
+    send_illegal: bool,
+    /// Illegal vector in the message that it's receiving.
+    rcv_illegal: bool,
+    /// Local APIC is in xAPIC mode, and SW attempts to access a reserved register.
+    illegal_reg: bool,
+    /// Reserved.
+    _8: u24,
+};
+
+/// Interrupt Command Register, low 32-bits.
+pub const IcrLow = packed struct(u32) {
+    /// The vector number of the interrupt being sent.
+    vector: u8,
+    /// Delivery mode.
+    delivery_mode: DeliveryMode,
+    /// Destination mode.
+    dest_mode: enum(u1) {
+        /// Uses local APIC ID.
+        physical = 0,
+        /// Uses 8-bit MDA (Message Destination Address).
+        logical = 1,
+    } = .physical,
+    /// Delivery status. Read-only.
+    delivery_status: enum(u1) {
+        /// This local APIC has completed sending any previous IPIs.
+        idle = 0,
+        /// Not completed sending a previous IPIs.
+        pending = 1,
+    } = .idle,
+    /// Reserved.
+    _13: u1 = 0,
+    /// Level.
+    level: Level,
+    /// Trigger mode.
+    trigger_mode: enum(u1) {
+        /// Edge-triggered.
+        edge = 0,
+        /// Level-triggered.
+        level = 1,
+    },
+    /// Reserved.
+    _16: u2 = 0,
+    /// Destination shorthand.
+    dest_shorthand: enum(u2) {
+        /// Destination is specified in the destination field.
+        none = 0,
+        /// The issuing APIC is the one and only destination of the IPI.
+        self = 1,
+        /// All processors including the issuing processor.
+        all_incl_self = 2,
+        /// All processors excluding the issuing processor.
+        all_excl_self = 3,
+    },
+    /// Reserved.
+    _20: u12 = 0,
+};
+
+/// Interrupt Command Register, high 32-bits.
+pub const IcrHigh = packed struct(u32) {
+    /// Reserved.
+    _0: u24 = 0,
+    /// Destination APIC ID.
+    dest: u8,
+};
+
+/// IPI delivery mode.
+pub const DeliveryMode = enum(u3) {
+    /// Delivers the interrupt specified in the vector field.
+    fixed = 0b000,
+    /// Delivers INIT request, which causes the target processor to perform an INIT.
+    init = 0b101,
+    /// Sends a special "start-up" IPI to the target processor.
+    startup = 0b110,
+};
+
+/// IPI level.
+pub const Level = enum(u1) {
+    deassert = 0,
+    assert = 1,
 };
 
 /// LVT Timer Register.
@@ -184,3 +346,4 @@ const common = @import("common");
 const rtt = common.rtt;
 const mmio = common.mmio;
 const am = @import("asm.zig");
+const timer = @import("timer.zig");

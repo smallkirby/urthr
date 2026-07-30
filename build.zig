@@ -392,6 +392,7 @@ pub fn build(b: *std.Build) !void {
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/head.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/switch.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/thread.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/smp.S"));
             },
             else => unreachable,
         }
@@ -1027,6 +1028,8 @@ const Qemu = struct {
             .q35 => try args.appendSlice(allocator, &.{
                 "-cpu",
                 "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
+                "-smp",
+                "4",
                 "-bios",
                 "/usr/share/ovmf/OVMF.fd", // TODO
                 "-drive",

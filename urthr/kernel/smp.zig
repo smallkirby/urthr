@@ -68,6 +68,9 @@ fn ksubmain() callconv(.c) noreturn {
 fn zsubmain() !void {
     const logical_core = waked.load(.acquire) + 1;
 
+    // Arch-specific per-CPU initialization.
+    arch.smp.localInit(logical_core);
+
     // Fill the CPU ID mapping for this core.
     idmap[logical_core] = arch.getCoreId();
 

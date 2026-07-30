@@ -53,7 +53,7 @@ For the supported features on each board, see [Features](#features).
 | | RP1 Sourthbridge | o | - | - | - |
 | Arch | GICv2 | o | o | - | - |
 | | GICv3 | - | - | o | - |
-| | SMP | o | o | o | x |
+| | SMP | o | o | o | o |
 | | PSCI | o | - | o | - |
 | | MSI-X | o | x | o | x |
 | Networking | IP | o | x | x | x |

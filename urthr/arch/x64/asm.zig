@@ -82,6 +82,13 @@ pub inline fn readCr2() u64 {
     );
 }
 
+pub inline fn readCr3() u64 {
+    return asm volatile (
+        \\mov %%cr3, %[out]
+        : [out] "=r" (-> u64),
+    );
+}
+
 pub inline fn rdtsc() u64 {
     var low: u32 = undefined;
     var high: u32 = undefined;

@@ -113,6 +113,9 @@ pub fn wakePsci(
     };
 }
 
+/// Called by a secondary core after it has been woken up.
+pub fn localInit(_: usize) void {}
+
 /// Get the virtual address that must be identity-mapped during secondary core boot.
 pub fn getIdentityAddress() usize {
     return mmu.getPhysicalAddress(@intFromPtr(&_substart));

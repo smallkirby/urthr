@@ -7,7 +7,7 @@ pub const sync = @import("sync.zig");
 pub const ExceptionHandler = *const fn (u64) ?void;
 
 /// Number of CPU cores in the system.
-pub const num_cpus = 1;
+pub const num_cpus = 4;
 
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
@@ -100,7 +100,67 @@ pub fn getDramRegion() []const common.Range {
         }
     }
 
+    // Find and reserve a low-memory for SMP trampoline blob.
+    count = reserveLowMemory(
+        &dram_region,
+        count,
+        util.roundup(arch.smp.trampolineSize(), urd.mem.page_size),
+    );
+
     return dram_region[0..count];
+}
+
+/// Find and reserve a free, page-aligned physical page below 1MiB.
+///
+/// The number of usable DRAM regions are updated to reflect the reserved page.
+///
+/// Returns the updated region count.
+fn reserveLowMemory(regions: []common.Range, count: usize, size: usize) usize {
+    const lowmem_limit = 1 * units.mib;
+    const page_size = urd.mem.page_size;
+
+    rtt.expect(size % page_size == 0);
+
+    for (regions[0..count], 0..) |*r, i| {
+        const start = util.roundup(r.start, page_size);
+        if (start + size > @min(r.end, lowmem_limit)) {
+            continue;
+        }
+
+        // Reserve this region for the SMP trampoline.
+        arch.smp.trampoline_phys = start;
+
+        // Remove the reserved page from the list of usable DRAM regions.
+        const hole_end = start + size;
+        if (start == r.start and hole_end == r.end) {
+            // The whole region is exactly the reserved page.
+            var j = i;
+            while (j + 1 < count) : (j += 1) regions[j] = regions[j + 1];
+            return count - 1;
+        } else if (start == r.start) {
+            // At the beginning of the region.
+            r.start = hole_end;
+            return count;
+        } else if (hole_end == r.end) {
+            // At the end of the region.
+            r.end = start;
+            return count;
+        } else {
+            if (count == regions.len) {
+                @panic("Cannot split a DRAM region.");
+            }
+
+            const tail: common.Range = .{ .start = hole_end, .end = r.end };
+            r.end = start;
+
+            var j = count;
+            while (j > i + 1) : (j -= 1) regions[j] = regions[j - 1];
+            regions[i + 1] = tail;
+            return count + 1;
+        }
+    }
+
+    @panic("No free page in low memory.");
 }
 
 /// Get the I/O regions that must be identity-mapped during boot.
@@ -325,13 +385,47 @@ pub fn initPeripherals3() common.mem.Error!void {}
 
 /// Prepare for waking up secondary cores.
 ///
-/// TODO: supports secondary cores.
-pub fn prepareSubcoreWakeup() urd.mem.Error!void {}
+/// Identity-maps a low-memory trampoline page.
+pub fn prepareSubcoreWakeup() urd.mem.Error!void {
+    // Map the trampoline page into kernel linear space.
+    const va = try urd.mem.phys.reserveAndRemap(
+        "SMP",
+        arch.smp.trampoline_phys,
+        urd.mem.page_size,
+        null,
+        .normal,
+    );
+
+    // Install the trampoline blob into the mapped page.
+    const blob: [*]u8 = @ptrFromInt(va);
+    arch.smp.installTrampoline(blob[0..urd.mem.page_size]);
+
+    // Identity-map the trampoline page.
+    try arch.mmu.map4kb(
+        urd.mem.getInitAddressSpace(),
+        .{
+            .va = arch.smp.trampoline_phys,
+            .pa = arch.smp.trampoline_phys,
+            .size = urd.mem.page_size,
+            .perm = .kernel_rwx,
+            .attr = .normal,
+        },
+        .{},
+        urd.mem.page,
+    );
+}
 
 /// De-initialize resources used for waking up secondary cores.
 ///
-/// TODO: supports secondary cores.
-pub fn deinitSubcoreWakeup() void {}
+/// Removes the identity mapping of the trampoline page.
+pub fn deinitSubcoreWakeup() void {
+    arch.mmu.unmap4kb(
+        urd.mem.getInitAddressSpace(),
+        arch.smp.trampoline_phys,
+        urd.mem.page_size,
+        urd.mem.page,
+    ) catch {};
+}
 
 /// Wakeup a secondary core.
 ///
@@ -341,8 +435,8 @@ pub fn deinitSubcoreWakeup() void {}
 /// - core: Core number to wake up.
 /// - entry: Virtual address of the entry point.
 /// - stack: Virtual address of the stack pointer.
-pub fn wakeSubcore(_: usize, _: usize, _: usize) urd.mem.Error!void {
-    urd.unimplemented("");
+pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
+    arch.smp.wakeSubcore(core, entry, stack);
 }
 
 /// Fill the given buffer with random data.
@@ -451,9 +545,10 @@ const console = struct {
 const std = @import("std");
 const log = std.log.scoped(.q35);
 const arch = @import("arch").impl;
-const common = @import("common");
 const BootInfo = @import("boot").BootInfo;
+const common = @import("common");
 const rtt = common.rtt;
+const units = common.units;
 const util = common.util;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;

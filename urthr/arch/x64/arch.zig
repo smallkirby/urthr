@@ -6,6 +6,7 @@ pub const lapic = @import("lapic.zig");
 pub const ioapic = @import("ioapic.zig");
 pub const pic = @import("pic.zig");
 pub const rng = @import("rng.zig");
+pub const smp = @import("smp.zig");
 pub const timer = @import("timer.zig");
 pub const thread = @import("thread.zig");
 
