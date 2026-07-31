@@ -129,6 +129,9 @@ pub fn unmap1gb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocat
 pub fn enable(as: AddressSpace, allocator: PageAllocator) void {
     rtt.expect(as._root != null);
 
+    // Reprogram PAT.
+    initPat();
+
     // Enable NX bits.
     var efer = am.rdmsr(.efer);
     efer.nxe = true;
@@ -146,6 +149,22 @@ pub fn enable(as: AddressSpace, allocator: PageAllocator) void {
         :
         : [cr3] "r" (cr3),
         : .{ .memory = true });
+}
+
+/// Reprogram IA32_PAT so that PAT.
+///
+/// IA32_PAT is a per-core MSR, so this must be called on every core.
+pub fn initPat() void {
+    am.wrmsr(.pat, .{
+        .pa0 = .wb,
+        .pa1 = .wt,
+        .pa2 = .uc_minus,
+        .pa3 = .uc,
+        .pa4 = .wc, // non-default
+        .pa5 = .wt,
+        .pa6 = .uc_minus,
+        .pa7 = .uc,
+    });
 }
 
 /// Switch the user-space address space to the user address space of `pt`.
@@ -231,11 +250,28 @@ const Granule = enum {
 const Level = u2;
 
 /// Attribute bits for the page table entry.
-const AttrBits = struct {
+///
+/// The field order matters.
+const AttrBits = packed struct(u3) {
     /// Write-through.
     pwt: bool,
     /// Page-level cache disable.
     pcd: bool,
+    /// PAT selector bit.
+    pat: bool,
+
+    /// Maps the requested memory type to the corresponding PAT index.
+    pub fn from(pattype: regs.PatType) AttrBits {
+        const v: u3 = switch (pattype) {
+            .uc => 3,
+            .wc => 4,
+            .wt => 5,
+            .wp => unreachable,
+            .wb => 0,
+            .uc_minus => 2,
+        };
+        return @bitCast(v);
+    }
 };
 
 /// Map the given virtual address to physical address using the given granule size.
@@ -269,13 +305,17 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
             allocator,
         );
 
+        // For 4KiB pages, PAT is at bit 7, while for 2MiB and 1GiB pages at bit 12.
+        const phys_with_pat = (cur_pa >> page_shift_4k) |
+            @as(u1, if (level != 3 and attr.pat) 1 else 0);
+
         entry.* = .{
             .rw = arg.perm.kw or arg.perm.uw,
             .us = arg.perm.ur or arg.perm.uw,
             .pwt = attr.pwt,
             .pcd = attr.pcd,
-            .ps = level != 3, // For 4KiB PTE, this bit is used as PAT.
-            .phys = @truncate(cur_pa >> page_shift_4k),
+            .ps = if (level == 3) attr.pat else true, // For 4KiB PTE, this bit is used as PAT.
+            .phys = @truncate(phys_with_pat),
             .xd = !(arg.perm.kx or arg.perm.ux),
         };
     }
@@ -427,18 +467,17 @@ fn flushAll() void {
 
 /// Get the cacheability bits for the given attribute.
 fn getAttrBits(attr: Attribute) AttrBits {
-    return switch (attr) {
+    const pattype: regs.PatType = switch (attr) {
         // Normal memory.
-        .normal => .{ .pwt = false, .pcd = false },
-        // Device memory.
-        .device => .{ .pwt = false, .pcd = true },
-        // Write-combining.
-        // TODO: Use PAT to implement write-combining.
-        .wc => .{ .pwt = false, .pcd = true },
-        // Non-cacheable.
-        // TODO: Use PAT to implement non-cacheable.
-        .nc => .{ .pwt = false, .pcd = true },
+        .normal => .wb,
+        // UC-.
+        .device => .uc_minus,
+        // Write Combining.
+        .wc => .wc,
+        // UC-.
+        .nc => .uc_minus,
     };
+    return .from(pattype);
 }
 
 /// Check if the given virtual address is in canonical form.
@@ -597,3 +636,4 @@ const Attribute = common.mem.Attribute;
 const Permission = common.mem.Permission;
 const PageAllocator = common.mem.PageAllocator;
 const am = @import("asm.zig");
+const regs = @import("register.zig");

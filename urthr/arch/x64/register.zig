@@ -4,9 +4,10 @@
 
 /// comptime-only register definitions.
 ///
-/// Entries must be sorted in alphabetical order in each group.
+/// Entries must be sorted in address order in each group.
 const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type, u64 }){
     .{ .apic_base, ApicBase, 0x0000_001B },
+    .{ .pat, Pat, 0x0000_0277 },
     .{ .tsc_deadline, TscDeadline, 0x0000_06E0 },
     .{ .efer, Efer, 0xC000_0080 },
     .{ .star, Star, 0xC000_0081 },
@@ -231,6 +232,60 @@ pub const Lstar = packed struct(u64) {
 pub const Fmask = packed struct(u64) {
     /// RFLAGS bits cleared on SYSCALL entry.
     mask: u64,
+};
+
+/// Memory types that can be encoded with PAT.
+pub const PatType = enum(u3) {
+    /// Uncacheable.
+    uc = 0,
+    /// Write Combining.
+    wc = 1,
+    /// Write Through.
+    wt = 4,
+    /// Write Protected.
+    wp = 5,
+    /// Write Back.
+    wb = 6,
+    /// Uncached (UC-).
+    uc_minus = 7,
+};
+
+/// IA32_PAT.
+///
+/// Default value is set to its reset value.
+pub const Pat = packed struct(u64) {
+    /// PA0
+    pa0: PatType = .wb,
+    /// Reserved.
+    _3: u5 = 0,
+    /// PA1
+    pa1: PatType = .wt,
+    /// Reserved.
+    _11: u5 = 0,
+    /// PA2
+    pa2: PatType = .uc_minus,
+    /// Reserved.
+    _19: u5 = 0,
+    /// PA3
+    pa3: PatType = .uc,
+    /// Reserved.
+    _27: u5 = 0,
+    /// PA4
+    pa4: PatType = .wb,
+    /// Reserved.
+    _35: u5 = 0,
+    /// PA5
+    pa5: PatType = .wt,
+    /// Reserved.
+    _43: u5 = 0,
+    /// PA6
+    pa6: PatType = .uc_minus,
+    /// Reserved.
+    _51: u5 = 0,
+    /// PA7
+    pa7: PatType = .uc,
+    /// Reserved.
+    _59: u5 = 0,
 };
 
 /// IA32_EFER.

@@ -58,6 +58,9 @@ pub fn wakeSubcore(core: usize, entry: usize, stack: usize) void {
 pub fn localInit(cpu: usize) void {
     // Initialize GDT and TSS for this CPU.
     gdt.localInit(cpu);
+
+    // Reprogram PAT.
+    mmu.initPat();
 }
 
 /// Get the offset of the boot data within the trampoline blob.
@@ -74,3 +77,4 @@ const rtt = common.rtt;
 const am = @import("asm.zig");
 const gdt = @import("gdt.zig");
 const lapic = @import("lapic.zig");
+const mmu = @import("mmu.zig");
