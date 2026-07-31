@@ -101,6 +101,10 @@ fn zmain() !void {
         return error.RsdpNotFound;
     };
 
+    // Locate GOP framebuffer.
+    log.info("Locating graphics output protocol.", .{});
+    const fb = try getFramebuffer(bs);
+
     // Get memory map.
     var map = try getMemoryMap(bs);
 
@@ -118,6 +122,7 @@ fn zmain() !void {
             .kphys = linfo.kphys,
             .memory_map = map,
             .rsdp = rsdp,
+            .fb = fb,
         };
         kentry(@intFromPtr(&info));
     }
@@ -216,6 +221,31 @@ fn alignedAllocPages(bs: *BootServices, mem_type: uefi.tables.MemoryType, pages:
         mem_type,
         pages,
     );
+}
+
+/// Locate the GOP framebuffer.
+///
+/// Returns null if GOP is not available or its pixel format is unsupported.
+fn getFramebuffer(bs: *BootServices) !?BootInfo.Framebuffer {
+    const gop = try bs.locateProtocol(uefi.protocol.GraphicsOutput, null) orelse {
+        return null;
+    };
+    const info = gop.mode.info;
+
+    switch (info.pixel_format) {
+        .red_green_blue_reserved_8_bit_per_color,
+        .blue_green_red_reserved_8_bit_per_color,
+        => {},
+        else => return null,
+    }
+
+    return .{
+        .base = gop.mode.frame_buffer_base,
+        .size = gop.mode.frame_buffer_size,
+        .width = info.horizontal_resolution,
+        .height = info.vertical_resolution,
+        .pitch = info.pixels_per_scan_line * 4,
+    };
 }
 
 /// Search Configuration Table entries for RSDP.

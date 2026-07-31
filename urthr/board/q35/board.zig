@@ -21,6 +21,9 @@ var ecam: ?dd.pci.EcamHost = null;
 /// Virtio block device instance.
 var virtio_blk_dev: ?dd.VirtioBlk = null;
 
+/// GOP framebuffer console instance.
+var fb_console: FbConsole = undefined;
+
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
     const info: *const BootInfo = @ptrFromInt(binfo_ptr);
@@ -279,6 +282,31 @@ pub fn initPeripherals1() common.mem.Error!void {
             .device,
         );
         arch.lapic.setBase(lapic);
+    }
+
+    // Framebuffer.
+    if (boot_info.fb) |fb| {
+        const base = try urd.mem.phys.reserveAndRemap(
+            "GOP framebuffer",
+            fb.base,
+            fb.size,
+            null,
+            .wc,
+        );
+
+        fb_console = .init(
+            base,
+            fb.base,
+            fb.pitch,
+            fb.width,
+            fb.height,
+            .{ .memcpy = null },
+        );
+        urd.console.addBackend(fb_console.interface()) catch |err| {
+            log.warn("failed to add console backend: {t}", .{err});
+        };
+    } else {
+        log.warn("No GOP framebuffer available.", .{});
     }
 }
 
@@ -560,6 +588,7 @@ const rtt = common.rtt;
 const units = common.units;
 const util = common.util;
 const Console = common.Console;
+const FbConsole = common.FbConsole;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const Pair = common.Pair;

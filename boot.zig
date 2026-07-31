@@ -75,13 +75,15 @@ pub const UrthrHeader = extern struct {
 pub const BootInfo = switch (builtin.cpu.arch) {
     .aarch64 => void,
 
-    .x86_64 => extern struct {
+    .x86_64 => struct {
         /// Physical address Urthr kernel was loaded at.
         kphys: usize,
         /// Located at .boot_services_data.
         memory_map: MemoryMap,
         /// RSDP address.
         rsdp: usize,
+        /// GOP framebuffer.
+        fb: ?Framebuffer,
 
         const uefi = std.os.uefi;
 
@@ -93,6 +95,20 @@ pub const BootInfo = switch (builtin.cpu.arch) {
             map_key: uefi.tables.MemoryMapKey,
             descriptor_size: usize,
             descriptor_version: u32,
+        };
+
+        /// Framebuffer provided by UEFI GOP.
+        pub const Framebuffer = extern struct {
+            /// Physical base address of the framebuffer.
+            base: usize,
+            /// Size in bytes of the framebuffer.
+            size: usize,
+            /// Width in pixels.
+            width: u32,
+            /// Height in pixels.
+            height: u32,
+            /// Bytes per scanline.
+            pitch: u32,
         };
 
         /// Memory descriptor iterator.
