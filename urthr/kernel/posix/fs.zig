@@ -771,6 +771,24 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
 // poll
 // =============================================================
 
+/// syscall: poll
+///
+/// - `fds`: Array of file descriptors to poll.
+/// - `nfds`: Number of file descriptors in `fds`.
+/// - `timeout`: Upper limit in milliseconds on the amount of time that this function will block.
+///     Negative value means an infinite timeout.
+pub fn sysPoll(fds: [*]PollFd, nfds: usize, timeout: i32) ReturnType {
+    if (timeout < 0) {
+        return sysPpoll(fds, nfds, null, null, 0);
+    }
+
+    const ts = posix.Timespec{
+        .sec = @divTrunc(timeout, std.time.ms_per_s),
+        .nsec = @intCast(@rem(timeout, std.time.ms_per_s) * std.time.ns_per_ms),
+    };
+    return sysPpoll(fds, nfds, &ts, null, 0);
+}
+
 /// syscall: ppoll
 ///
 /// - `fds`: Array of file descriptors to poll.
