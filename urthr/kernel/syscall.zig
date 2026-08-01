@@ -99,6 +99,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("getpid",               39,    posix.task.sysGetPid),
     .new("clone",                56,    posix.task.sysClone),
     .new("fork",                 57,    posix.task.sysFork),
+    .new("vfork",                58,    posix.task.sysVfork),
     .new("execve",               59,    posix.task.sysExecve),
     .new("wait4",                61,    posix.task.sysWait4),
     .new("kill",                 62,    posix.signal.sysKill),

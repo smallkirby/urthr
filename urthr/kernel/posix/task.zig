@@ -70,6 +70,16 @@ pub fn sysFork() ReturnType {
     return .success(@bitCast(@as(u64, child.tgid)));
 }
 
+/// syscall: vfork
+pub fn sysVfork() ReturnType {
+    const child = task.clone(.{
+        .vm = true,
+        .suspend_parent = true,
+    }, 0) catch return .err(.nomem);
+
+    return .success(@bitCast(@as(u64, child.tgid)));
+}
+
 /// Linux compatible flags for clone syscall.
 const CloneFlags = packed struct(u64) {
     /// Signal to send to the parent on child termination.
