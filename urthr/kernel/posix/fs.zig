@@ -403,6 +403,11 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
     return .success(0);
 }
 
+/// syscall: stat
+pub fn sysStat(pathname: [*:0]const u8, statbuf: *align(1) Stat) ReturnType {
+    return sysNewFstatAt(cwd_fd, pathname, statbuf, .{});
+}
+
 /// Flags shared by `at`-suffixed syscalls.
 const AtFlags = packed struct(i32) {
     /// Reserved.
