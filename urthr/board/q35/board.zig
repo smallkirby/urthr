@@ -24,6 +24,12 @@ var virtio_blk_dev: ?dd.VirtioBlk = null;
 /// GOP framebuffer console instance.
 var fb_console: FbConsole = undefined;
 
+/// xHC device.
+var xhc: ?*dd.usb.Xhc = null;
+
+/// IDT vector assigned to the xHC interrupt.
+const xhci_vector: u8 = 0x40;
+
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
     const info: *const BootInfo = @ptrFromInt(binfo_ptr);
@@ -409,7 +415,97 @@ pub fn initPeripherals2() urd.mem.Error!void {
 ///
 /// This function is called after initial task is spawned.
 /// This function can spawn new threads.
-pub fn initPeripherals3() common.mem.Error!void {}
+pub fn initPeripherals3() common.mem.Error!void {
+    // xHC
+    if (ecam) |*e| outer: {
+        const hc = e.interface();
+
+        // Scan for xHC device.
+        var scan_buf: [16]dd.pci.ScanResult = undefined;
+        const results = hc.scan(0, &scan_buf);
+        const xhcdev: dd.pci.ScanResult = for (results) |res| {
+            if (std.meta.eql(dd.usb.Xhc.class, res.class)) {
+                break res;
+            }
+        } else break :outer;
+
+        // Configure device command register.
+        const io = hc.getTypedIo(xhcdev.addr, dd.pci.HeaderType0);
+        io.modifyReg(dd.pci.HeaderCommandStatus, .{
+            .memory_space_enable = true,
+            .bus_master_enable = true,
+        });
+
+        // Check if BAR is valid.
+        var barbuf: [1]dd.pci.BarInfo = undefined;
+        const bar = blk: {
+            const bars = io.parseBars(&barbuf);
+            if (bars.len != barbuf.len) {
+                break :outer;
+            }
+            if (bars[0].index != 0) {
+                break :outer;
+            }
+            if (bars[0].type != .mem64) {
+                break :outer;
+            }
+
+            break :blk bars[0];
+        };
+
+        // Configure BAR.
+        const base, const phys = blk: {
+            const phys_base = bar.address & bar.address_mask;
+            const base = try mem.phys.reserveAndRemap(
+                "xhc",
+                phys_base,
+                bar.size(),
+                null,
+                .device,
+            );
+            io.setBarAddress(bar, phys_base);
+
+            break :blk .{ base, phys_base };
+        };
+        log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
+
+        // Initialize xHC driver.
+        xhc = dd.usb.Xhc.init(base, xhci_vector, mem.dma.interface(0)) catch |err| {
+            log.err("xHC initialization failed: {t}", .{err});
+            break :outer;
+        };
+
+        // Register MSI-X.
+        const msg = arch.msi.buildMessage(xhci_vector, arch.lapic.getId());
+        const msix = dd.pci.parseMsixConfig(hc, xhcdev.addr) orelse {
+            log.err("Failed to parse MSI-X configuration for xHC.", .{});
+            break :outer;
+        };
+        const table = dd.pci.MsixTable{
+            .base = base + msix.table_offset,
+        };
+        table.setEntry(0, msg.addr, msg.data);
+        table.maskEntry(0, false);
+        dd.pci.enableMsix(hc, xhcdev.addr, msix.cap_offset);
+    }
+    if (xhc) |x| outer: {
+        x.reset() catch |err| {
+            log.err("xHC reset failed: {t}", .{err});
+            break :outer;
+        };
+        x.setup() catch |err| {
+            log.err("xHC setup failed: {t}", .{err});
+            break :outer;
+        };
+
+        x.run();
+
+        x.scan() catch |err| {
+            log.err("xHC scan failed: {t}", .{err});
+            break :outer;
+        };
+    }
+}
 
 /// Prepare for waking up secondary cores.
 ///

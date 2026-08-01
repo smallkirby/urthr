@@ -64,8 +64,8 @@ For the supported features on each board, see [Features](#features).
 | File System | FAT32 | o | o | o | o |
 | | devfs | o | o | o | o |
 | | procfs | o | o | o | o |
-| HID | Keyboard | o | x | o | x |
-| | Console Output | o | x | o | x |
+| HID | Keyboard | o | x | o | o |
+| | Console Output | o | x | o | o |
 
 Urthr provides Linux-like user interface (syscalls and other APIs).
 See [`syscall.zig`](urthr/kernel/syscall.zig) for the list of supported syscalls.

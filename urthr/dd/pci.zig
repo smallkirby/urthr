@@ -369,8 +369,8 @@ fn Io(Module: type) type {
                 .mem64 => {
                     const bar_offset: u12 = @intCast(bar_base + bar.index * @sizeOf(HeaderBar0));
                     const value = self.read(bar_offset);
-                    self.write(bar_offset, @as(u32, @intCast(addr)) | (value & 0xF));
-                    self.write(bar_offset + 4, @intCast(addr >> 32));
+                    self.write(bar_offset, @as(u32, @truncate(addr)) | (value & 0xF));
+                    self.write(bar_offset + 4, @truncate(addr >> 32));
                 },
             }
         }

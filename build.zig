@@ -1126,6 +1126,12 @@ const Qemu = struct {
                 "-device",
                 "usb-kbd",
             }),
+            .q35 => try args.appendSlice(allocator, &.{
+                "-device",
+                "nec-usb-xhci,id=xhci",
+                "-device",
+                "usb-kbd",
+            }),
             else => {},
         }
 

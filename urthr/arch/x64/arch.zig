@@ -4,6 +4,7 @@ pub const gdt = @import("gdt.zig");
 pub const mmu = @import("mmu.zig");
 pub const lapic = @import("lapic.zig");
 pub const ioapic = @import("ioapic.zig");
+pub const msi = @import("msi.zig");
 pub const pic = @import("pic.zig");
 pub const rng = @import("rng.zig");
 pub const smp = @import("smp.zig");
