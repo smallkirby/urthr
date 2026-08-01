@@ -59,10 +59,70 @@ test "with too many fds fails with EINVAL" {
 }
 
 // =============================================================
+// poll
+
+test "syscall: poll on a regular file reports POLLIN and POLLOUT" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    const init = utest.getInit();
+
+    const file = try std.Io.Dir.openFileAbsolute(
+        init.io,
+        utest.myname,
+        .{},
+    );
+    defer file.close(init.io);
+
+    var fds = [_]linux.pollfd{.{
+        .fd = @intCast(file.handle),
+        .events = linux.POLL.IN | linux.POLL.OUT,
+        .revents = 0,
+    }};
+    const ret = linux.poll(&fds, fds.len, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    try testing.expectEqual(@as(usize, 1), ret);
+    try testing.expect(fds[0].revents & linux.POLL.IN != 0);
+    try testing.expect(fds[0].revents & linux.POLL.OUT != 0);
+}
+
+test "syscall: poll with a negative timeout returns immediately for a ready fd" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    const init = utest.getInit();
+
+    const file = try std.Io.Dir.openFileAbsolute(
+        init.io,
+        utest.myname,
+        .{},
+    );
+    defer file.close(init.io);
+
+    var fds = [_]linux.pollfd{.{
+        .fd = @intCast(file.handle),
+        .events = linux.POLL.IN,
+        .revents = 0,
+    }};
+    const ret = linux.poll(&fds, fds.len, -1);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    try testing.expectEqual(@as(usize, 1), ret);
+}
+
+test "syscall: poll with an unopened fd reports POLLNVAL" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    var fds = [_]linux.pollfd{.{ .fd = 999, .events = linux.POLL.IN, .revents = 0 }};
+    const ret = linux.poll(&fds, fds.len, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    try testing.expectEqual(@as(usize, 1), ret);
+    try testing.expect(fds[0].revents & linux.POLL.NVAL != 0);
+}
+
+// =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const linux = std.os.linux;
 const utest = @import("../utest.zig");

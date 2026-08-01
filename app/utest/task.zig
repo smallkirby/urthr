@@ -1,4 +1,5 @@
 comptime {
+    _ = @import("task/fork.zig");
     _ = @import("task/getpid.zig");
     _ = @import("task/gettid.zig");
     _ = @import("task/getuid.zig");

@@ -149,6 +149,81 @@ test "fstatat with AT_EMPTY_PATH and an empty pathname stats the dirfd itself" {
 }
 
 // =============================================================
+// stat / lstat
+
+test "syscall: stat" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const content = "0123456789";
+    const file = try t.createFile();
+    defer t.deleteFile();
+    defer file.close(init.io);
+    try file.writeStreamingAll(init.io, content);
+
+    var statbuf: [4096]u8 align(8) = undefined;
+    try testing.expectEqual(0, std.os.linux.syscall2(
+        .stat,
+        @intFromPtr((Test.base_dir ++ "/" ++ Test.file_name).ptr),
+        @intFromPtr(&statbuf),
+    ));
+
+    const stat: *const Stat = @ptrCast(&statbuf);
+    try testing.expectEqual(content.len, @as(usize, @intCast(stat.st_size)));
+    try testing.expect(0 != stat.st_ino);
+}
+
+test "stat on a non-existent file fails with ENOENT" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall2(
+        .stat,
+        @intFromPtr((Test.base_dir ++ "/no-such-file").ptr),
+        @intFromPtr(&statbuf),
+    );
+    try testing.expectEqual(.NOENT, linux.errno(ret));
+}
+
+test "syscall: lstat" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const content = "0123456789";
+    const file = try t.createFile();
+    defer t.deleteFile();
+    defer file.close(init.io);
+    try file.writeStreamingAll(init.io, content);
+
+    var statbuf: [4096]u8 align(8) = undefined;
+    try testing.expectEqual(0, std.os.linux.syscall2(
+        .lstat,
+        @intFromPtr((Test.base_dir ++ "/" ++ Test.file_name).ptr),
+        @intFromPtr(&statbuf),
+    ));
+
+    const stat: *const Stat = @ptrCast(&statbuf);
+    try testing.expectEqual(content.len, @as(usize, @intCast(stat.st_size)));
+    try testing.expect(0 != stat.st_ino);
+}
+
+test "lstat on a non-existent file fails with ENOENT" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    var statbuf: [4096]u8 align(8) = undefined;
+    const ret = std.os.linux.syscall2(
+        .lstat,
+        @intFromPtr((Test.base_dir ++ "/no-such-file").ptr),
+        @intFromPtr(&statbuf),
+    );
+    try testing.expectEqual(.NOENT, linux.errno(ret));
+}
+
+// =============================================================
 // getdents
 
 test "getdents64 on a regular file fails with ENOTDIR" {
@@ -240,6 +315,7 @@ const Stat = extern struct {
 // =============================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const linux = std.os.linux;
 const utest = @import("../utest.zig");
