@@ -3,8 +3,6 @@
 /// List of system calls.
 ///
 /// NOTE that this table is referenced only at comptime to construct runtime constants.
-///
-/// TODO: should be arch-specific.
 const entries =
 // =============================================================
 // Aarch64
