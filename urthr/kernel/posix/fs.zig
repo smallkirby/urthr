@@ -408,6 +408,11 @@ pub fn sysStat(pathname: [*:0]const u8, statbuf: *align(1) Stat) ReturnType {
     return sysNewFstatAt(cwd_fd, pathname, statbuf, .{});
 }
 
+/// syscall: lstat
+pub fn sysLstat(pathname: [*:0]const u8, statbuf: *align(1) Stat) ReturnType {
+    return sysNewFstatAt(cwd_fd, pathname, statbuf, .{ .symlink_nofollow = true });
+}
+
 /// Flags shared by `at`-suffixed syscalls.
 const AtFlags = packed struct(i32) {
     /// Reserved.

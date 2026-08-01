@@ -83,6 +83,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("close",                 3,    posix.fs.sysClose),
     .new("stat",                  4,    posix.fs.sysStat),
     .new("fstat",                 5,    posix.fs.sysFstat),
+    .new("lstat",                 6,    posix.fs.sysLstat),
     .new("poll",                  7,    posix.fs.sysPoll),
     .new("lseek",                 8,    posix.fs.sysLseek),
     .new("mmap",                  9,    posix.mem.sysMmap),
