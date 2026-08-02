@@ -516,7 +516,7 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
         dd.pci.enableMsix(hc, virtio_dev.addr, msix.cap_offset);
 
         // Bind the receive queue to MSI-X table entry #0.
-        pci_dev.setQueueVector(0, 0) catch |err| {
+        pci_dev.setQueueVector(dd.net.VirtioNet.rxq_idx, 0) catch |err| {
             log.warn("Failed to bind virtio-net RX queue to MSI-X: {t}", .{err});
             break :outer;
         };

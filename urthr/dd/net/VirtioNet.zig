@@ -26,7 +26,7 @@ page_allocator: PageAllocator,
 /// Index of the RX queue.
 ///
 /// The ordering of RX and TX queue is fixed by the virtio spec.
-const rxq_idx = 0;
+pub const rxq_idx = 0;
 /// Index of the TX queue.
 const txq_idx = 1;
 
