@@ -634,18 +634,16 @@ pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
 
     // Wait until there is data in the receive buffer.
     var remain = sock.buf.len - sock.rcv.wnd;
-    switch (sock.state) {
-        .established => {
-            while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
-                sock.cv.wait(&sock._lock);
-            }
-        },
-        .close_wait => if (remain == 0) return &.{},
-        .last_ack => return &.{},
-        else => {
-            log.err("receive: invalid socket state: {t}", .{sock.state});
-            return net.Error.Unavailable;
-        },
+    while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
+        switch (sock.state) {
+            .established => sock.cv.wait(&sock._lock),
+            .close_wait => return &.{},
+            .last_ack => return &.{},
+            else => {
+                log.err("receive: invalid socket state: {t}", .{sock.state});
+                return net.Error.Unavailable;
+            },
+        }
     }
 
     // Copy data from the receive buffer to the user buffer.
