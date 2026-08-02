@@ -287,27 +287,86 @@ test "getdents64 can find myself in /boot/bin" {
     try testing.expect(saw_utest);
 }
 
-const Stat = extern struct {
-    /// Device ID.
-    st_dev: u64,
-    /// Inode number.
-    st_ino: u64,
-    /// File mode.
-    st_mode: u32,
-    /// Number of hard links.
-    st_nlink: u32,
-    /// User ID of owner.
-    st_uid: u32,
-    /// Group ID of owner.
-    st_gid: u32,
-    /// Device ID (if special file).
-    st_rdev: u64,
-    /// Total size, in bytes.
-    st_size: i64,
-    /// Block size for filesystem I/O.
-    st_blksize: i64,
-    /// Number of 512B blocks allocated.
-    st_blocks: i64,
+const Stat = switch (builtin.cpu.arch) {
+    .aarch64 => extern struct {
+        /// Device ID.
+        st_dev: u64,
+        /// Inode number.
+        st_ino: u64,
+        /// File mode.
+        st_mode: u32,
+        /// Number of hard links.
+        st_nlink: u32,
+        /// User ID of owner.
+        st_uid: u32,
+        /// Group ID of owner.
+        st_gid: u32,
+        /// Device ID (if special file).
+        st_rdev: u64,
+        /// Padding.
+        __pad: u64 = 0,
+        /// Total size in bytes.
+        st_size: i64,
+        /// Block size for filesystem I/O.
+        st_blksize: i32,
+        /// Padding.
+        __pad2: i32 = 0,
+        /// Number of 512B blocks allocated.
+        st_blocks: i64,
+        /// Time of last access.
+        st_atime: i64 = 0,
+        /// Nanoseconds of last access.
+        st_atime_nsec: i64 = 0,
+        /// Time of last modification.
+        st_mtime: i64 = 0,
+        /// Nanoseconds of last modification.
+        st_mtime_nsec: i64 = 0,
+        /// Time of last status change.
+        st_ctime: i64 = 0,
+        /// Nanoseconds of last status change.
+        st_ctime_nsec: i64 = 0,
+        /// Padding.
+        __unused: [2]u32 = @splat(0),
+    },
+    .x86_64 => extern struct {
+        /// Device ID.
+        st_dev: u64,
+        /// Inode number.
+        st_ino: u64,
+        /// Number of hard links.
+        st_nlink: u64,
+        /// File mode.
+        st_mode: u32,
+        /// User ID of owner.
+        st_uid: u32,
+        /// Group ID of owner.
+        st_gid: u32,
+        /// Reserved.
+        __pad0: u32 = 0,
+        /// Device ID (if special file).
+        st_rdev: u64,
+        /// Total size, in bytes.
+        st_size: i64,
+        /// Block size for filesystem I/O.
+        st_blksize: i64,
+        /// Number of 512B blocks allocated.
+        st_blocks: i64,
+        /// Time of last access.
+        st_atime: i64 = 0,
+        /// Nanoseconds of last access.
+        st_atime_nsec: i64 = 0,
+        /// Time of last modification.
+        st_mtime: i64 = 0,
+        /// Nanoseconds of last modification.
+        st_mtime_nsec: i64 = 0,
+        /// Time of last status change.
+        st_ctime: i64 = 0,
+        /// Nanoseconds of last status change.
+        st_ctime_nsec: i64 = 0,
+        /// Padding.
+        __unused: [3]i64 = @splat(0),
+    },
+    else => extern struct {},
 };
 
 // =============================================================
