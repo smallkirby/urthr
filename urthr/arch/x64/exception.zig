@@ -45,6 +45,9 @@ pub fn initLocal() void {
     // so that a stack overflow does not turn into a triple fault.
     idt.setIst(@intFromEnum(Exception.df), 1);
 
+    // Use a separate dedicated interrupt stack for the page fault handler.
+    idt.setIst(@intFromEnum(Exception.pf), 2);
+
     idt.load();
 }
 

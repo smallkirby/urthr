@@ -24,7 +24,12 @@ pub fn localInit(cpu: usize) void {
 
     // Load TR.
     early.tss[cpu].init();
-    early.tss[cpu].setIst(1, @intFromPtr(&early.istacks[cpu]) + @sizeOf(Istack));
+    for (0..num_ists) |i| {
+        early.tss[cpu].setIst(
+            i + 1,
+            @intFromPtr(&early.istacks[cpu][i]) + @sizeOf(Istack),
+        );
+    }
     early.tss[cpu].load(&early.gdt, tssIndex(cpu));
 
     // Testing
@@ -138,13 +143,15 @@ const early = struct {
 
     /// Per-CPU TSS.
     ///
-    /// Each provides only IST1.
     /// This does not provide RSPx.
     var tss: [max_cpus]Tss align(aligns.tss) = undefined;
 
-    /// Per-CPU interrupt stack.
-    var istacks: [max_cpus]Istack align(aligns.ist) = [_]Istack{[_]u8{0} ** istack_size} ** max_cpus;
+    /// Per-CPU interrupt stacks, indexed by [cpu][ist_number - 1].
+    var istacks: [max_cpus][num_ists]Istack align(aligns.ist) = undefined;
 };
+
+/// Number of dedicated interrupt stacks provided per CPU.
+const num_ists = 2;
 
 /// Size in bytes of interrupt stack.
 const istack_size = 2 * (4 * units.kib);
