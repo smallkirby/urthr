@@ -45,6 +45,7 @@ For the supported features on each board, see [Features](#features).
 | | PCIe | o | x | o | x |
 | | virtio block | - | o | o | o |
 | | virtio rng | - | o | o | - |
+| | virtio net | - | - | - | o |
 | Device | Cadence Gigabit Ethernet MAC | o | - | - | - |
 | | DMA | o | o | - | x |
 | | VideoCore framebuffer | o | o | - | - |
@@ -56,11 +57,11 @@ For the supported features on each board, see [Features](#features).
 | | SMP | o | o | o | o |
 | | PSCI | o | - | o | - |
 | | MSI-X | o | x | o | x |
-| Networking | IP | o | x | x | x |
-| | TCP | o | x | x | x |
-| | UDP | o | x | x | x |
-| | ARP | o | x | x | x |
-| | ICMP | o | x | x | x |
+| Networking | IP | o | x | x | o |
+| | TCP | o | x | x | o |
+| | UDP | o | x | x | o |
+| | ARP | o | x | x | o |
+| | ICMP | o | x | x | o |
 | File System | FAT32 | o | o | o | o |
 | | devfs | o | o | o | o |
 | | procfs | o | o | o | o |
