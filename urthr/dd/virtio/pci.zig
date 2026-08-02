@@ -235,11 +235,16 @@ fn getQueue(ctx: *anyopaque, index: u32) ?*virtio.Virtqueue {
 /// Notify the device that there are new buffers in the queue.
 fn notifyQueue(ctx: *anyopaque, queue_index: u16) void {
     const self: *const Self = @ptrCast(@alignCast(ctx));
+
+    // Select the queue first.
+    self.ccfg.writei(QueueSelect, queue_index);
+
+    // Calculate the address of the queue's notification register.
     const notify_off: usize = self.ccfg.read(QueueNotifyOff).value;
     const addr = self.notify + notify_off * self.notify_off_mult;
     const ptr: *volatile u16 = @ptrFromInt(addr);
 
-    self.ccfg.writei(QueueSelect, queue_index);
+    // Notify the device.
     ptr.* = queue_index;
 }
 
