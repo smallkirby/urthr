@@ -413,6 +413,61 @@ pub fn sysLstat(pathname: [*:0]const u8, statbuf: *align(1) Stat) ReturnType {
     return sysNewFstatAt(cwd_fd, pathname, statbuf, .{ .symlink_nofollow = true });
 }
 
+/// syscall: statx
+///
+/// TODO: respect the `mask` argument.
+pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, statxbuf: *align(1) Statx) ReturnType {
+    const allocator = urd.mem.bin;
+    const s = std.mem.span(pathname);
+
+    var owned = true;
+    const file = if (flags.empty_path and s.len == 0) blk: {
+        owned = false;
+        break :blk getFile(dirfd) catch return .err(.badf);
+    } else openFileAt(
+        dirfd,
+        s,
+        .{},
+        allocator,
+    ) catch |err|
+        return mapOpenError(err);
+    defer if (owned) file.unref();
+
+    const zero_ts = Statx.Timestamp{ .sec = 0, .nsec = 0 };
+    statxbuf.* = .{
+        .mask = 0x7FF,
+        .blksize = 512,
+        .attributes = 0, // TODO
+        .nlink = 1, // TODO
+        .uid = 0, // TODO
+        .gid = 0, // TODO
+        .mode = @truncate(@as(u32, @bitCast(Mode.from(file)))),
+        .ino = file.path.dentry.inode.number,
+        .size = @intCast(file.size()),
+        .blocks = @intCast(file.size() / 512),
+        .attributes_mask = 0,
+        .atime = zero_ts, // TODO
+        .btime = zero_ts, // TODO
+        .ctime = zero_ts, // TODO
+        .mtime = zero_ts, // TODO
+        .rdev_major = 0, // TODO
+        .rdev_minor = 0, // TODO
+        .dev_major = 0, // TODO
+        .dev_minor = 0, // TODO
+        .mnt_id = 0, // TODO
+        .dio_mem_align = 0, // TODO
+        .dio_offset_align = 0, // TODO
+        .subvol = 0, // TODO
+        .atomic_write_unit_min = 0, // TODO
+        .atomic_write_unit_max = 0, // TODO
+        .atomic_write_segments_max = 0, // TODO
+        .dio_read_offset_align = 0, // TODO
+        .atomic_write_unit_max_opt = 0, // TODO
+    };
+
+    return .success(0);
+}
+
 /// Flags shared by `at`-suffixed syscalls.
 const AtFlags = packed struct(i32) {
     /// Reserved.
@@ -473,7 +528,7 @@ const Stat = switch (builtin.cpu.arch) {
         __unused: [2]u32 = @splat(0),
 
         comptime {
-            if (@sizeOf(Stat) != 144) {
+            if (@sizeOf(Stat) != 128) {
                 @compileError("Invalid Stat struct size.");
             }
         }
@@ -523,6 +578,90 @@ const Stat = switch (builtin.cpu.arch) {
         }
     },
     else => extern struct {},
+};
+
+const Statx = extern struct {
+    /// Mask of bits indicating filled fields.
+    mask: u32,
+    /// Block size for filesystem I/O.
+    blksize: u32,
+    /// Extra file attribute indicators.
+    attributes: u64,
+    /// Number of hard links.
+    nlink: u32,
+    /// User ID of owner.
+    uid: u32,
+    /// Group ID of owner.
+    gid: u32,
+    /// File type and mode.
+    mode: u16,
+    /// Reserved.
+    __spare0: u16 = 0,
+    /// Inode number.
+    ino: u64,
+    /// Total size in bytes.
+    size: u64,
+    /// Number of 512B blocks allocated.
+    blocks: u64,
+    /// Mask to show what's supported in `attributes`.
+    attributes_mask: u64,
+
+    /// Last access time.
+    atime: Timestamp,
+    /// Creation time.
+    btime: Timestamp,
+    /// Last status change time.
+    ctime: Timestamp,
+    /// Last modification time.
+    mtime: Timestamp,
+
+    /// Major ID.
+    rdev_major: u32,
+    /// Minor ID.
+    rdev_minor: u32,
+    /// Major ID of the device containing the filesystem where this file resides.
+    dev_major: u32,
+    /// Minor ID of the device containing the filesystem where this file resides.
+    dev_minor: u32,
+    /// Mount ID.
+    mnt_id: u64 = 0,
+
+    /// Memory buffer alignment for direct I/O.
+    dio_mem_align: u32 = 0,
+    /// File offset alignment for direct I/O.
+    dio_offset_align: u32 = 0,
+    /// Subvolume identifier.
+    subvol: u64 = 0,
+    /// Min atomic write unit in bytes.
+    atomic_write_unit_min: u32 = 0,
+    /// Max atomic write unit in bytes.
+    atomic_write_unit_max: u32 = 0,
+    /// Max atomic write segment count.
+    atomic_write_segments_max: u32 = 0,
+    /// File offset alignment for direct I/O reads.
+    dio_read_offset_align: u32 = 0,
+    /// Optimised max atomic write unit in bytes.
+    atomic_write_unit_max_opt: u32 = 0,
+
+    /// Reserved.
+    __spare2: [1]u32 = @splat(0),
+    /// Reserved.
+    __spare3: [8]u64 = @splat(0),
+
+    comptime {
+        if (@sizeOf(Statx) != 256) {
+            @compileError("Invalid Statx struct size.");
+        }
+    }
+
+    const Timestamp = extern struct {
+        /// Number of seconds before or after `1970-01-01T00:00:00Z`.
+        sec: i64,
+        /// Number of nanoseconds after `sec`.
+        nsec: u32,
+        /// Reserved.
+        __pad1: u32 = 0,
+    };
 };
 
 /// File information including file type, access permission, and other special bits.

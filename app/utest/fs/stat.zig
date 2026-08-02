@@ -149,6 +149,83 @@ test "fstatat with AT_EMPTY_PATH and an empty pathname stats the dirfd itself" {
 }
 
 // =============================================================
+// statx
+
+test "syscall: statx" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const content = "0123456789";
+    const file = try t.createFile();
+    defer t.deleteFile();
+    defer file.close(init.io);
+    try file.writeStreamingAll(init.io, content);
+
+    var statxbuf: linux.Statx align(8) = undefined;
+    const ret = std.os.linux.syscall5(
+        .statx,
+        @bitCast(@as(isize, linux.AT.FDCWD)),
+        @intFromPtr((Test.base_dir ++ "/" ++ Test.file_name).ptr),
+        0,
+        @as(u32, @bitCast(linux.STATX.BASIC_STATS)),
+        @intFromPtr(&statxbuf),
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+
+    try testing.expectEqual(0, statxbuf.uid);
+    try testing.expectEqual(0, statxbuf.gid);
+    try testing.expectEqual(512, statxbuf.blksize);
+    try testing.expectEqual(content.len, @as(usize, @intCast(statxbuf.size)));
+    try testing.expect(0 != statxbuf.ino);
+}
+
+test "statx on a non-existent file fails with ENOENT" {
+    var statxbuf: linux.Statx align(8) = undefined;
+    const ret = std.os.linux.syscall5(
+        .statx,
+        @bitCast(@as(isize, linux.AT.FDCWD)),
+        @intFromPtr((Test.base_dir ++ "/no-such-file").ptr),
+        0,
+        @as(u32, @bitCast(linux.STATX.BASIC_STATS)),
+        @intFromPtr(&statxbuf),
+    );
+    try testing.expectEqual(.NOENT, linux.errno(ret));
+}
+
+test "statx with an unopened dirfd fails with EBADF" {
+    var statxbuf: linux.Statx align(8) = undefined;
+    const ret = std.os.linux.syscall5(
+        .statx,
+        999,
+        @intFromPtr("somefile".ptr),
+        0,
+        @as(u32, @bitCast(linux.STATX.BASIC_STATS)),
+        @intFromPtr(&statxbuf),
+    );
+    try testing.expectEqual(.BADF, linux.errno(ret));
+}
+
+test "statx with AT_EMPTY_PATH and an empty pathname stats the dirfd itself" {
+    const AT_EMPTY_PATH = 0x1000;
+
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    var statxbuf: linux.Statx align(8) = undefined;
+    const ret = std.os.linux.syscall5(
+        .statx,
+        @intCast(fd),
+        @intFromPtr("".ptr),
+        AT_EMPTY_PATH,
+        @as(u32, @bitCast(linux.STATX.BASIC_STATS)),
+        @intFromPtr(&statxbuf),
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    try testing.expect(0 != statxbuf.ino);
+}
+
+// =============================================================
 // stat / lstat
 
 test "syscall: stat" {
