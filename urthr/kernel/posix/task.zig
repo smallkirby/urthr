@@ -1,3 +1,8 @@
+/// syscall: exit
+pub fn sysExit(code: i32) ReturnType {
+    task.exit(.{ .code = code });
+}
+
 /// syscall: exit_group
 pub fn sysExitGroup(code: i32) ReturnType {
     task.exit(.{ .code = code });
