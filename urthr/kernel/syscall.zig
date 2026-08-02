@@ -97,6 +97,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("readv",                19,    posix.fs.sysReadv),
     .new("writev",               20,    posix.fs.sysWritev),
     .new("dup",                  32,    posix.fs.sysDup),
+    .new("dup2",                 33,    posix.fs.sysDup2),
     .new("getpid",               39,    posix.task.sysGetPid),
     .new("clone",                56,    posix.task.sysClone),
     .new("fork",                 57,    posix.task.sysFork),

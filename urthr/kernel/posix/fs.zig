@@ -57,6 +57,32 @@ pub fn sysDup(oldfd: usize) ReturnType {
     return .success(@intCast(fd));
 }
 
+/// syscall: dup2
+pub fn sysDup2(oldfd: usize, newfd: usize) ReturnType {
+    if (oldfd == newfd) {
+        _ = getFile(oldfd) catch return .err(.badf);
+        return .success(@intCast(newfd));
+    }
+    if (newfd >= urd.fs.max_fds) {
+        return .err(.badf);
+    }
+
+    const file = getFile(oldfd) catch return .err(.badf);
+    const cur = sched.getCurrent();
+
+    // Close newfd if already open.
+    cur.fs.fdtbl.close(newfd) catch {};
+
+    // Allocate a nearest available fd.
+    _ = cur.fs.fdtbl.allocAt(
+        newfd,
+        file,
+        .{},
+    ) catch return .err(.mfile);
+
+    return .success(@intCast(newfd));
+}
+
 /// syscall: dup3
 pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
     if (oldfd == newfd) {
