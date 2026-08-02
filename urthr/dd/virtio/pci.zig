@@ -174,6 +174,21 @@ pub fn interface(self: *Self) virtio.Device {
     return .{ .ptr = self, .vtable = &vtable };
 }
 
+/// Bind a virtqueue to an MSI-X table entry
+/// so that the device raises an interrupt through that entry when the queue is used.
+///
+/// Must be called after the queue is setup for the given queue index,
+/// and after MSI-X has been enabled for the device.
+pub fn setQueueVector(self: *Self, index: u32, vector: u16) virtio.Error!void {
+    self.ccfg.writei(QueueSelect, @as(u16, @intCast(index)));
+    self.ccfg.writei(QueueMsixVector, vector);
+
+    // Check if the device accepted the vector.
+    if (self.ccfg.read(QueueMsixVector).value != vector) {
+        return virtio.Error.InvalidDevice;
+    }
+}
+
 // =============================================================
 // VTable implementation
 // =============================================================

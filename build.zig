@@ -1131,6 +1131,10 @@ const Qemu = struct {
                 "nec-usb-xhci,id=xhci",
                 "-device",
                 "usb-kbd",
+                "-netdev",
+                "user,id=net0",
+                "-device",
+                "virtio-net-pci,netdev=net0",
             }),
             else => {},
         }

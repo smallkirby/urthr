@@ -29,6 +29,8 @@ var xhc: ?*dd.usb.Xhc = null;
 
 /// IDT vector assigned to the xHC interrupt.
 const xhci_vector: u8 = 0x40;
+/// IDT vector assigned to the virtio-net interrupt.
+const virtio_net_vector: u8 = 0x41;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -319,8 +321,8 @@ pub fn initPeripherals1() common.mem.Error!void {
 /// Initialize peripherals phase 2.
 ///
 /// This function is called after exceptions are enabled.
-pub fn initPeripherals2() urd.mem.Error!void {
-    // virtio
+pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
+    // virtio-blk
     if (ecam) |*e| outer: {
         const hc = e.interface();
 
@@ -408,6 +410,125 @@ pub fn initPeripherals2() urd.mem.Error!void {
             log.warn("Failed to initialize virtio-blk: {t}", .{err});
             break :outer;
         };
+    }
+
+    // virtio-net
+    if (ecam) |*e| outer: {
+        const hc = e.interface();
+
+        // Scan for a virtio-net device.
+        var scan_buf: [16]dd.pci.ScanResult = undefined;
+        const results = hc.scan(0, &scan_buf);
+        const virtio_dev = for (results) |res| {
+            if (res.vendor_id == dd.virtio.pci.vendor_id and
+                (res.device_id == dd.net.VirtioNet.pci_device_id_legacy or
+                    res.device_id == dd.net.VirtioNet.pci_device_id_modern))
+            {
+                break res;
+            }
+        } else {
+            log.warn("No virtio-net PCI device found.", .{});
+            break :outer;
+        };
+
+        // Parse BARs of the virtio-net device.
+        const io = hc.getTypedIo(virtio_dev.addr, dd.pci.HeaderType0);
+        var barbuf: [6]dd.pci.BarInfo = undefined;
+        const bars = io.parseBars(&barbuf);
+        log.info(
+            "virtio-net PCI device#{X}:{X}:{X}, ID=0x{X:0>4}, {d} BARs",
+            .{ virtio_dev.addr.bus, virtio_dev.addr.device, virtio_dev.addr.function, virtio_dev.device_id, bars.len },
+        );
+
+        // Locate the virtio-pci configuration structures via the capability list.
+        const caps = dd.virtio.pci.findCaps(hc, virtio_dev.addr);
+        const region_ccfg = caps.common orelse {
+            log.warn("common config capability not found.", .{});
+            break :outer;
+        };
+        const region_notify = caps.notify orelse {
+            log.warn("notify config capability not found.", .{});
+            break :outer;
+        };
+        const region_dcfg = caps.device orelse {
+            log.warn("device config capability not found.", .{});
+            break :outer;
+        };
+        const msix = dd.pci.parseMsixConfig(hc, virtio_dev.addr) orelse {
+            log.warn("MSI-X capability not found.", .{});
+            break :outer;
+        };
+
+        // Map every distinct BAR referenced by the capabilities.
+        var barmap: dd.virtio.pci.BarMap = .{};
+        for ([_]usize{ region_ccfg.bar, region_notify.region.bar, region_dcfg.bar, msix.table_bar }) |idx| {
+            if (barmap.virt[idx] != 0) continue;
+
+            const bar_info = for (bars) |b| {
+                if (b.index == idx) break b;
+            } else {
+                log.warn("BAR#{d} not found.", .{idx});
+                break :outer;
+            };
+
+            barmap.virt[idx] = try urd.mem.phys.reserveAndRemap(
+                "virtio-pci BAR",
+                bar_info.address,
+                bar_info.size(),
+                null,
+                .device,
+            );
+        }
+
+        // Bring up the transport and initialize virtio-net device.
+        const pci_dev = (dd.virtio.pci.init(
+            hc,
+            virtio_dev.addr,
+            caps,
+            barmap,
+            urd.mem.page,
+            urd.mem.bin,
+        ) catch |err| {
+            log.warn("Failed to initialize virtio-pci device: {t}", .{err});
+            break :outer;
+        }) orelse {
+            log.warn("Failed to initialize virtio-pci device.", .{});
+            break :outer;
+        };
+
+        const netdev = dd.net.VirtioNet.new(
+            pci_dev.interface(),
+            urd.mem.page,
+            urd.mem.bin,
+        ) catch |err| {
+            log.warn("Failed to initialize virtio-net: {t}", .{err});
+            break :outer;
+        };
+        urd.net.registerDevice(netdev);
+
+        // Register MSI-X.
+        const msg = arch.msi.buildMessage(virtio_net_vector, arch.lapic.getId());
+        const table = dd.pci.MsixTable{
+            .base = barmap.get(msix.table_bar) + msix.table_offset,
+        };
+        table.setEntry(0, msg.addr, msg.data);
+        table.maskEntry(0, false);
+        dd.pci.enableMsix(hc, virtio_dev.addr, msix.cap_offset);
+
+        // Bind the receive queue to MSI-X table entry #0.
+        pci_dev.setQueueVector(0, 0) catch |err| {
+            log.warn("Failed to bind virtio-net RX queue to MSI-X: {t}", .{err});
+            break :outer;
+        };
+        try net.registerIrq(netdev, virtio_net_vector);
+
+        // TODO: should we create an interface here?
+        const iface = try urd.net.ip.Interface.create(
+            .comptimeParse("0.0.0.0"),
+            .comptimeParse("0.0.0.0"),
+            urd.mem.bin,
+        );
+        try netdev.appendInterface(iface);
     }
 }
 
@@ -690,6 +811,7 @@ const PageAllocator = common.mem.PageAllocator;
 const Pair = common.Pair;
 const urd = @import("urthr");
 const mem = urd.mem;
+const net = urd.net;
 const dd = @import("dd");
 
 const acpi = @import("acpi.zig");
