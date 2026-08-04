@@ -632,6 +632,15 @@ pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
     sock.lock();
     defer sock.unlock();
 
+    // Validate socket state for receiving data.
+    switch (sock.state) {
+        .established, .close_wait, .last_ack => {},
+        else => {
+            log.err("receive: invalid socket state: {t}", .{sock.state});
+            return net.Error.Unavailable;
+        },
+    }
+
     // Wait until there is data in the receive buffer.
     var remain = sock.buf.len - sock.rcv.wnd;
     while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
