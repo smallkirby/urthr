@@ -556,8 +556,8 @@ pub fn close(desc: usize) void {
     const sock = sock_table.get(desc);
 
     switch (sock.state) {
-        .closed => return log.warn("close: socket already closed", .{}),
-        .listen, .syn_sent => sock.update(.closed),
+        .free => return log.warn("close: socket already closed", .{}),
+        .closed, .listen, .syn_sent => sock.update(.closed),
         .syn_received, .established => {
             output(sock, .reset, &.{}) catch {};
             sock.update(.close_wait);
