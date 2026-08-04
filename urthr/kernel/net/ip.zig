@@ -217,13 +217,20 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
     // Debug print the packet.
     print(data, trace);
 
+    // Validate the total length against the actually received data.
+    const total_length = io.read(.total_length);
+    if (total_length < hlen or total_length > data.len) {
+        log.warn("Invalid IP total length: {d} (received {d} bytes)", .{ total_length, data.len });
+        return net.Error.InvalidPacket;
+    }
+
     // Find the handler for the encapsulated protocol.
     const protocol: Protocol = io.read(.protocol);
     if (protocol.getHandler()) |handler| {
         return handler.input(
             io,
             ipif,
-            data[hlen..io.read(.total_length)],
+            data[hlen..total_length],
         );
     } else {
         log.warn("Unsupported IP protocol: {d}", .{@intFromEnum(protocol)});
