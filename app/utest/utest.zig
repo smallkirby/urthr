@@ -19,6 +19,7 @@ pub const myname = "/boot/bin/utest";
 // Modules.
 pub const fs = @import("fs.zig");
 pub const mem = @import("mem.zig");
+pub const net = @import("net.zig");
 pub const signal = @import("signal.zig");
 pub const time = @import("time.zig");
 
@@ -34,6 +35,7 @@ comptime {
     _ = @import("devfs.zig");
     _ = @import("fs.zig");
     _ = @import("mem.zig");
+    _ = @import("net.zig");
     _ = @import("sched.zig");
     _ = @import("signal.zig");
     _ = @import("system.zig");
