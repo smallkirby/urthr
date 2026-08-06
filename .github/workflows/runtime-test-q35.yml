@@ -59,6 +59,8 @@ jobs:
             -Dinit=/boot/bin/utest \
             -Dallow_init_exit
 
+          python3 -m http.server 18080 --bind 0.0.0.0 1>/dev/null &
+
           set +e
           zig build run --summary all \
             -Dlog_level=debug \
@@ -70,8 +72,10 @@ jobs:
             -Didle_watchdog=30 \
             -Dinit=/boot/bin/utest \
             -Dallow_init_exit
-
           status=$?
+
+          kill %1
+
           if [ $status -eq 1 ]; then
             exit 0
           else
