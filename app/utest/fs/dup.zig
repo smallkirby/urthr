@@ -258,5 +258,5 @@ test "dup3 closes an already-open newfd before reuse" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");
 const Test = utest.fs.Test;

@@ -27,6 +27,8 @@ fn connectedSocket() !i32 {
 }
 
 test "send and recv a plain HTTP request" {
+    try utest.skipIfNetUnsupported();
+
     const fd = try connectedSocket();
     defer _ = linux.close(fd);
 
@@ -48,6 +50,8 @@ test "send and recv a plain HTTP request" {
 }
 
 test "recv on a non-blocking connection fails with EAGAIN before any data arrives" {
+    try utest.skipIfNetUnsupported();
+
     const fd = try connectedSocket();
     defer _ = linux.close(fd);
 
@@ -73,6 +77,8 @@ test "recv on a non-blocking connection fails with EAGAIN before any data arrive
 }
 
 test "ppoll reports POLLIN once the response arrives on a non-blocking socket" {
+    try utest.skipIfNetUnsupported();
+
     const fd = try connectedSocket();
     defer _ = linux.close(fd);
 
@@ -151,4 +157,4 @@ test "send and recv on an unconnected socket fails" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");

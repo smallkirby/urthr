@@ -4,6 +4,8 @@ const test_addr = utest.net.gateway_addr;
 const test_port: u16 = utest.net.gateway_port;
 
 test "syscall: connect" {
+    try utest.skipIfNetUnsupported();
+
     const fd = linux.socket(
         linux.AF.INET,
         linux.SOCK.STREAM,
@@ -62,4 +64,4 @@ test "on a non-socket fd fails with EINVAL" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");

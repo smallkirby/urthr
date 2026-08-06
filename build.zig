@@ -620,6 +620,19 @@ pub fn build(b: *std.Build) !void {
                     .mode = .simple,
                 },
             });
+            exe.root_module.addImport("utest", module);
+
+            // Add options.
+            {
+                const utest_options = b.addOptions();
+                exe.root_module.addOptions("options", utest_options);
+
+                const is_net_supported = switch (board_type) {
+                    .q35 => true,
+                    else => false,
+                };
+                utest_options.addOption(bool, "net_supported", is_net_supported);
+            }
 
             break :blk exe;
         };

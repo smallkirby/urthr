@@ -105,4 +105,4 @@ test "pipe2 with an invalid flag bit fails with EINVAL" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");

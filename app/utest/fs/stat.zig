@@ -454,5 +454,5 @@ const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");
 const Test = utest.fs.Test;

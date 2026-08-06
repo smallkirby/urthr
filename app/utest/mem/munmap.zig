@@ -40,5 +40,5 @@ test "fails with EINVAL for a length that is not page-aligned" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");
 const mem = utest.mem;

@@ -53,4 +53,4 @@ test "on a pipe fails with ESPIPE" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");

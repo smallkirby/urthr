@@ -24,4 +24,4 @@ test "closing the same fd twice fails with EBADF on the second call" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");

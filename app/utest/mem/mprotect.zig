@@ -47,5 +47,5 @@ test "changes the protection of an existing anonymous mapping" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");
 const mem = utest.mem;

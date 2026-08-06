@@ -13,6 +13,11 @@ pub fn getInit() std.process.Init {
     return utest_init_ptr.?.*;
 }
 
+/// Check if the network is supported in the current environment.
+pub fn skipIfNetUnsupported() !void {
+    return if (options.net_supported) {} else error.SkipZigTest;
+}
+
 /// The path of this binary.
 pub const myname = "/boot/bin/utest";
 
@@ -48,3 +53,4 @@ comptime {
 // =============================================================
 
 const std = @import("std");
+const options = @import("options");

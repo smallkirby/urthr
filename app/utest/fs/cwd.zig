@@ -54,5 +54,5 @@ fn chdir(path: [:0]const u8) !void {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
-const utest = @import("../utest.zig");
+const utest = @import("utest");
 const Test = utest.fs.Test;
