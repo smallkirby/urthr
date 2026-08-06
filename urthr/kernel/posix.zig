@@ -1,5 +1,6 @@
 pub const fs = @import("posix/fs.zig");
 pub const mem = @import("posix/mem.zig");
+pub const net = @import("posix/net.zig");
 pub const sched = @import("posix/sched.zig");
 pub const signal = @import("posix/signal.zig");
 pub const system = @import("posix/system.zig");
@@ -53,4 +54,6 @@ pub const ErrorEnum = enum(i64) {
     range = -34,
     /// Function not implemented.
     nosys = -38,
+    /// Connection refused.
+    econnrefused = -111,
 };
