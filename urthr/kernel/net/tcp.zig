@@ -585,8 +585,8 @@ pub fn close(desc: usize) void {
 
 /// Send data through a TCP socket.
 ///
-/// This function blocks until all data is sent.
-pub fn send(desc: usize, data: []const u8) net.Error!void {
+/// Returns the number of bytes accepted into the send window.
+pub fn send(desc: usize, data: []const u8, nonblock: bool) net.Error!usize {
     const sock = sock_table.get(desc);
 
     sock.lock();
@@ -600,6 +600,10 @@ pub fn send(desc: usize, data: []const u8) net.Error!void {
                 cap = sock.snd.wnd - (sock.snd.nxt - sock.snd.una);
 
                 if (cap == 0) {
+                    if (nonblock) {
+                        if (sent > 0) break;
+                        return net.Error.WouldBlock;
+                    }
                     trace("send: receiver window is full, waiting for ACK.", .{});
                     sock.cv.wait(&sock._lock);
                     continue;
@@ -614,6 +618,7 @@ pub fn send(desc: usize, data: []const u8) net.Error!void {
                 sock.snd.nxt += to_send;
                 sent += to_send;
             }
+            return sent;
         },
 
         .last_ack => {
@@ -629,9 +634,7 @@ pub fn send(desc: usize, data: []const u8) net.Error!void {
 }
 
 /// Receive data from a TCP socket.
-///
-/// This function blocks until at least one byte of data is received.
-pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
+pub fn receive(desc: usize, buf: []u8, nonblock: bool) net.Error![]u8 {
     const sock = sock_table.get(desc);
 
     sock.lock();
@@ -650,7 +653,10 @@ pub fn receive(desc: usize, buf: []u8) net.Error![]u8 {
     var remain = sock.buf.len - sock.rcv.wnd;
     while (remain == 0) : (remain = sock.buf.len - sock.rcv.wnd) {
         switch (sock.state) {
-            .established => sock.cv.wait(&sock._lock),
+            .established => if (nonblock)
+                return net.Error.WouldBlock
+            else
+                sock.cv.wait(&sock._lock),
             .close_wait => return &.{},
             .last_ack => return &.{},
             else => {
@@ -675,13 +681,113 @@ const dynamic_port = common.Range{
     .end = 65535,
 };
 
+/// Next dynamic port to try.
+var next_dynamic_port: Port = dynamic_port.start;
+
 /// Select an available dynamic port for automatic local port assignment.
 fn selectDynamicPort() Port {
-    for (dynamic_port.start..dynamic_port.end) |port| {
-        _ = sock_table.select(.{ .ip = .any, .port = @intCast(port) }, .empty) orelse {
-            return @intCast(port);
-        };
+    for (0..dynamic_port.end - dynamic_port.start) |_| {
+        const port = next_dynamic_port;
+        next_dynamic_port = if (next_dynamic_port + 1 >= dynamic_port.end)
+            dynamic_port.start
+        else
+            next_dynamic_port + 1;
+
+        if (sock_table.select(.{ .ip = .any, .port = port }, .empty) == null) {
+            return port;
+        }
     } else @panic("TCP dynamic port exhaustion");
+}
+
+// =============================================================
+// Socket FS backend implementation
+
+/// Socket backend.
+pub const socket_backend = fs.SocketFs.Backend{
+    .read = sockRead,
+    .write = sockWrite,
+    .poll = sockPoll,
+    .close = sockClose,
+    .connect = sockConnect,
+};
+
+/// Read bytes from a TCP socket.
+fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!usize {
+    const got = receive(
+        desc,
+        buf,
+        nonblock,
+    ) catch |err| return switch (err) {
+        error.WouldBlock => fs.Error.WouldBlock,
+        else => fs.Error.Unsupported,
+    };
+    return got.len;
+}
+
+/// Writes bytes to a TCP socket.
+fn sockWrite(desc: usize, buf: []const u8, nonblock: bool) fs.Error!usize {
+    return send(
+        desc,
+        buf,
+        nonblock,
+    ) catch |err| return switch (err) {
+        error.WouldBlock => fs.Error.WouldBlock,
+        else => fs.Error.Unsupported,
+    };
+}
+
+/// Polls a TCP socket for readability and writability.
+fn sockPoll(desc: usize) fs.PollEvents {
+    return .{
+        .in = pollReadable(desc),
+        .out = pollWritable(desc),
+    };
+}
+
+/// Check whether a TCP socket is readable without blocking.
+///
+/// True if there is buffered data to read,
+/// or the connection has reached a state where `receive()` would return immediately with EOF.
+fn pollReadable(desc: usize) bool {
+    const sock = sock_table.get(desc);
+
+    sock.lock();
+    defer sock.unlock();
+
+    return switch (sock.state) {
+        .established => sock.buf.len - sock.rcv.wnd > 0,
+        .close_wait, .last_ack => true,
+        else => false,
+    };
+}
+
+/// Check whether a TCP socket is writable without blocking.
+fn pollWritable(desc: usize) bool {
+    const sock = sock_table.get(desc);
+
+    sock.lock();
+    defer sock.unlock();
+
+    return switch (sock.state) {
+        .established => sock.snd.wnd - (sock.snd.nxt - sock.snd.una) > 0,
+        else => false,
+    };
+}
+
+/// Close a TCP socket.
+fn sockClose(desc: usize) void {
+    close(desc);
+}
+
+/// Connect a TCP socket to the given remote endpoint.
+fn sockConnect(desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void {
+    connect(
+        desc,
+        .{ .ip = ip, .port = port },
+    ) catch |err| return switch (err) {
+        error.Unavailable => fs.Error.ConnectionRefused,
+        else => fs.Error.Unsupported,
+    };
 }
 
 // =============================================================
@@ -1166,5 +1272,6 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const CondVar = urd.sync.CondVar;
 const SpinLock = urd.sync.SpinLock;
+const fs = urd.fs;
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;

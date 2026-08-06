@@ -8,6 +8,7 @@ pub const Fat32 = @import("fs/Fat32.zig");
 pub const RootFs = @import("fs/RootFs.zig");
 pub const DevFs = @import("fs/DevFs.zig");
 pub const PipeFs = @import("fs/PipeFs.zig");
+pub const SocketFs = @import("fs/SocketFs.zig");
 pub const ProcFs = @import("fs/ProcFs.zig");
 pub const FdTable = @import("fs/FdTable.zig");
 
@@ -39,6 +40,14 @@ pub const Error = error{
     IllegalSeek,
     /// The argument is invalid.
     InvalidArgument,
+    /// Operation would block and the file is in non-blocking mode.
+    WouldBlock,
+    /// Connection refused.
+    ///
+    /// TODO: should be here?
+    ConnectionRefused,
+    /// The file descriptor does not refer to a socket.
+    NotSocket,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;
@@ -115,11 +124,21 @@ pub fn init(allocator: Allocator) Error!void {
     dcache = Dentry.Cache.new(allocator);
     // Initialize the pipe filesystem.
     pipefs = try PipeFs.init(allocator);
+    // Initialize the socket filesystem.
+    socketfs = try SocketFs.init(allocator);
 }
 
 /// Create a new pipe and return its read and write file objects.
 pub fn createPipe() Error!PipeFs.PipePair {
     return pipefs.createPipe();
+}
+
+/// Create a new socket file wrapping the given protocol-specific descriptor.
+///
+/// The created socket is backed by the given protocol backend.
+/// The backend can identify the socket instance by the given opaque descriptor.
+pub fn createSocket(backend: *const SocketFs.Backend, desc: usize) Error!*File {
+    return socketfs.createSocket(backend, desc);
 }
 
 /// Mount a filesystem to the specified path.
@@ -434,6 +453,9 @@ var dcache: Dentry.Cache = undefined;
 
 /// pipefs instance.
 var pipefs: *PipeFs = undefined;
+
+/// socketfs instance.
+var socketfs: *SocketFs = undefined;
 
 // =============================================================
 // Imports

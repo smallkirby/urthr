@@ -43,6 +43,8 @@ pub const Error = error{
     Unsupported,
     /// Operation timed out.
     Timeout,
+    /// Operation would block and non-blocking mode is requested.
+    WouldBlock,
 };
 
 /// Network protocols.
