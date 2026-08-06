@@ -496,6 +496,11 @@ pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
         sock.local.ip = iface.unicast;
     }
 
+    // Implicitly bind to an ephemeral port if the socket hasn't been bound yet.
+    if (sock.local.port == 0) {
+        sock.local.port = selectDynamicPort();
+    }
+
     // Check if the local endpoint is already used by another socket.
     if (sock_table.select(sock.local, remote)) |s| {
         if (sock_table.indexOf(s) != desc) {
