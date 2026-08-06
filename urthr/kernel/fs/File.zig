@@ -95,12 +95,18 @@ pub const Iterator = struct {
     }
 };
 
+/// File status flags.
+pub const StatusFlags = struct {
+    /// I/O on this file should not block.
+    nonblock: bool = false,
+};
+
 /// Path this file is associated with.
 path: Path,
 /// File offset.
 offset: usize,
 /// File status flags.
-status_flags: u32 = 0,
+status_flags: StatusFlags = .{},
 /// Access mode this file was opened with.
 access: AccessMode = .{},
 /// Whether this file supports repositioning the file offset.

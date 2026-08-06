@@ -897,11 +897,15 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
 
         .getfl => {
             const file = getFile(fd) catch return .err(.badf);
-            return .success(@intCast(file.status_flags));
+            const flags = OpenFlags{
+                .nonblock = file.status_flags.nonblock,
+            };
+            return .success(@intCast(@as(i32, @bitCast(flags))));
         },
         .setfl => {
             const file = getFile(fd) catch return .err(.badf);
-            file.status_flags = @truncate(arg);
+            const flags: OpenFlags = @bitCast(@as(u32, @truncate(arg)));
+            file.status_flags.nonblock = flags.nonblock;
             return .success(0);
         },
 
