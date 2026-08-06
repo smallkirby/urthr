@@ -49,6 +49,8 @@ pub const FileType = enum {
     regular,
     /// Directory.
     directory,
+    /// Socket.
+    socket,
 };
 
 pub const Path = struct {

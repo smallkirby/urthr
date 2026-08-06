@@ -757,6 +757,7 @@ const FileType = enum(u4) {
         return switch (ftype) {
             .regular => .regular,
             .directory => .dir,
+            .socket => .socket,
         };
     }
 };

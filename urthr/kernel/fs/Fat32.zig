@@ -158,7 +158,12 @@ fn ideinit(inode: *fs.Inode) void {
         .regular => ctx.fat32.freeCluster(ctx.cluster) catch |err| {
             log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
         },
-        .directory => urd.unimplemented("ideinit: directory"),
+        .directory => {
+            urd.unimplemented("ideinit: directory");
+        },
+        .socket => {
+            unreachable;
+        },
     };
 
     ctx.fat32.allocator.destroy(ctx);
@@ -555,6 +560,7 @@ fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
             .out = true,
         } },
         .directory => .{ .events = .none },
+        .socket => unreachable,
     };
 }
 
