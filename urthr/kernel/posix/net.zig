@@ -13,9 +13,9 @@ pub fn sysSocket(domain: AddressFamily, typ: SockType, protocol: i32) ReturnType
     return switch (domain) {
         .inet => switch (typ.kind) {
             .stream => socketTcp(typ),
-            else => .err(.nosys),
+            else => .err(.inval),
         },
-        else => .err(.nosys),
+        else => .err(.inval),
     };
 }
 
