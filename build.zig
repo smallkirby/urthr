@@ -756,9 +756,17 @@ pub fn build(b: *std.Build) !void {
             .wait_gdb = wait_qemu,
         };
 
-        const qemu_cmd = b.addSystemCommand(
-            try qemu.command(b.allocator),
-        );
+        // Run QEMU through a wrapper script.
+        var qemu_argvs = std.array_list.Aligned([]const u8, null).empty;
+        defer qemu_argvs.deinit(b.allocator);
+        try qemu_argvs.appendSlice(b.allocator, &.{
+            "bash",
+            "scripts/run_qemu.bash",
+            @tagName(board_type.arch()),
+        });
+        try qemu_argvs.appendSlice(b.allocator, try qemu.command(b.allocator));
+
+        const qemu_cmd = b.addSystemCommand(qemu_argvs.items);
         qemu_cmd.step.dependOn(b.getInstallStep());
 
         const run_qemu = b.step("run", "Run Urthr on QEMU");
