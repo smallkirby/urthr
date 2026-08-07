@@ -2,6 +2,7 @@ comptime {
     _ = @import("net/socket.zig");
     _ = @import("net/connect.zig");
     _ = @import("net/sendrecv.zig");
+    _ = @import("net/sockopt.zig");
 }
 
 /// Default gateway address for QEMU SLIRP networking.

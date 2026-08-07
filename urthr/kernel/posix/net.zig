@@ -132,6 +132,97 @@ pub fn sysShutdown(sockfd: usize, _: ShutdownHow) ReturnType {
 }
 
 // =============================================================
+// setsockopt / getsockopt
+
+/// Option level.
+const SockOptLevel = enum(i32) {
+    /// Common socket options.
+    socket = 1,
+    /// Options for IPv4 and IPv6 TCP sockets.
+    tcp = 6,
+
+    _,
+};
+
+/// Option name for common socket options.
+const SocketOptName = enum(i32) {
+    /// Allow reuse of local addresses.
+    reuseaddr = 2,
+    /// Get the last socket error.
+    socket_error = 4,
+    /// Total per-socket buffer space reserved for sends.
+    sndbuf = 7,
+    /// Total per-socket buffer space reserved for receives.
+    rcvbuf = 8,
+    /// Enables keep-alive for a socket connection.
+    keepalive = 9,
+
+    _,
+};
+
+/// Option name for TCP socket options.
+const TcpOptName = enum(i32) {
+    /// Enables or disables the Nagle algorithm for TCP sockets.
+    nodelay = 1,
+    /// Gets or sets the number of seconds a TCP connection will remain idle before keep-alive probes are sent.
+    keepidle = 4,
+    /// Gets or sets the number of seconds the connection will wait for a keepalive response before sending another keepalive probe.
+    keepintvl = 5,
+    /// Gets or sets the number of TCP keep-alive probes that will be sent before the connection is terminated.
+    keepcnt = 6,
+
+    _,
+};
+
+/// syscall: setsockopt
+pub fn sysSetSockOpt(fd: usize, level: SockOptLevel, optname: i32, _: ?*const anyopaque, _: u32) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    if (file.getType() != .socket) return .err(.inval);
+
+    return switch (level) {
+        .socket => switch (@as(SocketOptName, @enumFromInt(optname))) {
+            .reuseaddr,
+            .sndbuf,
+            .rcvbuf,
+            .keepalive,
+            => .success(0),
+            else => .err(.noprotoopt),
+        },
+        .tcp => switch (@as(TcpOptName, @enumFromInt(optname))) {
+            .nodelay,
+            .keepidle,
+            .keepintvl,
+            .keepcnt,
+            => .success(0),
+            else => .err(.noprotoopt),
+        },
+        else => .err(.noprotoopt),
+    };
+}
+
+/// syscall: getsockopt
+pub fn sysGetSockOpt(fd: usize, level: SockOptLevel, optname: i32, optval: ?*align(1) i32, optlen: ?*u32) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    if (file.getType() != .socket) return .err(.inval);
+
+    switch (level) {
+        .socket => switch (@as(SocketOptName, @enumFromInt(optname))) {
+            .socket_error => {
+                const val = optval orelse return .err(.inval);
+                const len = optlen orelse return .err(.inval);
+                if (len.* < @sizeOf(i32)) return .err(.inval);
+
+                val.* = 0;
+                len.* = @sizeOf(i32);
+                return .success(0);
+            },
+            else => return .err(.noprotoopt),
+        },
+        else => return .err(.noprotoopt),
+    }
+}
+
+// =============================================================
 // POSIX compliant types
 // =============================================================
 

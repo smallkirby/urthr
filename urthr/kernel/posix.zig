@@ -54,6 +54,8 @@ pub const ErrorEnum = enum(i64) {
     range = -34,
     /// Function not implemented.
     nosys = -38,
+    /// Protocol not available.
+    noprotoopt = -92,
     /// Connection refused.
     econnrefused = -111,
 };
