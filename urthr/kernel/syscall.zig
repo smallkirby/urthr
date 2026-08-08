@@ -225,7 +225,7 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
         arg5,
         arg6,
     ) else {
-        log.debug("Unhandled syscall: {d}", .{nr});
+        log.warn("Unhandled syscall: {d}", .{nr});
         return @intFromEnum(ErrorEnum.nosys);
     };
 
