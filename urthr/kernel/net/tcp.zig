@@ -1039,8 +1039,8 @@ const Socket = struct {
     }
 };
 
-/// Default retransmission timeout in microseconds.
-const default_rto = 200;
+/// Default retransmission timeout in nanoseconds.
+const default_rto = 200 * std.time.ns_per_us;
 /// Interval for checking retransmission timeouts in microseconds.
 const retransmit_interval_us = 100 * std.time.us_per_ms;
 /// Maximum number of seconds to keep an unacknowledged segment in the retransmission queue.
@@ -1074,7 +1074,7 @@ fn timerFn() void {
             const timestamp = urd.time.getCurrentTimestamp();
             const elapsed = timestamp - entry.time_last;
 
-            if (timestamp - entry.time_first > retransmit_deadline_sec * std.time.us_per_s) {
+            if (timestamp - entry.time_first > retransmit_deadline_sec * std.time.ns_per_s) {
                 sock.state = .closed;
                 sock.wake();
                 continue;
@@ -1093,7 +1093,7 @@ fn timerFn() void {
 
                 // Exponential backoff.
                 entry.time_last = timestamp;
-                entry.rto = @min(entry.rto * 2, 60 * std.time.us_per_s);
+                entry.rto = @min(entry.rto * 2, 60 * std.time.ns_per_s);
             }
         }
     }
