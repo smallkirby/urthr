@@ -35,3 +35,5 @@ translater = "translater"
 # 16550 UART
 thr = "thr"
 thre = "thre"
+# regex
+fo = "fo"

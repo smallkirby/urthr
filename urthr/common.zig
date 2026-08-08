@@ -5,6 +5,7 @@ pub const block = @import("common/block.zig");
 pub const mem = @import("common/mem.zig");
 pub const mmio = @import("common/mmio.zig");
 pub const pio = @import("common/pio.zig");
+pub const regex = @import("common/regex.zig");
 pub const rtt = @import("common/rtt.zig");
 pub const typing = @import("common/typing.zig");
 pub const util = @import("common/util.zig");
@@ -105,6 +106,7 @@ pub fn comptimeAssert(comptime condition: bool, comptime message: ?[]const u8) v
 test {
     _ = bits;
     _ = mmio;
+    _ = regex;
     _ = typing;
     _ = util;
     _ = RbTree;

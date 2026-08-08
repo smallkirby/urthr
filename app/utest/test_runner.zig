@@ -32,6 +32,14 @@ pub fn main(init: std.process.Init) !void {
     var init_var = init;
     utest_init_ptr = &init_var;
 
+    // Test filters.
+    const arena = init.arena.allocator();
+    const argv = try init.minimal.args.toSlice(arena);
+    const filters: []const []const u8 = if (argv.len > 1) argv[1..] else &.{};
+    for (filters) |pattern| {
+        log.info("Test filter: {s}", .{pattern});
+    }
+
     // Find tag:ONLY tests.
     const has_tag_only = for (builtin.test_functions) |test_fn| {
         if (Tag.from(test_fn.name) == .only) {
@@ -43,7 +51,7 @@ pub fn main(init: std.process.Init) !void {
         // Run only the tag:ONLY tests.
         log.info("Found tag:ONLY tests. Skipping other tests.", .{});
         for (builtin.test_functions) |test_fn| {
-            if (Tag.from(test_fn.name) == .only) {
+            if (Tag.from(test_fn.name) == .only and matchesFilter(test_fn.name, filters)) {
                 runSingle(test_fn, init.gpa);
             }
         }
@@ -51,7 +59,9 @@ pub fn main(init: std.process.Init) !void {
     } else {
         // Run all tests.
         for (builtin.test_functions) |test_fn| {
-            runSingle(test_fn, init.gpa);
+            if (matchesFilter(test_fn.name, filters)) {
+                runSingle(test_fn, init.gpa);
+            }
         }
     }
     log.info("Summary: {d} passed, {d} skipped, {d} failed.", .{ ok_count, skip_count, fail_count });
@@ -64,6 +74,17 @@ pub fn main(init: std.process.Init) !void {
     } else {
         std.process.exit(0);
     }
+}
+
+/// Whether the test name matches one of the given filter regexes.
+fn matchesFilter(name: []const u8, filters: []const []const u8) bool {
+    if (filters.len == 0) {
+        return true;
+    }
+    for (filters) |f| {
+        if (regex.isMatch(f, name)) return true;
+    }
+    return false;
 }
 
 /// Exit code a child process uses to report its test's outcome to the parent.
@@ -205,5 +226,6 @@ const StackIterator = struct {
 const builtin = @import("builtin");
 const std = @import("std");
 const linux = std.os.linux;
+const regex = @import("common").regex;
 const log = std.log.scoped(.utest);
 const Allocator = std.mem.Allocator;

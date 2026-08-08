@@ -628,6 +628,7 @@ pub fn build(b: *std.Build) !void {
                 },
             });
             exe.root_module.addImport("utest", module);
+            exe.root_module.addImport("common", common_module);
 
             // Add options.
             {
