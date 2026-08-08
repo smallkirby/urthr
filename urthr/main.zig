@@ -200,9 +200,10 @@ fn initialTask() !void {
     try urd.net.run();
 
     // Load init executable and enter userland.
+    const argv = (try board.getCmdline()) orelse &.{};
     _ = try urd.task.enterUser(
         options.init,
-        &.{},
+        argv,
         &.{},
     );
 

@@ -59,6 +59,46 @@ pub fn hexdump(addr: anytype, len: usize, logger: anytype) void {
     }
 }
 
+/// Iterator that splits a string into shell-like words.
+///
+/// Words are basically separated by spaces.
+/// A word starting with `'` or `"` extends up to the next matching quote.
+/// Quotes are only recognized at the start of a word and no escape sequences are processed.
+pub const ShellWordIterator = struct {
+    rest: []const u8,
+
+    pub fn init(s: []const u8) ShellWordIterator {
+        return .{ .rest = s };
+    }
+
+    pub fn next(self: *ShellWordIterator) ?[]const u8 {
+        var i: usize = 0;
+
+        // Skip the leading spaces.
+        while (i < self.rest.len and self.rest[i] == ' ') i += 1;
+        self.rest = self.rest[i..];
+
+        // End of string.
+        if (self.rest.len == 0) return null;
+
+        // Parse the next word.
+        if (self.rest[0] == '\'' or self.rest[0] == '"') {
+            const quote = self.rest[0];
+            var end: usize = 1;
+            while (end < self.rest.len and self.rest[end] != quote) end += 1;
+            const word = self.rest[1..end];
+            self.rest = if (end < self.rest.len) self.rest[end + 1 ..] else self.rest[end..];
+            return word;
+        } else {
+            var end: usize = 0;
+            while (end < self.rest.len and self.rest[end] != ' ') end += 1;
+            const word = self.rest[0..end];
+            self.rest = self.rest[end..];
+            return word;
+        }
+    }
+};
+
 // =============================================================
 // Tests
 // =============================================================
@@ -85,6 +125,38 @@ test rounddown {
     try testing.expectEqual(4, rounddown(5, 4));
     try testing.expectEqual(0x1000, rounddown(0x1120, 0x1000));
     try testing.expectEqual(0x1000, rounddown(0x1FFF, 0x1000));
+}
+
+test ShellWordIterator {
+    {
+        var it = ShellWordIterator.init("hoge 'fuga waiwai' neko");
+        try testing.expectEqualStrings("hoge", it.next().?);
+        try testing.expectEqualStrings("fuga waiwai", it.next().?);
+        try testing.expectEqualStrings("neko", it.next().?);
+        try testing.expectEqual(null, it.next());
+    }
+    {
+        var it = ShellWordIterator.init("  a   b  ");
+        try testing.expectEqualStrings("a", it.next().?);
+        try testing.expectEqualStrings("b", it.next().?);
+        try testing.expectEqual(null, it.next());
+    }
+    {
+        var it = ShellWordIterator.init("");
+        try testing.expectEqual(null, it.next());
+    }
+    {
+        var it = ShellWordIterator.init("\"double quoted\" 'single quoted'");
+        try testing.expectEqualStrings("double quoted", it.next().?);
+        try testing.expectEqualStrings("single quoted", it.next().?);
+        try testing.expectEqual(null, it.next());
+    }
+    {
+        // Unterminated quote: takes the rest of the string.
+        var it = ShellWordIterator.init("'unterminated");
+        try testing.expectEqualStrings("unterminated", it.next().?);
+        try testing.expectEqual(null, it.next());
+    }
 }
 
 // =============================================================

@@ -359,6 +359,11 @@ pub fn reset(status: u8) void {
     }
 }
 
+/// Get a command line arguments.
+pub fn getCmdline() !?[]const []const u8 {
+    return null;
+}
+
 /// Wrapper functions for console API.
 const console = struct {
     fn putc(_: *anyopaque, c: u8) void {

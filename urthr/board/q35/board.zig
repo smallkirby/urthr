@@ -752,6 +752,25 @@ pub fn reset(status: u8) void {
     }
 }
 
+/// Get the command line passed by the host via a fw_cfg.
+///
+/// Callers are responsible for freeing the returned array and its contents.
+pub fn getCmdline() !?[]const []const u8 {
+    const fw = fwcfg.interface();
+    const file = fw.lookupFile(urd.fwcfg_filename) orelse return null;
+    if (file.size == 0) return null;
+
+    const content = try fw.readFile(file, mem.bin);
+    errdefer mem.bin.free(content);
+
+    var it = common.util.ShellWordIterator.init(content);
+    var argv: std.array_list.Aligned([]const u8, null) = .empty;
+    while (it.next()) |word| {
+        argv.append(mem.bin, word) catch break;
+    }
+    return argv.items;
+}
+
 /// Wrapper functions for console API.
 const console = struct {
     fn putc(_: *anyopaque, c: u8) void {
@@ -786,3 +805,4 @@ const net = urd.net;
 const dd = @import("dd");
 
 const acpi = @import("acpi.zig");
+const fwcfg = @import("fwcfg.zig");

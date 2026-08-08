@@ -464,6 +464,11 @@ pub fn reset(_: u8) void {
     rdd.pm.reset();
 }
 
+/// Get a command line arguments.
+pub fn getCmdline() !?[]const []const u8 {
+    return null;
+}
+
 /// Wrapper functions for console API.
 const console = struct {
     fn putc(_: *anyopaque, c: u8) void {

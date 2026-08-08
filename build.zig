@@ -64,6 +64,12 @@ pub fn build(b: *std.Build) !void {
         "QEMU waits for GDB connection.",
     ) orelse false;
 
+    const init_args = b.option(
+        []const u8,
+        "init_args",
+        "Command line arguments passed to initial process.",
+    ) orelse null;
+
     const enable_rtt = b.option(
         bool,
         "rtt",
@@ -126,6 +132,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(u64, "idle_watchdog", idle_watchdog);
     options.addOption([]const u8, "version", version);
     options.addOption(bool, "allow_init_exit", allow_init_exit);
+    options.addOption([]const u8, "fwcfg_filename", fwcfg_name);
 
     const options_module = options.createModule();
 
@@ -754,6 +761,7 @@ pub fn build(b: *std.Build) !void {
             .drive = drive,
             .verbose_logs = qemu_log,
             .wait_gdb = wait_qemu,
+            .append = init_args,
         };
 
         // Run QEMU through a wrapper script.
@@ -994,6 +1002,9 @@ const UnitTests = struct {
     }
 };
 
+/// fw_cfg file name used to pass the init process' command line arguments.
+const fwcfg_name = "urthr/init_args";
+
 const Qemu = struct {
     /// QEMU path.
     qemu: []const u8,
@@ -1020,8 +1031,15 @@ const Qemu = struct {
     verbose_logs: []const u8,
     /// Wait for GDB connection on startup.
     wait_gdb: bool,
+    /// Command line arguments passed to the init process via semihosting.
+    append: ?[]const u8,
 
     pub fn command(self: Qemu, allocator: std.mem.Allocator) ![]const []const u8 {
+        if (self.append) |_| switch (self.machine) {
+            .virt, .q35 => {},
+            else => @panic("Command line arguments cannot be specified for this board."),
+        };
+
         const machine_name = switch (self.machine) {
             .rpi4b => "raspi4b",
             .rpi5 => "raspi5",
@@ -1117,16 +1135,33 @@ const Qemu = struct {
                 .q35 => unreachable,
             }
         }
+        // semihosting
         switch (self.machine) {
-            .rpi4b, .virt => try args.appendSlice(allocator, &.{
+            .rpi4b => try args.appendSlice(allocator, &.{
                 "-semihosting",
             }),
-            .q35 => try args.appendSlice(allocator, &.{
-                "-device",
-                "isa-debug-exit,iobase=0xF4,iosize=0x04",
-            }),
+            .virt => {
+                try args.appendSlice(allocator, &.{
+                    "-semihosting",
+                });
+                if (self.append) |append| try args.appendSlice(allocator, &.{
+                    "-fw_cfg",
+                    try std.fmt.allocPrint(allocator, "name={s},string={s}", .{ fwcfg_name, append }),
+                });
+            },
+            .q35 => {
+                try args.appendSlice(allocator, &.{
+                    "-device",
+                    "isa-debug-exit,iobase=0xF4,iosize=0x04",
+                });
+                if (self.append) |append| try args.appendSlice(allocator, &.{
+                    "-fw_cfg",
+                    try std.fmt.allocPrint(allocator, "name={s},string={s}", .{ fwcfg_name, append }),
+                });
+            },
             else => {},
         }
+        // GDB
         if (self.wait_gdb) {
             try args.appendSlice(allocator, &.{
                 "-S",

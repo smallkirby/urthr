@@ -68,6 +68,12 @@ pub const pl011 = Range{
     .end = 0x0900_1000,
 };
 
+/// fw_cfg device.
+pub const fw_cfg = Range{
+    .start = 0x0902_0000,
+    .end = 0x0902_1000,
+};
+
 /// Virtio MMIO devices.
 ///
 /// QEMU virt machine has 32 virtio-mmio devices.

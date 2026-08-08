@@ -5,14 +5,8 @@
 /// `T` is the type of the register.
 /// `Width` is the access width for the register (must be `u8`).
 pub fn Register(T: type, Width: type) type {
-    if (Width != u8) {
+    if (Width != u8 and Width != u16) {
         @compileError("pio.Register only supports u8-width registers");
-    }
-    if (@sizeOf(T) > @sizeOf(Width)) {
-        @compileError(fmt.comptimePrint(
-            "pio.Register invalid size: {s} ({d} bytes), {s} ({d} bytes)",
-            .{ @typeName(T), @sizeOf(T), @typeName(Width), @sizeOf(Width) },
-        ));
     }
 
     return struct {
@@ -20,7 +14,11 @@ pub fn Register(T: type, Width: type) type {
 
         /// Read from the register at the given I/O port.
         pub fn read(port: u16) T {
-            const value = inb(port);
+            const value = switch (Width) {
+                u8 => inb(port),
+                u16 => inw(port),
+                else => unreachable,
+            };
             return switch (@typeInfo(T)) {
                 .@"enum" => @enumFromInt(value),
                 else => @bitCast(@as(IntT, @truncate(value))),
@@ -33,7 +31,11 @@ pub fn Register(T: type, Width: type) type {
                 @as(IntT, value)
             else
                 value;
-            outb(port, @as(IntT, @bitCast(nvalue)));
+            switch (Width) {
+                u8 => outb(port, @as(IntT, @bitCast(nvalue))),
+                u16 => outw(port, @as(IntT, @bitCast(nvalue))),
+                else => unreachable,
+            }
         }
 
         /// Read modify write the register at the given I/O port.
@@ -82,7 +84,7 @@ pub fn Module(comptime fields: []const struct { u16, type }) type {
             inline for (fields) |field| {
                 const offset, const U = field;
                 if (U == T) {
-                    return .{ offset, Register(T, u8) };
+                    return .{ offset, Register(T, std.meta.Int(.unsigned, @bitSizeOf(T))) };
                 }
             }
             @compileError("Register not found in Module: " ++ @typeName(T));
@@ -138,6 +140,14 @@ const pio = switch (builtin.cpu.arch) {
             );
         }
 
+        /// Read a single word from the given I/O port.
+        fn inw(port: u16) u16 {
+            return asm volatile ("inw %[port], %[ret]"
+                : [ret] "={ax}" (-> u16),
+                : [port] "N{dx}" (port),
+            );
+        }
+
         /// Write a single byte to the given I/O port.
         fn outb(port: u16, value: u8) void {
             asm volatile ("outb %[value], %[port]"
@@ -146,12 +156,23 @@ const pio = switch (builtin.cpu.arch) {
                   [port] "N{dx}" (port),
             );
         }
+
+        /// Write a single word to the given I/O port.
+        fn outw(port: u16, value: u16) void {
+            asm volatile ("outw %[value], %[port]"
+                :
+                : [value] "{ax}" (value),
+                  [port] "N{dx}" (port),
+            );
+        }
     },
     else => @compileError("Port I/O is not supported on this architecture"),
 };
 
 const inb = pio.inb;
+const inw = pio.inw;
 const outb = pio.outb;
+const outw = pio.outw;
 
 // =============================================================
 // Imports

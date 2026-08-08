@@ -27,6 +27,10 @@ pub const version = options.version;
 pub const enable_rtt = options.enable_rtt;
 /// Allow init process to exit.
 pub const allow_init_exit = options.allow_init_exit;
+/// File name for QEMU fw_cfg.
+///
+/// Valid only for QEMU targets.
+pub const fwcfg_filename = options.fwcfg_filename;
 
 /// Reached end of life.
 ///
