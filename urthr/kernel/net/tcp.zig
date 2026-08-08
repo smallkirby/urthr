@@ -220,6 +220,13 @@ fn inputImpl(
         else => {},
     }
 
+    // Check the RST bit before the ACK field.
+    if (flags.rst) {
+        sock.update(.closed);
+        sock_table.release(sock);
+        return;
+    }
+
     // Check validity of ACK number.
     if (!flags.ack) {
         return outputSegment(
