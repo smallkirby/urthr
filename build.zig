@@ -1003,7 +1003,7 @@ const UnitTests = struct {
 };
 
 /// fw_cfg file name used to pass the init process' command line arguments.
-const fwcfg_name = "urthr/init_args";
+const fwcfg_name = "opt/urthr/init_args";
 
 const Qemu = struct {
     /// QEMU path.
