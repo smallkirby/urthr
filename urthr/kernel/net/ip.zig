@@ -43,6 +43,11 @@ pub const IpAddr = extern struct {
         return IpAddr{ ._value = value.* };
     }
 
+    /// Get the byte representation of the IP address in network byte order.
+    pub fn toBytes(self: IpAddr) [length]u8 {
+        return self._value;
+    }
+
     /// Parse the IP address from the given string.
     pub fn parse(s: []const u8) error{InvalidFormat}!IpAddr {
         var count: usize = 0;

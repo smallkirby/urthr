@@ -37,3 +37,5 @@ thr = "thr"
 thre = "thre"
 # regex
 fo = "fo"
+# POSIX
+clen = "clen"

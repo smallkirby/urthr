@@ -114,13 +114,30 @@ pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
 // sendto
 
 /// syscall: sendto
-pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, _: usize, _: u32) ReturnType {
+pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, addr: ?*SockAddr, addrlen: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     const data = buf[0..len];
 
-    const written = file.write(data) catch |e| return switch (e) {
+    // If a destination is explicitly provided, use the address.
+    const dest: ?SocketFs.Endpoint = if (addr) |sa|
+        if (addrlen < @sizeOf(SockAddr) or sa.general.family != .inet)
+            return .err(.inval)
+        else
+            .{
+                .addr = .from(&sa.ipv4.addr),
+                .port = urd.net.util.fromNetEndian(sa.ipv4.port),
+            }
+    else
+        null;
+
+    const written = SocketFs.sendTo(
+        file,
+        data,
+        dest,
+    ) catch |e| return switch (e) {
         fs.Error.WouldBlock => .err(.again),
         fs.Error.BadAccess => .err(.badf),
+        fs.Error.Unsupported => .err(.opnotsupp),
         else => .err(.again),
     };
     return .success(@bitCast(written));
@@ -130,16 +147,90 @@ pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, _: usize, _: u
 // recvfrom
 
 /// syscall: recvfrom
-pub fn sysRecvFrom(sockfd: usize, buf: [*]u8, len: usize, _: i32, _: usize, _: usize) ReturnType {
+pub fn sysRecvFrom(sockfd: usize, buf: [*]u8, len: usize, _: i32, addr: ?*SockAddr, addrlen: ?*u32) ReturnType {
     const file = getFile(sockfd) catch return .err(.badf);
     const out = buf[0..len];
 
-    const read = file.read(out) catch |e| return switch (e) {
+    const result = SocketFs.recvFrom(file, out) catch |e| return switch (e) {
         fs.Error.WouldBlock => .err(.again),
         fs.Error.BadAccess => .err(.badf),
         else => .err(.again),
     };
-    return .success(@bitCast(read.len));
+
+    // Fill in the sender's address if requested.
+    if (addr) |sa| {
+        sa.* = .{ .ipv4 = .{
+            .port = urd.net.util.toNetEndian(result.port),
+            .addr = result.addr.toBytes(),
+        } };
+        if (addrlen) |al| al.* = @sizeOf(SockAddr);
+    }
+    return .success(@bitCast(result.len));
+}
+
+// =============================================================
+// recvmsg
+
+/// Vectorized I/O buffer.
+const Iovec = extern struct {
+    /// Starting address.
+    base: [*]u8,
+    /// Number of bytes to transfer.
+    len: usize,
+
+    pub fn slice(self: Iovec) []u8 {
+        return self.base[0..self.len];
+    }
+};
+
+/// Message header.
+const MsgHdr = extern struct {
+    name: ?*align(1) SockAddr,
+    namelen: u32,
+    iov: [*]const Iovec,
+    iovlen: usize,
+    control: ?*anyopaque,
+    clen: usize,
+    flags: i32,
+};
+
+/// syscall: recvmsg
+pub fn sysRecvMsg(sockfd: usize, msg: *align(1) MsgHdr, _: i32) ReturnType {
+    const file = getFile(sockfd) catch return .err(.badf);
+    const iovs = msg.iov[0..msg.iovlen];
+
+    var total: usize = 0;
+    for (iovs) |v| total += v.len;
+
+    const buf = urd.mem.bin.alloc(u8, total) catch return .err(.nomem);
+    defer urd.mem.bin.free(buf);
+
+    const result = SocketFs.recvFrom(file, buf) catch |e| return switch (e) {
+        fs.Error.WouldBlock => .err(.again),
+        fs.Error.BadAccess => .err(.badf),
+        else => .err(.again),
+    };
+
+    // Scatter the received datagram across the caller's buffers.
+    var off: usize = 0;
+    for (iovs) |v| {
+        const n = @min(v.len, result.len - off);
+        if (n == 0) break;
+        @memcpy(v.base[0..n], buf[off..][0..n]);
+        off += n;
+    }
+
+    // Fill in the sender's address if requested.
+    if (msg.name) |addr| {
+        addr.* = .{ .ipv4 = .{
+            .port = urd.net.util.toNetEndian(result.port),
+            .addr = result.addr.toBytes(),
+        } };
+        msg.namelen = @sizeOf(SockAddr);
+    }
+    msg.flags = 0;
+
+    return .success(@bitCast(result.len));
 }
 
 // =============================================================

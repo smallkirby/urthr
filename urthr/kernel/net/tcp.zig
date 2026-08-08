@@ -712,8 +712,8 @@ pub const socket_backend = fs.SocketFs.Backend{
     .bind = sockBind,
 };
 
-/// Read bytes from a TCP socket.
-fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!usize {
+/// Read bytes from a TCP socket, reporting the connected peer's endpoint.
+fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!fs.SocketFs.RecvResult {
     const got = receive(
         desc,
         buf,
@@ -722,11 +722,18 @@ fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!usize {
         error.WouldBlock => fs.Error.WouldBlock,
         else => fs.Error.Unsupported,
     };
-    return got.len;
+    const remote = sock_table.get(desc).remote;
+    return .{
+        .len = got.len,
+        .addr = remote.ip,
+        .port = remote.port,
+    };
 }
 
 /// Writes bytes to a TCP socket.
-fn sockWrite(desc: usize, buf: []const u8, nonblock: bool) fs.Error!usize {
+///
+/// `dest` is ignored.
+fn sockWrite(desc: usize, buf: []const u8, _: ?fs.SocketFs.Endpoint, nonblock: bool) fs.Error!usize {
     return send(
         desc,
         buf,

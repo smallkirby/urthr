@@ -250,8 +250,8 @@ pub const socket_backend = fs.SocketFs.Backend{
     .bind = sockBind,
 };
 
-/// Reads bytes received from the socket's connected remote endpoint.
-fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!usize {
+/// Receives a UDP packet along with the sender's endpoint.
+fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!fs.SocketFs.RecvResult {
     const result = recvfrom(
         desc,
         buf,
@@ -260,21 +260,23 @@ fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!usize {
         net.Error.WouldBlock => fs.Error.WouldBlock,
         else => fs.Error.Unsupported,
     };
-    return result.data.len;
+    return .{
+        .len = result.data.len,
+        .addr = result.remote.ip,
+        .port = result.remote.port,
+    };
 }
 
-/// Writes bytes to the socket's connected remote endpoint.
-fn sockWrite(desc: usize, buf: []const u8, _: bool) fs.Error!usize {
+/// Sends a UDP packet to `dest`, or to the connected remote endpoint if `dest` is null.
+fn sockWrite(desc: usize, buf: []const u8, dest: ?fs.SocketFs.Endpoint, _: bool) fs.Error!usize {
     const sock = sock_table.get(desc);
     rtt.expectEqual(.open, sock.state);
 
-    output(
-        sock.ep,
-        sock.remote,
-        buf,
-    ) catch |err| return switch (err) {
-        else => fs.Error.Unsupported,
-    };
+    const remote: Endpoint = if (dest) |d|
+        .{ .ip = d.addr, .port = d.port }
+    else
+        sock.remote;
+    sendto(desc, buf, remote) catch return fs.Error.Unsupported;
     return buf.len;
 }
 

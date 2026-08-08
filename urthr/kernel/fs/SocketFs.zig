@@ -9,9 +9,17 @@ const Self = @This();
 /// Operations a protocol module must provide to back a socket file.
 pub const Backend = struct {
     /// Read data from the socket identified by `desc`.
-    read: *const fn (desc: usize, buf: []u8, nonblock: bool) fs.Error!usize,
+    ///
+    /// Reports the endpoint it came from.
+    ///
+    /// Point-to-point protocols report the connected peer's endpoint.
+    read: *const fn (desc: usize, buf: []u8, nonblock: bool) fs.Error!RecvResult,
     /// Write data to the socket identified by `desc`.
-    write: *const fn (desc: usize, buf: []const u8, nonblock: bool) fs.Error!usize,
+    ///
+    /// If `dest` is given, sends to that endpoint instead of the connected remote endpoint.
+    ///
+    /// Point-to-point protocols ignore `dest` and always send to the connected peer.
+    write: *const fn (desc: usize, buf: []const u8, dest: ?Endpoint, nonblock: bool) fs.Error!usize,
     /// Return the current I/O readiness of the socket identified by `desc`.
     poll: *const fn (desc: usize) fs.PollEvents,
     /// Release the socket identified by `desc`.
@@ -20,6 +28,24 @@ pub const Backend = struct {
     connect: *const fn (desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void,
     /// Bind the socket identified by `desc` to the given local endpoint.
     bind: *const fn (desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void,
+};
+
+/// A remote endpoint address.
+pub const Endpoint = struct {
+    /// Address of the endpoint.
+    addr: net.ip.IpAddr,
+    /// Port of the endpoint.
+    port: u16,
+};
+
+/// Result of receiving data from a socket.
+pub const RecvResult = struct {
+    /// Number of bytes received.
+    len: usize,
+    /// Address of the endpoint the data was received from.
+    addr: net.ip.IpAddr,
+    /// Port of the endpoint the data was received from.
+    port: u16,
 };
 
 /// Memory allocator.
@@ -105,6 +131,29 @@ pub fn bind(file: *fs.File, ip: net.ip.IpAddr, port: u16) fs.Error!void {
     return ctx.backend.bind(ctx.desc, ip, port);
 }
 
+/// Send data via the given socket file, optionally to an explicit destination.
+///
+/// `dest` is ignored by point-to-point protocols, which always send to the connected peer.
+pub fn sendTo(file: *fs.File, buf: []const u8, dest: ?Endpoint) fs.Error!usize {
+    const ctx = try ctxFromFile(file);
+    return ctx.backend.write(
+        ctx.desc,
+        buf,
+        dest,
+        file.status_flags.nonblock,
+    );
+}
+
+/// Receive data via the given socket file, along with the sender's endpoint.
+pub fn recvFrom(file: *fs.File, buf: []u8) fs.Error!RecvResult {
+    const ctx = try ctxFromFile(file);
+    return ctx.backend.read(
+        ctx.desc,
+        buf,
+        file.status_flags.nonblock,
+    );
+}
+
 /// Options on how to shut down a socket connection.
 pub const ShutdownOption = packed struct {};
 
@@ -181,11 +230,12 @@ fn fIterate(_: *fs.File.Iterator, _: Allocator) fs.Error!?fs.File.IterResult {
 
 fn fRead(file: *fs.File, buf: []u8, _: usize) fs.Error!usize {
     const ctx: *FileCtx = @ptrCast(@alignCast(file.ctx));
-    return ctx.backend.read(
+    const result = try ctx.backend.read(
         ctx.desc,
         buf,
         file.status_flags.nonblock,
     );
+    return result.len;
 }
 
 fn fWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
@@ -193,6 +243,7 @@ fn fWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     return ctx.backend.write(
         ctx.desc,
         buf,
+        null,
         file.status_flags.nonblock,
     );
 }
