@@ -22,11 +22,11 @@ pub fn skipIfNetUnsupported() !void {
 pub const myname = "/boot/bin/utest";
 
 // Modules.
-pub const fs = @import("fs.zig");
-pub const mem = @import("mem.zig");
-pub const net = @import("net.zig");
-pub const signal = @import("signal.zig");
-pub const time = @import("time.zig");
+pub const fs = @import("syscall/fs.zig");
+pub const mem = @import("syscall/mem.zig");
+pub const net = @import("syscall/net.zig");
+pub const signal = @import("syscall/signal.zig");
+pub const time = @import("syscall/time.zig");
 
 // =============================================================
 // Test References
@@ -37,15 +37,15 @@ test "hello" {
 }
 
 comptime {
-    _ = @import("devfs.zig");
-    _ = @import("fs.zig");
-    _ = @import("mem.zig");
-    _ = @import("net.zig");
-    _ = @import("sched.zig");
-    _ = @import("signal.zig");
-    _ = @import("system.zig");
-    _ = @import("task.zig");
-    _ = @import("time.zig");
+    _ = @import("syscall/devfs.zig");
+    _ = @import("syscall/fs.zig");
+    _ = @import("syscall/mem.zig");
+    _ = @import("syscall/net.zig");
+    _ = @import("syscall/sched.zig");
+    _ = @import("syscall/signal.zig");
+    _ = @import("syscall/system.zig");
+    _ = @import("syscall/task.zig");
+    _ = @import("syscall/time.zig");
 }
 
 // =============================================================

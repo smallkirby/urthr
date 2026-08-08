@@ -42,4 +42,4 @@ test "/dev/null" {
 // =============================================================
 
 const std = @import("std");
-const utest = @import("utest.zig");
+const utest = @import("utest");
