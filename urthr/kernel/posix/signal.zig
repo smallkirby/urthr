@@ -126,8 +126,7 @@ pub fn sysKill(pid: i32, signum: Signal) ReturnType {
 
     // Deliver the signal to the target thread.
     const target = cur; // self-targeting only for now
-    const bit: u6 = @intCast(@intFromEnum(signum) - 1);
-    target.sigstate.pending |= @as(signal.Mask, 1) << bit;
+    signal.pushTo(target, @enumFromInt(@intFromEnum(signum)));
 
     return .success(0);
 }

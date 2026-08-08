@@ -20,6 +20,8 @@ pub const Signal = enum(SigInt) {
     segv = 11,
     /// Broken pipe.
     pipe = 13,
+    /// Timer signal from alarm.
+    alarm = 14,
     /// Termination signal.
     term = 15,
     /// Child stopped or terminated.
@@ -164,7 +166,11 @@ pub fn sigreturn() void {
 
 /// Push a pending signal to the current thread.
 pub fn push(signo: Signal) void {
-    const th = sched.getCurrent();
+    pushTo(sched.getCurrent(), signo);
+}
+
+/// Push a pending signal to the given thread.
+pub fn pushTo(th: *Thread, signo: Signal) void {
     const bit: u6 = @intCast(@intFromEnum(signo) - 1);
     th.sigstate.pending |= @as(Mask, 1) << bit;
 }

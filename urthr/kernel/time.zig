@@ -28,6 +28,11 @@ pub fn initLocal() void {
     _ = register(sleep_checker_interval_us, &checkSleepers) catch {
         @panic("Failed to register sleep checker timer callback.");
     };
+
+    // Register itimer checker as a timer callback.
+    _ = register(sleep_checker_interval_us, &checkItimers) catch {
+        @panic("Failed to register itimer checker timer callback.");
+    };
 }
 
 /// Register a periodic timer callback.
@@ -143,6 +148,111 @@ fn checkSleepers() void {
     }
 
     if (woke_any) urd.sched.markNeedResched();
+}
+
+// =============================================================
+// Interval Timers
+// =============================================================
+
+/// Setting of an interval timer in nanoseconds.
+pub const ItimerValue = struct {
+    /// Time remaining until the next expiration.
+    ///
+    /// Zero if disarmed.
+    value_ns: u64,
+    /// Reload interval for periodic expirations.
+    ///
+    /// Zero for a one-shot timer.
+    interval_ns: u64,
+};
+
+/// Arm, re-arm, or disarm the given thread's real-time interval timer.
+///
+/// A `value_ns` of zero disarms the timer.
+/// Returns the setting that was replaced.
+pub fn setItimer(thread: *Thread, value_ns: u64, interval_ns: u64) ItimerValue {
+    const allocator = urd.mem.bin;
+    const now_ns = getCurrentTimestamp();
+
+    const ie = qitimer_lock.lockDisableIrq();
+    defer qitimer_lock.unlockRestoreIrq(ie);
+
+    // Check if the thread already has an armed timer to remove it.
+    var old: ItimerValue = .{ .value_ns = 0, .interval_ns = 0 };
+    var it = qitimer.iter();
+    while (it.next()) |entry| {
+        if (entry.thread == thread) {
+            old = .{
+                .value_ns = if (entry.deadline_ns > now_ns) entry.deadline_ns - now_ns else 0,
+                .interval_ns = entry.interval_ns,
+            };
+            qitimer.remove(entry);
+            allocator.destroy(entry);
+            break;
+        }
+    }
+
+    if (value_ns != 0) {
+        const entry = allocator.create(ItimerEntry) catch @panic("Failed to allocate itimer entry.");
+        entry.* = .{
+            .thread = thread,
+            .deadline_ns = now_ns + value_ns,
+            .interval_ns = interval_ns,
+        };
+        qitimer.append(entry);
+    }
+
+    return old;
+}
+
+/// Disarm the given thread's interval timer, discarding any pending expiration.
+pub fn cancelItimer(thread: *Thread) void {
+    _ = setItimer(thread, 0, 0);
+}
+
+/// Queue of armed interval timers.
+var qitimer: ItimerEntry.List = .{};
+/// Spin lock to protect the itimer queue.
+var qitimer_lock: SpinLock = .{};
+
+/// An armed interval timer for a single thread.
+const ItimerEntry = struct {
+    /// Thread that owns this timer.
+    thread: *Thread,
+    /// Absolute expiration time in nanoseconds.
+    deadline_ns: u64,
+    /// Reload interval in nanoseconds.
+    ///
+    /// Zero for a one-shot timer.
+    interval_ns: u64,
+    /// List head.
+    _head: List.Head = .{},
+
+    /// List type for itimer entries.
+    const List = common.typing.InlineDoublyLinkedList(ItimerEntry, "_head");
+};
+
+/// Deliver a signal to threads whose interval timer has expired.
+///
+/// Runs as a timer callback in IRQ context.
+fn checkItimers() void {
+    const ie = qitimer_lock.lockDisableIrq();
+    defer qitimer_lock.unlockRestoreIrq(ie);
+
+    const now_ns = getCurrentTimestamp();
+    var it = qitimer.iter();
+    while (it.next()) |entry| {
+        if (now_ns >= entry.deadline_ns) {
+            urd.task.signal.pushTo(entry.thread, .alarm);
+
+            if (entry.interval_ns != 0) {
+                entry.deadline_ns = now_ns + entry.interval_ns;
+            } else {
+                qitimer.remove(entry);
+                urd.mem.bin.destroy(entry);
+            }
+        }
+    }
 }
 
 // =============================================================

@@ -107,6 +107,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("writev",               20,    posix.fs.sysWritev),
     .new("dup",                  32,    posix.fs.sysDup),
     .new("dup2",                 33,    posix.fs.sysDup2),
+    .new("setitimer",            38,    posix.time.sysSetItimer),
     .new("getpid",               39,    posix.task.sysGetPid),
     .new("socket",               41,    posix.net.sysSocket),
     .new("connect",              42,    posix.net.sysConnect),

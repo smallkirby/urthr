@@ -358,6 +358,9 @@ pub fn exit(status: thread.ExitStatus) noreturn {
         }
     }
 
+    // Disarm any interval timer.
+    urd.time.cancelItimer(cur);
+
     // Release the fd table.
     cur.fs.fdtbl.deinit();
 

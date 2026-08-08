@@ -44,6 +44,69 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     return .success(0);
 }
 
+/// syscall: setitimer
+pub fn sysSetItimer(which: ItimerWhich, new_value: *const ItimerVal, old_value: ?*ItimerVal) ReturnType {
+    if (which != .real) {
+        log.warn("Only ITIMER_REAL is supported.", .{});
+        return .err(.nosys);
+    }
+
+    const th = sched.getCurrent();
+    const old = urd.time.setItimer(
+        th,
+        new_value.it_value.toNs(),
+        new_value.it_interval.toNs(),
+    );
+
+    if (old_value) |out| {
+        out.* = .{
+            .it_value = .fromNs(old.value_ns),
+            .it_interval = .fromNs(old.interval_ns),
+        };
+    }
+
+    return .success(0);
+}
+
+/// Kind of interval timer.
+const ItimerWhich = enum(u32) {
+    /// Decrements in real time, and delivers SIGALRM upon expiration.
+    real = 0,
+    /// Decrements only when the process is executing, and delivers SIGVTALRM upon expiration.
+    virtual = 1,
+    /// Decrements both when the process executes and when the system is executing on behalf of the process
+    prof = 2,
+
+    _,
+};
+
+/// Timer value representation.
+const TimeVal = extern struct {
+    /// Seconds.
+    sec: i64,
+    /// Microseconds.
+    usec: i64,
+
+    fn toNs(self: TimeVal) u64 {
+        return @as(u64, @intCast(self.sec)) * std.time.ns_per_s + @as(u64, @intCast(self.usec)) * std.time.ns_per_us;
+    }
+
+    fn fromNs(ns: u64) TimeVal {
+        return .{
+            .sec = @intCast(ns / std.time.ns_per_s),
+            .usec = @intCast((ns % std.time.ns_per_s) / std.time.ns_per_us),
+        };
+    }
+};
+
+/// Interval timer value representation.
+const ItimerVal = extern struct {
+    /// Next expiration time.
+    it_interval: TimeVal,
+    /// Current value.
+    it_value: TimeVal,
+};
+
 const ClockType = enum(u32) {
     /// A settable system-wire real-time clock.
     realtime = 0,
@@ -65,6 +128,8 @@ const SleepFlags = enum(u32) {
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.ptime);
 const urd = @import("urthr");
+const sched = urd.sched;
 const ReturnType = urd.syscall.ReturnType;
 const Timespec = urd.posix.Timespec;
