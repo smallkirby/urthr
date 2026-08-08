@@ -18,6 +18,8 @@ pub const Backend = struct {
     close: *const fn (desc: usize) void,
     /// Connect the socket identified by `desc` to the given remote endpoint.
     connect: *const fn (desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void,
+    /// Bind the socket identified by `desc` to the given local endpoint.
+    bind: *const fn (desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void,
 };
 
 /// Memory allocator.
@@ -93,6 +95,14 @@ pub fn createSocket(self: *Self, backend: *const Backend, desc: usize) fs.Error!
 pub fn connect(file: *fs.File, ip: net.ip.IpAddr, port: u16) fs.Error!void {
     const ctx = try ctxFromFile(file);
     return ctx.backend.connect(ctx.desc, ip, port);
+}
+
+/// Bind the given socket file to the given local endpoint.
+///
+/// TODO: should not limit the address family to IPv4.
+pub fn bind(file: *fs.File, ip: net.ip.IpAddr, port: u16) fs.Error!void {
+    const ctx = try ctxFromFile(file);
+    return ctx.backend.bind(ctx.desc, ip, port);
 }
 
 /// Options on how to shut down a socket connection.

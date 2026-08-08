@@ -9,25 +9,34 @@ pub fn sysSocket(domain: AddressFamily, typ: SockType, protocol: i32) ReturnType
         return .err(.inval);
     }
 
-    // Dispatch to appropriate socket creator based on the domain and type.
+    // Dispatch to appropriate socket creator based on the domain.
     return switch (domain) {
-        .inet => switch (typ.kind) {
-            .stream => socketTcp(typ),
-            else => .err(.inval),
-        },
+        .inet => socketInet(typ),
         else => .err(.inval),
     };
 }
 
-/// Create a TCP socket and return its file descriptor.
-fn socketTcp(typ: SockType) ReturnType {
-    const desc = urd.net.tcp.open() catch return .err(.nomem);
-
-    // Create a socket file.
-    const file = urd.fs.createSocket(&urd.net.tcp.socket_backend, desc) catch {
-        urd.net.tcp.close(desc);
-        return .err(.nomem);
+/// Create an IPv4 socket and return its file descriptor.
+fn socketInet(typ: SockType) ReturnType {
+    const open: *const fn () urd.net.Error!usize = switch (typ.kind) {
+        .stream => urd.net.tcp.open,
+        .dgram => urd.net.udp.open,
+        else => return .err(.inval),
     };
+    const close: *const fn (usize) void = switch (typ.kind) {
+        .stream => urd.net.tcp.close,
+        .dgram => urd.net.udp.close,
+        else => unreachable,
+    };
+    const backend = switch (typ.kind) {
+        .stream => &urd.net.tcp.socket_backend,
+        .dgram => &urd.net.udp.socket_backend,
+        else => unreachable,
+    };
+
+    const desc = open() catch return .err(.nomem);
+    errdefer close(desc);
+    const file = urd.fs.createSocket(backend, desc) catch return .err(.nomem);
     defer file.unref();
 
     // Update file flags.
@@ -69,6 +78,33 @@ pub fn sysConnect(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
         fs.Error.NotSocket => .err(.inval),
         fs.Error.ConnectionRefused => .err(.econnrefused),
         else => .err(.again),
+    };
+
+    return .success(0);
+}
+
+// =============================================================
+// bind
+
+/// syscall: bind
+pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
+    if (addrlen < @sizeOf(SockAddr)) {
+        return .err(.inval);
+    }
+    const file = getFile(fd) catch {
+        return .err(.badf);
+    };
+
+    (switch (addr.general.family) {
+        .inet => SocketFs.bind(
+            file,
+            .from(&addr.ipv4.addr),
+            urd.net.util.fromNetEndian(addr.ipv4.port),
+        ),
+        else => return .err(.inval),
+    }) catch |err| return switch (err) {
+        fs.Error.NotSocket => .err(.inval),
+        else => .err(.addrinuse),
     };
 
     return .success(0);
@@ -252,6 +288,7 @@ const SockType = packed struct(u32) {
     /// Sequenced byte stream.
     const Kind = enum(u11) {
         stream = 1,
+        dgram = 2,
 
         _,
     };

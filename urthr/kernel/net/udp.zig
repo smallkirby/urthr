@@ -126,12 +126,27 @@ pub fn bind(desc: usize, local: Endpoint) net.Error!void {
     const sock = sock_table.get(desc);
     rtt.expectEqual(.open, sock.state);
 
+    // Assign an ephemeral port if the local endpoint's port is unset.
+    var ep = local;
+    if (ep.port == 0) {
+        ep.port = selectDynamicPort();
+    }
+
     // Check if the local endpoint is already used by another socket.
-    if (sock_table.select(local)) |_| {
+    if (sock_table.select(ep)) |_| {
         return net.Error.Unavailable;
     }
 
-    sock.ep = local;
+    sock.ep = ep;
+}
+
+/// Connect the socket to a remote endpoint.
+pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
+    const sock = sock_table.get(desc);
+    rtt.expectEqual(.open, sock.state);
+
+    try selectLocalEndpoint(&sock.ep, remote);
+    sock.remote = remote;
 }
 
 const RecvResult = struct {
@@ -144,10 +159,8 @@ const RecvResult = struct {
 };
 
 /// Receive a UDP data from the socket.
-///
-/// This function blocks until a UDP packet is received for the socket.
 /// If the out buffer length is smaller than the received packet, the packet is truncated and lost.
-pub fn recvfrom(desc: usize, buf: []u8) RecvResult {
+pub fn recvfrom(desc: usize, buf: []u8, nonblock: bool) net.Error!RecvResult {
     const sock = sock_table.get(desc);
     rtt.expectEqual(.open, sock.state);
 
@@ -161,6 +174,10 @@ pub fn recvfrom(desc: usize, buf: []u8) RecvResult {
         }
 
         // TODO: should return an error if the socket is closed while waiting
+
+        if (nonblock) {
+            return net.Error.WouldBlock;
+        }
 
         // Wait for incoming data.
         sock.cv.wait(&sock.lock);
@@ -183,7 +200,14 @@ pub fn sendto(desc: usize, data: []const u8, remote: Endpoint) net.Error!void {
     const sock = sock_table.get(desc);
     rtt.expectEqual(.open, sock.state);
 
-    const local = &sock.ep;
+    try selectLocalEndpoint(&sock.ep, remote);
+    try output(sock.ep, remote, data);
+}
+
+/// Select a local endpoint to reach the given remote endpoint,
+///
+/// If a local port is not specified, implicitly binding an ephemeral port.
+fn selectLocalEndpoint(local: *Endpoint, remote: Endpoint) net.Error!void {
     // Select a local port.
     if (local.port == 0) {
         local.port = selectDynamicPort();
@@ -196,8 +220,6 @@ pub fn sendto(desc: usize, data: []const u8, remote: Endpoint) net.Error!void {
         };
         local.ip = iface.unicast;
     }
-
-    try output(local.*, remote, data);
 }
 
 /// Range of dynamic UDP ports that can be used for automatic local port assignment.
@@ -214,6 +236,84 @@ fn selectDynamicPort() Port {
         };
     } else @panic("UDP dynamic port exhaustion");
 }
+
+// =============================================================
+// Socket FS backend implementation
+
+/// Socket backend.
+pub const socket_backend = fs.SocketFs.Backend{
+    .read = sockRead,
+    .write = sockWrite,
+    .poll = sockPoll,
+    .close = sockClose,
+    .connect = sockConnect,
+    .bind = sockBind,
+};
+
+/// Reads bytes received from the socket's connected remote endpoint.
+fn sockRead(desc: usize, buf: []u8, nonblock: bool) fs.Error!usize {
+    const result = recvfrom(
+        desc,
+        buf,
+        nonblock,
+    ) catch |err| return switch (err) {
+        net.Error.WouldBlock => fs.Error.WouldBlock,
+        else => fs.Error.Unsupported,
+    };
+    return result.data.len;
+}
+
+/// Writes bytes to the socket's connected remote endpoint.
+fn sockWrite(desc: usize, buf: []const u8, _: bool) fs.Error!usize {
+    const sock = sock_table.get(desc);
+    rtt.expectEqual(.open, sock.state);
+
+    output(
+        sock.ep,
+        sock.remote,
+        buf,
+    ) catch |err| return switch (err) {
+        else => fs.Error.Unsupported,
+    };
+    return buf.len;
+}
+
+/// Polls a UDP socket for readability and writability.
+fn sockPoll(desc: usize) fs.PollEvents {
+    const sock = sock_table.get(desc);
+    const ie = sock.lock.lockDisableIrq();
+    defer sock.lock.unlockRestoreIrq(ie);
+
+    return .{
+        .in = sock.pending_data.first != null,
+        // Sending a UDP datagram never blocks on socket state.
+        .out = true,
+    };
+}
+
+/// Close a UDP socket.
+fn sockClose(desc: usize) void {
+    close(desc);
+}
+
+/// Connect a UDP socket to the given remote endpoint.
+fn sockConnect(desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void {
+    connect(desc, .{
+        .ip = ip,
+        .port = port,
+    }) catch return fs.Error.Unsupported;
+}
+
+/// Bind a UDP socket to the given local endpoint.
+fn sockBind(desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void {
+    bind(desc, .{
+        .ip = ip,
+        .port = port,
+    }) catch return fs.Error.Unsupported;
+}
+
+// =============================================================
+// Internals
 
 /// Socket table instance.
 var sock_table: SocketTable = .{};
@@ -246,6 +346,8 @@ const Socket = struct {
     state: State,
     /// Local endpoint of the socket.
     ep: Endpoint,
+    /// Default remote endpoint.
+    remote: Endpoint = .empty,
     /// List of pending packets.
     pending_data: std.DoublyLinkedList,
     /// Wait queue to wake the receiver thread.
@@ -447,6 +549,7 @@ const common = @import("common");
 const Range = common.Range;
 const rtt = common.rtt;
 const urd = @import("urthr");
+const fs = urd.fs;
 const CondVar = urd.sync.CondVar;
 const SpinLock = urd.sync.SpinLock;
 const net = urd.net;

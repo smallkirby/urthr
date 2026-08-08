@@ -36,7 +36,7 @@ pub fn query(iface: *const net.Interface) net.Error!QueryResult {
     try discover(sock, &entry);
 
     // Receive DHCPOFFER message.
-    const offer = udp.recvfrom(sock, &recvbuf);
+    const offer = try udp.recvfrom(sock, &recvbuf, false);
     const result = try parseOffer(offer.data, &entry);
     trace("Server offered: {f}, subnet={f}, router={f}, dns={f}", .{ result.yip, result.subnet_mask, result.router, result.dns });
 
@@ -44,7 +44,7 @@ pub fn query(iface: *const net.Interface) net.Error!QueryResult {
     try request(sock, &entry, result);
 
     // Receive DHCPACK message.
-    const ack = udp.recvfrom(sock, &recvbuf);
+    const ack = try udp.recvfrom(sock, &recvbuf, false);
     try validateAck(ack.data, &entry);
 
     return result;

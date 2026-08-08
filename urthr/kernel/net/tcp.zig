@@ -709,6 +709,7 @@ pub const socket_backend = fs.SocketFs.Backend{
     .poll = sockPoll,
     .close = sockClose,
     .connect = sockConnect,
+    .bind = sockBind,
 };
 
 /// Read bytes from a TCP socket.
@@ -788,6 +789,14 @@ fn sockConnect(desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void {
         error.Unavailable => fs.Error.ConnectionRefused,
         else => fs.Error.Unsupported,
     };
+}
+
+/// Bind a TCP socket to the given local endpoint.
+fn sockBind(desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void {
+    bind(desc, .{
+        .ip = ip,
+        .port = port,
+    }) catch return fs.Error.Unsupported;
 }
 
 // =============================================================

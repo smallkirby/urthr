@@ -56,6 +56,8 @@ pub const ErrorEnum = enum(i64) {
     nosys = -38,
     /// Protocol not available.
     noprotoopt = -92,
+    /// Address already in use.
+    addrinuse = -98,
     /// Connection refused.
     econnrefused = -111,
 };
