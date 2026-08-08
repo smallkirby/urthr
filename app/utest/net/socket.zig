@@ -20,10 +20,20 @@ test "with an unsupported domain fails with EINVAL" {
 test "with an unsupported type fails with EINVAL" {
     const fd = linux.socket(
         linux.AF.INET,
-        linux.SOCK.DGRAM,
+        linux.SOCK.RAW,
         0,
     );
     try testing.expectEqual(.INVAL, linux.errno(fd));
+}
+
+test "syscall: socket with SOCK_DGRAM" {
+    const fd = linux.socket(
+        linux.AF.INET,
+        linux.SOCK.DGRAM,
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    _ = linux.close(@intCast(fd));
 }
 
 test "with SOCK_NONBLOCK sets O_NONBLOCK on the fd" {

@@ -60,6 +60,7 @@ jobs:
             -Dallow_init_exit
 
           python3 -m http.server 18080 --bind 0.0.0.0 1>/dev/null &
+          python3 ./scripts/tests/fake_dns_server.py 1>/dev/null &
 
           set +e
           zig build run --summary all \
@@ -74,6 +75,6 @@ jobs:
             -Dallow_init_exit
           status=$?
 
-          kill %1
+          kill %1 %2
 
           exit $status
