@@ -359,6 +359,16 @@ pub fn reset(status: u8) void {
     }
 }
 
+/// Power off the system.
+pub fn powerOff() noreturn {
+    log.warn("power-off is not supported on this board. Falling back to reset", .{});
+
+    reset(0);
+    while (true) {
+        arch.halt();
+    }
+}
+
 /// Get a command line arguments.
 pub fn getCmdline() !?[]const []const u8 {
     return null;

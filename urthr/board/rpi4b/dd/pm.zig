@@ -17,8 +17,8 @@ pub fn setBase(base: usize) void {
 }
 
 pub fn reset() void {
-    pm.write(Wdog, password | 10);
-    pm.write(Rstc, password | rstc_wrcfg_full_reset);
+    pm.writei(Wdog, password | 10);
+    pm.writei(Rstc, password | rstc_wrcfg_full_reset);
 }
 
 // =============================================================

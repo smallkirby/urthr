@@ -257,6 +257,57 @@ pub fn sysGetsid(pid: i32) ReturnType {
     return .success(@intCast(cur.sid));
 }
 
+/// syscall: reboot
+pub fn sysReboot(magic1: u32, magic2: RebootMagic2, cmd: RebootCmd, _: ?*anyopaque) ReturnType {
+    if (magic1 != reboot_magic1) {
+        return .err(.inval);
+    }
+    switch (magic2) {
+        .a, .b, .c, .d => {},
+        _ => return .err(.inval),
+    }
+
+    return switch (cmd) {
+        .restart,
+        .restart2,
+        => {
+            board.reset(0);
+            while (true) arch.halt();
+        },
+        .power_off,
+        .halt,
+        => board.powerOff(),
+
+        _ => .err(.inval),
+    };
+}
+
+/// First magic value required by the `reboot` syscall.
+const reboot_magic1: u32 = 0xfee1dead;
+/// Second magic value required by the `reboot` syscall.
+const RebootMagic2 = enum(u32) {
+    a = 0x28121969,
+    b = 0x05121996,
+    c = 0x16041998,
+    d = 0x20112000,
+
+    _,
+};
+
+/// Commands for the `reboot` syscall.
+const RebootCmd = enum(u32) {
+    /// The message "Restarting system." is printed, and a default restart is performed immediately.
+    restart = 0x01234567,
+    /// The message "System halted" is printed, and the system is halted.
+    halt = 0xCDEF0123,
+    /// The message "Power down" is printed, and the system is powered down.
+    power_off = 0x4321FEDC,
+    /// The message "Restarting system with command '%s'" is printed, and a restart is performed immediately.
+    restart2 = 0xA1B2C3D4,
+
+    _,
+};
+
 /// syscall: prlimit64
 pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) ReturnType {
     if (pid != 0) {
@@ -278,6 +329,7 @@ pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) R
 const std = @import("std");
 const common = @import("common");
 const Permission = common.mem.Permission;
+const board = @import("board").impl;
 const urd = @import("urthr");
 const sched = urd.sched;
 const task = urd.task;

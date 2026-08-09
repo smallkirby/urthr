@@ -487,6 +487,14 @@ pub fn reset(status: u8) void {
     }
 }
 
+/// Power off the system.
+pub fn powerOff() noreturn {
+    reset(0);
+    while (true) {
+        arch.halt();
+    }
+}
+
 /// Get the command line passed by the host via a fw_cfg.
 ///
 /// Callers are responsible for freeing the returned array and its contents.
