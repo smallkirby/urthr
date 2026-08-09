@@ -1,5 +1,5 @@
 test "delivers SIGALRM once after ITIMER_REAL expires" {
-    comptime if (!builtin.cpu.arch.isX86()) return error.SkipZigTest;
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 
     installAlarmHandler();
     defer restoreAlarmHandler();
@@ -20,7 +20,7 @@ test "delivers SIGALRM once after ITIMER_REAL expires" {
 }
 
 test "repeats at it_interval when set" {
-    comptime if (!builtin.cpu.arch.isX86()) return error.SkipZigTest;
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 
     installAlarmHandler();
     defer restoreAlarmHandler();
@@ -43,7 +43,7 @@ test "repeats at it_interval when set" {
 }
 
 test "a zero it_value disarms the timer" {
-    comptime if (!builtin.cpu.arch.isX86()) return error.SkipZigTest;
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 
     installAlarmHandler();
     defer restoreAlarmHandler();
@@ -72,7 +72,7 @@ test "a zero it_value disarms the timer" {
 }
 
 test "returns the previous setting in old_value" {
-    comptime if (!builtin.cpu.arch.isX86()) return error.SkipZigTest;
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 
     defer disarm();
 
@@ -94,7 +94,7 @@ test "returns the previous setting in old_value" {
 }
 
 test "fails with ENOSYS for ITIMER_VIRTUAL and ITIMER_PROF" {
-    comptime if (!builtin.cpu.arch.isX86()) return error.SkipZigTest;
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 
     const value: time.Itimerval = .{
         .it_interval = .{ .sec = 0, .usec = 0 },
