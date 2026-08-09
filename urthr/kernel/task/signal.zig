@@ -175,6 +175,25 @@ pub fn pushTo(th: *Thread, signo: Signal) void {
     th.sigstate.pending |= @as(Mask, 1) << bit;
 }
 
+/// Raise a synchronous fault signal on the current thread.
+///
+/// This function bypasses the signal mask
+/// to ensure that the signal is always delivered to avoid infinite fault loops.
+///
+/// If the signal is blocked or already pending, this function immediately terminates the current thread.
+pub fn pushSync(signo: Signal) void {
+    const th = sched.getCurrent();
+    const bit: u6 = @intCast(@intFromEnum(signo) - 1);
+    const mask = @as(Mask, 1) << bit;
+
+    if (th.sigstate.pending & mask != 0 or th.sigstate.blocked & mask != 0) {
+        task.exit(.{ .signal = signo });
+    }
+
+    th.sigstate.blocked &= ~mask;
+    th.sigstate.pending |= mask;
+}
+
 // =============================================================
 // Arch-specific code
 // =============================================================

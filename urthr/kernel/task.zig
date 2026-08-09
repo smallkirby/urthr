@@ -41,7 +41,8 @@ fn handlePageFault(far: usize, access: common.mem.AccessType) bool {
     const th = sched.getCurrent();
 
     th.vmm.faultIn(far, access) catch {
-        signal.push(.segv);
+        // Failed to handle the fault. Immediately terminate the current thread.
+        signal.pushSync(.segv);
     };
 
     return true;
