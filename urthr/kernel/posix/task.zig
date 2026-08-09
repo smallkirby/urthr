@@ -278,6 +278,10 @@ pub fn sysReboot(magic1: u32, magic2: RebootMagic2, cmd: RebootCmd, _: ?*anyopaq
         .halt,
         => board.powerOff(),
 
+        .cad_off,
+        .cad_on,
+        => .success(0),
+
         _ => .err(.inval),
     };
 }
@@ -296,6 +300,10 @@ const RebootMagic2 = enum(u32) {
 
 /// Commands for the `reboot` syscall.
 const RebootCmd = enum(u32) {
+    /// Disable CAD (Ctrl+Alt+Del) handling.
+    cad_off = 0,
+    /// Enable CAD (Ctrl+Alt+Del) handling.
+    cad_on = 0x89ABCDEF,
     /// The message "Restarting system." is printed, and a default restart is performed immediately.
     restart = 0x01234567,
     /// The message "System halted" is printed, and the system is halted.
