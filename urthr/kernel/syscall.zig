@@ -110,6 +110,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("ioctl",                16,    posix.fs.sysIoctl),
     .new("readv",                19,    posix.fs.sysReadv),
     .new("writev",               20,    posix.fs.sysWritev),
+    .new("pipe",                 22,    posix.fs.sysPipe),
     .new("sched_yield",          24,    posix.sched.sysSchedYield),
     .new("dup",                  32,    posix.fs.sysDup),
     .new("dup2",                 33,    posix.fs.sysDup2),

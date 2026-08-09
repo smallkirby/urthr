@@ -118,6 +118,11 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
     return .success(@intCast(newfd));
 }
 
+/// syscall: pipe
+pub fn sysPipe(pipefd: [*]i32) ReturnType {
+    return sysPipe2(pipefd, .{});
+}
+
 /// syscall: pipe2
 pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
     const allowed_flags = OpenFlags{

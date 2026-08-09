@@ -1,3 +1,24 @@
+test "pipe creates a working read/write pair" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    var fds: [2]i32 = undefined;
+    const ret = linux.pipe(&fds);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.close(fds[0]);
+    defer _ = linux.close(fds[1]);
+
+    const content = "urthr-pipe";
+    const wret = linux.write(fds[1], content, content.len);
+    try testing.expectEqual(.SUCCESS, linux.errno(wret));
+    try testing.expectEqual(content.len, wret);
+
+    var buf: [content.len]u8 = undefined;
+    const rret = linux.read(fds[0], &buf, buf.len);
+    try testing.expectEqual(.SUCCESS, linux.errno(rret));
+    try testing.expectEqual(content.len, rret);
+    try testing.expectEqualSlices(u8, content, &buf);
+}
+
 test "pipe2 creates a working read/write pair" {
     var fds: [2]i32 = undefined;
     const ret = linux.pipe2(&fds, .{});
@@ -103,6 +124,7 @@ test "pipe2 with an invalid flag bit fails with EINVAL" {
 // =============================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const linux = std.os.linux;
 const utest = @import("utest");
