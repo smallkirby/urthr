@@ -1,3 +1,9 @@
+/// syscall: sched_yield
+pub fn sysSchedYield() ReturnType {
+    sched.reschedule();
+    return .success(0);
+}
+
 /// syscall: sched_getaffinity
 pub fn sysSchedGetAffinity(pid: usize, size: usize, mask: [*]CpuSet) ReturnType {
     const cur = sched.getCurrent();
