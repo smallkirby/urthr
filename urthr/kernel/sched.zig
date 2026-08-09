@@ -31,6 +31,12 @@ pub fn initLocal() Allocator.Error!void {
     const vmm = try urd.task.Vmm.new(allocator, urd.mem.getKernelPageTable());
     errdefer vmm.deinit(allocator);
 
+    // Create a new thread group for the idle thread.
+    const group = try urd.task.ThreadGroup.new(allocator, th);
+    errdefer group.deref(allocator);
+    const handlers = try urd.task.signal.Handlers.new(allocator);
+    errdefer handlers.deinit(allocator);
+
     th.* = .{
         .id = 0,
         .tgid = 0,
@@ -42,7 +48,10 @@ pub fn initLocal() Allocator.Error!void {
         .sp = undefined,
         .vmm = vmm,
         .fs = undefined, // filled later on fs subsystem initialization.
+        .sigstate = .{ .handlers = handlers },
+        .group = group,
     };
+    group.addMember(th);
     pcpu.ptr(&idle).* = th;
 
     // Set the idle thread as the current thread.

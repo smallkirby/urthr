@@ -66,10 +66,50 @@ pub const Action = struct {
     const sig_ignore: usize = 1;
 };
 
-/// Per-thread signal state.
-pub const State = struct {
+/// Per-signal action table.
+///
+/// Might be shared by threads.
+pub const Handlers = struct {
+    /// Reference count.
+    ///
+    /// Freed when it drops to zero.
+    refcnt: usize = 1,
     /// Per-signal action table (0-origin).
     actions: [num_signals]Action = [_]Action{.{}} ** num_signals,
+
+    /// Create a new, default-initialized handler table.
+    pub fn new(allocator: Allocator) Allocator.Error!*Handlers {
+        const self = try allocator.create(Handlers);
+        self.* = .{};
+        return self;
+    }
+
+    /// Create an independent copy of this handler table.
+    pub fn clone(self: *const Handlers, allocator: Allocator) Allocator.Error!*Handlers {
+        const new_handlers = try allocator.create(Handlers);
+        new_handlers.* = .{ .actions = self.actions };
+        return new_handlers;
+    }
+
+    /// Increment the reference count to share this handler table.
+    pub fn ref(self: *Handlers) *Handlers {
+        self.refcnt += 1;
+        return self;
+    }
+
+    /// Decrement the reference count, freeing the table when it reaches zero.
+    pub fn deinit(self: *Handlers, allocator: Allocator) void {
+        self.refcnt -= 1;
+        if (self.refcnt == 0) allocator.destroy(self);
+    }
+};
+
+/// Per-thread signal state.
+pub const State = struct {
+    /// Handler table.
+    ///
+    /// Might be shared by threads.
+    handlers: *Handlers,
     /// Pending signals not yet delivered.
     pending: Mask = 0,
     /// Currently blocked signals.
@@ -87,13 +127,18 @@ pub fn deliver() void {
         return;
     }
 
+    // Cooperative thread-group termination checkpoint.
+    if (th.group.dyingStatus()) |status| {
+        task.exit(status);
+    }
+
     while (true) {
         const deliverable = th.sigstate.pending & ~th.sigstate.blocked;
         if (deliverable == 0) break;
 
         const bit: u6 = @intCast(@ctz(deliverable));
         const signo: Signal = @enumFromInt(bit + 1);
-        const action = th.sigstate.actions[bit];
+        const action = th.sigstate.handlers.actions[bit];
 
         // Clear pending bit.
         th.sigstate.pending &= ~(@as(Mask, 1) << bit);
@@ -403,6 +448,7 @@ fn defaultAbort(signo: Signal) void {
 
 const builtin = @import("builtin");
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.signal);
 const common = @import("common");
 const arch = @import("arch").impl;

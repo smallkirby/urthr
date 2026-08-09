@@ -29,9 +29,11 @@ pub const Thread = struct {
     vfork_done: ?*VforkWaiter = null,
 
     /// Signal handling state.
-    sigstate: signal.State = .{},
+    sigstate: signal.State,
 
-    /// Pointer to the parent thread. null for the idle thread and orphaned threads.
+    /// Pointer to the parent thread.
+    ///
+    /// null for the idle thread, orphaned threads, and non-leader members of a thread group.
     ///
     /// TODO: becomes dangling if the parent exits while this thread is still alive.
     /// Reattaching the child to init thread is not yet implemented.
@@ -42,6 +44,13 @@ pub const Thread = struct {
     sibling: ChildrenList.Head = .{},
     /// Condition variable the parent blocks on to wait for the child to exit.
     child_exit_cv: CondVar = .{},
+
+    /// Thread group this thread belongs to.
+    ///
+    /// Shared by all threads in the same thread group.
+    group: *task.ThreadGroup,
+    /// Link node for thread group members list.
+    tg_sibling: task.ThreadGroup.MemberList.Head = .{},
 
     /// This thread needs to be rescheduled.
     need_resched: bool = false,

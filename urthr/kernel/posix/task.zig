@@ -5,7 +5,7 @@ pub fn sysExit(code: i32) ReturnType {
 
 /// syscall: exit_group
 pub fn sysExitGroup(code: i32) ReturnType {
-    task.exit(.{ .code = code });
+    task.exitGroup(.{ .code = code });
 }
 
 /// syscall: wait4
@@ -44,11 +44,9 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
 
     if (flags.fs) urd.unimplemented("clone: share FS");
     if (flags.files) urd.unimplemented("clone: share open files");
-    if (flags.sighand) urd.unimplemented("clone: share signal handlers");
     if (flags.pidfd) urd.unimplemented("clone: pidfd");
     if (flags.ptrace) urd.unimplemented("clone: ptrace");
     if (flags.parent) urd.unimplemented("clone: share parent");
-    if (flags.thread) urd.unimplemented("clone: share thread group");
 
     if (flags.thread and !flags.sighand) return .err(.inval);
     if (flags.sighand and !flags.vm) return .err(.inval);
@@ -56,13 +54,15 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
     const ch_flags = std.mem.zeroInit(task.CloneFlags, .{
         .vm = flags.vm,
         .suspend_parent = flags.vfork,
+        .thread = flags.thread,
+        .sighand = flags.sighand,
     });
     const child = task.clone(
         ch_flags,
         stack,
     ) catch return .err(.nomem);
 
-    return .success(@bitCast(@as(u64, child.tgid)));
+    return .success(@bitCast(@as(u64, child.id)));
 }
 
 /// syscall: fork
@@ -70,6 +70,8 @@ pub fn sysFork() ReturnType {
     const child = task.clone(.{
         .vm = false,
         .suspend_parent = false,
+        .thread = false,
+        .sighand = false,
     }, 0) catch return .err(.nomem);
 
     return .success(@bitCast(@as(u64, child.tgid)));
@@ -80,6 +82,8 @@ pub fn sysVfork() ReturnType {
     const child = task.clone(.{
         .vm = true,
         .suspend_parent = true,
+        .thread = false,
+        .sighand = false,
     }, 0) catch return .err(.nomem);
 
     return .success(@bitCast(@as(u64, child.tgid)));

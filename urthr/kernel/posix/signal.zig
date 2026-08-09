@@ -80,7 +80,7 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
 
     // Save old action if requested.
     if (oldact) |old| {
-        const cur = th.sigstate.actions[bit];
+        const cur = th.sigstate.handlers.actions[bit];
         old.* = .{
             .handler = cur.handler,
             .flags = cur.flags,
@@ -91,7 +91,7 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
 
     // Set new action if requested.
     if (act) |new| {
-        th.sigstate.actions[bit] = .{
+        th.sigstate.handlers.actions[bit] = .{
             .handler = new.handler,
             .flags = new.flags,
             .mask = new.mask,

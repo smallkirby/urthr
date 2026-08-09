@@ -3,6 +3,7 @@
 pub const signal = @import("task/signal.zig");
 pub const thread = @import("task/thread.zig");
 pub const Vmm = @import("task/Vmm.zig");
+pub const ThreadGroup = @import("task/ThreadGroup.zig");
 
 pub const Error = error{
     /// Invalid argument provided.
@@ -83,6 +84,12 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
     const vmm = try Vmm.new(mem.bin, mem.getKernelPageTable());
     errdefer vmm.deinit(mem.bin);
 
+    // Create a new thread group for the new kernel thread.
+    const group = try ThreadGroup.new(mem.bin, th);
+    errdefer group.deref(mem.bin);
+    const handlers = try signal.Handlers.new(mem.bin);
+    errdefer handlers.deinit(mem.bin);
+
     // =============================================================
     // No error can be returned after this point.
 
@@ -109,8 +116,11 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         .stack = stack,
         .vmm = vmm,
         .fs = fs,
+        .sigstate = .{ .handlers = handlers },
+        .group = group,
         .parent = cur,
     };
+    group.addMember(th);
 
     // Register as a child of the current thread.
     {
@@ -254,6 +264,10 @@ pub const CloneFlags = packed struct {
     vm: bool,
     /// Suspend the parent thread until the child thread exits.
     suspend_parent: bool,
+    /// Shares the same thread group as the caller.
+    thread: bool,
+    /// Shares the signal handler table with the caller.
+    sighand: bool,
 };
 
 /// Clone the current thread.
@@ -285,6 +299,20 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         cur.vmm.clone(mem.bin) catch return Error.OutOfMemory;
     errdefer vmm.deinit(mem.bin);
 
+    // Share or copy the thread group.
+    const group = if (flags.thread)
+        cur.group.ref()
+    else
+        try ThreadGroup.new(mem.bin, th);
+    errdefer group.deref(mem.bin);
+
+    // Share or copy the signal handler table.
+    const handlers = if (flags.sighand)
+        cur.sigstate.handlers.ref()
+    else
+        cur.sigstate.handlers.clone(mem.bin) catch return Error.OutOfMemory;
+    errdefer handlers.deinit(mem.bin);
+
     // =============================================================
     // No error can be returned after this point.
 
@@ -308,8 +336,8 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
 
         th.* = .{
             .id = id,
-            .tgid = id,
-            .ppid = cur.tgid,
+            .tgid = if (flags.thread) cur.tgid else id,
+            .ppid = if (flags.thread) cur.ppid else cur.tgid,
             .pgid = cur.pgid,
             .sid = cur.sid,
             .name = name,
@@ -318,10 +346,13 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .stack = kstack,
             .vmm = vmm,
             .fs = fs,
+            .sigstate = .{ .handlers = handlers, .blocked = cur.sigstate.blocked },
+            .group = group,
             .vfork_done = if (flags.suspend_parent) &vforkw else null,
-            .parent = cur,
+            .parent = if (flags.thread) null else cur,
         };
-        {
+        group.addMember(th);
+        if (!flags.thread) {
             const zombie_ie = zombie_lock.lockDisableIrq();
             defer zombie_lock.unlockRestoreIrq(zombie_ie);
             cur.children.append(th);
@@ -372,11 +403,23 @@ pub fn exit(status: thread.ExitStatus) noreturn {
     // Free the address space.
     cur.vmm.deinit(mem.bin);
 
+    // Release the signal handler table.
+    cur.sigstate.handlers.deinit(mem.bin);
+
     // Wake up the parent waiting on a vfork-clone.
     if (cur.vfork_done) |vd| {
         cur.vfork_done = null;
         vd.complete();
     }
+
+    // Leave the thread group.
+    const group = cur.group;
+    if (!group.leave(cur)) {
+        // If this is not the last member, switch to the next thread. Never returns.
+        sched.exitCurrent();
+    }
+    const leader = group.reapPendingExcept(cur);
+    group.deref(mem.bin);
 
     // Remove from parent's children list, and move to zombie list.
     // IRQs are intentionally disabled until the context switch
@@ -385,8 +428,23 @@ pub fn exit(status: thread.ExitStatus) noreturn {
         _ = zombie_lock.lockDisableIrq();
         defer zombie_lock.unlock();
 
-        if (cur.parent) |p| {
+        if (leader != cur) {
+            // The original leader exited earlier.
+            cur.parent = leader.parent;
+            cur.ppid = leader.ppid;
+            cur.pgid = leader.pgid;
+            cur.sid = leader.sid;
+            if (leader.parent) |p| p.children.remove(leader);
+
+            // Reap the leader's resources.
+            if (leader.stack) |kstack| mem.page.freeBytesV(kstack);
+            mem.bin.free(leader.name);
+            mem.bin.destroy(leader);
+        } else if (cur.parent) |p| {
             p.children.remove(cur);
+        }
+
+        if (cur.parent) |p| {
             p.child_exit_cv.signal();
         }
         zombie_list.append(cur);
@@ -394,6 +452,13 @@ pub fn exit(status: thread.ExitStatus) noreturn {
 
     // Switch to the next thread. Never returns.
     sched.exitCurrent();
+}
+
+/// Terminate every thread in the current thread group with the given exit code or signal.
+pub fn exitGroup(status: thread.ExitStatus) noreturn {
+    const cur = sched.getCurrent();
+    cur.group.markDying(status);
+    exit(status);
 }
 
 const WaitResult = struct {
