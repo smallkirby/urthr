@@ -176,14 +176,30 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
     path.dentry.mount = mnt;
 }
 
-/// Create a directory at the given path with the given name.
-pub fn mkdir(path: Path, name: []const u8, allocator: Allocator) Error!*Inode {
-    var cur = path;
+/// Create a directory under the given directory with the given name.
+pub fn mkdirAt(dir: Path, name: []const u8, allocator: Allocator) Error!*Inode {
+    var cur = dir;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
     return cur.dentry.inode.mkdir(name, allocator);
+}
+
+/// Create a directory at the specified path.
+pub fn mkdir(s: []const u8, allocator: Allocator) Error!*Inode {
+    const basename = std.fs.path.basenamePosix(s);
+    if (basename.len == 0) {
+        return Error.AlreadyExists;
+    }
+
+    // Lookup parent directory.
+    const dir = if (std.fs.path.dirnamePosix(s)) |dirname|
+        try resolvePath(sched.getCurrent().fs.cwd, dirname, allocator)
+    else
+        sched.getCurrent().fs.cwd;
+
+    return mkdirAt(dir, basename, allocator);
 }
 
 /// Create a new regular file at the specified path and open it.
