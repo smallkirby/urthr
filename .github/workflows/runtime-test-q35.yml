@@ -56,7 +56,7 @@ jobs:
             -Drtt \
             -Drestart \
             -Didle_watchdog=30 \
-            -Dinit=/boot/bin/utest \
+            -Dinit=/bin/utest \
             -Dallow_init_exit
 
           python3 -m http.server 18080 --bind 0.0.0.0 1>/dev/null &
@@ -71,7 +71,7 @@ jobs:
             -Drtt \
             -Drestart \
             -Didle_watchdog=30 \
-            -Dinit=/boot/bin/utest \
+            -Dinit=/bin/utest \
             -Dallow_init_exit
           status=$?
 
