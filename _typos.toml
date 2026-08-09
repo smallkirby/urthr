@@ -39,3 +39,5 @@ thre = "thre"
 fo = "fo"
 # POSIX
 clen = "clen"
+# Control length
+controllen = "controllen"

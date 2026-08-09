@@ -2,6 +2,7 @@ comptime {
     _ = @import("net/socket.zig");
     _ = @import("net/bind.zig");
     _ = @import("net/connect.zig");
+    _ = @import("net/recvfrom.zig");
     _ = @import("net/sendrecv.zig");
     _ = @import("net/sockopt.zig");
     _ = @import("net/dns.zig");
