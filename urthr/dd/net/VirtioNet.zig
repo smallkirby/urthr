@@ -14,8 +14,10 @@ pub const Error = error{
 
 /// Virtio device instance.
 dev: virtio.Device,
-/// RX buffers, indexed by descriptor ID.
+/// RX buffers.
 rx_buffers: [num_rx_bufs]RxBuffer,
+/// Maps a descriptor ID currently posted to the RX queue to its index into `rx_buffers`.
+desc_to_buf: [num_rx_bufs]usize,
 /// TX buffer.
 ///
 /// Currently, transmission is synchronous and only one packet can be transmitted at a time.
@@ -108,6 +110,7 @@ pub fn new(dev: virtio.Device, page_allocator: PageAllocator, allocator: Allocat
     self.* = .{
         .dev = dev,
         .rx_buffers = undefined,
+        .desc_to_buf = undefined,
         .tx_buffer = try page_allocator.allocBytesV(buffer_size),
         .page_allocator = page_allocator,
     };
@@ -141,18 +144,19 @@ pub fn new(dev: virtio.Device, page_allocator: PageAllocator, allocator: Allocat
 fn fillRxQueue(self: *Self) Error!void {
     const vq = self.dev.getQueue(rxq_idx) orelse return Error.DeviceError;
 
-    for (&self.rx_buffers) |*buf| {
+    for (&self.rx_buffers, 0..) |*buf, index| {
         const mem = try self.page_allocator.allocBytesV(buffer_size);
         buf.* = .{
             .virt = @intFromPtr(mem.ptr),
             .phys = self.page_allocator.translateP(@intFromPtr(mem.ptr)),
         };
 
-        vq.addBuf(&[_]virtio.Buffer{.{
+        const id = vq.addBuf(&[_]virtio.Buffer{.{
             .addr = buf.phys,
             .len = buffer_size,
             .write = true,
         }}) catch return Error.DeviceError;
+        self.desc_to_buf[id] = index;
     }
 
     self.dev.notifyQueue(rxq_idx);
@@ -180,11 +184,12 @@ fn pollImpl(dev: *net.Device) net.Error!?net.Device.PollResult {
     }
 
     // Remove virtio-net header and return the packet data.
-    const buf = self.rx_buffers[id];
+    const index = self.desc_to_buf[id];
+    const buf = self.rx_buffers[index];
     const ptr: [*]const u8 = @ptrFromInt(buf.virt + @sizeOf(NetHdr));
     return .{
         .data = ptr[0 .. len - @sizeOf(NetHdr)],
-        .handle = id,
+        .handle = index,
     };
 }
 
@@ -194,7 +199,7 @@ fn releaseRxBufImpl(dev: *net.Device, handle: usize) void {
     const vq = self.dev.getQueue(rxq_idx) orelse return;
     const buf = self.rx_buffers[handle];
 
-    vq.addBuf(&[_]virtio.Buffer{.{
+    const id = vq.addBuf(&[_]virtio.Buffer{.{
         .addr = buf.phys,
         .len = buffer_size,
         .write = true,
@@ -202,6 +207,7 @@ fn releaseRxBufImpl(dev: *net.Device, handle: usize) void {
         log.err("failed to refil RX buffer: {t}", .{err});
         return;
     };
+    self.desc_to_buf[id] = handle;
     self.dev.notifyQueue(rxq_idx);
 }
 
@@ -221,7 +227,7 @@ fn transmitImpl(dev: *net.Device, _: net.Protocol, buf: *net.NetBuffer) net.Erro
     @memcpy(self.tx_buffer[@sizeOf(NetHdr)..][0..data.len], data);
 
     // Add the TX buffer to the queue.
-    vq.addBuf(&[_]virtio.Buffer{.{
+    _ = vq.addBuf(&[_]virtio.Buffer{.{
         .addr = self.page_allocator.translateP(@intFromPtr(self.tx_buffer.ptr)),
         .len = @intCast(@sizeOf(NetHdr) + data.len),
         .write = false,

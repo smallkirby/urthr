@@ -54,7 +54,7 @@ pub fn read(self: *Self, size: usize, allocator: PageAllocator) Error![]u8 {
             .write = true,
         },
     };
-    vq.addBuf(&requests) catch return Error.DeviceError;
+    _ = vq.addBuf(&requests) catch return Error.DeviceError;
 
     // Notify the device.
     self.dev.notifyQueue(queue_index);

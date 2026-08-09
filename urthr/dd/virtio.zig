@@ -309,7 +309,7 @@ pub const Virtqueue = struct {
     /// Add a buffer chain to the queue.
     ///
     /// Returns the head descriptor index.
-    pub fn addBuf(self: *Virtqueue, bufs: []const Buffer) Error!void {
+    pub fn addBuf(self: *Virtqueue, bufs: []const Buffer) Error!u16 {
         if (bufs.len == 0) {
             return Error.InvalidArgument;
         }
@@ -342,6 +342,8 @@ pub const Virtqueue = struct {
         avail_ring_ptr[avail_idx % self.size] = head;
         avail_idx_ptr.* = avail_idx +% 1;
         arch.barrier(.full, .release);
+
+        return head;
     }
 
     /// Get a completed buffer from the used ring.

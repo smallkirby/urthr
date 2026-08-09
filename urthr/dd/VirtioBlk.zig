@@ -172,7 +172,7 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
     };
 
     // Add buffers to the queue.
-    vq.addBuf(&bufs) catch return Error.DeviceError;
+    _ = vq.addBuf(&bufs) catch return Error.DeviceError;
 
     // Notify the device.
     self.dev.notifyQueue(queue_index);
@@ -250,7 +250,7 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
     };
 
     // Add buffers to the queue.
-    vq.addBuf(&bufs) catch return Error.DeviceError;
+    _ = vq.addBuf(&bufs) catch return Error.DeviceError;
 
     // Notify the device.
     self.dev.notifyQueue(queue_index);
