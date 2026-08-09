@@ -14,6 +14,7 @@ comptime {
     _ = @import("fs/read.zig");
     _ = @import("fs/readv.zig");
     _ = @import("fs/stat.zig");
+    _ = @import("fs/truncate.zig");
     _ = @import("fs/unlink.zig");
     _ = @import("fs/write.zig");
     _ = @import("fs/writev.zig");
