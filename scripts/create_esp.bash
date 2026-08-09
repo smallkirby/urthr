@@ -14,7 +14,7 @@ out=$2
 
 MiB=$((1024 * 1024))
 start_mib=1
-size_mib=64
+size_mib=2048
 
 echo_normal "Creating disk image: $out"
 dd \

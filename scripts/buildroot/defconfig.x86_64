@@ -1,0 +1,6 @@
+# Minimal x64 userland for testing Urthr OS.
+
+BR2_x86_64=y
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_STATIC_LIBS=y
+BR2_TARGET_ROOTFS_TAR=y

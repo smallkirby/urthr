@@ -1,0 +1,6 @@
+# Minimal aarch64 userland for testing Urthr OS.
+
+BR2_aarch64=y
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_STATIC_LIBS=y
+BR2_TARGET_ROOTFS_TAR=y

@@ -82,6 +82,12 @@ pub fn build(b: *std.Build) !void {
         "Path to init binary to run on boot.",
     ) orelse "/boot/bin/init";
 
+    const external_rootfs = b.option(
+        []const u8,
+        "external_rootfs",
+        "Path to an externally-built rootfs tree to merge into the boot filesystem.",
+    ) orelse null;
+
     const restart = b.option(
         bool,
         "restart",
@@ -654,6 +660,7 @@ pub fn build(b: *std.Build) !void {
             init,
             utest,
         };
+        const bootfs_boot_dir = b.fmt("zig-out/{s}/bootfs/boot", .{@tagName(board_type)});
 
         // Create bootfs.img from zig-out/bootfs directory.
         // This Run is executed if any of the apps are update,
@@ -662,12 +669,23 @@ pub fn build(b: *std.Build) !void {
             "bash",
             "scripts/create_disk.bash",
         });
-        run.addArg(b.fmt("zig-out/{s}/bootfs/boot", .{@tagName(board_type)}));
+        run.addArg(bootfs_boot_dir);
         const img = run.addOutputFileArg("bootfs.img");
         for (apps) |app| {
             const artifact = iu.createInstallArtifact(app, .target, .bootfs);
             run.step.dependOn(&artifact.step);
             run.addFileInput(artifact.emitted_bin.?);
+        }
+
+        // Optionally merge an externally-built rootfs.
+        if (external_rootfs) |rootfs_dir| {
+            const merge_rootfs = b.addSystemCommand(&.{
+                "bash",
+                "scripts/merge_rootfs.bash",
+                rootfs_dir,
+                bootfs_boot_dir,
+            });
+            run.step.dependOn(&merge_rootfs.step);
         }
 
         bootfs.dependOn(&iu.createInstallFile(
@@ -726,9 +744,24 @@ pub fn build(b: *std.Build) !void {
         b.getInstallStep().dependOn(&run.step);
 
         // Copy apps.
-        for (apps) |app| {
+        var app_artifact_steps: [apps.len]*std.Build.Step = undefined;
+        for (apps, 0..) |app, i| {
             const artifact = iu.createInstallArtifact(app, .target, .esp_bin);
             run.step.dependOn(&artifact.step);
+            app_artifact_steps[i] = &artifact.step;
+        }
+
+        // Optionally merge an externally-built rootfs.
+        if (external_rootfs) |rootfs_dir| {
+            const merge_rootfs = b.addSystemCommand(&.{
+                "bash",
+                "scripts/merge_rootfs.bash",
+                rootfs_dir,
+                iu.getInstallPath(.target, .esp),
+            });
+            merge_rootfs.step.dependOn(&cp_remote.step);
+            for (app_artifact_steps) |s| merge_rootfs.step.dependOn(s);
+            run.step.dependOn(&merge_rootfs.step);
         }
     }
 
