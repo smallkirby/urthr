@@ -7,6 +7,7 @@ comptime {
     _ = @import("fs/ioctl.zig");
     _ = @import("fs/lseek.zig");
     _ = @import("fs/mkdir.zig");
+    _ = @import("fs/mount.zig");
     _ = @import("fs/open.zig");
     _ = @import("fs/pipe.zig");
     _ = @import("fs/ppoll.zig");

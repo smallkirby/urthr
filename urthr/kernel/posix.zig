@@ -34,8 +34,12 @@ pub const ErrorEnum = enum(i64) {
     nomem = -12,
     /// Permission denied.
     nacces = -13,
+    /// Device or resource busy.
+    busy = -16,
     /// File exists.
     exist = -17,
+    /// No such device.
+    nodev = -19,
     /// Not a directory.
     notdir = -20,
     /// Is a directory.

@@ -423,6 +423,75 @@ pub fn sysMkdir(pathname: [*:0]const u8, mode: u32) ReturnType {
 }
 
 // =============================================================
+// Mount
+// =============================================================
+
+const MountFlags = packed struct(u64) {
+    /// Mount filesystem read-only.
+    rdonly: bool = false,
+    /// Do not honor set-user-ID and set-group-ID bits or file capabilities when executing programs from this filesystem.
+    nosuid: bool = false,
+    /// Do not allow access to devices on this filesystem.
+    nodev: bool = false,
+    /// Do not allow programs to be executed from this filesystem.
+    noexec: bool = false,
+    /// Writes are synced immediately.
+    synchronous: bool = false,
+    /// Remount an existing mount.
+    remount: bool = false,
+    /// Reserved.
+    _6: u2 = 0,
+    /// Do not update access times.
+    noatime: bool = false,
+    /// Do not update directory access times.
+    nodiratime: bool = false,
+    /// Bind mount.
+    bind: bool = false,
+    /// Move a subtree.
+    move: bool = false,
+    /// Reserved.
+    _13: u52 = 0,
+};
+
+/// syscall: mount
+pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0]const u8, flags: MountFlags, _: ?*const anyopaque) ReturnType {
+    const allocator = urd.mem.bin;
+    const s_target = std.mem.span(target);
+
+    // For remount, just check if the target path exists and is a mount point.
+    if (flags.remount) {
+        const path = urd.fs.resolve(
+            s_target,
+            allocator,
+        ) catch |err| return mapMountError(err);
+        path.dentry.unref();
+        return .success(0);
+    }
+
+    // Create a new filesystem instance based on the specified filesystem type.
+    const fstype = filesystem_type orelse return .err(.inval);
+    const new_fs = if (std.mem.eql(u8, std.mem.span(fstype), "proc")) blk: {
+        const procfs = urd.fs.ProcFs.init(allocator) catch return .err(.nomem);
+        break :blk procfs.filesystem();
+    } else return .err(.nodev);
+
+    // Mount the new filesystem at the specified target path.
+    const path = urd.fs.resolve(
+        s_target,
+        allocator,
+    ) catch |err| return mapMountError(err);
+    defer path.dentry.unref();
+
+    urd.fs.mount(
+        path,
+        new_fs,
+        allocator,
+    ) catch |err| return mapMountError(err);
+
+    return .success(0);
+}
+
+// =============================================================
 // Stat
 // =============================================================
 
@@ -1221,6 +1290,16 @@ fn mapOpenError(err: anyerror) ReturnType {
         urd.fs.Error.NotFound => .err(.noent),
         urd.fs.Error.AlreadyExists => .err(.exist),
         error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+}
+
+/// Convert mount-related error to syscall return type.
+fn mapMountError(err: anyerror) ReturnType {
+    return switch (err) {
+        urd.fs.Error.AlreadyMounted => .err(.busy),
+        urd.fs.Error.NotDirectory => .err(.notdir),
+        urd.fs.Error.NotFound => .err(.noent),
         else => .err(.again),
     };
 }
