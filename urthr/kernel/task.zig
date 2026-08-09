@@ -551,9 +551,39 @@ fn setupUserImage(
     envs: []const []const u8,
 ) Error!UserImage {
     const allocator = mem.bin;
+    var exec_filename = filename;
+    var exec_args = args;
+
+    // Resolve a shebang line first.
+    var rewritten_args: ?[][]const u8 = null;
+    const shebang = try loader.parseShebang(filename, allocator);
+    defer if (shebang) |sb| {
+        allocator.free(sb.interp);
+        if (sb.arg) |a| allocator.free(a);
+    };
+    defer if (rewritten_args) |ra| {
+        allocator.free(ra);
+    };
+
+    // Rewrite the arguments if a shebang is found.
+    if (shebang) |sb| {
+        var list: std.ArrayList([]const u8) = .empty;
+        errdefer list.deinit(allocator);
+        if (sb.arg) |a| {
+            try list.append(allocator, a);
+        }
+        try list.append(allocator, filename);
+        if (args.len > 0) {
+            try list.appendSlice(allocator, args[1..]);
+        }
+
+        exec_filename = sb.interp;
+        rewritten_args = try list.toOwnedSlice(allocator);
+        exec_args = rewritten_args.?;
+    }
 
     // Load the executable.
-    const ldr_info = try loader.load(th, filename);
+    const ldr_info = try loader.load(th, exec_filename);
     th.vmm.brk = ldr_info.brk;
 
     // Prepare user stack.
@@ -572,8 +602,8 @@ fn setupUserImage(
     );
     // Arguments.
     {
-        try scon.appendArgv(filename);
-        for (args) |arg| {
+        try scon.appendArgv(exec_filename);
+        for (exec_args) |arg| {
             try scon.appendArgv(arg);
         }
     }

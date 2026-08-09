@@ -25,6 +25,52 @@ pub const LoadInfo = struct {
     tp: usize,
 };
 
+/// Maximum number of bytes inspected while looking for a shebang line.
+const shebang_buf_size = 128;
+
+/// A parsed shebang directive.
+pub const Shebang = struct {
+    /// Interpreter path.
+    interp: []u8,
+    /// Optional argument to the interpreter.
+    arg: ?[]u8,
+};
+
+/// Checks whether `filename` starts with a shebang directive and parses it.
+///
+/// Returns null if the file does not start with shebang.
+/// Caller is responsible for freeing the returned resource.
+pub fn parseShebang(filename: []const u8, allocator: Allocator) Error!?Shebang {
+    const file = try fs.open(
+        filename,
+        .read_only,
+        allocator,
+    );
+    defer file.unref();
+
+    // Check if the first line has a shebang directive.
+    var buf: [shebang_buf_size]u8 = undefined;
+    const data = try file.read(&buf);
+    if (data.len < 2 or data[0] != '#' or data[1] != '!') return null;
+
+    // Trim to get the first line.
+    const line_end = std.mem.indexOfScalar(u8, data, '\n') orelse data.len;
+    const trimmed = std.mem.trim(u8, data[2..line_end], " \t\r");
+    if (trimmed.len == 0) return Error.InvalidElf;
+
+    // Split the line into interpreter and optional argument.
+    const sep = std.mem.indexOfAny(u8, trimmed, " \t");
+    const interp_str = if (sep) |s| trimmed[0..s] else trimmed;
+    const arg_str = if (sep) |s| std.mem.trim(u8, trimmed[s..], " \t") else "";
+
+    const interp = try allocator.dupe(u8, interp_str);
+    errdefer allocator.free(interp);
+    const arg = if (arg_str.len != 0) try allocator.dupe(u8, arg_str) else null;
+    errdefer if (arg) |a| allocator.free(a);
+
+    return .{ .interp = interp, .arg = arg };
+}
+
 /// Load an ELF executable from the filesystem.
 ///
 /// Returns the entry point address of the loaded executable.
@@ -257,6 +303,7 @@ fn getAttribute(phdr: std.elf.Elf64_Phdr) common.mem.Permission {
 
 const builtin = @import("builtin");
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Elf64_Ehdr = std.elf.Elf64_Ehdr;
 const Elf64_Phdr = std.elf.Elf64_Phdr;
 const log = std.log.scoped(.loader);
