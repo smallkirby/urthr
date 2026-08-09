@@ -27,7 +27,7 @@ test "with a negative fd fails with EBADF" {
 }
 
 test "reading from a directory fd fails with EISDIR" {
-    const fd = linux.openat(linux.AT.FDCWD, "/boot", .{}, 0);
+    const fd = linux.openat(linux.AT.FDCWD, Test.base_dir, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
 

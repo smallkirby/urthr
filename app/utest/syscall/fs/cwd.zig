@@ -5,7 +5,7 @@ test "chdir" {
     const current = try getcwd(&oldbuf);
     defer chdir(current) catch unreachable;
 
-    const target = Test.base_dir ++ "/bin";
+    const target = "/bin";
     try chdir(target);
     try testing.expectEqualSlices(u8, target, try getcwd(&newbuf));
 }

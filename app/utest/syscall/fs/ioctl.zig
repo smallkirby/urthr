@@ -18,7 +18,7 @@ test "with a negative fd fails with EBADF" {
 }
 
 test "on a directory fails with ENOTTY" {
-    const fd = linux.openat(linux.AT.FDCWD, "/boot", .{}, 0);
+    const fd = linux.openat(linux.AT.FDCWD, Test.base_dir, .{}, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(fd));
     defer _ = linux.close(@intCast(fd));
 
@@ -34,3 +34,4 @@ const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
 const utest = @import("utest");
+const Test = utest.fs.Test;

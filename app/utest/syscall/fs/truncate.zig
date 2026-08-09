@@ -86,7 +86,7 @@ test "ftruncate with a negative length fails with EINVAL" {
 test "ftruncate on a directory fd fails with EBADF" {
     const fd = linux.openat(
         linux.AT.FDCWD,
-        "/boot",
+        Test.base_dir,
         .{},
         0,
     );

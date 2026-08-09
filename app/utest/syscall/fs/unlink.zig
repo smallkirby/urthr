@@ -59,7 +59,7 @@ test "unlinkat with an unopened dirfd fails with EBADF" {
 test "unlinkat a directory fails with EISDIR" {
     const ret = linux.unlinkat(
         linux.AT.FDCWD,
-        "/boot/bin",
+        "/bin",
         0,
     );
     try testing.expectEqual(.ISDIR, linux.errno(ret));

@@ -36,7 +36,7 @@ test "syscall: openat" {
 
     const boot = try std.Io.Dir.openDirAbsolute(
         init.io,
-        "/boot",
+        Test.base_dir,
         .{},
     );
     defer boot.close(init.io);
@@ -110,7 +110,7 @@ test "opening a directory with write access fails with EISDIR" {
     {
         const ret = linux.openat(
             linux.AT.FDCWD,
-            "/boot",
+            Test.base_dir,
             .{ .ACCMODE = .WRONLY },
             0,
         );
@@ -120,7 +120,7 @@ test "opening a directory with write access fails with EISDIR" {
     {
         const ret = linux.openat(
             linux.AT.FDCWD,
-            "/boot",
+            Test.base_dir,
             .{ .ACCMODE = .RDWR },
             0,
         );
@@ -131,7 +131,7 @@ test "opening a directory with write access fails with EISDIR" {
 test "openat with O_DIRECTORY on a directory succeeds" {
     const ret = linux.openat(
         linux.AT.FDCWD,
-        "/boot",
+        Test.base_dir,
         .{ .DIRECTORY = true },
         0,
     );

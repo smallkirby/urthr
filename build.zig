@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) !void {
         []const u8,
         "init",
         "Path to init binary to run on boot.",
-    ) orelse "/boot/bin/init";
+    ) orelse "/bin/init";
 
     const external_rootfs = b.option(
         []const u8,

@@ -36,7 +36,7 @@ test "fchmodat resolves relative to a directory fd" {
 
     const dir = try std.Io.Dir.openDirAbsolute(
         init.io,
-        "/boot/bin",
+        "/bin",
         .{},
     );
     defer dir.close(init.io);

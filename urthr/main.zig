@@ -112,45 +112,51 @@ fn zmain() !void {
     log.info("Initializing filesystem.", .{});
     try urd.fs.init(urd.mem.bin);
 
-    // Mount rootfs.
+    // Mount root filesystem.
     log.info("Mounting root filesystem.", .{});
     {
         const allocator = urd.mem.bin;
         const croot = urd.sched.getCurrent().fs.root;
-        const rootfs = try urd.fs.RootFs.init(allocator);
 
-        try urd.fs.mount(croot, rootfs.filesystem(), allocator);
-        _ = try urd.fs.mkdir(croot, "boot", allocator);
-        _ = try urd.fs.mkdir(croot, "dev", allocator);
-        _ = try urd.fs.mkdir(croot, "proc", allocator);
-    }
+        const diskfs: ?urd.fs.FileSystem = if (board.getBlockDevice()) |dev| blk: {
+            // List partitions on the block device.
+            const parts = try common.block.partitions.listPartitions(dev, allocator);
+            defer allocator.free(parts);
+            log.info("Found {d} partitions:", .{parts.len});
 
-    if (board.getBlockDevice()) |dev| {
-        // List partitions on the block device.
-        const partitions = try common.block.partitions.listPartitions(dev, urd.mem.bin);
-        defer urd.mem.bin.free(partitions);
-        log.info("Found {d} partitions:", .{partitions.len});
+            for (parts, 0..) |*part, i| {
+                const bytes_per_sector = 512;
+                log.info("  Partition#{d}: LBA {d}, Size {d} sectors ({d} MiB)", .{
+                    i,
+                    part.lba,
+                    part.nsecs,
+                    (part.nsecs * bytes_per_sector) / units.mib,
+                });
+            }
 
-        for (partitions, 0..) |*part, i| {
-            const bytes_per_sector = 512;
-            log.info("  Partition#{d}: LBA {d}, Size {d} sectors ({d} MiB)", .{
-                i,
-                part.lba,
-                part.nsecs,
-                (part.nsecs * bytes_per_sector) / units.mib,
-            });
-        }
+            break :blk try findDiskFs(dev);
+        } else blk: {
+            log.warn("No block device found", .{});
+            break :blk null;
+        };
 
-        // Mount the boot filesystem.
-        if (try createBootFs(dev)) |fs| {
-            const mntpnt = try urd.fs.resolve("/boot", urd.mem.bin);
-            defer mntpnt.dentry.unref();
-            try urd.fs.mount(mntpnt, fs, urd.mem.bin);
+        // Mount the found filesystem, or fall back to an in-memory root filesystem.
+        if (diskfs) |fs| {
+            try urd.fs.mount(croot, fs, allocator);
         } else {
-            log.warn("No boot filesystem found.", .{});
+            const rootfs = try urd.fs.RootFs.init(allocator);
+            try urd.fs.mount(croot, rootfs.filesystem(), allocator);
         }
-    } else {
-        log.warn("No block device found", .{});
+
+        // Create mount points.
+        _ = urd.fs.mkdir(croot, "dev", allocator) catch |err| switch (err) {
+            urd.fs.Error.AlreadyExists => {},
+            else => return err,
+        };
+        _ = urd.fs.mkdir(croot, "proc", allocator) catch |err| switch (err) {
+            urd.fs.Error.AlreadyExists => {},
+            else => return err,
+        };
     }
 
     // Mount devfs at /dev and register devices.
@@ -215,7 +221,10 @@ fn initialTask() !void {
 // Utilities
 // =============================================================
 
-fn createBootFs(dev: common.block.Device) urd.fs.Error!?urd.fs.FileSystem {
+/// Find the filesystem to use as the root filesystem on the given block device.
+///
+/// Prefers a partition labeled "bootfs". Falls back to the first partition.
+fn findDiskFs(dev: common.block.Device) urd.fs.Error!?urd.fs.FileSystem {
     const allocator = urd.mem.bin;
     const partitions = try common.block.partitions.listPartitions(dev, allocator);
     defer allocator.free(partitions);

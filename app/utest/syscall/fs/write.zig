@@ -36,7 +36,7 @@ test "with a negative fd fails with EBADF" {
 test "writing to a directory fd fails with EBADF" {
     const fd = linux.openat(
         linux.AT.FDCWD,
-        "/boot",
+        Test.base_dir,
         .{},
         0,
     );

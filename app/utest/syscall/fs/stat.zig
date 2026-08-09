@@ -108,7 +108,7 @@ test "fstatat via a directory fd with a relative pathname succeeds" {
 
     const dir = try std.Io.Dir.openDirAbsolute(
         init.io,
-        "/boot",
+        Test.base_dir,
         .{},
     );
     defer dir.close(init.io);
@@ -335,7 +335,7 @@ test "getdents64 with a buffer too small for a single entry fails with EINVAL" {
 
     const dir = try std.Io.Dir.openDirAbsolute(
         init.io,
-        "/boot/bin",
+        "/bin",
         .{ .iterate = true },
     );
     defer dir.close(init.io);
@@ -345,12 +345,12 @@ test "getdents64 with a buffer too small for a single entry fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "getdents64 can find myself in /boot/bin" {
+test "getdents64 can find myself in /bin" {
     const init = utest.getInit();
 
     const dir = try std.Io.Dir.openDirAbsolute(
         init.io,
-        "/boot/bin",
+        "/bin",
         .{ .iterate = true },
     );
     defer dir.close(init.io);

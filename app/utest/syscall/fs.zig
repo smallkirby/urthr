@@ -24,7 +24,7 @@ pub const Test = struct {
     const Self = @This();
 
     /// Base directory name.
-    pub const base_dir = "/boot";
+    pub const base_dir = "/";
     /// Name of the test file.
     pub const file_name = "test.txt";
 

@@ -19,7 +19,7 @@ pub fn skipIfNetUnsupported() !void {
 }
 
 /// The path of this binary.
-pub const myname = "/boot/bin/utest";
+pub const myname = "/bin/utest";
 
 // Modules.
 pub const fs = @import("syscall/fs.zig");
