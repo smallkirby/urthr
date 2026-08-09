@@ -18,8 +18,8 @@ dev: virtio.Device,
 config: Config,
 /// Memory allocator.
 allocator: Allocator,
-/// Page allocator for DMA operations.
-page_allocator: PageAllocator,
+/// DMA allocator for request buffers.
+dma: DmaAllocator,
 
 /// Sector size in bytes.
 const sector_size = 512;
@@ -38,7 +38,7 @@ pub const pci_device_id_modern: u16 = 0x1042;
 /// Initialize the virtio-blk device.
 ///
 /// The block device "manages" the given allocators.
-pub fn init(dev: virtio.Device, page_allocator: PageAllocator, allocator: Allocator) Error!Self {
+pub fn init(dev: virtio.Device, dma: DmaAllocator, allocator: Allocator) Error!Self {
     // Read device configuration.
     const config = readConfig(dev);
     log.info("capacity: {d} sectors ({d} MiB)", .{
@@ -59,7 +59,7 @@ pub fn init(dev: virtio.Device, page_allocator: PageAllocator, allocator: Alloca
     return .{
         .dev = dev,
         .config = config,
-        .page_allocator = page_allocator,
+        .dma = dma,
         .allocator = allocator,
     };
 }
@@ -138,34 +138,37 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
 
     // Allocate DMA-capable buffers.
     const data_buf_size = count * sector_size;
-    const data = self.page_allocator.allocBytesV(data_buf_size) catch return Error.OutOfMemory;
-    defer self.page_allocator.freeBytesV(data);
+    const data_mem = try self.dma.allocBytes(data_buf_size, .normal);
+    defer self.dma.freeBytes(data_mem);
 
-    const req = self.page_allocator.create(Request) catch return Error.OutOfMemory;
-    defer self.page_allocator.destroy(req);
+    const req_mem = try self.dma.allocBytes(@sizeOf(Request), .normal);
+    defer self.dma.freeBytes(req_mem);
+    const req: *Request = @ptrFromInt(req_mem.cpu);
 
-    const status = self.page_allocator.create(Status) catch return Error.OutOfMemory;
-    defer self.page_allocator.destroy(status);
+    const status_mem = try self.dma.allocBytes(@sizeOf(Status), .normal);
+    defer self.dma.freeBytes(status_mem);
+    const status: *Status = @ptrFromInt(status_mem.cpu);
 
     req.* = .{
         .type = .read,
         .sector = sector,
     };
+    self.dma.syncForDevice(req_mem.cpu, @sizeOf(Request));
 
     // Build descriptor chain.
     const bufs = [_]virtio.Buffer{
         .{
-            .addr = self.page_allocator.translateP(@intFromPtr(req)),
+            .addr = req_mem.bus,
             .len = @sizeOf(Request),
             .write = false,
         },
         .{
-            .addr = self.page_allocator.translateP(@intFromPtr(data.ptr)),
+            .addr = data_mem.bus,
             .len = @intCast(data_buf_size),
             .write = true,
         },
         .{
-            .addr = self.page_allocator.translateP(@intFromPtr(status)),
+            .addr = status_mem.bus,
             .len = 1,
             .write = true,
         },
@@ -191,13 +194,15 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
     }
 
     // Check status.
+    self.dma.syncForCpu(status_mem.cpu, @sizeOf(Status));
     if (status.* != .ok) {
         log.err("read failed: status={d}", .{status.*});
         return Error.IoError;
     }
 
     // Copy data to user buffer.
-    @memcpy(buffer[0..data_buf_size], data[0..data_buf_size]);
+    self.dma.syncForCpu(data_mem.cpu, data_buf_size);
+    @memcpy(buffer[0..data_buf_size], @as([*]const u8, @ptrFromInt(data_mem.cpu))[0..data_buf_size]);
 }
 
 /// Read virtio-blk device configuration.
@@ -219,31 +224,39 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
     }
 
     // Allocate DMA-capable buffers.
-    const req = self.page_allocator.create(Request) catch return Error.OutOfMemory;
-    defer self.page_allocator.destroy(req);
+    const data_mem = try self.dma.allocBytes(data.len, .normal);
+    defer self.dma.freeBytes(data_mem);
+    @memcpy(@as([*]u8, @ptrFromInt(data_mem.cpu))[0..data.len], data);
+    self.dma.syncForDevice(data_mem.cpu, data.len);
 
-    const status = self.page_allocator.create(Status) catch return Error.OutOfMemory;
-    defer self.page_allocator.destroy(status);
+    const req_mem = try self.dma.allocBytes(@sizeOf(Request), .normal);
+    defer self.dma.freeBytes(req_mem);
+    const req: *Request = @ptrFromInt(req_mem.cpu);
+
+    const status_mem = try self.dma.allocBytes(@sizeOf(Status), .normal);
+    defer self.dma.freeBytes(status_mem);
+    const status: *Status = @ptrFromInt(status_mem.cpu);
 
     req.* = .{
         .type = .write,
         .sector = sector,
     };
+    self.dma.syncForDevice(req_mem.cpu, @sizeOf(Request));
 
     // Build descriptor chain.
     const bufs = [_]virtio.Buffer{
         .{
-            .addr = self.page_allocator.translateP(@intFromPtr(req)),
+            .addr = req_mem.bus,
             .len = @sizeOf(Request),
             .write = false,
         },
         .{
-            .addr = self.page_allocator.translateP(@intFromPtr(data.ptr)),
+            .addr = data_mem.bus,
             .len = @intCast(data.len),
             .write = false,
         },
         .{
-            .addr = self.page_allocator.translateP(@intFromPtr(status)),
+            .addr = status_mem.bus,
             .len = 1,
             .write = true,
         },
@@ -269,6 +282,7 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
     }
 
     // Check status.
+    self.dma.syncForCpu(status_mem.cpu, @sizeOf(Status));
     if (status.* != .ok) {
         log.err("write failed: status={d}", .{status.*});
         return Error.IoError;
@@ -334,5 +348,5 @@ const rtt = common.rtt;
 const block = common.block;
 const mmio = common.mmio;
 const units = common.units;
-const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
 const virtio = @import("virtio.zig");

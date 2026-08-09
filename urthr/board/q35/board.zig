@@ -445,7 +445,7 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
         // Initialize virtio-blk device.
         virtio_blk_dev = dd.VirtioBlk.init(
             result.dev.interface(),
-            urd.mem.page,
+            mem.dma.interface(0),
             urd.mem.bin,
         ) catch |err| {
             log.warn("Failed to initialize virtio-blk: {t}", .{err});

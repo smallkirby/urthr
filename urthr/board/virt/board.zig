@@ -190,7 +190,7 @@ pub fn initPeripherals2() urd.mem.Error!void {
             };
             virtio_blk_dev = dd.VirtioBlk.init(
                 dev.interface(),
-                urd.mem.page,
+                mem.dma.interface(0),
                 urd.mem.bin,
             ) catch continue;
 
