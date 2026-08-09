@@ -236,13 +236,20 @@ pub fn enterUser(
     _ = try current.fs.fdtbl.set(1, console);
     _ = try current.fs.fdtbl.set(2, console);
 
+    // Build the full argv.
+    const argv = try allocator.alloc([]const u8, args.len + 1);
+    errdefer allocator.free(argv);
+    argv[0] = filename;
+    @memcpy(argv[1..], args);
+
     // Setup user image.
     const uimg = try setupUserImage(
         current,
         filename,
-        args,
+        argv,
         envs,
     );
+    allocator.free(argv);
 
     // Set thread pointer.
     arch.thread.setThreadPointer(uimg.tp);
@@ -547,39 +554,45 @@ const UserImage = struct {
 fn setupUserImage(
     th: *Thread,
     filename: []const u8,
-    args: []const []const u8,
+    argv: []const []const u8,
     envs: []const []const u8,
 ) Error!UserImage {
     const allocator = mem.bin;
     var exec_filename = filename;
-    var exec_args = args;
+    var exec_argv = argv;
 
     // Resolve a shebang line first.
-    var rewritten_args: ?[][]const u8 = null;
+    var rewritten_argv: ?[][]const u8 = null;
     const shebang = try loader.parseShebang(filename, allocator);
     defer if (shebang) |sb| {
         allocator.free(sb.interp);
         if (sb.arg) |a| allocator.free(a);
     };
-    defer if (rewritten_args) |ra| {
+    defer if (rewritten_argv) |ra| {
         allocator.free(ra);
     };
 
-    // Rewrite the arguments if a shebang is found.
+    // Rewrite argv if a shebang is found.
     if (shebang) |sb| {
         var list: std.ArrayList([]const u8) = .empty;
         errdefer list.deinit(allocator);
+
+        // argv[0]: interpreter path
+        try list.append(allocator, sb.interp);
+        // argv[1]: optional argument to the interpreter
         if (sb.arg) |a| {
             try list.append(allocator, a);
         }
+        // argv[2]: original executable path
         try list.append(allocator, filename);
-        if (args.len > 0) {
-            try list.appendSlice(allocator, args[1..]);
+        // argv[3..]: original arguments
+        if (argv.len > 1) {
+            try list.appendSlice(allocator, argv[1..]);
         }
 
         exec_filename = sb.interp;
-        rewritten_args = try list.toOwnedSlice(allocator);
-        exec_args = rewritten_args.?;
+        rewritten_argv = try list.toOwnedSlice(allocator);
+        exec_argv = rewritten_argv.?;
     }
 
     // Load the executable.
@@ -602,8 +615,7 @@ fn setupUserImage(
     );
     // Arguments.
     {
-        try scon.appendArgv(exec_filename);
-        for (exec_args) |arg| {
+        for (exec_argv) |arg| {
             try scon.appendArgv(arg);
         }
     }
