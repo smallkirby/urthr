@@ -24,6 +24,10 @@ pub const Ops = struct {
     ///
     /// Return the number of bytes written.
     write: ?*const fn (self: *File, buf: []const u8, pos: usize) Error!usize = null,
+    /// Change the size of the file, zero-filling on growth and freeing storage on shrink.
+    ///
+    /// Returns Error.Unsupported if the file does not support resizing.
+    truncate: ?*const fn (self: *File, new_size: usize) Error!void = null,
     /// Perform a device-specific control operation.
     ///
     /// Returns Error.Unsupported if the file does not support ioctl.
@@ -198,6 +202,20 @@ pub fn pwrite(self: *Self, buf: []const u8, pos: usize) Error!usize {
 
     if (self.ops.write) |f| {
         return f(self, buf, pos);
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Change the size of the file.
+///
+/// Returns Error.Unsupported if the file does not support resizing.
+pub fn truncate(self: *Self, new_size: usize) Error!void {
+    if (self.inode().ftype == .directory) return Error.NotFile;
+    if (!self.access.writable) return Error.BadAccess;
+
+    if (self.ops.truncate) |f| {
+        return f(self, new_size);
     } else {
         return Error.Unsupported;
     }

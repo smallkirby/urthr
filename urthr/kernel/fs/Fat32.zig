@@ -518,6 +518,7 @@ const file_vtable = fs.File.Ops{
     .iterate = fiterate,
     .read = fread,
     .write = fwrite,
+    .truncate = ftruncate,
     .close = fclose,
     .poll = fpoll,
 };
@@ -649,7 +650,8 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     const inode = file.path.dentry.inode;
     const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
 
-    if (buf.len == 0) return 0;
+    // Nothing to write and nothing to zero-fill.
+    if (buf.len == 0 and offset <= inode.size) return 0;
 
     fat32.lock.lock();
     defer fat32.lock.unlock();
@@ -718,6 +720,49 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     }
 
     return buf.len;
+}
+
+/// Change the size of a regular file.
+///
+/// Growing the file zero-fills the new region.
+/// Shrinking the file frees the cluster chain beyond the new size,
+/// but always keeps at least the file's first cluster.
+fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
+    const ctx = FileImpl.from(file);
+    const fat32 = ctx.fat32;
+    const inode = file.path.dentry.inode;
+    const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
+
+    // No size change.
+    if (new_size == inode.size) {
+        return;
+    }
+
+    // Extending the size.
+    if (new_size > inode.size) {
+        _ = try fwrite(file, &[_]u8{}, new_size);
+        return;
+    }
+
+    fat32.lock.lock();
+    defer fat32.lock.unlock();
+
+    // Walk to the cluster that will remain the new last cluster of the chain.
+    const last_kept_offset = if (new_size == 0) 0 else new_size - 1;
+    var clus = ctx.start_cluster;
+    var clus_file_offset: u64 = 0;
+    while (clus_file_offset + bytes_per_cluster <= last_kept_offset) : (clus_file_offset += bytes_per_cluster) {
+        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
+    }
+
+    // Free the rest of the chain and terminate it at the kept cluster.
+    if (try fat32.getNextCluster(clus)) |next| {
+        try fat32.freeCluster(next);
+        try fat32.setFatEntry(clus, fat_eoc_min);
+    }
+
+    inode.size = new_size;
+    try fat32.updateDirEntrySize(inode.number, new_size);
 }
 
 /// Update the file size field of the on-disk directory entry.

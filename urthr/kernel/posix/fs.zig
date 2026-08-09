@@ -35,6 +35,15 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
         file.unref();
         return .err(.isdir);
     }
+    if (flags.trunc and file.getType() == .regular and (flags.wo or flags.rdwr)) {
+        file.truncate(0) catch |err| switch (err) {
+            urd.fs.Error.Unsupported => {},
+            else => {
+                file.unref();
+                return mapOpenError(err);
+            },
+        };
+    }
 
     const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
         return .err(.mfile);
@@ -308,6 +317,18 @@ pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, 
     }
 
     return .success(@bitCast(total));
+}
+
+/// syscall: ftruncate
+pub fn sysFtruncate(fd: usize, length: i64) ReturnType {
+    if (length < 0) return .err(.inval);
+
+    const file = getFile(fd) catch return .err(.badf);
+    file.truncate(@intCast(length)) catch |e| return switch (e) {
+        urd.fs.Error.Unsupported => .err(.inval),
+        else => writeError(e),
+    };
+    return .success(0);
 }
 
 // =============================================================
