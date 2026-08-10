@@ -1,5 +1,6 @@
 /// Context saved during a thread switch.
 const SwitchContext = extern struct {
+    fsbase: usize,
     r15: usize,
     r14: usize,
     r13: usize,
@@ -68,6 +69,7 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize)
     // Construct initial switch context for the child.
     sc.* = std.mem.zeroInit(SwitchContext, .{
         .link = @intFromPtr(&trampoline),
+        .fsbase = am.rdmsr(.fs_base).addr,
     });
 
     return stack[0 .. addr - @intFromPtr(stack.ptr)];

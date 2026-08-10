@@ -41,8 +41,9 @@ pub fn init() void {
 fn handlePageFault(far: usize, access: common.mem.AccessType) bool {
     const th = sched.getCurrent();
 
-    th.vmm.faultIn(far, access) catch {
+    th.vmm.faultIn(far, access) catch |err| {
         // Failed to handle the fault. Immediately terminate the current thread.
+        log.warn("Unhandled #PF: TGID={d} ID={d} FAR=0x{X} ACCESS={} ERR={}", .{ th.tgid, th.id, far, access, err });
         signal.pushSync(.segv);
     };
 
@@ -387,7 +388,7 @@ pub fn exit(status: thread.ExitStatus) noreturn {
         @branchHint(.cold);
 
         if (urd.allow_init_exit) {
-            log.info("Init process exited.", .{});
+            log.info("Init process exited with {}", .{status});
             urd.eol(switch (status) {
                 .code => |c| @intCast(c),
                 .signal => 1,

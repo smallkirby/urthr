@@ -9,11 +9,19 @@ switchContextAsm:
   pushq %r14
   pushq %r15
 
+  // Save FSBASE.
+  rdfsbase  %rax
+  pushq     %rax
+
   // Save current RSP.
   movq %rsp, (%rdi)
 
   // Switch to new RSP.
   movq (%rsi), %rsp
+
+  // Restore FSBASE.
+  popq      %rax
+  wrfsbase  %rax
 
   // Restore callee-saved registers from new stack.
   popq %r15
