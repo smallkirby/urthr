@@ -1085,6 +1085,44 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType 
 }
 
 // =============================================================
+// access
+// =============================================================
+
+/// Access mode flags to check.
+const AccessFlags = packed struct(i32) {
+    /// Execute permission.
+    exec: bool = false,
+    /// Write permission.
+    write: bool = false,
+    /// Read permission.
+    read: bool = false,
+    /// Reserved.
+    _3: u29 = 0,
+};
+
+/// syscall: faccessat
+pub fn sysFaccessAt(dirfd: usize, pathname: [*:0]const u8, mode: AccessFlags) ReturnType {
+    if (mode._3 != 0) {
+        return .err(.inval);
+    }
+
+    const file = openFileAt(
+        dirfd,
+        std.mem.span(pathname),
+        .{},
+        urd.mem.bin,
+    ) catch |err| return mapOpenError(err);
+    defer file.unref();
+
+    return .success(0);
+}
+
+/// syscall: access
+pub fn sysAccess(pathname: [*:0]const u8, mode: AccessFlags) ReturnType {
+    return sysFaccessAt(cwd_fd, pathname, mode);
+}
+
+// =============================================================
 // CWD
 // =============================================================
 
