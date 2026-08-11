@@ -381,22 +381,47 @@ const SyscallHandler = struct {
                 return handler();
             }
             fn f1(arg1: u64, _: u64, _: u64, _: u64, _: u64, _: u64) ReturnType {
-                return handler(convert(ArgType(0), arg1));
+                return handler(convert(ArgType(0), arg1) catch |e| return .err(emap(e)));
             }
             fn f2(arg1: u64, arg2: u64, _: u64, _: u64, _: u64, _: u64) ReturnType {
-                return handler(convert(ArgType(0), arg1), convert(ArgType(1), arg2));
+                return handler(
+                    convert(ArgType(0), arg1) catch |e| return .err(emap(e)),
+                    convert(ArgType(1), arg2) catch |e| return .err(emap(e)),
+                );
             }
             fn f3(arg1: u64, arg2: u64, arg3: u64, _: u64, _: u64, _: u64) ReturnType {
-                return handler(convert(ArgType(0), arg1), convert(ArgType(1), arg2), convert(ArgType(2), arg3));
+                return handler(
+                    convert(ArgType(0), arg1) catch |e| return .err(emap(e)),
+                    convert(ArgType(1), arg2) catch |e| return .err(emap(e)),
+                    convert(ArgType(2), arg3) catch |e| return .err(emap(e)),
+                );
             }
             fn f4(arg1: u64, arg2: u64, arg3: u64, arg4: u64, _: u64, _: u64) ReturnType {
-                return handler(convert(ArgType(0), arg1), convert(ArgType(1), arg2), convert(ArgType(2), arg3), convert(ArgType(3), arg4));
+                return handler(
+                    convert(ArgType(0), arg1) catch |e| return .err(emap(e)),
+                    convert(ArgType(1), arg2) catch |e| return .err(emap(e)),
+                    convert(ArgType(2), arg3) catch |e| return .err(emap(e)),
+                    convert(ArgType(3), arg4) catch |e| return .err(emap(e)),
+                );
             }
             fn f5(arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, _: u64) ReturnType {
-                return handler(convert(ArgType(0), arg1), convert(ArgType(1), arg2), convert(ArgType(2), arg3), convert(ArgType(3), arg4), convert(ArgType(4), arg5));
+                return handler(
+                    convert(ArgType(0), arg1) catch |e| return .err(emap(e)),
+                    convert(ArgType(1), arg2) catch |e| return .err(emap(e)),
+                    convert(ArgType(2), arg3) catch |e| return .err(emap(e)),
+                    convert(ArgType(3), arg4) catch |e| return .err(emap(e)),
+                    convert(ArgType(4), arg5) catch |e| return .err(emap(e)),
+                );
             }
             fn f6(arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) ReturnType {
-                return handler(convert(ArgType(0), arg1), convert(ArgType(1), arg2), convert(ArgType(2), arg3), convert(ArgType(3), arg4), convert(ArgType(4), arg5), convert(ArgType(5), arg6));
+                return handler(
+                    convert(ArgType(0), arg1) catch |e| return .err(emap(e)),
+                    convert(ArgType(1), arg2) catch |e| return .err(emap(e)),
+                    convert(ArgType(2), arg3) catch |e| return .err(emap(e)),
+                    convert(ArgType(3), arg4) catch |e| return .err(emap(e)),
+                    convert(ArgType(4), arg5) catch |e| return .err(emap(e)),
+                    convert(ArgType(5), arg6) catch |e| return .err(emap(e)),
+                );
             }
         };
 
@@ -412,10 +437,22 @@ const SyscallHandler = struct {
         };
     }
 
+    const ConvertError = error{
+        /// Pointer argument is outside the user's address space.
+        Fault,
+    };
+
+    /// Maps a `ConvertError` to an `ErrorEnum`.
+    fn emap(err: ConvertError) ErrorEnum {
+        return switch (err) {
+            error.Fault => .fault,
+        };
+    }
+
     /// Convert a syscall argument to the expected type.
-    fn convert(comptime T: type, arg: u64) T {
+    fn convert(comptime T: type, arg: u64) ConvertError!T {
         return switch (@typeInfo(T)) {
-            .pointer => @ptrFromInt(arg),
+            .pointer => if (arg == 0) error.Fault else @ptrFromInt(arg),
             .int => switch (@bitSizeOf(T)) {
                 8 => @bitCast(@as(u8, @truncate(arg))),
                 16 => @bitCast(@as(u16, @truncate(arg))),

@@ -34,6 +34,8 @@ pub const ErrorEnum = enum(i64) {
     nomem = -12,
     /// Permission denied.
     nacces = -13,
+    /// Bad address.
+    fault = -14,
     /// Device or resource busy.
     busy = -16,
     /// File exists.

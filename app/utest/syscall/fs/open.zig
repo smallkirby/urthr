@@ -31,6 +31,18 @@ test "try to open a non-existent file" {
     ));
 }
 
+test "syscall: open with a null pathname fails with EFAULT" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    const ret = linux.syscall3(.open, 0, 0, 0);
+    try testing.expectEqual(.FAULT, linux.errno(ret));
+}
+
+test "syscall: openat with a null pathname fails with EFAULT" {
+    const ret = linux.syscall4(.openat, @bitCast(@as(isize, linux.AT.FDCWD)), 0, 0, 0);
+    try testing.expectEqual(.FAULT, linux.errno(ret));
+}
+
 test "syscall: openat" {
     const init = utest.getInit();
 
@@ -183,6 +195,7 @@ test "openat with O_CREAT and O_EXCL on an existing file fails with EEXIST" {
 // =============================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const linux = std.os.linux;
 const utest = @import("utest");

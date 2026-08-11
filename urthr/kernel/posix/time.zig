@@ -12,7 +12,7 @@ pub fn sysClockGetTime(clock: ClockType, tp: *Timespec) ReturnType {
 }
 
 /// syscall: clock_nanosleep
-pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Timespec, rmtp: *allowzero Timespec) ReturnType {
+pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Timespec, rmtp: ?*Timespec) ReturnType {
     if (std.enums.tagName(@TypeOf(clock), clock) == null) {
         return .err(.inval);
     }
@@ -38,7 +38,7 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
 }
 
 /// syscall: nanosleep
-pub fn sysNanoSleep(rqtp: *const Timespec, rmtp: *allowzero Timespec) ReturnType {
+pub fn sysNanoSleep(rqtp: *const Timespec, rmtp: ?*Timespec) ReturnType {
     if (rqtp.nsec >= std.time.ns_per_s) {
         return .err(.inval);
     }
@@ -49,14 +49,14 @@ pub fn sysNanoSleep(rqtp: *const Timespec, rmtp: *allowzero Timespec) ReturnType
 }
 
 /// Sleep for the relative duration specified by `rqtp`.
-fn sleepRelative(rqtp: *const Timespec, rmtp: *allowzero Timespec) void {
+fn sleepRelative(rqtp: *const Timespec, rmtp: ?*Timespec) void {
     const us = rqtp.sec * std.time.us_per_s + rqtp.nsec / std.time.ns_per_us;
     urd.time.sleepUs(@intCast(us));
 
     // No signals now. So remaining time is always zero.
-    if (@intFromPtr(rmtp) != 0) {
-        rmtp.sec = 0;
-        rmtp.nsec = 0;
+    if (rmtp) |r| {
+        r.sec = 0;
+        r.nsec = 0;
     }
 }
 

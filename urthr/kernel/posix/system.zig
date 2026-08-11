@@ -51,10 +51,12 @@ const UtsName = struct {
 };
 
 /// syscall: getrandom
-pub fn sysGetRandom(buf: [*]u8, buflen: usize, flags: GetRandomFlags) ReturnType {
+pub fn sysGetRandom(buf: ?[*]u8, buflen: usize, flags: GetRandomFlags) ReturnType {
     if (flags._2 != 0) return .err(.inval);
+    if (buflen == 0) return .success(0);
+    if (buf == null) return .err(.fault);
 
-    urd.rng.getRandom(buf[0..buflen]);
+    urd.rng.getRandom(buf.?[0..buflen]);
 
     return .success(@bitCast(buflen));
 }

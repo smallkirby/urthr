@@ -297,8 +297,11 @@ pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
 }
 
 /// syscall: writev
-pub fn sysWritev(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
-    const iovs = iov[0..iovcnt];
+pub fn sysWritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
+    if (iovcnt == 0) return .success(0);
+    if (iov == null) return .err(.fault);
+
+    const iovs = iov.?[0..iovcnt];
     const file = getFile(fd) catch return .err(.badf);
 
     var total: usize = 0;
@@ -311,11 +314,13 @@ pub fn sysWritev(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
 }
 
 /// syscall: pwritev
-pub fn sysPwritev(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
-    const offset = bits.concat(u64, offset_h, offset_l);
+pub fn sysPwritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
+    if (iovcnt == 0) return .success(0);
+    if (iov == null) return .err(.fault);
 
+    const offset = bits.concat(u64, offset_h, offset_l);
     const file = getFile(fd) catch return .err(.badf);
-    const iovs = iov[0..iovcnt];
+    const iovs = iov.?[0..iovcnt];
 
     var pos: usize = @intCast(offset);
     var total: usize = 0;
@@ -355,8 +360,11 @@ pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
 }
 
 // syscall: readv
-pub fn sysReadv(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
-    const iovs = iov[0..iovcnt];
+pub fn sysReadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
+    if (iovcnt == 0) return .success(0);
+    if (iov == null) return .err(.fault);
+
+    const iovs = iov.?[0..iovcnt];
     const file = getFile(fd) catch return .err(.badf);
 
     var total: usize = 0;
@@ -370,11 +378,13 @@ pub fn sysReadv(fd: usize, iov: [*]const Iovec, iovcnt: usize) ReturnType {
 }
 
 /// syscall: preadv
-pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
-    const offset = bits.concat(u64, offset_h, offset_l);
+pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
+    if (iovcnt == 0) return .success(0);
+    if (iov == null) return .err(.fault);
 
+    const offset = bits.concat(u64, offset_h, offset_l);
     const file = getFile(fd) catch return .err(.badf);
-    const iovs = iov[0..iovcnt];
+    const iovs = iov.?[0..iovcnt];
 
     var pos: usize = @intCast(offset);
     var total: usize = 0;
@@ -1449,7 +1459,7 @@ pub fn sysUmask(mask: Mode) ReturnType {
 /// - `nfds`: Number of file descriptors in `fds`.
 /// - `timeout`: Upper limit in milliseconds on the amount of time that this function will block.
 ///     Negative value means an infinite timeout.
-pub fn sysPoll(fds: [*]PollFd, nfds: usize, timeout: i32) ReturnType {
+pub fn sysPoll(fds: ?[*]PollFd, nfds: usize, timeout: i32) ReturnType {
     if (timeout < 0) {
         return sysPpoll(fds, nfds, null, null, 0);
     }
@@ -1469,7 +1479,7 @@ pub fn sysPoll(fds: [*]PollFd, nfds: usize, timeout: i32) ReturnType {
 /// - `sigmask`: TODO: Unused.
 /// - `sigsetsize`: TODO: Unused.
 pub fn sysPpoll(
-    fds: [*]PollFd,
+    fds: ?[*]PollFd,
     nfds: usize,
     tmop: ?*const posix.Timespec,
     _: ?*const anyopaque,
@@ -1478,10 +1488,13 @@ pub fn sysPpoll(
     if (nfds > Event.max_multiwait) {
         return .err(.inval);
     }
+    if (nfds != 0 and fds == null) {
+        return .err(.fault);
+    }
 
     const kfds = mem.bin.alloc(PollFd, nfds) catch return .err(.nomem);
     defer mem.bin.free(kfds);
-    @memcpy(kfds, fds[0..nfds]);
+    if (nfds > 0) @memcpy(kfds, fds.?[0..nfds]);
 
     // Calculate deadline for blocking.
     const deadline_ns = if (tmop) |t| blk: {
@@ -1546,7 +1559,7 @@ pub fn sysPpoll(
             sched.reschedule();
     };
 
-    @memcpy(fds[0..nfds], kfds);
+    if (nfds > 0) @memcpy(fds.?[0..nfds], kfds);
     return .success(@intCast(done));
 }
 

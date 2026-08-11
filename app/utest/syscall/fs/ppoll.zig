@@ -58,6 +58,13 @@ test "with too many fds fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
+test "with zero fds and null pointer acts as a timed sleep" {
+    var timeout: linux.timespec = .{ .sec = 0, .nsec = 0 };
+    const ret = linux.syscall5(.ppoll, 0, 0, @intFromPtr(&timeout), 0, 8);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    try testing.expectEqual(@as(usize, 0), ret);
+}
+
 // =============================================================
 // poll
 
@@ -115,6 +122,14 @@ test "syscall: poll with an unopened fd reports POLLNVAL" {
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
     try testing.expectEqual(@as(usize, 1), ret);
     try testing.expect(fds[0].revents & linux.POLL.NVAL != 0);
+}
+
+test "syscall: poll with zero fds and null pointer acts as a timed sleep" {
+    if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
+
+    const ret = linux.syscall3(.poll, 0, 0, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    try testing.expectEqual(@as(usize, 0), ret);
 }
 
 // =============================================================

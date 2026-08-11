@@ -9,7 +9,7 @@ pub fn sysExitGroup(code: i32) ReturnType {
 }
 
 /// syscall: wait4
-pub fn sysWait4(pid: i32, wstatus: *allowzero i32, options: WaitOptions, _: usize) ReturnType {
+pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, _: usize) ReturnType {
     const result = task.waitChild(
         pid,
         options.nohang,
@@ -17,8 +17,8 @@ pub fn sysWait4(pid: i32, wstatus: *allowzero i32, options: WaitOptions, _: usiz
         error.NoChild => return .err(.child),
     } orelse return .success(0);
 
-    if (@intFromPtr(wstatus) != 0) {
-        wstatus.* = switch (result.exit_status) {
+    if (wstatus) |ws| {
+        ws.* = switch (result.exit_status) {
             .code => |c| (c & 0xFF) << 8,
             .signal => |s| @intCast(@intFromEnum(s) & 0x7F),
         };
