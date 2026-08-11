@@ -14,8 +14,20 @@ pub const fops = fs.File.Ops{
 
 pub const name = "console";
 
+/// Per-console device state shared across all open file descriptors.
+///
+/// TODO: each console device should have its own instance.
+var instance: Console = .{};
+
+const Console = struct {
+    /// Foreground process group of this terminal.
+    fg_pgid: u32 = 0,
+};
+
 fn open(_: *fs.Inode, _: Allocator) fs.Error!*anyopaque {
-    return &.{};
+    instance.fg_pgid = urd.sched.getCurrent().pgid;
+
+    return @ptrCast(&instance);
 }
 
 fn write(_: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
@@ -24,15 +36,17 @@ fn write(_: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     return buf.len;
 }
 
-fn read(_: *fs.File, _: []u8, _: usize) fs.Error!usize {
-    return fs.Error.Unsupported;
+fn read(_: *fs.File, buf: []u8, _: usize) fs.Error!usize {
+    return urd.input.read(buf);
 }
 
 fn iterate(_: *fs.File.Iterator, _: Allocator) fs.Error!?fs.File.IterResult {
     return null;
 }
 
-fn ioctl(_: *fs.File, request: u64, arg: usize) fs.Error!usize {
+fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
+    const console = ctx(file);
+
     switch (@as(Request, @enumFromInt(request))) {
         .tcgets => {
             const ret: *urd.input.Termios = @ptrFromInt(arg);
@@ -51,18 +65,37 @@ fn ioctl(_: *fs.File, request: u64, arg: usize) fs.Error!usize {
                 .ypixel = 0,
             };
         },
+        .tiocsctty => {
+            // TODO
+        },
+        .tiocgpgrp => {
+            const ret: *u32 = @ptrFromInt(arg);
+            ret.* = console.fg_pgid;
+        },
+        .tiocspgrp => {
+            const pgid: *const u32 = @ptrFromInt(arg);
+            console.fg_pgid = pgid.*;
+        },
         else => return fs.Error.Unsupported,
     }
     return 0;
 }
 
 fn poll(_: *fs.File) fs.Error!fs.PollResult {
-    return .{ .events = .{
-        .out = true,
-    } };
+    return .{
+        .events = .{
+            .in = urd.input.available(),
+            .out = true,
+        },
+        .wait = &urd.input.event,
+    };
 }
 
 fn close(_: *anyopaque, _: Allocator) void {}
+
+inline fn ctx(file: *fs.File) *Console {
+    return @ptrCast(@alignCast(file.ctx));
+}
 
 const WinSize = extern struct {
     row: u16,
@@ -80,6 +113,12 @@ const Request = enum(u64) {
     tcsetsw = 0x5403,
     /// Allow the output buffers to drain, discard pending input, and set the current serial port settings.
     tcsetsf = 0x5404,
+    /// Make the given terminal the controlling terminal of the calling process.
+    tiocsctty = 0x540E,
+    /// Get the process group ID of the foreground process group on this terminal.
+    tiocgpgrp = 0x540F,
+    /// Set the foreground process group ID of this terminal.
+    tiocspgrp = 0x5410,
     /// Get window size.
     tiocgwinsz = 0x5413,
 
