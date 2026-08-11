@@ -12,7 +12,7 @@ pub fn sysSocket(domain: AddressFamily, typ: SockType, protocol: i32) ReturnType
     // Dispatch to appropriate socket creator based on the domain.
     return switch (domain) {
         .inet => socketInet(typ),
-        else => .err(.inval),
+        else => .err(.eafnosupport),
     };
 }
 

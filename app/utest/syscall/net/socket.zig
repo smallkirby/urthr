@@ -8,13 +8,13 @@ test "syscall: socket" {
     _ = linux.close(@intCast(fd));
 }
 
-test "with an unsupported domain fails with EINVAL" {
+test "with an unsupported domain fails with EAFNOSUPPORT" {
     const fd = linux.socket(
         linux.AF.INET6,
         linux.SOCK.STREAM,
         0,
     );
-    try testing.expectEqual(.INVAL, linux.errno(fd));
+    try testing.expectEqual(.AFNOSUPPORT, linux.errno(fd));
 }
 
 test "with an unsupported type fails with EINVAL" {

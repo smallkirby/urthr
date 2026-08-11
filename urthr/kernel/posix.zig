@@ -66,6 +66,8 @@ pub const ErrorEnum = enum(i64) {
     noprotoopt = -92,
     /// Operation not supported.
     opnotsupp = -95,
+    /// Address family not supported.
+    eafnosupport = -97,
     /// Address already in use.
     addrinuse = -98,
     /// Connection refused.
