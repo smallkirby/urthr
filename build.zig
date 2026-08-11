@@ -64,6 +64,12 @@ pub fn build(b: *std.Build) !void {
         "QEMU waits for GDB connection.",
     ) orelse false;
 
+    const kvm = b.option(
+        bool,
+        "kvm",
+        "Enable KVM acceleration in QEMU.",
+    ) orelse false;
+
     const init_args = b.option(
         []const u8,
         "init_args",
@@ -796,6 +802,7 @@ pub fn build(b: *std.Build) !void {
             .verbose_logs = qemu_log,
             .wait_gdb = wait_qemu,
             .append = init_args,
+            .kvm = kvm,
         };
 
         // Run QEMU through a wrapper script.
@@ -1067,6 +1074,8 @@ const Qemu = struct {
     wait_gdb: bool,
     /// Command line arguments passed to the init process via semihosting.
     append: ?[]const u8,
+    /// Enable KVM acceleration.
+    kvm: bool = false,
 
     pub fn command(self: Qemu, allocator: std.mem.Allocator) ![]const []const u8 {
         if (self.append) |_| switch (self.machine) {
@@ -1100,7 +1109,10 @@ const Qemu = struct {
             }),
             .q35 => try args.appendSlice(allocator, &.{
                 "-cpu",
-                "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
+                if (self.kvm)
+                    "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline"
+                else
+                    "host,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
                 "-smp",
                 "4",
                 "-bios",
