@@ -109,6 +109,16 @@ pub const BootInfo = switch (builtin.cpu.arch) {
             height: u32,
             /// Bytes per scanline.
             pitch: u32,
+            /// Byte order of pixel color components in memory.
+            format: PixelFormat,
+        };
+
+        /// Byte order of framebuffer pixel color components.
+        pub const PixelFormat = enum(u32) {
+            /// RGBX.
+            rgbx = 0,
+            /// BGRX.
+            bgrx = 1,
         };
 
         /// Memory descriptor iterator.

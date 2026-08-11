@@ -148,6 +148,7 @@ pub fn FrameBuffer(width: usize, height: usize) type {
                 fb.pitch,
                 fb.width,
                 fb.height,
+                .rgbx8888,
                 vt,
             );
         }

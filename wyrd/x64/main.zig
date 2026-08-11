@@ -232,12 +232,11 @@ fn getFramebuffer(bs: *BootServices) !?BootInfo.Framebuffer {
     };
     const info = gop.mode.info;
 
-    switch (info.pixel_format) {
-        .red_green_blue_reserved_8_bit_per_color,
-        .blue_green_red_reserved_8_bit_per_color,
-        => {},
+    const format: BootInfo.PixelFormat = switch (info.pixel_format) {
+        .red_green_blue_reserved_8_bit_per_color => .rgbx,
+        .blue_green_red_reserved_8_bit_per_color => .bgrx,
         else => return null,
-    }
+    };
 
     return .{
         .base = gop.mode.frame_buffer_base,
@@ -245,6 +244,7 @@ fn getFramebuffer(bs: *BootServices) !?BootInfo.Framebuffer {
         .width = info.horizontal_resolution,
         .height = info.vertical_resolution,
         .pitch = info.pixels_per_scan_line * 4,
+        .format = format,
     };
 }
 

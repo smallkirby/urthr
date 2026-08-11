@@ -308,6 +308,10 @@ pub fn initPeripherals1() common.mem.Error!void {
             fb.pitch,
             fb.width,
             fb.height,
+            switch (fb.format) {
+                .rgbx => .rgbx8888,
+                .bgrx => .bgrx8888,
+            },
             .{ .memcpy = null },
         );
         urd.console.addBackend(fb_console.interface()) catch |err| {

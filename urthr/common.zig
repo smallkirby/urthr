@@ -110,4 +110,5 @@ test {
     _ = typing;
     _ = util;
     _ = RbTree;
+    _ = FbConsole;
 }

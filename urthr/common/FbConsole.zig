@@ -14,6 +14,14 @@ pub const VTable = struct {
     memcpy: ?*const fn (dst: usize, src: usize, len: usize) void,
 };
 
+/// Byte order of pixel color components in memory.
+pub const PixelFormat = enum {
+    /// RGBX.
+    rgbx8888,
+    /// BGRX.
+    bgrx8888,
+};
+
 /// Virtual base address of the pixel buffer.
 base: usize,
 /// Physical base address of the pixel buffer.
@@ -34,9 +42,9 @@ cols: u32,
 /// Number of text rows.
 rows: u32,
 
-/// Foreground color (RGBX8888).
+/// Foreground color packed as a raw pixel word.
 fg: u32,
-/// Background color (RGBX8888).
+/// Background color packed as a raw pixel word.
 bg: u32,
 
 /// VTable.
@@ -49,7 +57,8 @@ fbvtable: VTable,
 /// - `pitch`: Bytes per scanline.
 /// - `width`: Framebuffer width in pixels.
 /// - `height`: Framebuffer height in pixels.
-pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, vt: VTable) Self {
+/// - `format`: Byte order of pixel color components in memory.
+pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, format: PixelFormat, vt: VTable) Self {
     var self = Self{
         .base = base,
         .pitch = pitch,
@@ -61,8 +70,8 @@ pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, vt: 
         .cols = width / font.glyph_width,
         .rows = height / font.glyph_height,
 
-        .fg = 0xFF0000FF,
-        .bg = 0x00000000,
+        .fg = pack(format, 0xFF, 0xFF, 0xFF),
+        .bg = pack(format, 0x00, 0x00, 0x00),
 
         .fbvtable = vt,
         .phys_base = phys orelse 0,
@@ -71,6 +80,14 @@ pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, vt: 
     self.clear();
 
     return self;
+}
+
+/// Pack a logical RGB color into a raw pixel word.
+fn pack(format: PixelFormat, r: u8, g: u8, b: u8) u32 {
+    return switch (format) {
+        .rgbx8888 => (@as(u32, b) << 16) | (@as(u32, g) << 8) | @as(u32, r),
+        .bgrx8888 => (@as(u32, r) << 16) | (@as(u32, g) << 8) | @as(u32, b),
+    };
 }
 
 // =============================================================
@@ -196,6 +213,23 @@ fn clear(self: *Self) void {
     for (0..total) |i| {
         pixels[i] = self.bg;
     }
+}
+
+// =============================================================
+// Tests
+// =============================================================
+
+test "pack" {
+    try std.testing.expectEqual(0x00FFFFFF, pack(.rgbx8888, 0xFF, 0xFF, 0xFF));
+    try std.testing.expectEqual(0x00FFFFFF, pack(.bgrx8888, 0xFF, 0xFF, 0xFF));
+    try std.testing.expectEqual(0x00000000, pack(.rgbx8888, 0x00, 0x00, 0x00));
+    try std.testing.expectEqual(0x00000000, pack(.bgrx8888, 0x00, 0x00, 0x00));
+
+    try std.testing.expectEqual(0x000000FF, pack(.rgbx8888, 0xFF, 0x00, 0x00));
+    try std.testing.expectEqual(0x00FF0000, pack(.bgrx8888, 0xFF, 0x00, 0x00));
+
+    try std.testing.expectEqual(0x00FF0000, pack(.rgbx8888, 0x00, 0x00, 0xFF));
+    try std.testing.expectEqual(0x000000FF, pack(.bgrx8888, 0x00, 0x00, 0xFF));
 }
 
 // =============================================================
