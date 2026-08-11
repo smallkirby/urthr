@@ -1,6 +1,7 @@
 comptime {
     _ = @import("time/clock_gettime.zig");
     _ = @import("time/clock_nanosleep.zig");
+    _ = @import("time/nanosleep.zig");
     _ = @import("time/setitimer.zig");
 }
 

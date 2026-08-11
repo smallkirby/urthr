@@ -32,6 +32,24 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     }
 
     // Block until the specified duration has passed.
+    sleepRelative(rqtp, rmtp);
+
+    return .success(0);
+}
+
+/// syscall: nanosleep
+pub fn sysNanoSleep(rqtp: *const Timespec, rmtp: *allowzero Timespec) ReturnType {
+    if (rqtp.nsec >= std.time.ns_per_s) {
+        return .err(.inval);
+    }
+
+    sleepRelative(rqtp, rmtp);
+
+    return .success(0);
+}
+
+/// Sleep for the relative duration specified by `rqtp`.
+fn sleepRelative(rqtp: *const Timespec, rmtp: *allowzero Timespec) void {
     const us = rqtp.sec * std.time.us_per_s + rqtp.nsec / std.time.ns_per_us;
     urd.time.sleepUs(@intCast(us));
 
@@ -40,8 +58,6 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
         rmtp.sec = 0;
         rmtp.nsec = 0;
     }
-
-    return .success(0);
 }
 
 /// syscall: setitimer
