@@ -1254,6 +1254,18 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType
     return .success(0);
 }
 
+/// syscall: fchmod
+pub fn sysFchmod(fd: usize, mode: Mode) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+
+    file.chmod(mode.to()) catch |err| return switch (err) {
+        urd.fs.Error.Unsupported => .err(.perm),
+        else => mapOpenError(err),
+    };
+
+    return .success(0);
+}
+
 // =============================================================
 // chown
 // =============================================================
