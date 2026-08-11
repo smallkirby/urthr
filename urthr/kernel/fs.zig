@@ -26,6 +26,10 @@ pub const Error = error{
     NotFile,
     /// The specified file or directory was not found.
     NotFound,
+    /// The directory is not empty.
+    NotEmpty,
+    /// Cannot operate on the resource.
+    Busy,
     /// Filesystem data is corrupted.
     CorruptedData,
     /// The operation is not supported by the filesystem.
@@ -498,6 +502,68 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
 
     try parent_dentry.inode.unlink(path.dentry.inode);
     dcache.remove(parent_dentry, basename);
+}
+
+/// Remove an empty directory at the specified path.
+pub fn rmdir(s: []const u8, allocator: Allocator) Error!void {
+    const cwd = sched.getCurrent().fs.cwd;
+    const path = try resolvePath(cwd, s, allocator);
+    return rmdirImpl(path, s, allocator);
+}
+
+/// Remove an empty directory relative to a directory.
+pub fn rmdirAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
+    if (std.fs.path.isAbsolute(s)) {
+        return Error.InvalidArgument;
+    }
+    if (dir.dentry.inode.ftype != .directory) {
+        return Error.NotDirectory;
+    }
+
+    const path = try resolvePath(dir, s, allocator);
+    return rmdirImpl(path, s, allocator);
+}
+
+/// Detach the directory entry for an empty directory.
+fn rmdirImpl(path: Path, s: []const u8, allocator: Allocator) Error!void {
+    if (path.dentry.inode.ftype != .directory) {
+        return Error.NotDirectory;
+    }
+
+    const basename = std.fs.path.basenamePosix(s);
+    if (std.mem.eql(u8, ".", basename) or std.mem.eql(u8, "..", basename)) {
+        return Error.InvalidArgument;
+    }
+
+    // The root of a filesystem has no parent.
+    const parent_dentry = path.dentry.parent orelse return Error.Busy;
+    // Something else is mounted on top of this directory.
+    if (path.dentry.mount != null) {
+        return Error.Busy;
+    }
+
+    if (!try isEmptyDir(path, allocator)) {
+        return Error.NotEmpty;
+    }
+
+    try parent_dentry.inode.rmdir(path.dentry.inode);
+    dcache.remove(parent_dentry, basename);
+}
+
+/// Check whether a directory has no entries.
+fn isEmptyDir(path: Path, allocator: Allocator) Error!bool {
+    const file = try File.open(path, .{
+        .readable = true,
+        .writable = false,
+    }, allocator);
+    defer file.unref();
+
+    var iter = try file.iterator();
+    if (try iter.next(allocator)) |ent| {
+        ent.deinit(allocator);
+        return false;
+    }
+    return true;
 }
 
 /// Resolve a file path to a `Path`.

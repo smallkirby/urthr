@@ -89,6 +89,7 @@ const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
     .create = &icreate,
     .unlink = &iunlink,
+    .rmdir = &irmdir,
     .chmod = &ichmod,
     .deinit = &ideinit,
 };
@@ -162,13 +163,14 @@ fn ideinit(inode: *fs.Inode) void {
     const ctx = InodeImpl.from(inode);
 
     if (ctx.unlinked) switch (inode.ftype) {
-        .regular => ctx.fat32.freeCluster(ctx.cluster) catch |err| {
+        .regular,
+        .directory,
+        => ctx.fat32.freeCluster(ctx.cluster) catch |err| {
             log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
         },
-        .directory => {
-            urd.unimplemented("ideinit: directory");
-        },
-        .symlink, .socket => {
+        .symlink,
+        .socket,
+        => {
             unreachable;
         },
     };
@@ -183,10 +185,24 @@ fn ideinit(inode: *fs.Inode) void {
 /// so a file that is still open remains readable after this call.
 fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
     rtt.expectEqual(.directory, dir.ftype);
+    rtt.expectEqual(.regular, child.ftype);
+    try markEntryDeleted(child);
+}
 
+/// Remove the directory entry for the empty subdirectory.
+///
+/// Only marks the on-disk directory entry as deleted.
+/// The cluster chain is released later in `ideinit` once the refcount reaches zero.
+fn irmdir(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
+    rtt.expectEqual(.directory, dir.ftype);
+    rtt.expectEqual(.directory, child.ftype);
+    try markEntryDeleted(child);
+}
+
+/// Mark the on-disk directory entry as deleted.
+fn markEntryDeleted(child: *fs.Inode) fs.Error!void {
     const ctx = InodeImpl.from(child);
     const self = ctx.fat32;
-    rtt.expectEqual(.regular, ctx.common.ftype);
 
     self.lock.lock();
     defer self.lock.unlock();

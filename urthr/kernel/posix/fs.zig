@@ -393,9 +393,14 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 // =============================================================
 
 /// syscall: unlinkat
-pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, _: i32) ReturnType {
+pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
+
+    if (flags.removedir) {
+        rmdirFileAt(dirfd, s, allocator) catch |err| return mapRmdirError(err);
+        return .success(0);
+    }
 
     unlinkFileAt(dirfd, s, allocator) catch |err| return switch (err) {
         urd.fs.Error.NotFound => .err(.noent),
@@ -411,7 +416,16 @@ pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, _: i32) ReturnType {
 
 /// syscall: unlink
 pub fn sysUnlink(pathname: [*:0]const u8) ReturnType {
-    return sysUnlinkAt(cwd_fd, pathname, 0);
+    return sysUnlinkAt(cwd_fd, pathname, .{});
+}
+
+// =============================================================
+// Rmdir
+// =============================================================
+
+/// syscall: rmdir
+pub fn sysRmdir(pathname: [*:0]const u8) ReturnType {
+    return sysUnlinkAt(cwd_fd, pathname, .{ .removedir = true });
 }
 
 // =============================================================
@@ -1465,6 +1479,20 @@ fn mapOpenError(err: anyerror) ReturnType {
     };
 }
 
+/// Convert rmdir-related error to syscall return type.
+fn mapRmdirError(err: anyerror) ReturnType {
+    return switch (err) {
+        urd.fs.Error.NotFound => .err(.noent),
+        urd.fs.Error.NotDirectory => .err(.notdir),
+        urd.fs.Error.NotEmpty => .err(.notempty),
+        urd.fs.Error.InvalidArgument => .err(.inval),
+        urd.fs.Error.Busy => .err(.busy),
+        urd.fs.Error.Unsupported => .err(.perm),
+        error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+}
+
 /// Convert mount-related error to syscall return type.
 fn mapMountError(err: anyerror) ReturnType {
     return switch (err) {
@@ -1644,6 +1672,29 @@ fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error
         };
 
         return urd.fs.unlinkAt(dir.path, pathname, allocator);
+    }
+}
+
+/// Remove an empty directory at the specified path relative to the given directory file descriptor.
+fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
+    // Check if pathname is relative or absolute.
+    if (std.fs.path.isAbsolute(pathname)) {
+        // Absolute path. Ignore directory.
+        return urd.fs.rmdir(pathname, allocator);
+    } else if (dirfd == cwd_fd) {
+        // Relative to CWD.
+        const cur = sched.getCurrent();
+        return urd.fs.rmdirAt(cur.fs.cwd, pathname, allocator);
+    } else {
+        // Relative to dirfd.
+        const cur = sched.getCurrent();
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return error.BadFileDescriptor;
+        } orelse {
+            return error.BadFileDescriptor;
+        };
+
+        return urd.fs.rmdirAt(dir.path, pathname, allocator);
     }
 }
 

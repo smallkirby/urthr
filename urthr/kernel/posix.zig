@@ -58,6 +58,8 @@ pub const ErrorEnum = enum(i64) {
     range = -34,
     /// Function not implemented.
     nosys = -38,
+    /// Directory not empty.
+    notempty = -39,
     /// Protocol not available.
     noprotoopt = -92,
     /// Operation not supported.

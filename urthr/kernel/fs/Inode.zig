@@ -43,6 +43,15 @@ pub const Ops = struct {
     ///
     /// null if the filesystem does not support changing permission.
     chmod: ?*const fn (inode: *Inode, mode: fs.FileMode) Error!void = null,
+
+    /// Remove the empty subdirectory.
+    ///
+    /// Caller must ensure that `child` is empty.
+    /// Implementation must not release the underlying storage of `child`
+    /// until the inode is `deinit()`-ed when there's no references to it anymore.
+    ///
+    /// null if the filesystem does not support directory removal.
+    rmdir: ?*const fn (dir: *Inode, child: *Inode) Error!void = null,
 };
 
 /// inode number type.
@@ -145,6 +154,19 @@ pub fn unlink(self: *Self, child: *Inode) Error!void {
     if (self.ftype != .directory) return Error.NotDirectory;
 
     if (self.iops.unlink) |f| {
+        return f(self, child);
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Remove the empty subdirectory from this directory.
+///
+/// Caller must ensure that `child` is empty.
+pub fn rmdir(self: *Self, child: *Inode) Error!void {
+    if (self.ftype != .directory) return Error.NotDirectory;
+
+    if (self.iops.rmdir) |f| {
         return f(self, child);
     } else {
         return Error.Unsupported;

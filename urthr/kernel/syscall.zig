@@ -149,6 +149,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("chdir",                80,    posix.fs.sysChdir),
     .new("fchdir",               81,    posix.fs.sysFchdir),
     .new("mkdir",                83,    posix.fs.sysMkdir),
+    .new("rmdir",                84,    posix.fs.sysRmdir),
     .new("unlink",               87,    posix.fs.sysUnlink),
     .new("symlink",              88,    posix.fs.sysSymlink),
     .new("umask",                95,    posix.fs.sysUmask),
