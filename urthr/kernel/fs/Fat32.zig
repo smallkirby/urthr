@@ -239,6 +239,15 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
     const clus = try self.allocateCluster(null);
     errdefer self.freeCluster(clus) catch unreachable;
 
+    // Clear the cluster for directory.
+    if (ftype == .directory) {
+        var zero_buf = std.mem.zeroes([sector_size]u8);
+        const lba = self.clusterToLba(clus);
+        for (0..self.bpb.sec_per_clus) |sec| {
+            try self.device.writeBlock(lba + sec, &zero_buf);
+        }
+    }
+
     // Find or create a directory entry slot.
     const entpos = try self.findDirSlot(
         ctx.cluster,
