@@ -44,6 +44,13 @@ pub const Ops = struct {
     /// null if the filesystem does not support changing permission.
     chmod: ?*const fn (inode: *Inode, mode: fs.FileMode) Error!void = null,
 
+    /// Change the owner user and/or group of the file.
+    ///
+    /// A null UID and GID should leave the corresponding ID unchanged.
+    ///
+    /// null if the filesystem does not support changing ownership.
+    chown: ?*const fn (inode: *Inode, uid: ?u32, gid: ?u32) Error!void = null,
+
     /// Move `child` named `old_name` under `dir` to `new_name` under `new_dir`.
     ///
     /// `replaced` is an existing inode at the destination that must be atomically replaced.
@@ -74,6 +81,10 @@ size: usize,
 ftype: fs.FileType,
 /// Permission granted to this file's owner, group, and others.
 mode: fs.FileMode = .{},
+/// User ID of the owner.
+uid: u32 = 0,
+/// Group ID of the owner.
+gid: u32 = 0,
 
 /// Inode operations.
 iops: Ops,
@@ -139,6 +150,17 @@ pub fn chmod(self: *Self, mode: fs.FileMode) Error!void {
         try f(self, mode);
     }
     self.mode = mode;
+}
+
+/// Change the owner user and/or group of this file.
+///
+/// A null argument leaves the corresponding ID unchanged.
+pub fn chown(self: *Self, uid: ?u32, gid: ?u32) Error!void {
+    if (self.iops.chown) |f| {
+        try f(self, uid, gid);
+    }
+    if (uid) |v| self.uid = v;
+    if (gid) |v| self.gid = v;
 }
 
 /// Create a symbolic link under this inode with the given name, pointing to `target`.

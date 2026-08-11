@@ -290,6 +290,13 @@ pub fn chmod(self: *Self, mode: fs.FileMode) Error!void {
     return self.inode().chmod(mode);
 }
 
+/// Change the owner user and/or group of this file.
+///
+/// A null argument leaves the corresponding ID unchanged.
+pub fn chown(self: *Self, uid: ?u32, gid: ?u32) Error!void {
+    return self.inode().chown(uid, gid);
+}
+
 /// Get the type of this file.
 pub fn getType(self: *const Self) fs.FileType {
     return self.inode().ftype;
@@ -298,6 +305,16 @@ pub fn getType(self: *const Self) fs.FileType {
 /// Get the permission mode of this file.
 pub fn getMode(self: *const Self) fs.FileMode {
     return self.inode().mode;
+}
+
+/// Get the user ID of the owner.
+pub fn getUid(self: *const Self) u32 {
+    return self.inode().uid;
+}
+
+/// Get the group ID of theowner.
+pub fn getGid(self: *const Self) u32 {
+    return self.inode().gid;
 }
 
 /// Helper function to get the inode associated with this file.

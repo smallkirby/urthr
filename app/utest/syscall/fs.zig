@@ -1,6 +1,7 @@
 comptime {
     _ = @import("fs/access.zig");
     _ = @import("fs/chmod.zig");
+    _ = @import("fs/chown.zig");
     _ = @import("fs/close.zig");
     _ = @import("fs/cwd.zig");
     _ = @import("fs/dup.zig");

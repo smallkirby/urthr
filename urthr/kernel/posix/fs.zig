@@ -626,8 +626,8 @@ pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
         .st_ino = file.path.dentry.inode.number,
         .st_mode = @bitCast(Mode.from(file)),
         .st_nlink = 1,
-        .st_uid = 0,
-        .st_gid = 0,
+        .st_uid = file.getUid(),
+        .st_gid = file.getGid(),
         .st_rdev = 0,
         .st_size = @intCast(file.size()),
         .st_blksize = 512,
@@ -655,8 +655,8 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
         .st_ino = file.path.dentry.inode.number,
         .st_mode = @bitCast(Mode.from(file)),
         .st_nlink = 1, // TODO
-        .st_uid = 0, // TODO
-        .st_gid = 0, // TODO
+        .st_uid = file.getUid(),
+        .st_gid = file.getGid(),
         .st_rdev = 0, // TODO
         .st_size = @intCast(file.size()),
         .st_blksize = 512,
@@ -702,8 +702,8 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         .blksize = 512,
         .attributes = 0, // TODO
         .nlink = 1, // TODO
-        .uid = 0, // TODO
-        .gid = 0, // TODO
+        .uid = file.getUid(),
+        .gid = file.getGid(),
         .mode = @truncate(@as(u32, @bitCast(Mode.from(file)))),
         .ino = file.path.dentry.inode.number,
         .size = @intCast(file.size()),
@@ -1252,6 +1252,64 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType
     };
 
     return .success(0);
+}
+
+// =============================================================
+// chown
+// =============================================================
+
+/// Sentinel value to keep the ID unchanged.
+const keep_id: u32 = std.math.maxInt(u32);
+
+/// syscall: fchown
+pub fn sysFchown(fd: usize, uid: u32, gid: u32) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+
+    file.chown(
+        if (uid == keep_id) null else uid,
+        if (gid == keep_id) null else gid,
+    ) catch |err| return switch (err) {
+        urd.fs.Error.Unsupported => .err(.perm),
+        else => mapOpenError(err),
+    };
+
+    return .success(0);
+}
+
+/// syscall: fchownat
+pub fn sysFchownAt(dirfd: usize, pathname: [*:0]const u8, uid: u32, gid: u32, flags: AtFlags) ReturnType {
+    const allocator = urd.mem.bin;
+    const s = std.mem.span(pathname);
+
+    var owned = true;
+    const file = if (flags.empty_path and s.len == 0) blk: {
+        owned = false;
+        break :blk getFile(dirfd) catch return .err(.badf);
+    } else openFileAt(dirfd, s, .{}, allocator) catch |err|
+        return mapOpenError(err);
+    defer if (owned) file.unref();
+
+    file.chown(
+        if (uid == keep_id) null else uid,
+        if (gid == keep_id) null else gid,
+    ) catch |err| return switch (err) {
+        urd.fs.Error.Unsupported => .err(.perm),
+        else => mapOpenError(err),
+    };
+
+    return .success(0);
+}
+
+/// syscall: chown
+pub fn sysChown(pathname: [*:0]const u8, uid: u32, gid: u32) ReturnType {
+    return sysFchownAt(cwd_fd, pathname, uid, gid, .{});
+}
+
+/// syscall: lchown
+pub fn sysLchown(pathname: [*:0]const u8, uid: u32, gid: u32) ReturnType {
+    return sysFchownAt(cwd_fd, pathname, uid, gid, .{
+        .symlink_nofollow = true,
+    });
 }
 
 // =============================================================
