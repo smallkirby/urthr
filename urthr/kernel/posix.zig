@@ -38,6 +38,8 @@ pub const ErrorEnum = enum(i64) {
     busy = -16,
     /// File exists.
     exist = -17,
+    /// Cross-device.
+    xdev = -18,
     /// No such device.
     nodev = -19,
     /// Not a directory.

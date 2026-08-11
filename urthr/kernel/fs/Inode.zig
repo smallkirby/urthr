@@ -44,6 +44,13 @@ pub const Ops = struct {
     /// null if the filesystem does not support changing permission.
     chmod: ?*const fn (inode: *Inode, mode: fs.FileMode) Error!void = null,
 
+    /// Move `child` named `old_name` under `dir` to `new_name` under `new_dir`.
+    ///
+    /// `replaced` is an existing inode at the destination that must be atomically replaced.
+    ///
+    /// null if the filesystem does not support renaming entries.
+    rename: ?*const fn (dir: *Inode, old_name: []const u8, child: *Inode, new_dir: *Inode, new_name: []const u8, replaced: ?*Inode) Error!void = null,
+
     /// Remove the empty subdirectory.
     ///
     /// Caller must ensure that `child` is empty.
@@ -144,6 +151,18 @@ pub fn symlink(self: *Self, name: []const u8, target: []const u8, allocator: All
 
     if (self.iops.symlink) |f| {
         return f(self, name, target, allocator);
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Move `child` named `old_name` under `dir` to `new_name` under `new_dir`.
+pub fn rename(self: *Self, old_name: []const u8, child: *Inode, new_dir: *Inode, new_name: []const u8, replaced: ?*Inode) Error!void {
+    if (self.ftype != .directory) return Error.NotDirectory;
+    if (new_dir.ftype != .directory) return Error.NotDirectory;
+
+    if (self.iops.rename) |f| {
+        return f(self, old_name, child, new_dir, new_name, replaced);
     } else {
         return Error.Unsupported;
     }

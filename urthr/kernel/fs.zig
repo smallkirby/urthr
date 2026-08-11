@@ -52,6 +52,8 @@ pub const Error = error{
     ConnectionRefused,
     /// The file descriptor does not refer to a socket.
     NotSocket,
+    /// The source and destination are on different filesystems.
+    CrossDevice,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;
@@ -564,6 +566,121 @@ fn isEmptyDir(path: Path, allocator: Allocator) Error!bool {
         return false;
     }
     return true;
+}
+
+/// Move a directory entry to the specified directory with a new name.
+///
+/// If the new name already exists, it is replaced atomically.
+pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []const u8, allocator: Allocator) Error!void {
+    if (std.mem.eql(u8, ".", old_name) or std.mem.eql(u8, "..", old_name) or
+        std.mem.eql(u8, ".", new_name) or std.mem.eql(u8, "..", new_name))
+    {
+        return Error.InvalidArgument;
+    }
+
+    var old_cur = old_dir;
+    var new_cur = new_dir;
+    if (old_cur.dentry.mount) |mnt| old_cur = .{
+        .dentry = mnt.root,
+        .mount = mnt,
+    };
+    if (new_cur.dentry.mount) |mnt| new_cur = .{
+        .dentry = mnt.root,
+        .mount = mnt,
+    };
+    if (old_cur.dentry.inode.ftype != .directory) return Error.NotDirectory;
+    if (new_cur.dentry.inode.ftype != .directory) return Error.NotDirectory;
+    if (old_cur.mount != new_cur.mount) return Error.CrossDevice;
+
+    // The source must exist.
+    const old_path = try resolvePath(old_cur, old_name, allocator);
+    // The destination may or may not exist.
+    const dst_path: ?Path = resolvePath(new_cur, new_name, allocator) catch |err| switch (err) {
+        Error.NotFound => null,
+        else => return err,
+    };
+
+    // Renaming an entry onto itself is a no-op.
+    if (dst_path) |d| {
+        if (d.dentry == old_path.dentry) return;
+    }
+
+    // Check file type consistency.
+    const src_ftype = old_path.dentry.inode.ftype;
+    if (dst_path) |d| {
+        const dst_ftype = d.dentry.inode.ftype;
+        if (src_ftype == .directory and dst_ftype != .directory) return Error.NotDirectory;
+        if (src_ftype != .directory and dst_ftype == .directory) return Error.NotFile;
+        // Replacing an existing directory would require removing it.
+        if (dst_ftype == .directory) return Error.Unsupported;
+    }
+
+    // A directory cannot be moved into itself or one of its own descendants.
+    if (src_ftype == .directory and isAncestorOrSelf(old_path.dentry, new_cur.dentry)) {
+        return Error.InvalidArgument;
+    }
+
+    // Do the actual rename operation on the filesystem.
+    try old_cur.dentry.inode.rename(
+        old_name,
+        old_path.dentry.inode,
+        new_cur.dentry.inode,
+        new_name,
+        if (dst_path) |d| d.dentry.inode else null,
+    );
+
+    // Remove the old and replaced dentry from the cache.
+    // Keep the old dentry alive while it's inserted again to reuse it.
+    old_path.dentry.ref();
+    defer old_path.dentry.unref();
+    dcache.remove(old_cur.dentry, old_name);
+
+    if (dst_path != null) {
+        dcache.remove(new_cur.dentry, new_name);
+    }
+
+    const name_copy = try old_path.dentry.allocator.dupe(u8, new_name);
+    old_path.dentry.allocator.free(old_path.dentry.name);
+    old_path.dentry.name = name_copy;
+    old_path.dentry.parent = new_cur.dentry;
+
+    try dcache.insert(old_path.dentry);
+}
+
+/// Move a directory entry to the specified directory with a new name.
+///
+/// If the new name already exists, it is replaced atomically.
+pub fn rename(oldpath: []const u8, newpath: []const u8, allocator: Allocator) Error!void {
+    const cur = sched.getCurrent();
+    const old_basename = std.fs.path.basenamePosix(oldpath);
+    const new_basename = std.fs.path.basenamePosix(newpath);
+    if (old_basename.len == 0) return Error.InvalidArgument;
+    if (new_basename.len == 0) return Error.InvalidArgument;
+
+    const old_dir = if (std.fs.path.dirnamePosix(oldpath)) |dirname|
+        try resolvePath(cur.fs.cwd, dirname, allocator)
+    else
+        cur.fs.cwd;
+    const new_dir = if (std.fs.path.dirnamePosix(newpath)) |dirname|
+        try resolvePath(cur.fs.cwd, dirname, allocator)
+    else
+        cur.fs.cwd;
+
+    return renameAt(
+        old_dir,
+        old_basename,
+        new_dir,
+        new_basename,
+        allocator,
+    );
+}
+
+/// Check whether `self` is `candidate` itself or one of its ancestors.
+fn isAncestorOrSelf(self: *Dentry, candidate: *Dentry) bool {
+    var cur: ?*Dentry = candidate;
+    while (cur) |d| : (cur = d.parent) {
+        if (d == self) return true;
+    } else return false;
 }
 
 /// Resolve a file path to a `Path`.

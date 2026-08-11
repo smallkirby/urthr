@@ -487,6 +487,64 @@ pub fn sysSymlink(target: [*:0]const u8, linkpath: [*:0]const u8) ReturnType {
 }
 
 // =============================================================
+// Rename
+// =============================================================
+
+/// syscall: renameat
+pub fn sysRenameAt(olddirfd: usize, oldpath: [*:0]const u8, newdirfd: usize, newpath: [*:0]const u8) ReturnType {
+    renameFileAt(
+        olddirfd,
+        std.mem.span(oldpath),
+        newdirfd,
+        std.mem.span(newpath),
+        false,
+        urd.mem.bin,
+    ) catch |err| return mapRenameError(err);
+
+    return .success(0);
+}
+
+/// syscall: rename
+pub fn sysRename(oldpath: [*:0]const u8, newpath: [*:0]const u8) ReturnType {
+    return sysRenameAt(
+        cwd_fd,
+        oldpath,
+        cwd_fd,
+        newpath,
+    );
+}
+
+/// syscall: renameat2
+pub fn sysRenameAt2(olddirfd: usize, oldpath: [*:0]const u8, newdirfd: usize, newpath: [*:0]const u8, flags: RenameFlags) ReturnType {
+    if (flags.exchange or flags.whiteout) {
+        return .err(.inval);
+    }
+
+    renameFileAt(
+        olddirfd,
+        std.mem.span(oldpath),
+        newdirfd,
+        std.mem.span(newpath),
+        flags.noreplace,
+        urd.mem.bin,
+    ) catch |err| return mapRenameError(err);
+
+    return .success(0);
+}
+
+/// Flags for `renameat2`.
+const RenameFlags = packed struct(u32) {
+    /// Don't overwrite the destination.
+    noreplace: bool = false,
+    /// Atomically exchange the source and destination.
+    exchange: bool = false,
+    /// Create a whileout object at the source of the rename.
+    whiteout: bool = false,
+    /// Reserved.
+    _3: u29 = 0,
+};
+
+// =============================================================
 // Mount
 // =============================================================
 
@@ -1479,6 +1537,21 @@ fn mapOpenError(err: anyerror) ReturnType {
     };
 }
 
+/// Convert rename-related error to syscall return type.
+fn mapRenameError(err: anyerror) ReturnType {
+    return switch (err) {
+        urd.fs.Error.NotFound => .err(.noent),
+        urd.fs.Error.NotDirectory => .err(.notdir),
+        urd.fs.Error.NotFile => .err(.isdir),
+        urd.fs.Error.AlreadyExists => .err(.exist),
+        urd.fs.Error.InvalidArgument => .err(.inval),
+        urd.fs.Error.CrossDevice => .err(.xdev),
+        urd.fs.Error.Unsupported => .err(.perm),
+        error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+}
+
 /// Convert rmdir-related error to syscall return type.
 fn mapRmdirError(err: anyerror) ReturnType {
     return switch (err) {
@@ -1650,6 +1723,73 @@ fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocat
 
         return urd.fs.symlinkAt(dir.path, pathname, target, allocator);
     }
+}
+
+/// File information for a rename operation.
+const RenameOperand = struct {
+    /// Directory containing the file to rename.
+    dir: urd.fs.Path,
+    /// Basename of the file to rename.
+    name: []const u8,
+    /// Whether the dentry holds a reference that must be released.
+    owned: bool,
+
+    fn deinit(self: RenameOperand) void {
+        if (self.owned) self.dir.dentry.unref();
+    }
+};
+
+/// Get a operand for a rename operation.
+fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!RenameOperand {
+    const cur = sched.getCurrent();
+
+    if (std.fs.path.isAbsolute(pathname)) {
+        const basename = std.fs.path.basenamePosix(pathname);
+        if (basename.len == 0) return urd.fs.Error.InvalidArgument;
+        const dirname = std.fs.path.dirnamePosix(pathname) orelse "/";
+        const dir = try urd.fs.resolve(dirname, allocator);
+        return .{ .dir = dir, .name = basename, .owned = true };
+    } else if (dirfd == cwd_fd) {
+        return .{ .dir = cur.fs.cwd, .name = pathname, .owned = false };
+    } else {
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return error.BadFileDescriptor;
+        } orelse {
+            return error.BadFileDescriptor;
+        };
+        return .{ .dir = dir.path, .name = pathname, .owned = false };
+    }
+}
+
+/// Rename or move a file relative to the given directory file descriptors.
+fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: []const u8, noreplace: bool, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
+    const old_op = try resolveRenameOperand(
+        olddirfd,
+        oldpath,
+        allocator,
+    );
+    defer old_op.deinit();
+    const new_op = try resolveRenameOperand(
+        newdirfd,
+        newpath,
+        allocator,
+    );
+    defer new_op.deinit();
+
+    if (noreplace) {
+        if (try new_op.dir.dentry.inode.lookup(new_op.name)) |existing| {
+            existing.unref();
+            return urd.fs.Error.AlreadyExists;
+        }
+    }
+
+    return urd.fs.renameAt(
+        old_op.dir,
+        old_op.name,
+        new_op.dir,
+        new_op.name,
+        allocator,
+    );
 }
 
 /// Remove a file at the specified path relative to the given directory file descriptor.

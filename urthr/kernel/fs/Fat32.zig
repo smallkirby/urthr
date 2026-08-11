@@ -91,6 +91,7 @@ const inode_vtable = fs.Inode.Ops{
     .unlink = &iunlink,
     .rmdir = &irmdir,
     .chmod = &ichmod,
+    .rename = &irename,
     .deinit = &ideinit,
 };
 
@@ -318,6 +319,59 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
     inode.common.ref();
 
     return &inode.common;
+}
+
+/// Move the directory entry for `child` to `new_name` under `new_dir`,
+/// optionally replacing an existing entry `replaced` at the destination.
+fn irename(_: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Inode, new_name: []const u8, replaced: ?*fs.Inode) fs.Error!void {
+    const self = InodeImpl.from(child).fat32;
+    var buf: [sector_size]u8 = undefined;
+
+    if (!isFitSfn(new_name)) {
+        log.err("Rename to LFN not supported: {s}", .{new_name});
+        return fs.Error.Unsupported;
+    }
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    // Snapshot the existing directory entry with new name.
+    const old_pos = Position.fromInodeNumber(child.number);
+    try self.device.readBlock(old_pos.sector, &buf);
+    var ent_data = @as(*const DirEntry, @ptrCast(@alignCast(&buf[old_pos.offset]))).*;
+    writeSfn(&ent_data, new_name);
+
+    // Reuse the replaced entry's slot if possible.
+    const new_pos = if (replaced) |r|
+        Position.fromInodeNumber(r.number)
+    else
+        try self.findDirSlot(
+            InodeImpl.from(new_dir).cluster,
+            1,
+            .create,
+        ) orelse return fs.Error.NoSpace;
+
+    // Write the renamed entry to its new slot.
+    try self.device.readBlock(new_pos.sector, &buf);
+    const new_ent: *DirEntry = @ptrCast(@alignCast(&buf[new_pos.offset]));
+    new_ent.* = ent_data;
+    try self.device.writeBlock(new_pos.sector, &buf);
+
+    // Delete the old entry unless it was reused.
+    if (new_pos.sector != old_pos.sector or new_pos.offset != old_pos.offset) {
+        try self.device.readBlock(old_pos.sector, &buf);
+        const old_ent: *DirEntry = @ptrCast(@alignCast(&buf[old_pos.offset]));
+        old_ent.markDeleted();
+        try self.device.writeBlock(old_pos.sector, &buf);
+    }
+
+    // Update in-memory inode number.
+    child.number = new_pos.toInodeNumber();
+
+    // The replaced inode's cluster chain should be freed once its refcount reaches zero.
+    if (replaced) |r| {
+        InodeImpl.from(r).unlinked = true;
+    }
 }
 
 /// Check if the mode includes any write permission for owner, group, or others.
