@@ -1110,9 +1110,9 @@ const Qemu = struct {
             .q35 => try args.appendSlice(allocator, &.{
                 "-cpu",
                 if (self.kvm)
-                    "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline"
+                    "host,+fsgsbase,+invtsc,+rdrand,+tsc-deadline"
                 else
-                    "host,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
+                    "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
                 "-smp",
                 "4",
                 "-bios",
