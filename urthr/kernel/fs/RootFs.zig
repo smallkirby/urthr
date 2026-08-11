@@ -71,6 +71,7 @@ const DirEntry = struct {
 const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
     .create = &icreate,
+    .symlink = &isymlink,
     .deinit = &ideinit,
 };
 
@@ -80,6 +81,8 @@ pub const InodeImpl = struct {
     common: fs.Inode,
     /// Pointer to the rootfs.
     rootfs: *Self,
+    /// Target path this inode points to if this is a symlink.
+    symlink_target: ?[]const u8 = null,
 
     pub fn from(inode: *fs.Inode) *InodeImpl {
         return @fieldParentPtr("common", inode);
@@ -121,6 +124,43 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
     return &inode.common;
 }
 
+/// symlink implementation.
+fn isymlink(dir: *fs.Inode, name: []const u8, target: []const u8, allocator: Allocator) fs.Error!*fs.Inode {
+    const ctx = InodeImpl.from(dir);
+    const self = ctx.rootfs;
+
+    rtt.expectEqual(.directory, dir.ftype);
+    rtt.expect(self.entry_count < max_entries);
+
+    const inode = try allocator.create(InodeImpl);
+    errdefer allocator.destroy(inode);
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+    const target_copy = try allocator.dupe(u8, target);
+    errdefer allocator.free(target_copy);
+
+    inode.* = .{
+        .common = .{
+            .number = self.entry_count + 2,
+            .size = target_copy.len,
+            .ftype = .symlink,
+            .iops = inode_vtable,
+            .fops = file_vtable,
+        },
+        .rootfs = self,
+        .symlink_target = target_copy,
+    };
+    inode.common.ref();
+
+    self.entries[self.entry_count] = .{
+        .name = name_copy,
+        .inode = inode,
+    };
+    self.entry_count += 1;
+
+    return &inode.common;
+}
+
 /// Lookup an inode by its name in the root directory.
 fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
     const ctx = InodeImpl.from(dir);
@@ -138,6 +178,9 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
 /// Deinitialize an inode and release associated resources.
 fn ideinit(inode: *fs.Inode) void {
     const ctx = InodeImpl.from(inode);
+    if (ctx.symlink_target) |link| {
+        ctx.rootfs.allocator.free(link);
+    }
     ctx.rootfs.allocator.destroy(ctx);
 }
 
@@ -175,7 +218,7 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
     return .{
         .name = try allocator.dupe(u8, e.name),
         .inum = e.inode.common.number,
-        .type = .directory,
+        .type = e.inode.common.ftype,
     };
 }
 
@@ -194,7 +237,7 @@ fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
             .in = true,
             .out = true,
         } },
-        .directory => .{ .events = .none },
+        .directory, .symlink => .{ .events = .none },
         .socket => unreachable,
     };
 }

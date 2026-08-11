@@ -34,6 +34,11 @@ pub const Ops = struct {
     /// null if the filesystem does not support file removal.
     unlink: ?*const fn (dir: *Inode, child: *Inode) Error!void = null,
 
+    /// Create a symbolic link under `dir` with the given name pointing to `target`.
+    ///
+    /// null if the filesystem does not support symbolic links.
+    symlink: ?*const fn (dir: *Inode, name: []const u8, target: []const u8, allocator: Allocator) Error!*Inode = null,
+
     /// Change a permission of the file.
     ///
     /// null if the filesystem does not support changing permission.
@@ -118,6 +123,21 @@ pub fn chmod(self: *Self, mode: fs.FileMode) Error!void {
         try f(self, mode);
     }
     self.mode = mode;
+}
+
+/// Create a symbolic link under this inode with the given name, pointing to `target`.
+pub fn symlink(self: *Self, name: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
+    if (self.ftype != .directory) return Error.NotDirectory;
+
+    if (try self.lookup(name)) |_| {
+        return Error.AlreadyExists;
+    }
+
+    if (self.iops.symlink) |f| {
+        return f(self, name, target, allocator);
+    } else {
+        return Error.Unsupported;
+    }
 }
 
 /// Remove a file entry named `name` under this directory.

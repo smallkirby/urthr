@@ -441,6 +441,38 @@ pub fn sysMkdir(pathname: [*:0]const u8, mode: Mode) ReturnType {
 }
 
 // =============================================================
+// Symlink
+// =============================================================
+
+/// syscall: symlinkat
+pub fn sysSymlinkAt(target: [*:0]const u8, newdirfd: usize, linkpath: [*:0]const u8) ReturnType {
+    const allocator = urd.mem.bin;
+    const target_s = std.mem.span(target);
+    const linkpath_s = std.mem.span(linkpath);
+
+    _ = symlinkFileAt(
+        newdirfd,
+        linkpath_s,
+        target_s,
+        allocator,
+    ) catch |err| return switch (err) {
+        urd.fs.Error.NotFound => .err(.noent),
+        urd.fs.Error.NotDirectory => .err(.notdir),
+        urd.fs.Error.AlreadyExists => .err(.exist),
+        urd.fs.Error.Unsupported => .err(.perm),
+        error.BadFileDescriptor => .err(.badf),
+        else => .err(.again),
+    };
+
+    return .success(0);
+}
+
+/// syscall: symlink
+pub fn sysSymlink(target: [*:0]const u8, linkpath: [*:0]const u8) ReturnType {
+    return sysSymlinkAt(target, cwd_fd, linkpath);
+}
+
+// =============================================================
 // Mount
 // =============================================================
 
@@ -932,6 +964,7 @@ const FileType = enum(u4) {
         return switch (ftype) {
             .regular => .regular,
             .directory => .dir,
+            .symlink => .symlink,
             .socket => .socket,
         };
     }
@@ -1565,6 +1598,29 @@ fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, alloca
         };
 
         return urd.fs.mkdirAt(dir.path, pathname, mode, allocator);
+    }
+}
+
+/// Create a symbolic link pointing to `target` at the specified path relative to the given directory file descriptor.
+fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
+    // Check if pathname is relative or absolute.
+    if (std.fs.path.isAbsolute(pathname)) {
+        // Absolute path. Ignore directory.
+        return urd.fs.symlink(target, pathname, allocator);
+    } else if (dirfd == cwd_fd) {
+        // Relative to CWD.
+        const cur = sched.getCurrent();
+        return urd.fs.symlinkAt(cur.fs.cwd, pathname, target, allocator);
+    } else {
+        // Relative to dirfd.
+        const cur = sched.getCurrent();
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return error.BadFileDescriptor;
+        } orelse {
+            return error.BadFileDescriptor;
+        };
+
+        return urd.fs.symlinkAt(dir.path, pathname, target, allocator);
     }
 }
 

@@ -58,6 +58,8 @@ pub const FileType = enum {
     regular,
     /// Directory.
     directory,
+    /// Symbolic link.
+    symlink,
     /// Socket.
     socket,
 };
@@ -275,6 +277,51 @@ pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
         sched.getCurrent().fs.cwd;
 
     return mkdirAt(dir, basename, mode, allocator);
+}
+
+/// Create a symbolic link under the given directory with the given name pointing to `target`.
+pub fn symlinkAt(dir: Path, name: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
+    var cur = dir;
+    if (cur.dentry.mount) |mnt| {
+        cur = .{ .dentry = mnt.root, .mount = mnt };
+    }
+
+    const inode = try cur.dentry.inode.symlink(
+        name,
+        target,
+        allocator,
+    );
+
+    // Put the new symlink into the dentry cache.
+    const dentry = Dentry.create(
+        name,
+        inode,
+        cur.dentry,
+        allocator,
+    ) catch |err| {
+        inode.unref();
+        return err;
+    };
+    errdefer dentry.unref();
+    try dcache.insert(dentry);
+
+    return inode;
+}
+
+/// Create a symbolic link pointing to `target` at the specified path.
+pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) Error!*Inode {
+    const basename = std.fs.path.basenamePosix(linkpath);
+    if (basename.len == 0) {
+        return Error.InvalidArgument;
+    }
+
+    // Lookup parent directory.
+    const dir = if (std.fs.path.dirnamePosix(linkpath)) |dirname|
+        try resolvePath(sched.getCurrent().fs.cwd, dirname, allocator)
+    else
+        sched.getCurrent().fs.cwd;
+
+    return symlinkAt(dir, basename, target, allocator);
 }
 
 /// Create a new regular file at the specified path and open it.

@@ -168,7 +168,7 @@ fn ideinit(inode: *fs.Inode) void {
         .directory => {
             urd.unimplemented("ideinit: directory");
         },
-        .socket => {
+        .symlink, .socket => {
             unreachable;
         },
     };
@@ -596,7 +596,7 @@ fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
             .out = true,
         } },
         .directory => .{ .events = .none },
-        .socket => unreachable,
+        .symlink, .socket => unreachable,
     };
 }
 
