@@ -1207,7 +1207,24 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     if (path.dentry.inode.ftype != .directory) {
         return .err(.notdir);
     }
+    cur.fs.cwd.dentry.unref();
     cur.fs.cwd = path;
+
+    return .success(0);
+}
+
+/// syscall: fchdir
+pub fn sysFchdir(fd: usize) ReturnType {
+    const cur = sched.getCurrent();
+    const file = getFile(fd) catch return .err(.badf);
+
+    if (file.getType() != .directory) {
+        return .err(.notdir);
+    }
+
+    file.path.dentry.ref();
+    cur.fs.cwd.dentry.unref();
+    cur.fs.cwd = file.path;
 
     return .success(0);
 }

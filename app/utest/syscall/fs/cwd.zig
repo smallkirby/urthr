@@ -20,6 +20,37 @@ test "chdir to a regular file fails with ENOTDIR" {
     try testing.expectEqual(.NOTDIR, linux.errno(rc));
 }
 
+test "fchdir" {
+    var oldbuf: [std.fs.max_path_bytes]u8 = undefined;
+    var newbuf: [std.fs.max_path_bytes]u8 = undefined;
+
+    const current = try getcwd(&oldbuf);
+    defer chdir(current) catch unreachable;
+
+    const target = "/bin";
+    const fd = linux.openat(linux.AT.FDCWD, target, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const rc = linux.fchdir(@intCast(fd));
+    try testing.expectEqual(.SUCCESS, linux.errno(rc));
+    try testing.expectEqualSlices(u8, target, try getcwd(&newbuf));
+}
+
+test "fchdir with an unopened fd fails with EBADF" {
+    const rc = linux.fchdir(999);
+    try testing.expectEqual(.BADF, linux.errno(rc));
+}
+
+test "fchdir on a regular file fails with ENOTDIR" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const rc = linux.fchdir(@intCast(fd));
+    try testing.expectEqual(.NOTDIR, linux.errno(rc));
+}
+
 test "getcwd with a zero-sized buffer fails with EINVAL" {
     var buf: [1]u8 = undefined;
     const rc = linux.getcwd(&buf, 0);
