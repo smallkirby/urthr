@@ -82,6 +82,7 @@ if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("mmap",                222,    posix.mem.sysMmap),
     .new("mprotect",            226,    posix.mem.sysMprotect),
     .new("prlimit64",           261,    posix.task.sysPrlimit64),
+    .new("getrandom",           278,    posix.system.sysGetRandom),
     .new("statx",               291,    posix.fs.sysStatx),
 
     // =============================================================
@@ -182,6 +183,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("preadv",               295,   posix.fs.sysPreadv),
     .new("pwritev",              296,   posix.fs.sysPwritev),
     .new("prlimit64",            302,   posix.task.sysPrlimit64),
+    .new("getrandom",            318,   posix.system.sysGetRandom),
     .new("statx",                332,   posix.fs.sysStatx),
 
     // =============================================================

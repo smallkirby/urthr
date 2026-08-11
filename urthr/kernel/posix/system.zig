@@ -50,6 +50,25 @@ const UtsName = struct {
     machine: [65]u8,
 };
 
+/// syscall: getrandom
+pub fn sysGetRandom(buf: [*]u8, buflen: usize, flags: GetRandomFlags) ReturnType {
+    if (flags._2 != 0) return .err(.inval);
+
+    urd.rng.getRandom(buf[0..buflen]);
+
+    return .success(@bitCast(buflen));
+}
+
+/// Flags for `getrandom` syscall.
+const GetRandomFlags = packed struct(u32) {
+    /// Use the random source instead of the urandom source.
+    random: bool = false,
+    /// Do not block.
+    nonblock: bool = false,
+    /// Reserved.
+    _2: u30 = 0,
+};
+
 // =============================================================
 // Imports
 // =============================================================
