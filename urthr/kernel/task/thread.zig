@@ -131,6 +131,8 @@ pub const ThreadFs = struct {
     cwd: urd.fs.Path,
     /// File descriptor table.
     fdtbl: urd.fs.FdTable = .{},
+    /// File mode creation mask.
+    umask: urd.fs.FileMode = .default,
 };
 
 /// Thread function type.

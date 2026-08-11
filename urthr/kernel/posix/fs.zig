@@ -20,12 +20,17 @@ const Iovec = extern struct {
 // =============================================================
 
 /// syscall: openat
-pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32) ReturnType {
+pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: Mode) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    const file = resolveOpenFile(dirfd, s, flags, allocator) catch |err|
-        return mapOpenError(err);
+    const file = resolveOpenFile(
+        dirfd,
+        s,
+        flags,
+        mode,
+        allocator,
+    ) catch |err| return mapOpenError(err);
 
     if (flags.directory and file.getType() != .directory) {
         file.unref();
@@ -52,7 +57,7 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, _: u32
 }
 
 /// syscall: open
-pub fn sysOpen(pathname: [*:0]const u8, flags: OpenFlags, mode: u32) ReturnType {
+pub fn sysOpen(pathname: [*:0]const u8, flags: OpenFlags, mode: Mode) ReturnType {
     return sysOpenAt(cwd_fd, pathname, flags, mode);
 }
 
@@ -387,7 +392,7 @@ pub fn sysPreadv(fd: usize, iov: [*]const Iovec, iovcnt: usize, offset_l: u32, o
 // Unlink
 // =============================================================
 
-// syscall: unlinkat
+/// syscall: unlinkat
 pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, _: i32) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
@@ -404,18 +409,26 @@ pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, _: i32) ReturnType {
     return .success(0);
 }
 
+/// syscall: unlink
+pub fn sysUnlink(pathname: [*:0]const u8) ReturnType {
+    return sysUnlinkAt(cwd_fd, pathname, 0);
+}
+
 // =============================================================
 // Mkdir
 // =============================================================
 
 /// syscall: mkdirat
-pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, _: u32) ReturnType {
+pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
+    const umask = sched.getCurrent().fs.umask;
+    const effective_mode = umask.apply(mode.to());
     _ = mkdirFileAt(
         dirfd,
         s,
+        effective_mode,
         allocator,
     ) catch |err| return mapOpenError(err);
 
@@ -423,7 +436,7 @@ pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, _: u32) ReturnType {
 }
 
 /// syscall: mkdir
-pub fn sysMkdir(pathname: [*:0]const u8, mode: u32) ReturnType {
+pub fn sysMkdir(pathname: [*:0]const u8, mode: Mode) ReturnType {
     return sysMkdirAt(cwd_fd, pathname, mode);
 }
 
@@ -525,11 +538,13 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    const file = if (flags.empty_path and s.len == 0)
-        getFile(dirfd) catch return .err(.badf)
-    else
-        openFileAt(dirfd, s, .{}, allocator) catch |err|
-            return mapOpenError(err);
+    var owned = true;
+    const file = if (flags.empty_path and s.len == 0) blk: {
+        owned = false;
+        break :blk getFile(dirfd) catch return .err(.badf);
+    } else openFileAt(dirfd, s, .{}, allocator) catch |err|
+        return mapOpenError(err);
+    defer if (owned) file.unref();
 
     statbuf.* = .{
         .st_dev = 0, // TODO
@@ -835,7 +850,32 @@ const Mode = packed struct(u32) {
     };
 
     pub fn from(file: *const urd.fs.File) Mode {
-        return Mode{ .type = .from(file.getType()) };
+        const mode = file.getMode();
+        return .{
+            .type = .from(file.getType()),
+            .other = .from(mode.other),
+            .group = .from(mode.group),
+            .user = .from(mode.user),
+        };
+    }
+
+    /// Convert to fs file mode.
+    fn to(self: Mode) urd.fs.FileMode {
+        return .{
+            .other = self.other.to(),
+            .group = self.group.to(),
+            .user = self.user.to(),
+        };
+    }
+
+    /// Convert from fs file mode.
+    fn fromFileMode(mode: urd.fs.FileMode) Mode {
+        return .{
+            .other = .from(mode.other),
+            .group = .from(mode.group),
+            .user = .from(mode.user),
+            .type = @enumFromInt(0),
+        };
     }
 };
 
@@ -849,6 +889,23 @@ const Permission = packed struct(u3) {
     pub const rw = Permission{ .read = true, .write = true, .exec = false };
     pub const rx = Permission{ .read = true, .write = false, .exec = true };
     pub const rwx = Permission{ .read = true, .write = true, .exec = true };
+    pub const none = Permission{ .read = false, .write = false, .exec = false };
+
+    fn from(p: urd.fs.Permission) Permission {
+        return .{
+            .read = p.read,
+            .write = p.write,
+            .exec = p.exec,
+        };
+    }
+
+    fn to(self: Permission) urd.fs.Permission {
+        return .{
+            .read = self.read,
+            .write = self.write,
+            .exec = self.exec,
+        };
+    }
 };
 
 /// File type.
@@ -1072,14 +1129,22 @@ pub fn sysIoctl(fd: usize, request: u64, arg: usize) ReturnType {
 // =============================================================
 
 /// syscall: fchmodat
-pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: u32) ReturnType {
-    _ = mode; // TODO: should be implemented.
-
+pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType {
     const allocator = urd.mem.bin;
     const s = std.mem.span(pathname);
 
-    _ = openFileAt(dirfd, s, .{}, allocator) catch |err|
-        return mapOpenError(err);
+    const file = openFileAt(
+        dirfd,
+        s,
+        .{},
+        allocator,
+    ) catch |err| return mapOpenError(err);
+    defer file.unref();
+
+    file.chmod(mode.to()) catch |err| return switch (err) {
+        urd.fs.Error.Unsupported => .err(.perm),
+        else => mapOpenError(err),
+    };
 
     return .success(0);
 }
@@ -1167,6 +1232,19 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
     out[path.len] = 0; // null-terminate
 
     return .success(@bitCast(path.len));
+}
+
+// =============================================================
+// umask
+// =============================================================
+
+/// syscall: umask
+pub fn sysUmask(mask: Mode) ReturnType {
+    const cur = sched.getCurrent();
+    const old = cur.fs.umask;
+    cur.fs.umask = mask.to();
+
+    return .success(@bitCast(@as(u64, @as(u32, @bitCast(Mode.fromFileMode(old))))));
 }
 
 // =============================================================
@@ -1374,7 +1452,7 @@ fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
 }
 
 /// Resolve the file to open honoring O_CREAT/O_EXCL semantics.
-fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: Mode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     const access: AccessMode = .{
         .readable = !flags.wo,
         .writable = flags.wo or flags.rdwr,
@@ -1392,7 +1470,15 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, allocat
         return file;
     } else |err| {
         if (err != urd.fs.Error.NotFound) return err;
-        return createFileAt(dirfd, pathname, access, allocator);
+        const umask = sched.getCurrent().fs.umask;
+        const effective_mode = umask.apply(mode.to());
+        return createFileAt(
+            dirfd,
+            pathname,
+            effective_mode,
+            access,
+            allocator,
+        );
     }
 }
 
@@ -1420,15 +1506,15 @@ fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator:
 }
 
 /// Create a file at the specified path relative to the given directory file descriptor.
-fn createFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn createFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     // Check if pathname is relative or absolute.
     if (std.fs.path.isAbsolute(pathname)) {
         // Absolute path. Ignore directory.
-        return urd.fs.create(pathname, access, allocator);
+        return urd.fs.create(pathname, mode, access, allocator);
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.createAt(cur.fs.cwd, pathname, access, allocator);
+        return urd.fs.createAt(cur.fs.cwd, pathname, mode, access, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -1438,20 +1524,20 @@ fn createFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocato
             return error.BadFileDescriptor;
         };
 
-        return urd.fs.createAt(dir.path, pathname, access, allocator);
+        return urd.fs.createAt(dir.path, pathname, mode, access, allocator);
     }
 }
 
 /// Create a directory at the specified path relative to the given directory file descriptor.
-fn mkdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
+fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
     // Check if pathname is relative or absolute.
     if (std.fs.path.isAbsolute(pathname)) {
         // Absolute path. Ignore directory.
-        return urd.fs.mkdir(pathname, allocator);
+        return urd.fs.mkdir(pathname, mode, allocator);
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.mkdirAt(cur.fs.cwd, pathname, allocator);
+        return urd.fs.mkdirAt(cur.fs.cwd, pathname, mode, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -1461,7 +1547,7 @@ fn mkdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{
             return error.BadFileDescriptor;
         };
 
-        return urd.fs.mkdirAt(dir.path, pathname, allocator);
+        return urd.fs.mkdirAt(dir.path, pathname, mode, allocator);
     }
 }
 

@@ -87,7 +87,7 @@ pub const InodeImpl = struct {
 };
 
 /// create implementation.
-fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, allocator: Allocator) fs.Error!*fs.Inode {
+fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMode, allocator: Allocator) fs.Error!*fs.Inode {
     const ctx = InodeImpl.from(dir);
     const self = ctx.rootfs;
 
@@ -104,6 +104,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, allocator: Allo
             .number = self.entry_count + 2,
             .size = 0,
             .ftype = ftype,
+            .mode = mode,
             .iops = inode_vtable,
             .fops = file_vtable,
         },

@@ -89,6 +89,7 @@ const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
     .create = &icreate,
     .unlink = &iunlink,
+    .chmod = &ichmod,
     .deinit = &ideinit,
 };
 
@@ -130,11 +131,17 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
             const inode = try self.allocator.create(InodeImpl);
             errdefer self.allocator.destroy(inode);
 
+            const mode: fs.FileMode = if (result.entry.attr.read_only) .{
+                .other = .rx,
+                .group = .rx,
+                .user = .rx,
+            } else .{};
             inode.* = .{
                 .common = .{
                     .number = result.pos.toInodeNumber(),
                     .size = result.entry.file_size,
                     .ftype = if (result.entry.attr.directory) .directory else .regular,
+                    .mode = mode,
                     .iops = inode_vtable,
                     .fops = file_vtable,
                 },
@@ -195,8 +202,28 @@ fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
     ctx.unlinked = true;
 }
 
+/// Update the on-disk read-only attribute to reflect the requested mode.
+fn ichmod(inode: *fs.Inode, mode: fs.FileMode) fs.Error!void {
+    const ctx = InodeImpl.from(inode);
+    const self = ctx.fat32;
+
+    // The root directory has no on-disk directory entry of its own.
+    if (inode == &self.root.common) return;
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    const pos = Position.fromInodeNumber(inode.number);
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlock(pos.sector, &buf);
+
+    const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+    ent.attr.read_only = !isWritable(mode);
+    try self.device.writeBlock(pos.sector, &buf);
+}
+
 /// Create a new file or directory under a directory inode.
-fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) fs.Error!*fs.Inode {
+fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMode, _: Allocator) fs.Error!*fs.Inode {
     const ctx = InodeImpl.from(dir);
     const self = ctx.fat32;
 
@@ -228,7 +255,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) f
     try self.device.readBlock(entpos.sector, &buf);
     {
         const attr = DirEntry.Attributes{
-            .read_only = false,
+            .read_only = !isWritable(mode),
             .hidden = false,
             .system = false,
             .volume_id = false,
@@ -256,6 +283,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) f
             .number = entpos.toInodeNumber(),
             .size = 0,
             .ftype = ftype,
+            .mode = mode,
             .iops = inode_vtable,
             .fops = file_vtable,
         },
@@ -265,6 +293,13 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, _: Allocator) f
     inode.common.ref();
 
     return &inode.common;
+}
+
+/// Check if the mode includes any write permission for owner, group, or others.
+///
+/// This workaround is needed since FAT32 has only single read-only attribute.
+inline fn isWritable(mode: fs.FileMode) bool {
+    return mode.user.write or mode.group.write or mode.other.write;
 }
 
 /// Unique identifier for a position within a disk.

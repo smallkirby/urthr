@@ -285,9 +285,19 @@ pub fn poll(self: *Self) Error!PollResult {
     return self.ops.poll(self);
 }
 
+/// Change the permission granted to this file.
+pub fn chmod(self: *Self, mode: fs.FileMode) Error!void {
+    return self.inode().chmod(mode);
+}
+
 /// Get the type of this file.
 pub fn getType(self: *const Self) fs.FileType {
     return self.inode().ftype;
+}
+
+/// Get the permission mode of this file.
+pub fn getMode(self: *const Self) fs.FileMode {
+    return self.inode().mode;
 }
 
 /// Helper function to get the inode associated with this file.

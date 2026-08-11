@@ -24,7 +24,7 @@ pub const Ops = struct {
     /// Create a new file under `dir` with the given name.
     ///
     /// null if the filesystem does not support file creation.
-    create: ?*const fn (dir: *Inode, name: []const u8, ftype: fs.FileType, allocator: Allocator) Error!*Inode = null,
+    create: ?*const fn (dir: *Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMode, allocator: Allocator) Error!*Inode = null,
 
     /// Remove the directory entry named `name` under `dir`.
     ///
@@ -33,6 +33,11 @@ pub const Ops = struct {
     ///
     /// null if the filesystem does not support file removal.
     unlink: ?*const fn (dir: *Inode, child: *Inode) Error!void = null,
+
+    /// Change a permission of the file.
+    ///
+    /// null if the filesystem does not support changing permission.
+    chmod: ?*const fn (inode: *Inode, mode: fs.FileMode) Error!void = null,
 };
 
 /// inode number type.
@@ -46,6 +51,8 @@ number: Number,
 size: usize,
 /// File type.
 ftype: fs.FileType,
+/// Permission granted to this file's owner, group, and others.
+mode: fs.FileMode = .{},
 
 /// Inode operations.
 iops: Ops,
@@ -76,7 +83,7 @@ pub fn unref(self: *Self) void {
 }
 
 /// Create a directory under this inode with the given name.
-pub fn mkdir(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode {
+pub fn mkdir(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*Inode {
     if (self.ftype != .directory) return Error.NotDirectory;
 
     if (try self.lookup(name)) |_| {
@@ -84,14 +91,14 @@ pub fn mkdir(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode {
     }
 
     if (self.iops.create) |f| {
-        return f(self, name, .directory, allocator);
+        return f(self, name, .directory, mode, allocator);
     } else {
         return Error.Unsupported;
     }
 }
 
 /// Create a regular file under this inode with the given name.
-pub fn create(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode {
+pub fn create(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*Inode {
     if (self.ftype != .directory) return Error.NotDirectory;
 
     if (try self.lookup(name)) |_| {
@@ -99,10 +106,18 @@ pub fn create(self: *Self, name: []const u8, allocator: Allocator) Error!*Inode 
     }
 
     if (self.iops.create) |f| {
-        return f(self, name, .regular, allocator);
+        return f(self, name, .regular, mode, allocator);
     } else {
         return Error.Unsupported;
     }
+}
+
+/// Change the permission granted to this file.
+pub fn chmod(self: *Self, mode: fs.FileMode) Error!void {
+    if (self.iops.chmod) |f| {
+        try f(self, mode);
+    }
+    self.mode = mode;
 }
 
 /// Remove a file entry named `name` under this directory.

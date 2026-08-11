@@ -41,3 +41,5 @@ fo = "fo"
 clen = "clen"
 # Control length
 controllen = "controllen"
+# Write-only
+WRONLY = "WRONLY"

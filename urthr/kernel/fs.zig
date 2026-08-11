@@ -69,6 +69,61 @@ pub const Path = struct {
     mount: ?*Mount,
 };
 
+/// Access permission.
+pub const Permission = struct {
+    /// Readable.
+    read: bool = false,
+    /// Writable.
+    write: bool = false,
+    /// Executable.
+    exec: bool = false,
+
+    /// Not accessible.
+    pub const none = Permission{};
+    /// Read-only permission.
+    pub const ro = Permission{ .read = true };
+    /// Read-write permission.
+    pub const rw = Permission{ .read = true, .write = true };
+    /// Read-execute permission.
+    pub const rx = Permission{ .read = true, .exec = true };
+    /// Read-write-execute permission.
+    pub const rwx = Permission{ .read = true, .write = true, .exec = true };
+
+    /// Clear the bits set in the given mask.
+    pub fn clear(self: Permission, mask: Permission) Permission {
+        return .{
+            .read = self.read and !mask.read,
+            .write = self.write and !mask.write,
+            .exec = self.exec and !mask.exec,
+        };
+    }
+};
+
+/// Permission granted to a file's owner, group, and others.
+pub const FileMode = struct {
+    /// Permission for the file owner.
+    user: Permission = .rwx,
+    /// Permission for the file's group.
+    group: Permission = .rwx,
+    /// Permission for others.
+    other: Permission = .rwx,
+
+    pub const default = FileMode{
+        .user = .none,
+        .group = .{ .write = true },
+        .other = .{ .write = true },
+    };
+
+    /// Apply this mask to a requested file mode, clearing the masked-out bits.
+    pub fn apply(self: FileMode, mode: FileMode) FileMode {
+        return .{
+            .other = mode.other.clear(self.other),
+            .group = mode.group.clear(self.group),
+            .user = mode.user.clear(self.user),
+        };
+    }
+};
+
 /// I/O readiness events.
 pub const PollEvents = packed struct {
     /// Readable data is available.
@@ -119,6 +174,7 @@ pub fn init(allocator: Allocator) Error!void {
     const current = sched.getCurrent();
     current.fs.root = .{ .dentry = dentry, .mount = null };
     current.fs.cwd = .{ .dentry = dentry, .mount = null };
+    current.fs.umask = .default;
 
     // Initialize the dentry cache.
     dcache = Dentry.Cache.new(allocator);
@@ -177,17 +233,36 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
 }
 
 /// Create a directory under the given directory with the given name.
-pub fn mkdirAt(dir: Path, name: []const u8, allocator: Allocator) Error!*Inode {
+pub fn mkdirAt(dir: Path, name: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
     var cur = dir;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
-    return cur.dentry.inode.mkdir(name, allocator);
+    const inode = try cur.dentry.inode.mkdir(
+        name,
+        mode,
+        allocator,
+    );
+
+    // Put the new directory into the dentry cache.
+    const dentry = Dentry.create(
+        name,
+        inode,
+        cur.dentry,
+        allocator,
+    ) catch |err| {
+        inode.unref();
+        return err;
+    };
+    errdefer dentry.unref();
+    try dcache.insert(dentry);
+
+    return inode;
 }
 
 /// Create a directory at the specified path.
-pub fn mkdir(s: []const u8, allocator: Allocator) Error!*Inode {
+pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
     const basename = std.fs.path.basenamePosix(s);
     if (basename.len == 0) {
         return Error.AlreadyExists;
@@ -199,11 +274,11 @@ pub fn mkdir(s: []const u8, allocator: Allocator) Error!*Inode {
     else
         sched.getCurrent().fs.cwd;
 
-    return mkdirAt(dir, basename, allocator);
+    return mkdirAt(dir, basename, mode, allocator);
 }
 
 /// Create a new regular file at the specified path and open it.
-pub fn create(s: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
+pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
     const basename = std.fs.path.basenamePosix(s);
     if (basename.len == 0) {
         return Error.InvalidArgument;
@@ -215,11 +290,11 @@ pub fn create(s: []const u8, access: File.AccessMode, allocator: Allocator) Erro
     else
         sched.getCurrent().fs.cwd;
 
-    return createAt(dir, basename, access, allocator);
+    return createAt(dir, basename, mode, access, allocator);
 }
 
 /// Create a new regular file at the specified directory and open it.
-pub fn createAt(dir: Path, basename: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
+pub fn createAt(dir: Path, basename: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
     var cur = dir;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
@@ -230,7 +305,11 @@ pub fn createAt(dir: Path, basename: []const u8, access: File.AccessMode, alloca
     }
 
     // Create new file in the directory.
-    const inode = try cur.dentry.inode.create(basename, allocator);
+    const inode = try cur.dentry.inode.create(
+        basename,
+        mode,
+        allocator,
+    );
 
     // Put the new file into dentry cache.
     const dentry = Dentry.create(
