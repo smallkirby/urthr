@@ -1113,6 +1113,10 @@ const Qemu = struct {
                     "host,+fsgsbase,+invtsc,+rdrand,+tsc-deadline"
                 else
                     "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
+                if (self.kvm)
+                    "-enable-kvm"
+                else
+                    "",
                 "-smp",
                 "4",
                 "-bios",
