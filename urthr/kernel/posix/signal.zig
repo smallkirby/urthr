@@ -173,6 +173,64 @@ pub fn sysRtSigProcMask(how: How, set: ?*const signal.Mask, oldset: ?*signal.Mas
     return .success(0);
 }
 
+/// syscall: rt_sigtimedwait
+pub fn sysRtSigTimedWait(set: *const signal.Mask, info: ?*SigInfo, timeout: ?*const Timespec, sigsetsize: usize) ReturnType {
+    if (sigsetsize != @sizeOf(signal.Mask)) {
+        return .err(.inval);
+    }
+
+    const deadline_ns: ?u64 = if (timeout) |t| blk: {
+        if (t.nsec >= std.time.ns_per_s) return .err(.inval);
+        const dur_ns = @as(u64, @intCast(t.sec)) * std.time.ns_per_s + t.nsec;
+        break :blk urd.time.getCurrentTimestamp() + dur_ns;
+    } else null;
+
+    const signo = signal.blocksFor(
+        set.*,
+        deadline_ns,
+    ) orelse return .err(.again);
+
+    if (info) |i| {
+        i.* = .{ .signo = @intCast(signo) };
+    }
+
+    return .success(signo);
+}
+
+/// Signal information type.
+const SigInfo = extern struct {
+    /// Signal number.
+    signo: i32,
+    /// errno value.
+    errno: i32 = 0,
+    /// Signal code.
+    code: i32 = 0,
+    /// Trap number that caused HW-generated signal.
+    trapno: i32 = 0,
+    /// Sending process ID.
+    pid: i32 = 0,
+    /// Real user ID of sending process.
+    uid: i32 = 0,
+    /// Exit value or signal.
+    status: usize = 0,
+    /// User time consumed.
+    utime: u64 = 0,
+    /// System time consumed.
+    stime: u64 = 0,
+    /// Signal value.
+    value: usize = 0,
+    /// POSIX.1b signal.
+    int: i32 = 0,
+    /// POSIX.1b signal.
+    ptr: usize = 0,
+    /// Timer overrun count.
+    overrun: i32 = 0,
+    /// Timer ID.
+    timerid: i32 = 0,
+    /// Memory location which caused fault.
+    addr: usize = 0,
+};
+
 // =============================================================
 // Imports
 // =============================================================
@@ -182,3 +240,4 @@ const urd = @import("urthr");
 const sched = urd.sched;
 const signal = urd.task.signal;
 const ReturnType = urd.syscall.ReturnType;
+const Timespec = urd.posix.Timespec;

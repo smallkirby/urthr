@@ -217,7 +217,83 @@ pub fn push(signo: Signal) void {
 /// Push a pending signal to the given thread.
 pub fn pushTo(th: *Thread, signo: Signal) void {
     const bit: u6 = @intCast(@intFromEnum(signo) - 1);
-    th.sigstate.pending |= @as(Mask, 1) << bit;
+    const bitmask = @as(Mask, 1) << bit;
+
+    const ie = waiters_lock.lockDisableIrq();
+    defer waiters_lock.unlockRestoreIrq(ie);
+
+    // Set the pending bit for the signal.
+    th.sigstate.pending |= bitmask;
+
+    // Wake any thread blocked in the list waiting for this signal.
+    var it = waiters.iter();
+    while (it.next()) |w| {
+        if (w.thread == th and w.mask & bitmask != 0) {
+            _ = w.event.wake();
+        }
+    }
+}
+
+/// Thread descriptor blocked to wait for one of the signals.
+const Waiter = struct {
+    /// Thread waiting for a signal.
+    thread: *Thread,
+    /// Signals being waited for.
+    mask: Mask,
+    /// Event to wake once a matching signal becomes pending.
+    event: *Event,
+    /// List head.
+    _head: List.Head = .{},
+
+    const List = common.typing.InlineDoublyLinkedList(Waiter, "_head");
+};
+
+/// Lock protecting waiters list.
+var waiters_lock: SpinLock = .{};
+/// List of threads currently blocked waiting for a signal.
+var waiters: Waiter.List = .{};
+
+/// Block the current thread until one of the signals becomes pending.
+/// Returns the signal number delivered.
+///
+/// Returns null if the deadline is given and no matching signal becomes pending before the deadline.
+/// Otherwise, blocks indefinitely until the signals.
+pub fn blocksFor(mask: Mask, deadline_ns: ?u64) ?SigInt {
+    const th = sched.getCurrent();
+
+    while (true) {
+        var event: Event = .{};
+        var waiter: Waiter = .{
+            .thread = th,
+            .mask = mask,
+            .event = &event,
+        };
+
+        // Check if any matching signal is already pending.
+        {
+            const ie = waiters_lock.lockDisableIrq();
+            defer waiters_lock.unlockRestoreIrq(ie);
+
+            const deliverable = th.sigstate.pending & mask;
+            if (deliverable != 0) {
+                const bit: u6 = @intCast(@ctz(deliverable));
+                th.sigstate.pending &= ~(@as(Mask, 1) << bit);
+                return @as(SigInt, bit) + 1;
+            }
+
+            waiters.append(&waiter);
+        }
+
+        // Wait for a matching signal to be pushed or the deadline to expire.
+        const fired = event.wait(deadline_ns);
+        {
+            const ie = waiters_lock.lockDisableIrq();
+            defer waiters_lock.unlockRestoreIrq(ie);
+            waiters.remove(&waiter);
+        }
+
+        if (!fired) return null;
+    }
 }
 
 /// Raise a synchronous fault signal on the current thread.
@@ -458,3 +534,5 @@ const mem = urd.mem;
 const sched = urd.sched;
 const task = urd.task;
 const Thread = task.thread.Thread;
+const SpinLock = urd.sync.SpinLock;
+const Event = urd.sync.Event;
