@@ -228,10 +228,15 @@ const Keyboard = struct {
         }
     };
 
+    /// Maximum length in bytes of a single character representation of a key code.
+    const max_chars_len = 3;
+
     /// Convert USB HID key code to ASCII character.
-    fn codeToChars(key_code: u8, shifted: bool) []const u8 {
-        return switch (key_code) {
-            0x04...0x1D => if (shifted) &.{key_code - 0x04 + 'A'} else &.{key_code - 0x04 + 'a'},
+    ///
+    /// The result is copied into the given buffer and returned as a slice.
+    fn codeToChars(key_code: u8, shifted: bool, buf: *[max_chars_len]u8) []const u8 {
+        const chars: []const u8 = switch (key_code) {
+            0x04...0x1D => &.{if (shifted) key_code - 0x04 + 'A' else key_code - 0x04 + 'a'},
             0x1E => if (shifted) "!" else "1",
             0x1F => if (shifted) "@" else "2",
             0x20 => if (shifted) "#" else "3",
@@ -264,6 +269,9 @@ const Keyboard = struct {
             0x52 => "\x1B[A", // Up arrow
             else => &.{},
         };
+
+        @memcpy(buf[0..chars.len], chars);
+        return buf[0..chars.len];
     }
 };
 
@@ -290,7 +298,8 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
             continue;
         }
 
-        for (Keyboard.codeToChars(key, shifted)) |c| {
+        var char_buf: [Keyboard.max_chars_len]u8 = undefined;
+        for (Keyboard.codeToChars(key, shifted, &char_buf)) |c| {
             urd.input.push(c);
         }
     }
