@@ -1,18 +1,15 @@
-//! Thread instance.
+/// Thread instance.
 pub const Thread = struct {
     /// Thread ID.
     id: Id,
-    /// Thread Group ID (PID from userspace perspective).
-    ///
-    /// For single-threaded processes this equals `id`.
-    /// Threads created via clone(CLONE_THREAD) share the TGID of the creator.
-    tgid: Id,
-    /// Parent thread group ID.
+    /// Thread group ID.
+    tgid: Tgid,
+    /// Parent TGID.
     ppid: Id,
     /// Process group ID.
-    pgid: Id,
+    pgid: Pgid,
     /// Session ID.
-    sid: Id,
+    sid: Sid,
 
     /// Thread name.
     name: []const u8,
@@ -71,8 +68,25 @@ pub const Thread = struct {
 /// Default stack size for threads.
 pub const default_stack_size = 64 * 1024; // 64 KiB
 
-/// Thread identifier.
+/// Thread ID type.
+///
+/// This value is purely unique for each thread until wrapped around.
 pub const Id = u32;
+/// Thread group ID type.
+///
+/// This is PID from userspace perspective.
+/// For single-threaded processes this equals the thread ID.
+pub const Tgid = u32;
+/// Process group ID.
+///
+/// Collection of one or more threads that can receive signals together (job).
+pub const Pgid = u32;
+/// Session ID.
+///
+/// Collection of one or more process groups.
+/// Shares only one controlling terminal by threads in the same session.
+/// Cannot join a process group from a different session.
+pub const Sid = u32;
 
 /// Thread state.
 pub const State = enum {
