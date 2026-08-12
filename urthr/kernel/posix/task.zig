@@ -199,11 +199,37 @@ pub fn sysGetTid() ReturnType {
 
 /// syscall: getuid
 pub fn sysGetUid() ReturnType {
-    return .success(0);
+    return .success(0); // TODO
 }
 
 /// syscall: geteuid
 pub fn sysGetEuid() ReturnType {
+    return .success(0); // TODO
+}
+
+/// syscall: getgid
+pub fn sysGetGid() ReturnType {
+    return .success(0); // TODO
+}
+
+/// syscall: getegid
+pub fn sysGetEgid() ReturnType {
+    return .success(0); // TODO
+}
+
+/// syscall: getresuid
+pub fn sysGetResUid(ruid: *u32, euid: *u32, suid: *u32) ReturnType {
+    ruid.* = 0; // TODO
+    euid.* = 0; // TODO
+    suid.* = 0; // TODO
+    return .success(0);
+}
+
+/// syscall: getresgid
+pub fn sysGetResGid(rgid: *u32, egid: *u32, sgid: *u32) ReturnType {
+    rgid.* = 0; // TODO
+    egid.* = 0; // TODO
+    sgid.* = 0; // TODO
     return .success(0);
 }
 

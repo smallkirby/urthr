@@ -6,6 +6,10 @@ comptime {
     _ = @import("task/gettid.zig");
     _ = @import("task/getuid.zig");
     _ = @import("task/geteuid.zig");
+    _ = @import("task/getgid.zig");
+    _ = @import("task/getegid.zig");
+    _ = @import("task/getresuid.zig");
+    _ = @import("task/getresgid.zig");
     _ = @import("task/getpgid.zig");
     _ = @import("task/getsid.zig");
     _ = @import("task/prlimit64.zig");
