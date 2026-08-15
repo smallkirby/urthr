@@ -26,6 +26,7 @@ pub const fs = @import("syscall/fs.zig");
 pub const mem = @import("syscall/mem.zig");
 pub const net = @import("syscall/net.zig");
 pub const signal = @import("syscall/signal.zig");
+pub const task = @import("syscall/task.zig");
 pub const time = @import("syscall/time.zig");
 
 // =============================================================

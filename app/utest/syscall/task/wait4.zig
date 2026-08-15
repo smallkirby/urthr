@@ -59,19 +59,7 @@ test "waiting on a non-leader thread's own tid fails with ECHILD" {
         var fds = [2]i32{ pipe_worker[0], pipe_parent[1] };
 
         // Spawn a new thread in the same group.
-        const stack_size = 64 * 1024;
-        const stack = std.posix.mmap(
-            null,
-            stack_size,
-            .{ .READ = true, .WRITE = true },
-            .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
-            -1,
-            0,
-        ) catch linux.exit_group(2);
-        const sp = @intFromPtr(stack.ptr) + stack.len;
-        const flags: u32 = linux.CLONE.VM | linux.CLONE.THREAD | linux.CLONE.SIGHAND;
-        const wret = linux.clone(S.worker, sp, flags, @intFromPtr(&fds), null, 0, null);
-        if (linux.errno(wret) != .SUCCESS) linux.exit_group(3);
+        _ = utest.task.spawnThread(S.worker, @intFromPtr(&fds)) catch linux.exit_group(3);
 
         // Block until the parent tells the leader to exit.
         var buf: [1]u8 = undefined;
@@ -112,3 +100,4 @@ test "waiting on a non-leader thread's own tid fails with ECHILD" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
+const utest = @import("utest");

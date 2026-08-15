@@ -36,23 +36,6 @@ const S = struct {
     }
 };
 
-/// Spawns a thread with CLONE_THREAD.
-fn spawnThread(func: *const fn (usize) callconv(.c) u8, arg: usize) !void {
-    const stack_size = 64 * 1024;
-    const stack = try std.posix.mmap(
-        null,
-        stack_size,
-        .{ .READ = true, .WRITE = true },
-        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
-        -1,
-        0,
-    );
-    const sp = @intFromPtr(stack.ptr) + stack.len;
-    const flags: u32 = linux.CLONE.VM | linux.CLONE.THREAD | linux.CLONE.SIGHAND;
-    const ret = linux.clone(func, sp, flags, arg, null, 0, null);
-    if (linux.errno(ret) != .SUCCESS) return error.CloneFailed;
-}
-
 test "last thread (non-leader)'s exit status is reported" {
     S.leader_exited.store(0, .release);
 
@@ -60,7 +43,7 @@ test "last thread (non-leader)'s exit status is reported" {
     var ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
     if (ret == 0) {
         // Child process: group leader
-        _ = spawnThread(S.workerExitsLast, non_leader_exit_code) catch linux.exit_group(2);
+        _ = utest.task.spawnThread(S.workerExitsLast, non_leader_exit_code) catch linux.exit_group(2);
 
         // Exit as the leader first, while the worker thread is still alive.
         S.leader_exited.store(1, .release);
@@ -81,7 +64,7 @@ test "last thread (leader)'s exit status is reported" {
     var ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
     if (ret == 0) {
         // Child process: group leader
-        _ = spawnThread(S.workerExitsImmediately, 1) catch linux.exit_group(2);
+        _ = utest.task.spawnThread(S.workerExitsImmediately, 1) catch linux.exit_group(2);
 
         // Give the worker some opportunity to exit and leave the group.
         for (0..100) |_| _ = linux.sched_yield();
@@ -112,7 +95,7 @@ test "thread group is not waitable until every member has exited" {
     var ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
     if (ret == 0) {
         // Child process: group leader
-        _ = spawnThread(S.workerBlocksThenExits, @intCast(to_worker[0])) catch linux.exit_group(2);
+        _ = utest.task.spawnThread(S.workerBlocksThenExits, @intCast(to_worker[0])) catch linux.exit_group(2);
 
         // Tell the parent the leader is about to exit, then exit first.
         const byte = [_]u8{1};
@@ -149,3 +132,4 @@ test "thread group is not waitable until every member has exited" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
+const utest = @import("utest");

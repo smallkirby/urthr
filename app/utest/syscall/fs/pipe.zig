@@ -134,22 +134,10 @@ test "a single write wakes all readers blocked on the same pipe" {
     };
 
     // Spawn a thread that also blocks reading from the same pipe read-end.
-    const stack_size = 64 * 1024;
-    const stack = std.posix.mmap(
-        null,
-        stack_size,
-        .{ .READ = true, .WRITE = true },
-        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
-        -1,
-        0,
-    ) catch return error.SpawnThreadFailed;
-    const sp = @intFromPtr(stack.ptr) + stack.len;
-    const flags: u32 = linux.CLONE.VM | linux.CLONE.THREAD | linux.CLONE.SIGHAND;
-    var ret = linux.clone(S.readOne, sp, flags, @intCast(pfds[0]), null, 0, null);
-    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    _ = try utest.task.spawnThread(S.readOne, @intCast(pfds[0]));
 
     // Fork a process that performs a single write of 2 bytes.
-    ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
     if (ret == 0) {
         const ts: linux.timespec = .{ .sec = 0, .nsec = 50_000_000 };
         _ = utest.time.clockNanoSleep(utest.time.CLOCK_MONOTONIC, 0, &ts, null);

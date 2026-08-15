@@ -39,18 +39,7 @@ test "propagates to every thread in the same thread group" {
         const tgid = linux.getpid();
 
         // Spawn a worker thread in the same group.
-        const stack_size = 64 * 1024;
-        const stack = std.posix.mmap(
-            null,
-            stack_size,
-            .{ .READ = true, .WRITE = true },
-            .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
-            -1,
-            0,
-        ) catch linux.exit_group(2);
-        const sp = @intFromPtr(stack.ptr) + stack.len;
-        const flags: u32 = linux.CLONE.VM | linux.CLONE.THREAD | linux.CLONE.SIGHAND;
-        _ = linux.clone(S.worker, sp, flags, @intCast(tgid), null, 0, null);
+        _ = utest.task.spawnThread(S.worker, @intCast(tgid)) catch linux.exit_group(2);
 
         // Become own process group leader.
         _ = linux.setpgid(0, 0);
@@ -84,3 +73,4 @@ test "propagates to every thread in the same thread group" {
 const std = @import("std");
 const testing = std.testing;
 const linux = std.os.linux;
+const utest = @import("utest");

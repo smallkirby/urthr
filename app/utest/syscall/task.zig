@@ -1,3 +1,23 @@
+/// Spawns a thread sibling sharing the caller's address space, signal handlers and thread group.
+///
+/// Returns the new thread's TID.
+pub fn spawnThread(func: *const fn (usize) callconv(.c) u8, arg: usize) !linux.pid_t {
+    const stack_size = 64 * 1024;
+    const stack = try std.posix.mmap(
+        null,
+        stack_size,
+        .{ .READ = true, .WRITE = true },
+        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+        -1,
+        0,
+    );
+    const sp = @intFromPtr(stack.ptr) + stack.len;
+    const flags: u32 = linux.CLONE.VM | linux.CLONE.THREAD | linux.CLONE.SIGHAND;
+    const ret = linux.clone(func, sp, flags, arg, null, 0, null);
+    if (linux.errno(ret) != .SUCCESS) return error.CloneFailed;
+    return @bitCast(@as(u32, @truncate(ret)));
+}
+
 comptime {
     _ = @import("task/clone.zig");
     _ = @import("task/exit.zig");
@@ -19,3 +39,10 @@ comptime {
     _ = @import("task/thread_group.zig");
     _ = @import("task/wait4.zig");
 }
+
+// =============================================================
+// Imports
+// =============================================================
+
+const std = @import("std");
+const linux = std.os.linux;
