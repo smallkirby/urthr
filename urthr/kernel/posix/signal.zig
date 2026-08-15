@@ -115,12 +115,12 @@ pub fn sysKill(pid: i32, signum: Signal) ReturnType {
     const tgid: u32 = if (pid > 0)
         @bitCast(pid)
     else if (pid == 0)
-        cur.pgid
+        cur.group.getPgid()
     else
         return .err(.nosys); // negative pid (process group) not implemented
 
     // Only self-targeting is supported for now.
-    if (tgid != cur.tgid and tgid != cur.pgid) {
+    if (tgid != cur.group.getTgid() and tgid != cur.group.getPgid()) {
         urd.unimplemented("kill: not self-targeting.");
     }
 

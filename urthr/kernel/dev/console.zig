@@ -25,7 +25,7 @@ const Console = struct {
 };
 
 fn open(_: *fs.Inode, _: Allocator) fs.Error!*anyopaque {
-    instance.fg_pgid = urd.sched.getCurrent().pgid;
+    instance.fg_pgid = urd.sched.getCurrent().group.getPgid();
 
     return @ptrCast(&instance);
 }

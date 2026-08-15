@@ -52,7 +52,7 @@ fn handlePageFault(far: usize, access: common.mem.AccessType) bool {
 
     th.vmm.faultIn(far, access) catch |err| {
         // Failed to handle the fault. Immediately terminate the current thread.
-        log.warn("Unhandled #PF: TGID={d} ID={d} FAR=0x{X} ACCESS={} ERR={}", .{ th.tgid, th.id, far, access, err });
+        log.warn("Unhandled #PF: TGID={d} ID={d} FAR=0x{X} ACCESS={} ERR={}", .{ th.group.getTgid(), th.id, far, access, err });
         signal.pushSync(.segv);
     };
 
@@ -95,7 +95,8 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
     errdefer vmm.deinit(mem.bin);
 
     // Create a new thread group for the new kernel thread.
-    const group = try ThreadGroup.new(mem.bin, th);
+    const id = allocateId();
+    const group = try ThreadGroup.new(mem.bin, th, id, id, id);
     errdefer group.deref(mem.bin);
     const handlers = try signal.Handlers.new(mem.bin);
     errdefer handlers.deinit(mem.bin);
@@ -113,13 +114,9 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
     };
 
     // Initialize thread.
-    const id = allocateId();
     th.* = .{
         .id = id,
-        .tgid = id,
-        .ppid = cur.tgid,
-        .pgid = id,
-        .sid = id,
+        .ppid = cur.group.getTgid(),
         .name = name,
         .state = .running,
         .sp = @intFromPtr(sp.ptr) + sp.len,
@@ -309,6 +306,12 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         usp,
     );
 
+    const id = blk: {
+        const ie = lock.lockDisableIrq();
+        defer lock.unlockRestoreIrq(ie);
+        break :blk allocateId();
+    };
+
     // Share or copy VM.
     const vmm = if (flags.vm)
         cur.vmm.ref()
@@ -320,7 +323,13 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
     const group = if (flags.thread)
         cur.group.ref()
     else
-        try ThreadGroup.new(mem.bin, th);
+        try ThreadGroup.new(
+            mem.bin,
+            th,
+            id,
+            cur.group.getPgid(),
+            cur.group.getSid(),
+        );
     errdefer group.deref(mem.bin);
 
     // Share or copy the signal handler table.
@@ -349,14 +358,10 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
     {
         const ie = lock.lockDisableIrq();
         defer lock.unlockRestoreIrq(ie);
-        const id = allocateId();
 
         th.* = .{
             .id = id,
-            .tgid = if (flags.thread) cur.tgid else id,
-            .ppid = if (flags.thread) cur.ppid else cur.tgid,
-            .pgid = cur.pgid,
-            .sid = cur.sid,
+            .ppid = if (flags.thread) cur.ppid else cur.group.getTgid(),
             .name = name,
             .state = .running,
             .sp = @intFromPtr(sp.ptr) + sp.len,
@@ -393,7 +398,7 @@ pub fn exit(status: thread.ExitStatus) noreturn {
     cur.exit_status = status;
 
     // Check if the current thread is init.
-    if (cur.tgid == 1 and cur.id == 1) {
+    if (cur.group.getTgid() == 1 and cur.id == 1) {
         @branchHint(.cold);
 
         if (urd.allow_init_exit) {
@@ -530,7 +535,7 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
             zombie_list.remove(th);
 
             const result: WaitResult = .{
-                .pid = th.tgid,
+                .pid = th.group.getTgid(),
                 .exit_status = th.exit_status,
             };
             shutdownThread(th);
@@ -556,11 +561,11 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
 
 /// Check if the given child thread matches the PID in POSIX-way.
 fn matchesChild(parent: *const Thread, pid: i32, child: *const Thread) bool {
-    if (child.ppid != parent.tgid) return false;
+    if (child.ppid != parent.group.getTgid()) return false;
     if (pid == -1) return true; // any child.
-    if (pid > 0) return child.tgid == @as(u32, @bitCast(pid)); // any child in process group.
-    if (pid == 0) return child.pgid == parent.pgid; // specific child with TGID == PID.
-    return child.pgid == @as(u32, @bitCast(-pid)); // any child with PGID == -PID.
+    if (pid > 0) return child.group.getTgid() == @as(u32, @bitCast(pid)); // any child in process group.
+    if (pid == 0) return child.group.getPgid() == parent.group.getPgid(); // specific child with TGID == PID.
+    return child.group.getPgid() == @as(u32, @bitCast(-pid)); // any child with PGID == -PID.
 }
 
 // =============================================================

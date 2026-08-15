@@ -2,14 +2,8 @@
 pub const Thread = struct {
     /// Thread ID.
     id: Id,
-    /// Thread group ID.
-    tgid: Tgid,
     /// Parent TGID.
     ppid: Id,
-    /// Process group ID.
-    pgid: Pgid,
-    /// Session ID.
-    sid: Sid,
 
     /// Thread name.
     name: []const u8,

@@ -20,6 +20,15 @@ _dying: bool = false,
 /// Exit status for all members of this group.
 _exit_status: thread.ExitStatus = .{ .code = 0 },
 
+/// TGID of this group.
+///
+/// Equal to the leader's TID.
+_tgid: thread.Tgid,
+/// Process group ID of this group.
+_pgid: thread.Pgid,
+/// Session ID of this group.
+_sid: thread.Sid,
+
 /// Protects fields of this struct.
 _lock: SpinLock = .{},
 
@@ -29,10 +38,40 @@ pub const MemberList = typing.InlineDoublyLinkedList(Thread, "tg_sibling");
 /// Create a new thread group whose sole member and leader is `leader`.
 ///
 /// The caller is responsible for adding `leader` to `members` once it has been fully initialized.
-pub fn new(allocator: Allocator, leader: *Thread) Allocator.Error!*Self {
+pub fn new(allocator: Allocator, leader: *Thread, tgid: thread.Tgid, pgid: thread.Pgid, sid: thread.Sid) Allocator.Error!*Self {
     const self = try allocator.create(Self);
-    self.* = .{ ._leader = leader };
+    self.* = .{
+        ._leader = leader,
+        ._tgid = tgid,
+        ._pgid = pgid,
+        ._sid = sid,
+    };
     return self;
+}
+
+/// Get the process group ID.
+pub fn getPgid(self: *const Self) thread.Pgid {
+    return self._pgid;
+}
+
+/// Set the process group ID.
+pub fn setPgid(self: *Self, pgid: thread.Pgid) void {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    self._pgid = pgid;
+}
+
+/// Get the session ID.
+pub fn getSid(self: *const Self) thread.Sid {
+    return self._sid;
+}
+
+/// Set the session ID.
+pub fn setSid(self: *Self, sid: thread.Sid) void {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    self._sid = sid;
+    self._pgid = sid;
 }
 
 /// Increment the reference count to share this thread group.
@@ -57,6 +96,11 @@ pub fn deref(self: *Self, allocator: Allocator) void {
 /// Get a thread leader whose TID is equal to this group's TGID.
 pub fn getLeader(self: *const Self) *Thread {
     return self._leader;
+}
+
+/// Get the TGID of this group.
+pub fn getTgid(self: *const Self) thread.Tgid {
+    return self._tgid;
 }
 
 /// Add a fully-initialized thread to this group's live members.

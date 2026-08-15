@@ -74,7 +74,7 @@ pub fn sysFork() ReturnType {
         .sighand = false,
     }, 0) catch return .err(.nomem);
 
-    return .success(@bitCast(@as(u64, child.tgid)));
+    return .success(@bitCast(@as(u64, child.group.getTgid())));
 }
 
 /// syscall: vfork
@@ -86,7 +86,7 @@ pub fn sysVfork() ReturnType {
         .sighand = false,
     }, 0) catch return .err(.nomem);
 
-    return .success(@bitCast(@as(u64, child.tgid)));
+    return .success(@bitCast(@as(u64, child.group.getTgid())));
 }
 
 /// Linux compatible flags for clone syscall.
@@ -182,7 +182,7 @@ const ArchPrctlOp = enum(u32) {
 /// syscall: getpid
 pub fn sysGetPid() ReturnType {
     const current = sched.getCurrent();
-    return .success(@bitCast(@as(u64, current.tgid)));
+    return .success(@bitCast(@as(u64, current.group.getTgid())));
 }
 
 /// syscall: getppid
@@ -236,17 +236,17 @@ pub fn sysGetResGid(rgid: *u32, egid: *u32, sgid: *u32) ReturnType {
 /// syscall: setpgid
 pub fn sysSetPgid(pid: i32, pgid: i32) ReturnType {
     const cur = sched.getCurrent();
-    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.tgid) {
+    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.group.getTgid()) {
         return .err(.perm);
     }
     if (pgid < 0) {
         return .err(.inval);
     }
     // Session leaders cannot change their pgid.
-    if (cur.tgid == cur.sid) {
+    if (cur.group.getTgid() == cur.group.getSid()) {
         return .err(.perm);
     }
-    cur.pgid = if (pgid == 0) cur.tgid else @bitCast(pgid);
+    cur.group.setPgid(if (pgid == 0) cur.group.getTgid() else @bitCast(pgid));
 
     return .success(0);
 }
@@ -254,33 +254,32 @@ pub fn sysSetPgid(pid: i32, pgid: i32) ReturnType {
 /// syscall: getpgid
 pub fn sysGetPgid(pid: i32) ReturnType {
     const cur = sched.getCurrent();
-    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.tgid) {
+    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.group.getTgid()) {
         return .err(.perm);
     }
-    return .success(@intCast(cur.pgid));
+    return .success(@intCast(cur.group.getPgid()));
 }
 
 /// syscall: setsid
 pub fn sysSetsid() ReturnType {
     const cur = sched.getCurrent();
-    if (cur.tgid == cur.pgid) {
+    if (cur.group.getTgid() == cur.group.getPgid()) {
         // Already a process group leader.
         return .err(.perm);
     }
-    cur.sid = cur.tgid;
-    cur.pgid = cur.tgid;
+    cur.group.setSid(cur.group.getTgid());
 
-    return .success(@intCast(cur.sid));
+    return .success(@intCast(cur.group.getSid()));
 }
 
 /// syscall: getsid
 pub fn sysGetsid(pid: i32) ReturnType {
     const cur = sched.getCurrent();
-    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.tgid) {
+    if (pid != 0 and @as(u32, @bitCast(pid)) != cur.group.getTgid()) {
         return .err(.perm);
     }
 
-    return .success(@intCast(cur.sid));
+    return .success(@intCast(cur.group.getSid()));
 }
 
 /// syscall: reboot

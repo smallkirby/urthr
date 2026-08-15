@@ -32,17 +32,14 @@ pub fn initLocal() Allocator.Error!void {
     errdefer vmm.deinit(allocator);
 
     // Create a new thread group for the idle thread.
-    const group = try urd.task.ThreadGroup.new(allocator, th);
+    const group = try urd.task.ThreadGroup.new(allocator, th, 0, 0, 0);
     errdefer group.deref(allocator);
     const handlers = try urd.task.signal.Handlers.new(allocator);
     errdefer handlers.deinit(allocator);
 
     th.* = .{
         .id = 0,
-        .tgid = 0,
         .ppid = 0,
-        .pgid = 0,
-        .sid = 0,
         .name = "idle", // TODO: should be unique per core.
         .state = .running,
         .sp = undefined,
