@@ -489,6 +489,7 @@ fn releaseThread(th: *thread.Thread) void {
 pub fn shutdownThread(th: *thread.Thread) void {
     if (th.stack) |kstack| mem.page.freeBytesV(kstack);
     mem.bin.free(th.name);
+    th.group.deref(mem.bin);
     mem.bin.destroy(th);
 }
 
@@ -527,12 +528,14 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
             rtt.expectEqual(.zombie, th.state);
 
             zombie_list.remove(th);
-            shutdownThread(th);
 
-            return .{
+            const result: WaitResult = .{
                 .pid = th.tgid,
                 .exit_status = th.exit_status,
             };
+            shutdownThread(th);
+
+            return result;
         }
 
         // Check for alive matching children.

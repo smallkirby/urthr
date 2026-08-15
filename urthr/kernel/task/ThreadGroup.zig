@@ -37,14 +37,21 @@ pub fn new(allocator: Allocator, leader: *Thread) Allocator.Error!*Self {
 
 /// Increment the reference count to share this thread group.
 pub fn ref(self: *Self) *Self {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
     self._refcnt += 1;
     return self;
 }
 
 /// Decrement the reference count, freeing the group when it reaches zero.
 pub fn deref(self: *Self, allocator: Allocator) void {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
     self._refcnt -= 1;
-    if (self._refcnt == 0) allocator.destroy(self);
+    if (self._refcnt == 0) {
+        allocator.destroy(self);
+    }
 }
 
 /// Get a thread leader whose TID is equal to this group's TGID.
