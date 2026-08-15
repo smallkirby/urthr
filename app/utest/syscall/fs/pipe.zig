@@ -119,6 +119,56 @@ test "pipe2 with an invalid flag bit fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
+test "a single write wakes all readers blocked on the same pipe" {
+    var pfds: [2]i32 = undefined;
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.pipe2(&pfds, .{})));
+    defer _ = linux.close(pfds[0]);
+    defer _ = linux.close(pfds[1]);
+
+    const S = struct {
+        fn readOne(fd: usize) callconv(.c) u8 {
+            var buf: [1]u8 = undefined;
+            _ = linux.read(@intCast(fd), &buf, 1);
+            linux.exit(0);
+        }
+    };
+
+    // Spawn a thread that also blocks reading from the same pipe read-end.
+    const stack_size = 64 * 1024;
+    const stack = std.posix.mmap(
+        null,
+        stack_size,
+        .{ .READ = true, .WRITE = true },
+        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+        -1,
+        0,
+    ) catch return error.SpawnThreadFailed;
+    const sp = @intFromPtr(stack.ptr) + stack.len;
+    const flags: u32 = linux.CLONE.VM | linux.CLONE.THREAD | linux.CLONE.SIGHAND;
+    var ret = linux.clone(S.readOne, sp, flags, @intCast(pfds[0]), null, 0, null);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+
+    // Fork a process that performs a single write of 2 bytes.
+    ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    if (ret == 0) {
+        const ts: linux.timespec = .{ .sec = 0, .nsec = 50_000_000 };
+        _ = utest.time.clockNanoSleep(utest.time.CLOCK_MONOTONIC, 0, &ts, null);
+        const data = [_]u8{ 1, 2 };
+        _ = linux.write(pfds[1], &data, data.len);
+        linux.exit(0);
+    }
+    const child_pid: linux.pid_t = @intCast(ret);
+    try testing.expect(child_pid > 0);
+
+    // Leader also blocks reading from the same pipe.
+    var buf: [1]u8 = undefined;
+    try testing.expectEqual(@as(usize, 1), linux.read(pfds[0], &buf, 1));
+
+    // Check if the child process got waken up and exited.
+    var status: u32 = undefined;
+    _ = linux.wait4(child_pid, &status, 0, null);
+}
+
 // =============================================================
 // Imports
 // =============================================================

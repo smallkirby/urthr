@@ -268,7 +268,7 @@ fn frRead(file: *fs.File, buf: []u8, _: usize) fs.Error!usize {
     }
 
     const n = pipe.read(buf);
-    pipe.wcv.signal();
+    pipe.wcv.broadcast();
     return n;
 }
 
@@ -294,7 +294,7 @@ fn frWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     }
 
     const n = pipe.write(buf);
-    pipe.rcv.signal();
+    pipe.rcv.broadcast();
     return n;
 }
 
