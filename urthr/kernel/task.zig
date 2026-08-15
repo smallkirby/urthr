@@ -1,4 +1,13 @@
 //! Process and thread module.
+//!
+//! #### Transition of thread state
+//!
+//! - running -> blocked: Thread blocks on an event and yields the CPU.
+//! - blocked -> running: Thread is woken up by an event and added to the ready queue.
+//! - running -> moribund: Thread who is a last member of a group exits and waits for being switched out.
+//! - running -> dead: Thread who is not a last member of a group exits and waits for being switched out.
+//! - moribund -> zombie: Thread is switched out and becomes a zombie.
+//! - zombie -> (deinit): Thread is reaped by the parent and freed.
 
 pub const signal = @import("task/signal.zig");
 pub const thread = @import("task/thread.zig");
@@ -112,7 +121,7 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         .pgid = id,
         .sid = id,
         .name = name,
-        .state = .ready,
+        .state = .running,
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
         .vmm = vmm,
@@ -349,7 +358,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .pgid = cur.pgid,
             .sid = cur.sid,
             .name = name,
-            .state = .ready,
+            .state = .running,
             .sp = @intFromPtr(sp.ptr) + sp.len,
             .stack = kstack,
             .vmm = vmm,
@@ -398,21 +407,8 @@ pub fn exit(status: thread.ExitStatus) noreturn {
         }
     }
 
-    // Disarm any interval timer.
-    urd.time.cancelItimer(cur);
-
-    // Release the fd table.
-    cur.fs.fdtbl.deinit();
-
-    // Release fs information.
-    cur.fs.root.dentry.unref();
-    cur.fs.cwd.dentry.unref();
-
-    // Free the address space.
-    cur.vmm.deinit(mem.bin);
-
-    // Release the signal handler table.
-    cur.sigstate.handlers.deinit(mem.bin);
+    // Release thread resources.
+    releaseThread(cur);
 
     // Wake up the parent waiting on a vfork-clone.
     if (cur.vfork_done) |vd| {
@@ -421,48 +417,84 @@ pub fn exit(status: thread.ExitStatus) noreturn {
     }
 
     // Leave the thread group.
-    const group = cur.group;
-    if (!group.leave(cur)) {
-        // If this is not the last member, switch to the next thread. Never returns.
-        sched.exitCurrent();
+    const is_last = cur.group.leave(cur);
+    // Switch to the next thread.
+    sched.exitCurrent(if (is_last) .moribund else .dead);
+
+    unreachable;
+}
+
+/// Called on a thread has been switched out.
+pub fn onSwitchedOut(prev: *Thread) void {
+    switch (prev.state) {
+        // When the thread was a last member of the group.
+        .moribund => becomeZombie(prev),
+        // When the thread was not the last member of the group.
+        // Group leader is kept alive until the last member exits.
+        .dead => if (prev.group.getLeader() != prev) shutdownThread(prev),
+        else => {},
     }
-    const leader = group.reapPendingExcept(cur);
-    group.deref(mem.bin);
+}
 
-    // Remove from parent's children list, and move to zombie list.
-    // IRQs are intentionally disabled until the context switch
-    // to prevent the parent from freeing kernel stack before `exitCurrent()` completes.
-    {
-        _ = zombie_lock.lockDisableIrq();
-        defer zombie_lock.unlock();
+/// Turn the thread into a zombie thread.
+fn becomeZombie(th: *Thread) void {
+    const ie = zombie_lock.lockDisableIrq();
+    defer zombie_lock.unlockRestoreIrq(ie);
 
-        if (leader != cur) {
-            // The original leader exited earlier.
-            cur.parent = leader.parent;
-            cur.ppid = leader.ppid;
-            cur.pgid = leader.pgid;
-            cur.sid = leader.sid;
-            if (leader.parent) |p| p.children.remove(leader);
-
-            // Reap the leader's resources.
-            if (leader.stack) |kstack| mem.page.freeBytesV(kstack);
-            mem.bin.free(leader.name);
-            mem.bin.destroy(leader);
-        } else if (cur.parent) |p| {
-            p.children.remove(cur);
-        }
-
-        if (cur.parent) |p| {
-            p.child_exit_cv.signal();
-        }
-        zombie_list.append(cur);
+    const leader = th.group.getLeader();
+    if (leader != th) {
+        // The original leader exited earlier and was kept alive for this.
+        // Re-assign the leader's IDs to the new leader.
+        th.parent = leader.parent;
+        th.ppid = leader.ppid;
+        if (leader.parent) |p| p.children.remove(leader);
+        // Then clean up the original leader.
+        shutdownThread(leader);
+    } else if (th.parent) |p| {
+        p.children.remove(th);
     }
 
-    // Switch to the next thread. Never returns.
-    sched.exitCurrent();
+    // Append the thread to the zombie list.
+    th.state = .zombie;
+    zombie_list.append(th);
+
+    // Notify the parent that a child has exited.
+    if (th.parent) |p| {
+        p.child_exit_cv.signal();
+    }
+}
+
+/// Release the resources of a thread.
+fn releaseThread(th: *thread.Thread) void {
+    // Disarm any interval timer.
+    urd.time.cancelItimer(th);
+
+    // Release the fd table.
+    th.fs.fdtbl.deinit();
+
+    // Release fs information.
+    th.fs.root.dentry.unref();
+    th.fs.cwd.dentry.unref();
+
+    // Free the address space.
+    th.vmm.deinit(mem.bin);
+
+    // Release the signal handler table.
+    th.sigstate.handlers.deinit(mem.bin);
+}
+
+/// Colempletely shutdown the given thread, freeing all its resources.
+///
+/// After this function, the thread struct and related resources are no longer accessible.
+pub fn shutdownThread(th: *thread.Thread) void {
+    if (th.stack) |kstack| mem.page.freeBytesV(kstack);
+    mem.bin.free(th.name);
+    mem.bin.destroy(th);
 }
 
 /// Terminate every thread in the current thread group with the given exit code or signal.
+///
+/// Other threads in the group marked dying will cooperatively exit when they're scheduled.
 pub fn exitGroup(status: thread.ExitStatus) noreturn {
     const cur = sched.getCurrent();
     cur.group.markDying(status);
@@ -492,11 +524,11 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
         while (it.next()) |th| {
             if (!matchesChild(cur, pid, th)) continue;
 
-            defer if (th.stack) |kstack| mem.page.freeBytesV(kstack);
-            defer mem.bin.destroy(th);
-            defer mem.bin.free(th.name);
+            rtt.expectEqual(.zombie, th.state);
 
             zombie_list.remove(th);
+            shutdownThread(th);
+
             return .{
                 .pid = th.tgid,
                 .exit_status = th.exit_status,
@@ -665,7 +697,7 @@ fn ThreadFuncWrapper(comptime f: anytype, ArgType: type) type {
             mem.bin.destroy(argv);
 
             // Exit thread.
-            sched.exitCurrent();
+            sched.exitCurrent(.dead);
         }
     };
 }
@@ -702,6 +734,7 @@ const std = @import("std");
 const log = std.log.scoped(.task);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
+const rtt = common.rtt;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const SpinLock = urd.sync.SpinLock;

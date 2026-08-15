@@ -90,13 +90,16 @@ pub const Sid = u32;
 
 /// Thread state.
 pub const State = enum {
-    /// Thread is ready to run.
-    ready,
-    /// Thread is currently running.
+    /// Thread is currently running or ready in the runqueue.
     running,
     /// Thread is blocked, waiting for an event.
     blocked,
-    /// Thread has finished execution and is waiting to be cleaned up.
+    /// Thread has finished execution as the group's leader,
+    /// and waiting to become zombie after switched-out.
+    moribund,
+    /// Thread has finished execution but is waiting for the parent to collect.
+    zombie,
+    /// Thread has finished execution and is ready to be cleaned up.
     dead,
 };
 

@@ -15,8 +15,6 @@ _refcnt: usize = 1,
 _leader: *Thread,
 /// Live, not yet exited, members of this group.
 _members: MemberList = .{},
-/// Members that exited before the group's last member.
-_pending_reap: MemberList = .{},
 /// Indicates that every member should terminate.
 _dying: bool = false,
 /// Exit status for all members of this group.
@@ -61,44 +59,14 @@ pub fn addMember(self: *Self, th: *Thread) void {
     self._members.append(th);
 }
 
-/// Remove the thread from this group's live members,
-/// parking it on the pending list.
+/// Remove the thread from this group's live members.
 ///
 /// Returns whether the thread was the last live member.
 pub fn leave(self: *Self, th: *Thread) bool {
     const ie = self._lock.lockDisableIrq();
     defer self._lock.unlockRestoreIrq(ie);
     self._members.remove(th);
-    self._pending_reap.append(th);
     return self._members.isEmpty();
-}
-
-/// Reap every already-exited member other than `except` and the group leader.
-///
-/// The leader's struct is kept alive, so the caller is responsible for freeing it.
-///
-/// Returns the group leader.
-pub fn reapPendingExcept(self: *Self, except: *Thread) *Thread {
-    const ie = self._lock.lockDisableIrq();
-    defer self._lock.unlockRestoreIrq(ie);
-
-    // Remove all members from the pending list.
-    var it = self._pending_reap.iter();
-    while (it.next()) |th| {
-        if (th == except or th == self._leader) {
-            continue;
-        }
-        self._pending_reap.remove(th);
-        if (th.stack) |kstack| mem.page.freeBytesV(kstack);
-        mem.bin.free(th.name);
-        mem.bin.destroy(th);
-    }
-    // Remove `except` from the pending list.
-    self._pending_reap.remove(except);
-    // Also, remove the leader.
-    if (self._leader != except) self._pending_reap.remove(self._leader);
-
-    return self._leader;
 }
 
 /// Mark every member of this group for termination with the given status.
@@ -123,7 +91,6 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const typing = common.typing;
 const urd = @import("urthr");
-const mem = urd.mem;
 const SpinLock = urd.sync.SpinLock;
 const thread = @import("thread.zig");
 const Thread = thread.Thread;

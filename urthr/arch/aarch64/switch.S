@@ -1,6 +1,6 @@
 //! Context switch implementation for AArch64.
 
-// switchContextAsm(old: *usize, new: *const usize)
+// switchContextAsm(oldsp: *usize, newsp: *const usize, prev: *anyopaque) -> *anyopaque
 .global switchContextAsm
 switchContextAsm:
   // Save callee-saved registers to current stack.
@@ -12,12 +12,12 @@ switchContextAsm:
   stp x29, x30, [sp, #-16]!
 
   // Save current SP.
-  mov x2, sp
-  str x2, [x0]
+  mov x4, sp
+  str x4, [x0]
 
   // Switch to new SP.
-  ldr x2, [x1]
-  mov sp, x2
+  ldr x4, [x1]
+  mov sp, x4
 
   // Restore callee-saved registers from new stack.
   ldp x29, x30, [sp], #16
@@ -26,5 +26,8 @@ switchContextAsm:
   ldp x23, x24, [sp], #16
   ldp x21, x22, [sp], #16
   ldp x19, x20, [sp], #16
+
+  // Return the previous thread pointer.
+  mov x0, x2
 
   ret

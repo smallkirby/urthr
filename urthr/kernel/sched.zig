@@ -74,7 +74,7 @@ pub fn enqueue(th: *Thread) void {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
-    th.state = .ready;
+    th.state = .running;
     qready.append(th);
 }
 
@@ -86,10 +86,15 @@ pub fn wake(th: *Thread) void {
     defer lock.unlockRestoreIrq(ie);
 
     if (th.state == .blocked) {
-        th.state = .ready;
+        th.state = .running;
         qready.append(th);
         markNeedResched();
     }
+}
+
+/// Yield the current thread to allow other threads to run.
+pub fn reschedule() void {
+    rescheduleImpl(null, .running, null);
 }
 
 /// Put the current thread to sleep.
@@ -98,16 +103,7 @@ pub fn wake(th: *Thread) void {
 ///
 /// Marks the current thread as blocked before switching.
 pub fn blockCurrentCheckWoken(woken: *const bool) void {
-    const ie = lock.lockDisableIrq();
-    defer arch.intr.setMask(ie);
-
-    // Check if the thread was already woken during the lock is held.
-    if (woken.*) {
-        lock.unlock();
-        return;
-    }
-
-    blockCurrentImpl(null);
+    rescheduleImpl(null, .blocked, woken);
 }
 
 /// Put the current thread to sleep.
@@ -116,115 +112,14 @@ pub fn blockCurrentCheckWoken(woken: *const bool) void {
 ///
 /// The lock is released on return.
 pub fn blockCurrent(caller_lock: ?*SpinLock) void {
-    const ie = lock.lockDisableIrq();
-    defer arch.intr.setMask(ie);
-
-    blockCurrentImpl(caller_lock);
-}
-
-/// Put the current thread to sleep and switch to another thread.
-fn blockCurrentImpl(caller_lock: ?*SpinLock) void {
-    rtt.expect(lock.isLocked());
-    if (caller_lock) |l| rtt.expect(l.isLocked());
-
-    // Update the current thread's runtime.
-    accountRuntime();
-
-    const cur = getCurrent();
-    cur.state = .blocked;
-    cur.need_resched = false;
-
-    const next = pickNext();
-    setCurrent(next);
-    next.state = .running;
-
-    // Switch user-space page table if needed.
-    arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
-
-    // Release locks before switching.
-    lock.unlock();
-    if (caller_lock) |l| l.unlock();
-
-    // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp, kstackTopOf(next));
-
-    // Update the last switch-in timestamp.
-    updateLastExecTimestamp();
-}
-
-/// Top of the given thread's kernel stack, or 0 if it has none.
-fn kstackTopOf(th: *Thread) usize {
-    return if (th.stack) |kstack| @intFromPtr(kstack.ptr) + kstack.len else 0;
-}
-
-/// Yield the current thread to allow other threads to run.
-///
-/// If no other threads are ready, this will simply return and continue running the current thread.
-pub fn reschedule() void {
-    const ie = lock.lockDisableIrq();
-
-    // Get the next thread from the ready queue.
-    const next = qready.popFirst() orelse {
-        return lock.unlockRestoreIrq(ie);
-    };
-    next.state = .running;
-
-    // Account runtime before switching away from the current thread.
-    accountRuntime();
-
-    // Move the current thread to the ready queue.
-    const cur = getCurrent();
-    cur.state = .ready;
-    cur.need_resched = false;
-    if (cur != getIdle()) {
-        qready.append(cur);
-    }
-
-    setCurrent(next);
-
-    // Switch user-space page table if needed.
-    arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
-
-    // Release lock before switching. IRQs remain disabled until restored.
-    lock.unlock();
-
-    // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp, kstackTopOf(next));
-
-    // Update the last switch-in timestamp.
-    updateLastExecTimestamp();
-
-    // Resume here when switched back to this thread.
-    arch.intr.setMask(ie);
+    rescheduleImpl(caller_lock, .blocked, null);
 }
 
 /// Exit the current thread.
-///
-/// Marks the current thread as dead and switches to the next ready thread.
-pub fn exitCurrent() noreturn {
-    _ = lock.lockDisableIrq();
+pub fn exitCurrent(state: thread.State) noreturn {
+    rtt.expect(state == .dead or state == .moribund);
 
-    rtt.expect(getCurrent() != getIdle());
-
-    accountRuntime();
-
-    // Mark the current thread as dead.
-    const cur = getCurrent();
-    cur.state = .dead;
-
-    // Select and set the next thread to run.
-    const next = pickNext();
-    setCurrent(next);
-    next.state = .running;
-
-    // Switch user-space page table if needed.
-    arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
-
-    // Release lock before switching. IRQs remain disabled.
-    lock.unlock();
-
-    // Switch to the next thread.
-    arch.thread.switchContext(&cur.sp, &next.sp, kstackTopOf(next));
+    rescheduleImpl(null, state, null);
 
     // This thread should not be scheduled again.
     unreachable;
@@ -238,6 +133,79 @@ pub fn shouldReschedule() bool {
 /// Mark the currently running thread as needing rescheduling.
 pub fn markNeedResched() void {
     getCurrent().need_resched = true;
+}
+
+/// Top of the given thread's kernel stack, or 0 if it has none.
+fn kstackTopOf(th: *Thread) usize {
+    return if (th.stack) |kstack| @intFromPtr(kstack.ptr) + kstack.len else 0;
+}
+
+/// Select the next thread to run and switch to it.
+///
+/// If the caller lock is provided, it is released before switching and re-acquired on return.
+///
+/// If `skip` is provided and points to a true value, returns immediately.
+fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*const bool) void {
+    const ie = lock.lockDisableIrq();
+    if (caller_lock) |l| rtt.expect(l.isLocked());
+
+    if (skip) |s| if (s.*) {
+        return lock.unlockRestoreIrq(ie);
+    };
+
+    if (next_state == .running and qready.isEmpty()) {
+        return lock.unlockRestoreIrq(ie);
+    }
+
+    const prev = blk: {
+        // Get the next thread from the ready queue.
+        const next = pickNext();
+
+        // Account runtime before switching away from the current thread.
+        accountRuntime();
+
+        // Move the current thread to the ready queue.
+        const cur = getCurrent();
+        cur.state = next_state;
+        cur.need_resched = false;
+        if (cur.state == .running and cur != getIdle()) {
+            qready.append(cur);
+        }
+        setCurrent(next);
+
+        // Switch user-space page table if needed.
+        arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
+
+        // Release lock before switching. IRQs remain disabled until restored.
+        lock.unlock();
+        if (caller_lock) |l| l.unlock();
+
+        // Switch to the next thread.
+        break :blk arch.thread.switchContext(
+            &cur.sp,
+            &next.sp,
+            kstackTopOf(next),
+            cur,
+        );
+    };
+
+    {
+        // Do deferred work for the previous thread.
+        onSwitchedIn(prev);
+
+        // Update the last switch-in timestamp.
+        updateLastExecTimestamp();
+    }
+
+    // Restore IRQ mask.
+    arch.intr.setMask(ie);
+}
+
+/// Called by a newly switched-in thread when a thread is switched out.
+///
+/// Do some deferred work for the previous thread.
+export fn onSwitchedIn(prev: *anyopaque) callconv(.c) void {
+    urd.task.onSwitchedOut(@ptrCast(@alignCast(prev)));
 }
 
 /// Pick the next thread to run from the ready queue.
@@ -260,7 +228,7 @@ pub fn getCurrentCtx() *arch.exception.Context {
 }
 
 /// Get the currently running thread, or null if no thread is running.
-fn getCurrentNullable() ?*Thread {
+noinline fn getCurrentNullable() ?*Thread {
     return pcpu.get(&current);
 }
 

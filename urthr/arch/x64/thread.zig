@@ -89,12 +89,14 @@ pub fn isrContextOf(kstack: []u8) *IsrContext {
     return @ptrFromInt(@intFromPtr(kstack.ptr) + kstack.len - @sizeOf(IsrContext));
 }
 
-/// Switch context from the old thread to the new thread.
-pub fn switchContext(old: *usize, new: *const usize, new_ksp: usize) void {
+/// Switch context from the calling thread to the new thread.
+///
+/// Returns the pointer to the previous thread's context.
+pub fn switchContext(oldsp: *usize, newsp: *const usize, new_ksp: usize, th: *anyopaque) *anyopaque {
     if (new_ksp != 0) gdt.setKernelStack(new_ksp);
-    switchContextAsm(old, new);
+    return switchContextAsm(oldsp, newsp, th);
 }
-extern fn switchContextAsm(old: *usize, new: *const usize) callconv(.c) void;
+extern fn switchContextAsm(oldsp: *usize, newsp: *const usize, th: *anyopaque) callconv(.c) *anyopaque;
 
 /// Set the thread pointer for TLS.
 pub fn setThreadPointer(tp: usize) void {
@@ -113,7 +115,14 @@ extern fn enterUserlandAsm(pc: usize, sp: usize, kstack: usize) callconv(.c) nor
 /// Thread entry trampoline function.
 fn trampoline() callconv(.naked) noreturn {
     asm volatile (
+        \\
+        // RAX: context of switched-out thread
+        \\movq %rax, %rdi
+        \\call onSwitchedIn
+        // Exit pseudo-exception handler using the orphan frame.
         \\jmp isrReturn
+        // Unreachable.
+        \\ud2
     );
 }
 

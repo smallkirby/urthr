@@ -1,4 +1,4 @@
-// switchContextAsm(old: *usize, new: *const usize)
+// switchContextAsm(oldsp: *usize, newsp: *const usize, prev: *anyopaque) -> *anyopaque
 .global switchContextAsm
 switchContextAsm:
   // Save callee-saved registers to current stack.
@@ -30,5 +30,8 @@ switchContextAsm:
   popq %r12
   popq %rbx
   popq %rbp
+
+  // Return the previous thread pointer.
+  movq %rdx, %rax
 
   ret
