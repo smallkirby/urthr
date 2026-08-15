@@ -22,19 +22,14 @@ pub const Thread = struct {
     /// Signal handling state.
     sigstate: signal.State,
 
-    /// Pointer to the parent thread.
+    /// Parent's thread group
+    ///
+    /// Stays valid even after the specific thread that created this thread has exited.
     ///
     /// null for the idle thread, orphaned threads, and non-leader members of a thread group.
-    ///
-    /// TODO: becomes dangling if the parent exits while this thread is still alive.
-    /// Reattaching the child to init thread is not yet implemented.
-    parent: ?*Thread = null,
-    /// List of live children.
-    children: ChildrenList = .{},
-    /// Link node in parent's children list.
+    parent: ?*task.ThreadGroup = null,
+    /// Link node in the parent group's children list.
     sibling: ChildrenList.Head = .{},
-    /// Condition variable the parent blocks on to wait for the child to exit.
-    child_exit_cv: CondVar = .{},
 
     /// Thread group this thread belongs to.
     ///

@@ -125,15 +125,15 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         .fs = fs,
         .sigstate = .{ .handlers = handlers },
         .group = group,
-        .parent = cur,
+        .parent = cur.group.ref(),
     };
     group.addMember(th);
 
-    // Register as a child of the current thread.
+    // Register as a child of the current thread group.
     {
         const ie = zombie_lock.lockDisableIrq();
         defer zombie_lock.unlockRestoreIrq(ie);
-        cur.children.append(th);
+        cur.group.children.append(th);
     }
 
     // Add the thread to the ready queue.
@@ -371,13 +371,13 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .sigstate = .{ .handlers = handlers, .blocked = cur.sigstate.blocked },
             .group = group,
             .vfork_done = if (flags.suspend_parent) &vforkw else null,
-            .parent = if (flags.thread) null else cur,
+            .parent = if (flags.thread) null else cur.group.ref(),
         };
         group.addMember(th);
         if (!flags.thread) {
             const zombie_ie = zombie_lock.lockDisableIrq();
             defer zombie_lock.unlockRestoreIrq(zombie_ie);
-            cur.children.append(th);
+            cur.group.children.append(th);
         }
         sched.enqueue(th);
     }
@@ -449,10 +449,11 @@ fn becomeZombie(th: *Thread) void {
     const leader = th.group.getLeader();
     if (leader != th) {
         // The original leader exited earlier and was kept alive for this.
-        // Re-assign the leader's IDs to the new leader.
+        // Transfer its parent-group reference and ID to the new leader.
         th.parent = leader.parent;
+        leader.parent = null;
         th.ppid = leader.ppid;
-        if (leader.parent) |p| p.children.remove(leader);
+        if (th.parent) |p| p.children.remove(leader);
         // Then clean up the original leader.
         shutdownThread(leader);
     } else if (th.parent) |p| {
@@ -463,7 +464,7 @@ fn becomeZombie(th: *Thread) void {
     th.state = .zombie;
     zombie_list.append(th);
 
-    // Notify the parent that a child has exited.
+    // Notify the parent group that a child has exited.
     if (th.parent) |p| {
         p.child_exit_cv.signal();
     }
@@ -493,6 +494,7 @@ fn releaseThread(th: *thread.Thread) void {
 /// After this function, the thread struct and related resources are no longer accessible.
 pub fn shutdownThread(th: *thread.Thread) void {
     if (th.stack) |kstack| mem.page.freeBytesV(kstack);
+    if (th.parent) |p| p.deref(mem.bin);
     mem.bin.free(th.name);
     th.group.deref(mem.bin);
     mem.bin.destroy(th);
@@ -544,7 +546,7 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
         }
 
         // Check for alive matching children.
-        var child_it = cur.children.iter();
+        var child_it = cur.group.children.iter();
         while (child_it.next()) |th| {
             if (matchesChild(cur, pid, th)) break;
         } else {
@@ -552,7 +554,7 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
         }
 
         if (!nowait) {
-            cur.child_exit_cv.wait(&zombie_lock);
+            cur.group.child_exit_cv.wait(&zombie_lock);
         } else {
             return null;
         }

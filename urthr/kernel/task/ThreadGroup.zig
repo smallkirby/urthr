@@ -1,8 +1,15 @@
-//! Shared state for a thread group.
+//! Shared state for a thread group (process).
 //!
 //! All threads sharing a TGID hold a reference to the same this struct.
 
 const Self = @This();
+
+/// Live children forked by any thread in this group.
+///
+/// Protected by `zombie_lock`.
+children: thread.ChildrenList = .{},
+/// Condition variable any thread in this group blocks on to wait for the child to exit.
+child_exit_cv: CondVar = .{},
 
 /// Reference count.
 ///
@@ -143,5 +150,6 @@ const common = @import("common");
 const typing = common.typing;
 const urd = @import("urthr");
 const SpinLock = urd.sync.SpinLock;
+const CondVar = urd.sync.CondVar;
 const thread = @import("thread.zig");
 const Thread = thread.Thread;
