@@ -102,6 +102,11 @@ fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     _ = linux.tcgetattr(sr.handle, &termios);
     termios.ispeed = speed;
     termios.ospeed = speed;
+
+    // Block until at least one byte is available without a timeout.
+    termios.cc[@intFromEnum(linux.V.MIN)] = 1;
+    termios.cc[@intFromEnum(linux.V.TIME)] = 0;
+
     _ = linux.tcsetattr(sr.handle, linux.TCSA.NOW, &termios);
 
     // Assert DTR and RTS.
