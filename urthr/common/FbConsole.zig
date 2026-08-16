@@ -85,6 +85,8 @@ bg: u32,
 format: PixelFormat,
 /// Whether bold output is active.
 bold: bool,
+/// Whether the cursor is currently rendered on screen.
+cursor_shown: bool,
 
 /// ANSI/VT100 escape sequence parser state.
 csi: CsiParser,
@@ -116,6 +118,7 @@ pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, form
         .bg = pack(format, 0x00, 0x00, 0x00),
         .format = format,
         .bold = false,
+        .cursor_shown = false,
 
         .csi = .{},
 
@@ -151,17 +154,28 @@ pub fn interface(self: *Self) Console {
 const vtable = Console.Vtable{
     .putc = putc,
     .flush = flush,
+    .tick = tick,
 };
 
 /// Put a single character.
 fn putc(ctx: *anyopaque, c: u8) void {
     const self: *Self = @ptrCast(@alignCast(ctx));
 
+    // Hide the cursor before touching the screen.
+    self.setCursorVisible(false);
+    defer self.setCursorVisible(true);
+
     switch (self.csi.state) {
         .normal => self.putcNormal(c),
         .esc => self.putcEsc(c),
         .csi => self.putcCsi(c),
     }
+}
+
+/// Periodic housekeeping hook.
+fn tick(ctx: *anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ctx));
+    self.setCursorVisible(!self.cursor_shown);
 }
 
 /// Handle a byte outside of any escape sequence.
@@ -384,6 +398,30 @@ fn drawGlyph(self: *Self, col: u32, row: u32, ch: u8) void {
             const color = if (row_bytes[0] & mask != 0) self.fg else self.bg;
             pixels[(y0 + dy) * stride + (x0 + dx)] = color;
             mask >>= 1;
+        }
+    }
+}
+
+/// Show or hide the cursor at its current position.
+fn setCursorVisible(self: *Self, visible: bool) void {
+    if (visible == self.cursor_shown) {
+        return;
+    }
+    self.xorCursorCell();
+    self.cursor_shown = visible;
+}
+
+/// XOR-invert the pixel cell at the current cursor position.
+fn xorCursorCell(self: *Self) void {
+    const stride = self.pitch / @sizeOf(u32);
+    const x0 = self.col * font.glyph_width;
+    const y0 = self.row * font.glyph_height;
+    const pixels: [*]u32 = @ptrFromInt(self.base);
+
+    for (0..font.glyph_height) |dy| {
+        for (0..font.glyph_width) |dx| {
+            const idx = (y0 + dy) * stride + (x0 + dx);
+            pixels[idx] ^= 0x00FFFFFF;
         }
     }
 }

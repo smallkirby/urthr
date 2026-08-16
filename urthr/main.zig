@@ -97,6 +97,9 @@ fn zmain() !void {
     urd.time.initGlobal();
     urd.time.initLocal();
 
+    // Start periodic console timer.
+    urd.console.initTimer();
+
     // Initialize sync primitives.
     urd.sync.init();
 

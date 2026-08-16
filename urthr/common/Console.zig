@@ -10,6 +10,8 @@ pub const Vtable = struct {
     putc: *const fn (ctx: *anyopaque, c: u8) void,
     /// Ensure that all previous output has been transmitted.
     flush: *const fn (ctx: *anyopaque) void,
+    /// Periodic housekeeping callback.
+    tick: ?*const fn (ctx: *anyopaque) void = null,
 };
 
 /// Print a string to the console.
@@ -26,4 +28,9 @@ pub fn println(self: *Self, s: []const u8) usize {
     const n = self.print(s);
     self.vtable.putc(self.ctx, '\n');
     return n + 1;
+}
+
+/// Run backend's periodic housekeeping.
+pub fn tick(self: *Self) void {
+    if (self.vtable.tick) |f| f(self.ctx);
 }
