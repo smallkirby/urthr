@@ -44,6 +44,8 @@ const CsiParser = struct {
     nparams: u8 = 0,
     /// Value of the CSI parameter currently being accumulated.
     cur: u16 = 0,
+    /// Whether the sequence has a `?` DEC private mode prefix.
+    private: bool = false,
 
     /// Append the currently accumulated parameter.
     fn commitParam(self: *CsiParser) void {
@@ -191,6 +193,7 @@ fn putcEsc(self: *Self, c: u8) void {
             self.csi.state = .csi;
             self.csi.nparams = 0;
             self.csi.cur = 0;
+            self.csi.private = false;
         },
         else => self.csi.state = .normal,
     }
@@ -199,11 +202,12 @@ fn putcEsc(self: *Self, c: u8) void {
 /// Handle a byte inside a CSI sequence.
 fn putcCsi(self: *Self, c: u8) void {
     switch (c) {
+        '?' => self.csi.private = true,
         '0'...'9' => self.csi.cur = self.csi.cur *| 10 +| @as(u16, c - '0'),
         ';' => self.csi.commitParam(),
         else => {
             self.csi.commitParam();
-            self.handleCsi(c);
+            if (!self.csi.private) self.handleCsi(c);
             self.csi.state = .normal;
         },
     }
@@ -216,8 +220,40 @@ fn handleCsi(self: *Self, final: u8) void {
         'm' => self.applySgr(),
         'K' => self.eraseInLine(param0),
         'J' => self.eraseInDisplay(param0),
+        'A' => self.moveCursor(0, -@as(i32, @max(param0, 1))),
+        'B' => self.moveCursor(0, @as(i32, @max(param0, 1))),
+        'C' => self.moveCursor(@as(i32, @max(param0, 1)), 0),
+        'D' => self.moveCursor(-@as(i32, @max(param0, 1)), 0),
+        'H', 'f' => self.setCursor(
+            if (self.csi.nparams > 0) self.csi.params[0] else 1,
+            if (self.csi.nparams > 1) self.csi.params[1] else 1,
+        ),
+        'G' => self.setCursor(@intCast(self.row + 1), @max(param0, 1)),
+        'd' => self.setCursor(@max(param0, 1), @intCast(self.col + 1)),
         else => {},
     }
+}
+
+/// Move the cursor to the 1-based `(row, col)` position.
+fn setCursor(self: *Self, row: u32, col: u32) void {
+    self.row = @min(if (row > 0) row - 1 else 0, self.rows - 1);
+    self.col = @min(if (col > 0) col - 1 else 0, self.cols - 1);
+}
+
+/// Move the cursor by a relative `(dcol, drow)` offset.
+fn moveCursor(self: *Self, dcol: i32, drow: i32) void {
+    const col = std.math.clamp(
+        @as(i32, @intCast(self.col)) + dcol,
+        0,
+        @as(i32, @intCast(self.cols - 1)),
+    );
+    const row = std.math.clamp(
+        @as(i32, @intCast(self.row)) + drow,
+        0,
+        @as(i32, @intCast(self.rows - 1)),
+    );
+    self.col = @intCast(col);
+    self.row = @intCast(row);
 }
 
 /// Advance the cursor to the next tab stop.
