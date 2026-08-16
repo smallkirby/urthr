@@ -777,7 +777,7 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
                 sdhc.waitFor(
                     NormalIntStatus,
                     .{ .transfer_complete = true },
-                    .ms(1),
+                    .ms(100),
                 );
             } else {
                 sdhc.waitFor(
