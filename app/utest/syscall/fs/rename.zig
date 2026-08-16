@@ -33,6 +33,82 @@ test "renameat moves a file to a new name in the same directory" {
     try testing.expectEqualSlices(u8, content_a, read);
 }
 
+test "renameat from a long name" {
+    const init = utest.getInit();
+    const name_lfn = "index.html";
+    try createWith(init, name_lfn, content_a);
+
+    const ret = linux.renameat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_lfn,
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_file1,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_file1, 0);
+
+    var buf: [32]u8 = undefined;
+    const read = try readAll(init, name_file1, &buf);
+    try testing.expectEqualSlices(u8, content_a, read);
+
+    try createWith(init, name_lfn, content_b);
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_lfn, 0);
+}
+
+test "renameat to a long name" {
+    const init = utest.getInit();
+    const name_lfn = "index.html";
+    try createWith(init, name_file1, content_a);
+
+    const ret = linux.renameat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_file1,
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_lfn,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_lfn, 0);
+
+    const dir = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});
+    defer dir.close(init.io);
+    try testing.expectError(
+        error.FileNotFound,
+        dir.openFile(init.io, name_file1, .{}),
+    );
+
+    var buf: [32]u8 = undefined;
+    const read = try readAll(init, name_lfn, &buf);
+    try testing.expectEqualSlices(u8, content_a, read);
+}
+
+test "renameat from and to long names" {
+    const init = utest.getInit();
+    const name_src = "index.html";
+    const name_dst = "existing.html";
+    try createWith(init, name_src, content_a);
+    try createWith(init, name_dst, content_b);
+
+    const ret = linux.renameat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_src,
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_dst,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_dst, 0);
+
+    const dir = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});
+    defer dir.close(init.io);
+    try testing.expectError(
+        error.FileNotFound,
+        dir.openFile(init.io, name_src, .{}),
+    );
+
+    var buf: [32]u8 = undefined;
+    const read = try readAll(init, name_dst, &buf);
+    try testing.expectEqualSlices(u8, content_a, read);
+}
+
 test "renameat replaces an existing destination file" {
     const init = utest.getInit();
     try createWith(init, name_file1, content_a);

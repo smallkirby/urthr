@@ -187,7 +187,7 @@ fn ideinit(inode: *fs.Inode) void {
 fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
     rtt.expectEqual(.directory, dir.ftype);
     rtt.expectEqual(.regular, child.ftype);
-    try markEntryDeleted(child);
+    try markEntryDeleted(dir, child);
 }
 
 /// Remove the directory entry for the empty subdirectory.
@@ -197,11 +197,11 @@ fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
 fn irmdir(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
     rtt.expectEqual(.directory, dir.ftype);
     rtt.expectEqual(.directory, child.ftype);
-    try markEntryDeleted(child);
+    try markEntryDeleted(dir, child);
 }
 
-/// Mark the on-disk directory entry as deleted.
-fn markEntryDeleted(child: *fs.Inode) fs.Error!void {
+/// Mark the on-disk directory entry as deleted along with any LFN entries preceding it.
+fn markEntryDeleted(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
     const ctx = InodeImpl.from(child);
     const self = ctx.fat32;
 
@@ -213,8 +213,12 @@ fn markEntryDeleted(child: *fs.Inode) fs.Error!void {
     try self.device.readBlock(pos.sector, &buf);
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+    const sfn = ent.name;
     ent.markDeleted();
     try self.device.writeBlock(pos.sector, &buf);
+
+    const dir_inode = InodeImpl.from(dir);
+    try self.deletePrecedingLfnEntries(dir_inode.cluster, pos, &sfn);
 
     ctx.unlinked = true;
 }
@@ -244,9 +248,8 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
     const ctx = InodeImpl.from(dir);
     const self = ctx.fat32;
 
-    if (!isFitSfn(name)) {
-        log.err("Creation of file with LFN not supported: {s}", .{name});
-        return fs.Error.Unsupported;
+    if (name.len > LongNameEntry.max_name_len) {
+        return fs.Error.InvalidArgument;
     }
 
     self.lock.lock();
@@ -265,48 +268,64 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         }
     }
 
-    // Find or create a directory entry slot.
+    // Determine the short name.
+    const use_lfn = !isFitSfn(name);
+    const sfn = if (use_lfn)
+        try self.genShortName(ctx.cluster, name)
+    else
+        sfnArray(name);
+    const lfn_count = if (use_lfn) lfnEntryCount(name) else 0;
+
+    // Find or create a directory entry slots.
     const entpos = try self.findDirSlot(
         ctx.cluster,
-        1,
+        lfn_count + 1, // +1 for real directory entry
         .create,
     ) orelse return fs.Error.NoSpace;
+
+    // Build and write the directory entry.
+    const attr = DirEntry.Attributes{
+        .read_only = !isWritable(mode),
+        .hidden = false,
+        .system = false,
+        .volume_id = false,
+        .directory = (ftype == .directory),
+        .archive = true,
+    };
+    var dent = std.mem.zeroInit(DirEntry, .{
+        .name = sfn,
+        .attr = attr,
+        .first_cluster_low = bits.extract(u16, clus, 0),
+        .first_cluster_high = bits.extract(u16, clus, 16),
+        .file_size = 0,
+    });
+    writeTimeFields(&dent);
+
+    // Write the LFN entries followed by the SFN entry.
+    var rawents: [LongNameEntry.max_entries + 1][@sizeOf(DirEntry)]u8 = undefined;
+    if (use_lfn) {
+        var buf: [LongNameEntry.max_entries]LongNameEntry = undefined;
+        const lents = buildLfnEntries(
+            buf[0..lfn_count],
+            name,
+            computeSfnChecksum(&sfn),
+        );
+        for (lents, 0..) |ent, i| {
+            rawents[i] = std.mem.asBytes(&ent).*;
+        }
+    }
+    rawents[lfn_count] = std.mem.asBytes(&dent).*;
+    const sfn_pos = try self.writeDirEntries(
+        entpos,
+        rawents[0 .. lfn_count + 1],
+    );
 
     // Initialize the new inode.
     const inode = try self.allocator.create(InodeImpl);
     errdefer self.allocator.destroy(inode);
-
-    // Write the directory entry to the disk.
-    var buf: [sector_size]u8 = undefined;
-    try self.device.readBlock(entpos.sector, &buf);
-    {
-        const attr = DirEntry.Attributes{
-            .read_only = !isWritable(mode),
-            .hidden = false,
-            .system = false,
-            .volume_id = false,
-            .directory = (ftype == .directory),
-            .archive = true,
-        };
-        const ent: *DirEntry = @ptrCast(@alignCast(&buf[entpos.offset]));
-        ent.* = std.mem.zeroInit(DirEntry, .{
-            .attr = attr,
-            .first_cluster_low = bits.extract(u16, clus, 0),
-            .first_cluster_high = bits.extract(u16, clus, 16),
-            .file_size = 0,
-        });
-        // Timestamp
-        writeTimeFields(ent);
-        // Name
-        // TODO: support LFN.
-        writeSfn(ent, name);
-    }
-    try self.device.writeBlock(entpos.sector, &buf);
-
-    // Construct inode.
     inode.* = .{
         .common = .{
-            .number = entpos.toInodeNumber(),
+            .number = sfn_pos.toInodeNumber(),
             .size = 0,
             .ftype = ftype,
             .mode = mode,
@@ -323,46 +342,86 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
 
 /// Move the directory entry for `child` to `new_name` under `new_dir`,
 /// optionally replacing an existing entry `replaced` at the destination.
-fn irename(_: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Inode, new_name: []const u8, replaced: ?*fs.Inode) fs.Error!void {
+fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Inode, new_name: []const u8, replaced: ?*fs.Inode) fs.Error!void {
     const self = InodeImpl.from(child).fat32;
     var buf: [sector_size]u8 = undefined;
 
-    if (!isFitSfn(new_name)) {
-        log.err("Rename to LFN not supported: {s}", .{new_name});
-        return fs.Error.Unsupported;
+    if (new_name.len > LongNameEntry.max_name_len) {
+        return fs.Error.InvalidArgument;
     }
 
     self.lock.lock();
     defer self.lock.unlock();
 
-    // Snapshot the existing directory entry with new name.
+    // Snapshot the existing directory entry.
     const old_pos = Position.fromInodeNumber(child.number);
     try self.device.readBlock(old_pos.sector, &buf);
     var ent_data = @as(*const DirEntry, @ptrCast(@alignCast(&buf[old_pos.offset]))).*;
-    writeSfn(&ent_data, new_name);
+    const old_sfn = ent_data.name;
 
-    // Reuse the replaced entry's slot if possible.
-    const new_pos = if (replaced) |r|
-        Position.fromInodeNumber(r.number)
+    // Determine the short name.
+    const use_lfn = !isFitSfn(new_name);
+    const new_sfn = if (use_lfn)
+        try self.genShortName(InodeImpl.from(new_dir).cluster, new_name)
     else
-        try self.findDirSlot(
-            InodeImpl.from(new_dir).cluster,
-            1,
-            .create,
-        ) orelse return fs.Error.NoSpace;
+        sfnArray(new_name);
+    ent_data.name = new_sfn;
+    const lfn_count = if (use_lfn) lfnEntryCount(new_name) else 0;
 
-    // Write the renamed entry to its new slot.
-    try self.device.readBlock(new_pos.sector, &buf);
-    const new_ent: *DirEntry = @ptrCast(@alignCast(&buf[new_pos.offset]));
-    new_ent.* = ent_data;
-    try self.device.writeBlock(new_pos.sector, &buf);
+    // Remove replaced directory entry and any LFN entries preceding it.
+    if (replaced) |r| {
+        const r_pos = Position.fromInodeNumber(r.number);
+        try self.device.readBlock(r_pos.sector, &buf);
+        const r_ent: *DirEntry = @ptrCast(@alignCast(&buf[r_pos.offset]));
+        const r_sfn = r_ent.name;
+
+        // Remove the directory entry.
+        r_ent.markDeleted();
+        try self.device.writeBlock(r_pos.sector, &buf);
+        // Remove the preceding LFN entries.
+        try self.deletePrecedingLfnEntries(
+            InodeImpl.from(new_dir).cluster,
+            r_pos,
+            &r_sfn,
+        );
+    }
+
+    // Find or create a directory entry slots.
+    const entpos = try self.findDirSlot(
+        InodeImpl.from(new_dir).cluster,
+        lfn_count + 1, // +1 for real directory entry
+        .create,
+    ) orelse return fs.Error.NoSpace;
+
+    // Build and write the directory entry.
+    var rawents: [LongNameEntry.max_entries + 1][@sizeOf(DirEntry)]u8 = undefined;
+    if (use_lfn) {
+        var lbuf: [LongNameEntry.max_entries]LongNameEntry = undefined;
+        const lents = buildLfnEntries(
+            lbuf[0..lfn_count],
+            new_name,
+            computeSfnChecksum(&new_sfn),
+        );
+        for (lents, 0..) |ent, i| {
+            rawents[i] = std.mem.asBytes(&ent).*;
+        }
+    }
+    rawents[lfn_count] = std.mem.asBytes(&ent_data).*;
+    const new_pos = try self.writeDirEntries(
+        entpos,
+        rawents[0 .. lfn_count + 1],
+    );
 
     // Delete the old entry unless it was reused.
     if (new_pos.sector != old_pos.sector or new_pos.offset != old_pos.offset) {
         try self.device.readBlock(old_pos.sector, &buf);
         const old_ent: *DirEntry = @ptrCast(@alignCast(&buf[old_pos.offset]));
+
+        // Remove the old directory entry.
         old_ent.markDeleted();
         try self.device.writeBlock(old_pos.sector, &buf);
+        // Remove the preceding LFN entries.
+        try self.deletePrecedingLfnEntries(InodeImpl.from(old_dir).cluster, old_pos, &old_sfn);
     }
 
     // Update in-memory inode number.
@@ -611,15 +670,6 @@ const DirIterator = struct {
 
         const name = try allocator.alloc(u8, len);
         return std.ascii.lowerString(name, buf[0..len]);
-    }
-
-    /// Compute checksum of the short name.
-    fn computeSfnChecksum(name: *const [DirEntry.sfn_len]u8) u8 {
-        var sum: u8 = 0;
-        for (name) |c| {
-            sum = ((sum >> 1) | ((sum & 1) << 7)) +% c;
-        }
-        return sum;
     }
 };
 
@@ -907,6 +957,39 @@ fn clusterToLba(self: *const Self, cluster: Cluster) Lba {
     return first_data_sector + (cluster - first_data_cluster) * self.bpb.sec_per_clus;
 }
 
+/// Convert LBA to cluster number.
+fn lbaToCluster(self: *const Self, lba: Lba) Cluster {
+    const first_data_cluster = 2;
+    const first_data_sector = self.bpb.rsvd_sec_cnt +
+        (self.bpb.num_fats * self.bpb.fat_sz32);
+
+    return @intCast((lba - first_data_sector) / self.bpb.sec_per_clus + first_data_cluster);
+}
+
+/// Advance a directory position by one entry.
+///
+/// Crosses sector and cluster boundaries as necessary.
+fn advanceDirPos(self: *Self, pos: Position) fs.Error!Position {
+    const new_offset = pos.offset + @sizeOf(DirEntry);
+    if (new_offset < sector_size) return .{
+        .sector = pos.sector,
+        .offset = new_offset,
+    };
+
+    const cluster = self.lbaToCluster(pos.sector);
+    const sector_in_clus = pos.sector - self.clusterToLba(cluster);
+    if (sector_in_clus + 1 < self.bpb.sec_per_clus) return .{
+        .sector = pos.sector + 1,
+        .offset = 0,
+    };
+
+    const next = try self.getNextCluster(cluster) orelse return fs.Error.CorruptedData;
+    return .{
+        .sector = self.clusterToLba(next),
+        .offset = 0,
+    };
+}
+
 /// Get the next cluster in the FAT chain.
 ///
 /// Returns null if this is the last cluster.
@@ -1121,18 +1204,247 @@ fn writeTimeFields(dirent: *DirEntry) void {
     _ = dirent;
 }
 
-/// Write the SFN to the directory entry.
-/// TODO: make this a method of `DirEntry`.
-fn writeSfn(dirent: *DirEntry, name: []const u8) void {
+/// Build the 11-byte SFN field for a name that already fits the 8.3 format.
+fn sfnArray(name: []const u8) [DirEntry.sfn_len]u8 {
     rtt.expect(isFitSfn(name));
 
     const stem = sfnGetStem(name);
     const ext = sfnGetExt(name);
-    const dst_stem = dirent.name[0..8];
-    const dst_ext = dirent.name[8..11];
-    @memset(&dirent.name, ' ');
-    @memcpy(dst_stem[0..stem.len], stem);
-    @memcpy(dst_ext[0..ext.len], ext);
+    var sfn: [DirEntry.sfn_len]u8 = [_]u8{' '} ** DirEntry.sfn_len;
+    @memcpy(sfn[0..stem.len], stem);
+    @memcpy(sfn[8..][0..ext.len], ext);
+
+    return sfn;
+}
+
+/// Compute checksum of the short name.
+fn computeSfnChecksum(name: *const [DirEntry.sfn_len]u8) u8 {
+    var sum: u8 = 0;
+    for (name) |c| {
+        sum = ((sum >> 1) | ((sum & 1) << 7)) +% c;
+    }
+    return sum;
+}
+
+/// Generate a unique 8.3 short name for a long file name.
+///
+/// Uses numeric tail generation algorithm to avoid name collision.
+fn genShortName(self: *Self, dir_cluster: Cluster, name: []const u8) fs.Error![DirEntry.sfn_len]u8 {
+    const stem = sfnGetStem(name);
+    const ext = sfnGetExt(name);
+
+    var stem_buf: [8]u8 = undefined;
+    var stem_len: usize = 0;
+    for (stem) |c| {
+        if (stem_len >= stem_buf.len) break;
+        if (std.ascii.isAlphanumeric(c)) {
+            stem_buf[stem_len] = std.ascii.toUpper(c);
+            stem_len += 1;
+        }
+    }
+    if (stem_len == 0) {
+        stem_buf[0] = '_';
+        stem_len = 1;
+    }
+
+    var ext_buf: [3]u8 = undefined;
+    var ext_len: usize = 0;
+    for (ext) |c| {
+        if (ext_len >= ext_buf.len) break;
+        if (std.ascii.isAlphanumeric(c)) {
+            ext_buf[ext_len] = std.ascii.toUpper(c);
+            ext_len += 1;
+        }
+    }
+
+    const retry_max = 999_999;
+    var tail: u32 = 1;
+    while (tail <= retry_max) : (tail += 1) {
+        var tail_buf: [7]u8 = undefined; // "~" + up to 6 digits
+        const tail_str = std.fmt.bufPrint(&tail_buf, "~{d}", .{tail}) catch unreachable;
+        const base_len = @min(stem_len, stem_buf.len - tail_str.len);
+
+        var candidate: [DirEntry.sfn_len]u8 = [_]u8{' '} ** DirEntry.sfn_len;
+        @memcpy(candidate[0..base_len], stem_buf[0..base_len]);
+        @memcpy(candidate[base_len..][0..tail_str.len], tail_str);
+        @memcpy(candidate[8..][0..ext_len], ext_buf[0..ext_len]);
+
+        if (!try self.sfnExists(dir_cluster, &candidate)) {
+            return candidate;
+        }
+    } else return fs.Error.NoSpace;
+}
+
+/// Check if a directory entry with the exact given short name already exists.
+///
+/// The search continues until the end of the directory cluster chain or matching entry is found.
+fn sfnExists(self: *Self, start: Cluster, sfn: *const [DirEntry.sfn_len]u8) fs.Error!bool {
+    var clus = start;
+    var buf: [sector_size]u8 = undefined;
+
+    while (true) {
+        const clus_lba = self.clusterToLba(clus);
+        for (0..self.bpb.sec_per_clus) |sec| {
+            try self.device.readBlock(clus_lba + sec, &buf);
+
+            for (clus2dirents(&buf)) |ent| {
+                if (ent.isFree()) return false;
+                if (ent.isDeleted() or ent.isLongName() or ent.attr.volume_id) continue;
+                if (std.mem.eql(u8, &ent.name, sfn)) return true;
+            }
+        }
+
+        clus = try self.getNextCluster(clus) orelse return false;
+    }
+}
+
+/// Build the LFN entries representing the given long name,
+///
+/// Ordered from the last entry to the first.
+fn buildLfnEntries(buf: []LongNameEntry, name: []const u8, sfn_checksum: u8) []const LongNameEntry {
+    const chars_per_entry = LongNameEntry.chars_per_entry;
+    const n = lfnEntryCount(name);
+    for (0..n) |i| {
+        const ord: u8 = @intCast(n - i);
+        const seg_start = (ord - 1) * chars_per_entry;
+        const seg = name[seg_start..@min(seg_start + chars_per_entry, name.len)];
+
+        var chars: [LongNameEntry.chars_per_entry]u16 = [_]u16{0xFFFF} ** chars_per_entry;
+        for (seg, 0..) |c, j| chars[j] = c;
+        if (seg.len < chars.len) chars[seg.len] = 0x0000;
+
+        buf[i] = std.mem.zeroInit(LongNameEntry, .{
+            .order = ord | (if (i == 0) @as(u8, LongNameEntry.last_entry_flag) else 0),
+            .attr = DirEntry.Attributes.long_name,
+            .chksum = sfn_checksum,
+        });
+        @memcpy(&buf[i].name1, chars[0..5]);
+        @memcpy(&buf[i].name2, chars[5..11]);
+        @memcpy(&buf[i].name3, chars[11..13]);
+    }
+
+    return buf[0..n];
+}
+
+/// Number of LFN entries needed to represent `name`.
+fn lfnEntryCount(name: []const u8) usize {
+    return (name.len + LongNameEntry.chars_per_entry - 1) / LongNameEntry.chars_per_entry;
+}
+
+/// Write the given directory entries starting at the given position.
+///
+/// Caller must ensure that entries in the given position are reserved for this use.
+///
+/// Returns the position of the last entry written.
+fn writeDirEntries(self: *Self, start: Position, entries: []const [@sizeOf(DirEntry)]u8) fs.Error!Position {
+    var pos = start;
+    var buf: [sector_size]u8 = undefined;
+
+    for (entries, 0..) |raw, i| {
+        try self.device.readBlock(pos.sector, &buf);
+        @memcpy(buf[pos.offset..][0..raw.len], &raw);
+        try self.device.writeBlock(pos.sector, &buf);
+
+        if (i + 1 < entries.len) pos = try self.advanceDirPos(pos);
+    }
+
+    return pos;
+}
+
+/// Mark the LFN entries that precede the given directory entry at `target` as deleted.
+///
+/// This function does not touch the SFN entry.
+fn deletePrecedingLfnEntries(
+    self: *Self,
+    /// Cluster number of the directory containing the target entry.
+    dir_clus: Cluster,
+    /// Position of the SFN directory entry that follows the LFN entries to be deleted.
+    target: Position,
+    /// SFN matched against the checksum of the LFN entries.
+    sfn: *const [DirEntry.sfn_len]u8,
+) fs.Error!void {
+    const target_checksum = computeSfnChecksum(sfn);
+
+    var clus = dir_clus;
+    var buf: [sector_size]u8 = undefined;
+
+    var positions: [LongNameEntry.max_entries]Position = undefined;
+    var count: usize = 0;
+    var next_ord: u8 = 0;
+    var checksum: u8 = 0;
+
+    while (true) {
+        // Iterate over sectors in one cluster.
+        const clus_lba = self.clusterToLba(clus);
+        for (0..self.bpb.sec_per_clus) |sec| {
+            const lba = clus_lba + sec;
+            try self.device.readBlock(lba, &buf);
+
+            // Iterate over directory entries in the sector.
+            for (clus2dirents(&buf), 0..) |ent, i| {
+                const pos = Position{
+                    .sector = lba,
+                    .offset = i * @sizeOf(DirEntry),
+                };
+
+                // Reached the target SFN entry.
+                if (pos.sector == target.sector and pos.offset == target.offset) {
+                    if (count > 0 and next_ord == 0 and checksum == target_checksum) {
+                        for (positions[0..count]) |p| {
+                            try self.markPositionDeleted(p);
+                        }
+                    }
+                    return;
+                }
+
+                // Reached end of directory entries.
+                if (ent.isFree()) {
+                    return;
+                }
+
+                // Skip deleted entries.
+                if (ent.isDeleted()) {
+                    count = 0;
+                    next_ord = 0;
+                    continue;
+                }
+
+                // Found a long name entry.
+                if (ent.isLongName()) {
+                    const lfn: *const LongNameEntry = @ptrCast(&ent);
+                    const ord = lfn.getOrder();
+                    if (lfn.isLast()) {
+                        next_ord = ord;
+                        checksum = lfn.chksum;
+                        count = 0;
+                    }
+                    if (ord == next_ord and lfn.chksum == checksum) {
+                        positions[ord - 1] = pos;
+                        count += 1;
+                        next_ord = ord - 1;
+                    } else {
+                        count = 0;
+                        next_ord = 0;
+                    }
+                    continue;
+                }
+
+                count = 0;
+                next_ord = 0;
+            }
+        }
+
+        clus = try self.getNextCluster(clus) orelse return;
+    }
+}
+
+/// Mark the directory entry at `pos` as deleted.
+fn markPositionDeleted(self: *Self, pos: Position) fs.Error!void {
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlock(pos.sector, &buf);
+    const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+    ent.markDeleted();
+    try self.device.writeBlock(pos.sector, &buf);
 }
 
 /// Extract the stem part of a name for SFN.

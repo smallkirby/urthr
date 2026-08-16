@@ -173,6 +173,65 @@ test "openat with a regular file as a non-final path component fails with ENOTDI
     try testing.expectEqual(.NOTDIR, linux.errno(ret));
 }
 
+test "openat to create long filename" {
+    const init = utest.getInit();
+    const name = "index.html";
+    const path = Test.base_dir ++ name;
+
+    // Create a file with a long name.
+    const content = "<html></html>";
+    {
+        const file = try std.Io.Dir.createFileAbsolute(init.io, path, .{});
+        defer file.close(init.io);
+        try file.writeStreamingAll(init.io, content);
+    }
+    defer std.Io.Dir.deleteFileAbsolute(init.io, path) catch unreachable;
+
+    // Open the created file.
+    const file = try std.Io.Dir.openFileAbsolute(init.io, path, .{});
+    defer file.close(init.io);
+
+    // Check if the content is correct.
+    var buf: [content.len]u8 = undefined;
+    var reader = file.reader(init.io, &.{});
+    try reader.interface.readSliceAll(&buf);
+    try testing.expectEqualSlices(u8, content, &buf);
+
+    // Check if FAT SFN is not exposed.
+    const dir = try std.Io.Dir.openDirAbsolute(
+        init.io,
+        Test.base_dir,
+        .{ .iterate = true },
+    );
+    defer dir.close(init.io);
+
+    var found = false;
+    var it = dir.iterateAssumeFirstIteration();
+    while (try it.next(init.io)) |ent| {
+        if (std.mem.eql(u8, ent.name, name)) found = true;
+    }
+    try testing.expect(found);
+}
+
+test "unlinking a file with a long name and re-creating it" {
+    const init = utest.getInit();
+    const path = Test.base_dir ++ "index.html";
+
+    // Create and delete a file with a long name.
+    {
+        const file = try std.Io.Dir.createFileAbsolute(init.io, path, .{});
+        file.close(init.io);
+        try std.Io.Dir.deleteFileAbsolute(init.io, path);
+    }
+
+    // Re-creating a file with the same LFN must succeed.
+    {
+        const file = try std.Io.Dir.createFileAbsolute(init.io, path, .{});
+        file.close(init.io);
+        try std.Io.Dir.deleteFileAbsolute(init.io, path);
+    }
+}
+
 test "openat with O_CREAT and O_EXCL on an existing file fails with EEXIST" {
     const init = utest.getInit();
     var t = Test.init();
