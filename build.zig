@@ -1107,23 +1107,26 @@ const Qemu = struct {
                 "-smp",
                 "4",
             }),
-            .q35 => try args.appendSlice(allocator, &.{
-                "-cpu",
-                if (self.kvm)
-                    "host,+fsgsbase,+invtsc,+rdrand,+tsc-deadline"
-                else
-                    "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
-                if (self.kvm)
-                    "-enable-kvm"
-                else
-                    "",
-                "-smp",
-                "4",
-                "-bios",
-                "/usr/share/ovmf/OVMF.fd", // TODO
-                "-drive",
-                try std.fmt.allocPrint(allocator, "file={s},format=raw,if=virtio,media=disk", .{self.drive.?}),
-            }),
+            .q35 => {
+                try args.appendSlice(allocator, &.{
+                    "-cpu",
+                    if (self.kvm)
+                        "host,+fsgsbase,+invtsc,+rdrand,+tsc-deadline"
+                    else
+                        "qemu64,+fsgsbase,+invtsc,+rdrand,+tsc-deadline",
+                });
+                if (self.kvm) {
+                    try args.appendSlice(allocator, &.{"-enable-kvm"});
+                }
+                try args.appendSlice(allocator, &.{
+                    "-smp",
+                    "4",
+                    "-bios",
+                    "/usr/share/ovmf/OVMF.fd", // TODO
+                    "-drive",
+                    try std.fmt.allocPrint(allocator, "file={s},format=raw,if=virtio,media=disk", .{self.drive.?}),
+                });
+            },
             else => {},
         }
         try args.appendSlice(allocator, &.{
