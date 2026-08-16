@@ -1757,21 +1757,21 @@ const DirEntry = extern struct {
     /// Creation time fine resolution (10ms units).
     create_time_tenth: u8,
     /// Creation time.
-    create_time: u16,
+    create_time: u16 align(1),
     /// Creation date.
-    create_date: u16,
+    create_date: u16 align(1),
     /// Last access date.
-    access_date: u16,
+    access_date: u16 align(1),
     /// High word of first cluster.
-    first_cluster_high: u16,
+    first_cluster_high: u16 align(1),
     /// Last modification time.
-    write_time: u16,
+    write_time: u16 align(1),
     /// Last modification date.
-    write_date: u16,
+    write_date: u16 align(1),
     /// Low word of first cluster.
-    first_cluster_low: u16,
+    first_cluster_low: u16 align(1),
     /// File size in bytes.
-    file_size: u32,
+    file_size: u32 align(1),
 
     comptime {
         urd.comptimeAssert(32 * 8 == @bitSizeOf(DirEntry), "Invalid size of DirEntry", .{});
