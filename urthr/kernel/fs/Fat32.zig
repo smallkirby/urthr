@@ -268,13 +268,21 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         }
     }
 
-    // Determine the short name.
+    // Determine the short name converting from UTF-8 to UTF-16.
     const use_lfn = !isFitSfn(name);
+    var u16name_buf: [LongNameEntry.max_name_len]u16 = undefined;
+    var u16name: []const u16 = &.{};
+    if (use_lfn) {
+        const n = std.unicode.utf8ToUtf16Le(&u16name_buf, name) catch {
+            return fs.Error.InvalidArgument;
+        };
+        u16name = u16name_buf[0..n];
+    }
     const sfn = if (use_lfn)
         try self.genShortName(ctx.cluster, name)
     else
         sfnArray(name);
-    const lfn_count = if (use_lfn) lfnEntryCount(name) else 0;
+    const lfn_count = if (use_lfn) lfnEntryCount(u16name.len) else 0;
 
     // Find or create a directory entry slots.
     const entpos = try self.findDirSlot(
@@ -307,7 +315,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         var buf: [LongNameEntry.max_entries]LongNameEntry = undefined;
         const lents = buildLfnEntries(
             buf[0..lfn_count],
-            name,
+            u16name,
             computeSfnChecksum(&sfn),
         );
         for (lents, 0..) |ent, i| {
@@ -359,14 +367,22 @@ fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Ino
     var ent_data = @as(*const DirEntry, @ptrCast(@alignCast(&buf[old_pos.offset]))).*;
     const old_sfn = ent_data.name;
 
-    // Determine the short name.
+    // Determine the short name converting from UTF-8 to UTF-16.
     const use_lfn = !isFitSfn(new_name);
+    var u16name_buf: [LongNameEntry.max_name_len]u16 = undefined;
+    var u16name: []const u16 = &.{};
+    if (use_lfn) {
+        const n = std.unicode.utf8ToUtf16Le(&u16name_buf, new_name) catch {
+            return fs.Error.InvalidArgument;
+        };
+        u16name = u16name_buf[0..n];
+    }
     const new_sfn = if (use_lfn)
         try self.genShortName(InodeImpl.from(new_dir).cluster, new_name)
     else
         sfnArray(new_name);
     ent_data.name = new_sfn;
-    const lfn_count = if (use_lfn) lfnEntryCount(new_name) else 0;
+    const lfn_count = if (use_lfn) lfnEntryCount(u16name.len) else 0;
 
     // Remove replaced directory entry and any LFN entries preceding it.
     if (replaced) |r| {
@@ -399,7 +415,7 @@ fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Ino
         var lbuf: [LongNameEntry.max_entries]LongNameEntry = undefined;
         const lents = buildLfnEntries(
             lbuf[0..lfn_count],
-            new_name,
+            u16name,
             computeSfnChecksum(&new_sfn),
         );
         for (lents, 0..) |ent, i| {
@@ -501,8 +517,8 @@ const DirIterator = struct {
     };
 
     const LfnInfo = struct {
-        /// Buffer for collecting long file name characters.
-        buf: [LongNameEntry.max_name_len]u8 = undefined,
+        /// Buffer for collecting long file name UTF-16 code units.
+        buf: [LongNameEntry.max_name_len]u16 = undefined,
         /// Current length of LFN in the buffer.
         len: usize = 0,
         /// Expected next LFN sequence number.
@@ -604,11 +620,17 @@ const DirIterator = struct {
             }
 
             // Use LFN if valid, otherwise fall back to short name.
-            const name = if (self.lfn.isValid(&entry.name)) blk: {
-                const buf = try allocator.alloc(u8, self.lfn.len);
-                @memcpy(buf, self.lfn.buf[0..buf.len]);
-                break :blk buf;
-            } else try parseName(entry, allocator);
+            // A malformed on-disk UTF-16 sequence falls back to the short name too.
+            const name = if (self.lfn.isValid(&entry.name))
+                std.unicode.utf16LeToUtf8Alloc(allocator, self.lfn.buf[0..self.lfn.len]) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.DanglingSurrogateHalf,
+                    error.ExpectedSecondSurrogateHalf,
+                    error.UnexpectedSecondSurrogateHalf,
+                    => try parseName(entry, allocator),
+                }
+            else
+                try parseName(entry, allocator);
             errdefer allocator.free(name);
 
             // Reset LFN state for next entry.
@@ -1298,19 +1320,19 @@ fn sfnExists(self: *Self, start: Cluster, sfn: *const [DirEntry.sfn_len]u8) fs.E
     }
 }
 
-/// Build the LFN entries representing the given long name,
+/// Build the LFN entries representing the given UTF-16 long name.
 ///
 /// Ordered from the last entry to the first.
-fn buildLfnEntries(buf: []LongNameEntry, name: []const u8, sfn_checksum: u8) []const LongNameEntry {
+fn buildLfnEntries(buf: []LongNameEntry, name: []const u16, sfn_checksum: u8) []const LongNameEntry {
     const chars_per_entry = LongNameEntry.chars_per_entry;
-    const n = lfnEntryCount(name);
+    const n = lfnEntryCount(name.len);
     for (0..n) |i| {
         const ord: u8 = @intCast(n - i);
         const seg_start = (ord - 1) * chars_per_entry;
         const seg = name[seg_start..@min(seg_start + chars_per_entry, name.len)];
 
         var chars: [LongNameEntry.chars_per_entry]u16 = [_]u16{0xFFFF} ** chars_per_entry;
-        for (seg, 0..) |c, j| chars[j] = c;
+        @memcpy(chars[0..seg.len], seg);
         if (seg.len < chars.len) chars[seg.len] = 0x0000;
 
         buf[i] = std.mem.zeroInit(LongNameEntry, .{
@@ -1326,9 +1348,9 @@ fn buildLfnEntries(buf: []LongNameEntry, name: []const u8, sfn_checksum: u8) []c
     return buf[0..n];
 }
 
-/// Number of LFN entries needed to represent `name`.
-fn lfnEntryCount(name: []const u8) usize {
-    return (name.len + LongNameEntry.chars_per_entry - 1) / LongNameEntry.chars_per_entry;
+/// Number of LFN entries needed to represent a name of `len` UTF-16 code units.
+fn lfnEntryCount(len: usize) usize {
+    return (len + LongNameEntry.chars_per_entry - 1) / LongNameEntry.chars_per_entry;
 }
 
 /// Write the given directory entries starting at the given position.
@@ -1670,10 +1692,10 @@ const LongNameEntry = extern struct {
         return (self.order & last_entry_flag) != 0;
     }
 
-    /// Extract characters from this entry to the buffer.
+    /// Extract UTF-16 code units from this entry to the buffer.
     ///
-    /// Returns the number of characters written.
-    fn extractChars(self: *const LongNameEntry, buf: []u8) usize {
+    /// Returns the number of code units written.
+    fn extractChars(self: *const LongNameEntry, buf: []u16) usize {
         var pos: usize = 0;
 
         const targets = [_]struct {
@@ -1690,7 +1712,7 @@ const LongNameEntry = extern struct {
                 if (c == 0 or c == 0xFFFF) return pos;
 
                 if (pos < buf.len) {
-                    buf[pos] = if (c < 128) @intCast(c) else '?';
+                    buf[pos] = c;
                     pos += 1;
                 }
             }

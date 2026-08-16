@@ -232,6 +232,57 @@ test "unlinking a file with a long name and re-creating it" {
     }
 }
 
+test "openat to create UTF-16 filenames" {
+    const init = utest.getInit();
+
+    const names = [_][]const u8{
+        "猫",
+        "柴犬.txt",
+        "鰯",
+        "\u{1F600}.txt",
+        "😀",
+        "🎉🐱🎉",
+        "🐱🐱🐱🐱🐱🐱🐱🐱🐱🐱.🐱🐱",
+    };
+
+    for (names) |name| {
+        var path_buf: [64]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}{s}", .{ Test.base_dir, name });
+
+        const content = "hello";
+        {
+            const file = try std.Io.Dir.createFileAbsolute(init.io, path, .{});
+            defer file.close(init.io);
+            try file.writeStreamingAll(init.io, content);
+        }
+        defer std.Io.Dir.deleteFileAbsolute(init.io, path) catch unreachable;
+
+        // Can open and read the file.
+        const file = try std.Io.Dir.openFileAbsolute(init.io, path, .{});
+        defer file.close(init.io);
+
+        var buf: [content.len]u8 = undefined;
+        var reader = file.reader(init.io, &.{});
+        try reader.interface.readSliceAll(&buf);
+        try testing.expectEqualSlices(u8, content, &buf);
+
+        // Exposed name is correct.
+        const dir = try std.Io.Dir.openDirAbsolute(
+            init.io,
+            Test.base_dir,
+            .{ .iterate = true },
+        );
+        defer dir.close(init.io);
+
+        var found = false;
+        var it = dir.iterateAssumeFirstIteration();
+        while (try it.next(init.io)) |ent| {
+            if (std.mem.eql(u8, ent.name, name)) found = true;
+        }
+        try testing.expect(found);
+    }
+}
+
 test "openat with O_CREAT and O_EXCL on an existing file fails with EEXIST" {
     const init = utest.getInit();
     var t = Test.init();
