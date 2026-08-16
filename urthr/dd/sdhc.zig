@@ -59,6 +59,9 @@ var dma: DmaAllocator = undefined;
 /// The device supports ADMA2.
 var adma2_avail = false;
 
+/// Serializes access to the SD Host Controller.
+var lock: SpinLock = .{};
+
 // =============================================================
 // API
 // =============================================================
@@ -203,6 +206,9 @@ const vtable_impl = struct {
             return block.Error.InvalidArgument;
         }
 
+        const ie = lock.lockDisableIrq();
+        defer lock.unlockRestoreIrq(ie);
+
         for (0..(buffer.len / block_size)) |i| {
             readBlock(
                 self,
@@ -224,6 +230,9 @@ const vtable_impl = struct {
         if (lba > std.math.maxInt(u32)) {
             return block.Error.InvalidArgument;
         }
+
+        const ie = lock.lockDisableIrq();
+        defer lock.unlockRestoreIrq(ie);
 
         for (0..(buffer.len / block_size)) |i| {
             writeBlock(
@@ -2305,3 +2314,4 @@ const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
+const SpinLock = urd.sync.SpinLock;
