@@ -103,6 +103,13 @@ fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     termios.ispeed = speed;
     termios.ospeed = speed;
     _ = linux.tcsetattr(sr.handle, linux.TCSA.NOW, &termios);
+
+    // Assert DTR and RTS.
+    const TIOCMBIS: u32 = 0x5416;
+    const TIOCM_DTR: c_int = 0x002;
+    const TIOCM_RTS: c_int = 0x004;
+    var bits: c_int = TIOCM_DTR | TIOCM_RTS;
+    _ = linux.ioctl(sr.handle, TIOCMBIS, @intFromPtr(&bits));
 }
 
 /// Blocks until <Enter> key press while printing UART output.
