@@ -121,6 +121,10 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
 
     const ctx = InodeImpl.from(dir);
     const self = ctx.fat32;
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
     var iter = DirIterator{
         .fat32 = self,
         .cluster = ctx.cluster,
@@ -166,8 +170,13 @@ fn ideinit(inode: *fs.Inode) void {
     if (ctx.unlinked) switch (inode.ftype) {
         .regular,
         .directory,
-        => ctx.fat32.freeCluster(ctx.cluster) catch |err| {
-            log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
+        => {
+            ctx.fat32.lock.lock();
+            defer ctx.fat32.lock.unlock();
+
+            ctx.fat32.freeCluster(ctx.cluster) catch |err| {
+                log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
+            };
         },
         .symlink,
         .socket,
@@ -755,8 +764,13 @@ fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
 fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
     const file = iter.file;
     const inode = InodeImpl.from(file.path.dentry.inode);
+    const fat32 = inode.fat32;
+
+    fat32.lock.lock();
+    defer fat32.lock.unlock();
+
     var diter = DirIterator{
-        .fat32 = inode.fat32,
+        .fat32 = fat32,
         .cluster = inode.cluster,
     };
     diter.seek(iter.offset, allocator) catch return null;
@@ -782,6 +796,9 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
 
     const fat32 = ctx.fat32;
     const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
+
+    fat32.lock.lock();
+    defer fat32.lock.unlock();
 
     // Seek to the cluster that contains `offset`.
     var clus = ctx.start_cluster; // cluster number of the current position in the file
