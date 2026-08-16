@@ -20,6 +20,8 @@ config: Config,
 allocator: Allocator,
 /// DMA allocator for request buffers.
 dma: DmaAllocator,
+/// Serializes access to the queue.
+lock: SpinLock = .{},
 
 /// Sector size in bytes.
 const sector_size = 512;
@@ -134,6 +136,9 @@ const vtable_impl = struct {
 
 /// Read sectors from the device.
 fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void {
+    self.lock.lock();
+    defer self.lock.unlock();
+
     const vq = self.dev.getQueue(queue_index) orelse return Error.DeviceError;
 
     // Allocate DMA-capable buffers.
@@ -217,6 +222,9 @@ fn readConfig(dev: virtio.Device) Config {
 
 /// Write sectors to the device.
 fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!void {
+    self.lock.lock();
+    defer self.lock.unlock();
+
     const vq = self.dev.getQueue(queue_index) orelse return Error.DeviceError;
 
     if (data.len != count * sector_size) {
@@ -350,3 +358,5 @@ const mmio = common.mmio;
 const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;
 const virtio = @import("virtio.zig");
+const urd = @import("urthr");
+const SpinLock = urd.sync.SpinLock;
