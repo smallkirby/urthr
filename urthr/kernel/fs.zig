@@ -115,11 +115,25 @@ pub const FileMode = struct {
     group: Permission = .rwx,
     /// Permission for others.
     other: Permission = .rwx,
+    /// Special mode flags.
+    flags: Flags = .none,
 
     pub const default = FileMode{
         .user = .none,
         .group = .{ .write = true },
         .other = .{ .write = true },
+    };
+
+    /// Special file mode flags.
+    pub const Flags = struct {
+        /// Sticky bit.
+        sticky: bool = false,
+        /// Set-group-ID.
+        sgid: bool = false,
+        /// Set-user-ID.
+        suid: bool = false,
+
+        pub const none = Flags{};
     };
 
     /// Apply this mask to a requested file mode, clearing the masked-out bits.
@@ -128,6 +142,7 @@ pub const FileMode = struct {
             .other = mode.other.clear(self.other),
             .group = mode.group.clear(self.group),
             .user = mode.user.clear(self.user),
+            .flags = mode.flags,
         };
     }
 };

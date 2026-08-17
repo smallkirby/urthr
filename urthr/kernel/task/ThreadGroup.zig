@@ -35,6 +35,8 @@ _tgid: thread.Tgid,
 _pgid: thread.Pgid,
 /// Session ID of this group.
 _sid: thread.Sid,
+/// Credential of this group.
+_credential: Credential = .{},
 
 /// Protects fields of this struct.
 _lock: SpinLock = .{},
@@ -79,6 +81,18 @@ pub fn setSid(self: *Self, sid: thread.Sid) void {
     defer self._lock.unlockRestoreIrq(ie);
     self._sid = sid;
     self._pgid = sid;
+}
+
+/// Get the copy of credential of this group.
+pub fn getCredential(self: *const Self) Credential {
+    return self._credential;
+}
+
+/// Set the credential of this group.
+pub fn setCredential(self: *Self, credential: Credential) void {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    self._credential = credential;
 }
 
 /// Increment the reference count to share this thread group.
@@ -153,3 +167,4 @@ const SpinLock = urd.sync.SpinLock;
 const CondVar = urd.sync.CondVar;
 const thread = @import("thread.zig");
 const Thread = thread.Thread;
+const Credential = @import("Credential.zig");

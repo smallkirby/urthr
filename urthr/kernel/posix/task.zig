@@ -199,37 +199,170 @@ pub fn sysGetTid() ReturnType {
 
 /// syscall: getuid
 pub fn sysGetUid() ReturnType {
-    return .success(0); // TODO
+    const cred = sched.getCurrent().group.getCredential();
+    return .success(@intCast(cred.uid));
 }
 
 /// syscall: geteuid
 pub fn sysGetEuid() ReturnType {
-    return .success(0); // TODO
+    const cred = sched.getCurrent().group.getCredential();
+    return .success(@intCast(cred.euid));
 }
 
 /// syscall: getgid
 pub fn sysGetGid() ReturnType {
-    return .success(0); // TODO
+    const cred = sched.getCurrent().group.getCredential();
+    return .success(@intCast(cred.gid));
 }
 
 /// syscall: getegid
 pub fn sysGetEgid() ReturnType {
-    return .success(0); // TODO
+    const cred = sched.getCurrent().group.getCredential();
+    return .success(@intCast(cred.egid));
 }
 
 /// syscall: getresuid
 pub fn sysGetResUid(ruid: *u32, euid: *u32, suid: *u32) ReturnType {
-    ruid.* = 0; // TODO
-    euid.* = 0; // TODO
-    suid.* = 0; // TODO
+    const cred = sched.getCurrent().group.getCredential();
+    ruid.* = cred.uid;
+    euid.* = cred.euid;
+    suid.* = cred.suid;
     return .success(0);
 }
 
 /// syscall: getresgid
 pub fn sysGetResGid(rgid: *u32, egid: *u32, sgid: *u32) ReturnType {
-    rgid.* = 0; // TODO
-    egid.* = 0; // TODO
-    sgid.* = 0; // TODO
+    const cred = sched.getCurrent().group.getCredential();
+    rgid.* = cred.gid;
+    egid.* = cred.egid;
+    sgid.* = cred.sgid;
+    return .success(0);
+}
+
+/// Value indicating to leave this ID unchanged.
+const id_nochange: u32 = std.math.maxInt(u32);
+
+/// syscall: setuid
+pub fn sysSetUid(uid: u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (cred.isPrivileged()) {
+        cred.uid = uid;
+        cred.euid = uid;
+        cred.suid = uid;
+    } else if (uid == cred.uid or uid == cred.suid) {
+        cred.euid = uid;
+    } else {
+        return .err(.perm);
+    }
+    group.setCredential(cred);
+
+    return .success(0);
+}
+
+/// syscall: setgid
+pub fn sysSetGid(gid: u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (cred.isPrivileged()) {
+        cred.gid = gid;
+        cred.egid = gid;
+        cred.sgid = gid;
+    } else if (gid == cred.gid or gid == cred.sgid) {
+        cred.egid = gid;
+    } else {
+        return .err(.perm);
+    }
+    group.setCredential(cred);
+
+    return .success(0);
+}
+
+/// syscall: setreuid
+pub fn sysSetReUid(ruid: u32, euid: u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (!cred.isPrivileged()) {
+        if (ruid != id_nochange and ruid != cred.uid and ruid != cred.euid)
+            return .err(.perm);
+        if (euid != id_nochange and euid != cred.uid and euid != cred.euid and euid != cred.suid)
+            return .err(.perm);
+    }
+
+    const old_uid = cred.uid;
+    if (ruid != id_nochange) cred.uid = ruid;
+    if (euid != id_nochange) cred.euid = euid;
+    if (ruid != id_nochange or cred.euid != old_uid) cred.suid = cred.euid;
+    group.setCredential(cred);
+
+    return .success(0);
+}
+
+/// syscall: setregid
+pub fn sysSetReGid(rgid: u32, egid: u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (!cred.isPrivileged()) {
+        if (rgid != id_nochange and rgid != cred.gid and rgid != cred.egid)
+            return .err(.perm);
+        if (egid != id_nochange and egid != cred.gid and egid != cred.egid and egid != cred.sgid)
+            return .err(.perm);
+    }
+
+    const old_gid = cred.gid;
+    if (rgid != id_nochange) cred.gid = rgid;
+    if (egid != id_nochange) cred.egid = egid;
+    if (rgid != id_nochange or cred.egid != old_gid) cred.sgid = cred.egid;
+    group.setCredential(cred);
+
+    return .success(0);
+}
+
+/// syscall: setresuid
+pub fn sysSetResUid(ruid: u32, euid: u32, suid: u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (!cred.isPrivileged()) {
+        if (ruid != id_nochange and ruid != cred.uid and ruid != cred.euid and ruid != cred.suid)
+            return .err(.perm);
+        if (euid != id_nochange and euid != cred.uid and euid != cred.euid and euid != cred.suid)
+            return .err(.perm);
+        if (suid != id_nochange and suid != cred.uid and suid != cred.euid and suid != cred.suid)
+            return .err(.perm);
+    }
+
+    if (ruid != id_nochange) cred.uid = ruid;
+    if (euid != id_nochange) cred.euid = euid;
+    if (suid != id_nochange) cred.suid = suid;
+    group.setCredential(cred);
+
+    return .success(0);
+}
+
+/// syscall: setresgid
+pub fn sysSetResGid(rgid: u32, egid: u32, sgid: u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (!cred.isPrivileged()) {
+        if (rgid != id_nochange and rgid != cred.gid and rgid != cred.egid and rgid != cred.sgid)
+            return .err(.perm);
+        if (egid != id_nochange and egid != cred.gid and egid != cred.egid and egid != cred.sgid)
+            return .err(.perm);
+        if (sgid != id_nochange and sgid != cred.gid and sgid != cred.egid and sgid != cred.sgid)
+            return .err(.perm);
+    }
+
+    if (rgid != id_nochange) cred.gid = rgid;
+    if (egid != id_nochange) cred.egid = egid;
+    if (sgid != id_nochange) cred.sgid = sgid;
+    group.setCredential(cred);
+
     return .success(0);
 }
 

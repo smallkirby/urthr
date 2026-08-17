@@ -23,6 +23,10 @@ pub const LoadInfo = struct {
     phdr_num: usize,
     /// Thread pointer value.
     tp: usize,
+    /// Effective UID if set.
+    setuid: ?u32 = null,
+    /// Effective GID if set.
+    setgid: ?u32 = null,
 };
 
 /// Maximum number of bytes inspected while looking for a shebang line.
@@ -92,10 +96,13 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
     if (ehdr.phentsize != @sizeOf(Elf64_Phdr)) return Error.InvalidElf;
 
+    const mode = file.getMode();
     var info = std.mem.zeroInit(LoadInfo, .{
         .entry = ehdr.entry,
         .phdr_entsize = ehdr.phentsize,
         .phdr_num = ehdr.phnum,
+        .setuid = if (mode.flags.suid) file.getUid() else null,
+        .setgid = if (mode.flags.sgid) file.getGid() else null,
     });
 
     // Scan program headers.

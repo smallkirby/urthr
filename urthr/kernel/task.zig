@@ -13,6 +13,7 @@ pub const signal = @import("task/signal.zig");
 pub const thread = @import("task/thread.zig");
 pub const Vmm = @import("task/Vmm.zig");
 pub const ThreadGroup = @import("task/ThreadGroup.zig");
+pub const Credential = @import("task/Credential.zig");
 
 pub const Error = error{
     /// Invalid argument provided.
@@ -322,14 +323,17 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
     // Share or copy the thread group.
     const group = if (flags.thread)
         cur.group.ref()
-    else
-        try ThreadGroup.new(
+    else blk: {
+        const g = try ThreadGroup.new(
             mem.bin,
             th,
             id,
             cur.group.getPgid(),
             cur.group.getSid(),
         );
+        g.setCredential(cur.group.getCredential());
+        break :blk g;
+    };
     errdefer group.deref(mem.bin);
 
     // Share or copy the signal handler table.
@@ -641,6 +645,20 @@ fn setupUserImage(
     // Load the executable.
     const ldr_info = try loader.load(th, exec_filename);
     th.vmm.brk = ldr_info.brk;
+
+    // Apply set-user-ID and set-group-ID bits.
+    if (ldr_info.setuid != null or ldr_info.setgid != null) {
+        var cred = th.group.getCredential();
+        if (ldr_info.setuid) |uid| {
+            cred.euid = uid;
+            cred.suid = uid;
+        }
+        if (ldr_info.setgid) |gid| {
+            cred.egid = gid;
+            cred.sgid = gid;
+        }
+        th.group.setCredential(cred);
+    }
 
     // Prepare user stack.
     const stack = try th.vmm.map(

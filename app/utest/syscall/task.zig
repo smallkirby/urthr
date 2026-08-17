@@ -36,6 +36,12 @@ comptime {
     _ = @import("task/reboot.zig");
     _ = @import("task/setpgid.zig");
     _ = @import("task/setsid.zig");
+    _ = @import("task/setuid.zig");
+    _ = @import("task/setgid.zig");
+    _ = @import("task/setreuid.zig");
+    _ = @import("task/setregid.zig");
+    _ = @import("task/setresuid.zig");
+    _ = @import("task/setresgid.zig");
     _ = @import("task/thread_group.zig");
     _ = @import("task/wait4.zig");
 }

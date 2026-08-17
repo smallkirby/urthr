@@ -1019,6 +1019,22 @@ const Mode = packed struct(u32) {
         suid: bool,
 
         pub const none = Flags{ .sticky = false, .sgid = false, .suid = false };
+
+        fn from(f: urd.fs.FileMode.Flags) Flags {
+            return .{
+                .sticky = f.sticky,
+                .sgid = f.sgid,
+                .suid = f.suid,
+            };
+        }
+
+        fn to(self: Flags) urd.fs.FileMode.Flags {
+            return .{
+                .sticky = self.sticky,
+                .sgid = self.sgid,
+                .suid = self.suid,
+            };
+        }
     };
 
     pub fn from(file: *const urd.fs.File) Mode {
@@ -1028,6 +1044,7 @@ const Mode = packed struct(u32) {
             .other = .from(mode.other),
             .group = .from(mode.group),
             .user = .from(mode.user),
+            .flags = .from(mode.flags),
         };
     }
 
@@ -1037,6 +1054,7 @@ const Mode = packed struct(u32) {
             .other = self.other.to(),
             .group = self.group.to(),
             .user = self.user.to(),
+            .flags = self.flags.to(),
         };
     }
 
@@ -1047,6 +1065,7 @@ const Mode = packed struct(u32) {
             .group = .from(mode.group),
             .user = .from(mode.user),
             .type = @enumFromInt(0),
+            .flags = .from(mode.flags),
         };
     }
 };
@@ -1502,7 +1521,9 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
 pub fn sysUmask(mask: Mode) ReturnType {
     const cur = sched.getCurrent();
     const old = cur.fs.umask;
-    cur.fs.umask = mask.to();
+    var value = mask;
+    value.flags = .none; // keep flags unchanged
+    cur.fs.umask = value.to();
 
     return .success(@bitCast(@as(u64, @as(u32, @bitCast(Mode.fromFileMode(old))))));
 }
