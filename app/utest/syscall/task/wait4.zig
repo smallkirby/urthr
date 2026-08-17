@@ -53,7 +53,7 @@ test "waiting on a non-leader thread's own tid fails with ECHILD" {
     };
 
     var ret: usize = undefined;
-    ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    ret = linux.fork();
     if (ret == 0) {
         // Child process: thread leader
         var fds = [2]i32{ pipe_worker[0], pipe_parent[1] };
@@ -130,13 +130,13 @@ test "a child forked by one thread can be wait-ed by another thread in the same 
     defer _ = linux.close(gc_gate[0]);
     defer _ = linux.close(gc_gate[1]);
 
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         // Spawn a thread that will wait on the grandchild's PID.
         _ = utest.task.spawnThread(S.waiter, 0) catch linux.exit_group(2);
 
         // Fork a grandchild that blocks until told to exit.
-        const gcret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+        const gcret = linux.fork();
         if (gcret == 0) {
             var gbuf: [1]u8 = undefined;
             _ = linux.read(gc_gate[0], &gbuf, 1);

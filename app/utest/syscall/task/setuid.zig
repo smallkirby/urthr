@@ -1,5 +1,5 @@
 test "setuid drops privilege and blocks escalation" {
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         var code: u8 = 0;
 

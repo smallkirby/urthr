@@ -1,6 +1,6 @@
 test "setresuid sets real, effective, and saved UID" {
     const nochange = std.math.maxInt(u32);
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         var code: u8 = 0;
         var ruid: linux.uid_t = undefined;

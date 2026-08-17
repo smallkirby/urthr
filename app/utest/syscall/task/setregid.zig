@@ -1,6 +1,6 @@
 test "setregid sets GID and EGID" {
     const nochange = std.math.maxInt(u32);
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         var code: u8 = 0;
         var rgid: linux.gid_t = undefined;

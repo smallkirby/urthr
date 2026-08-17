@@ -1,5 +1,5 @@
 test "setgid changes GID and EGID when called by root" {
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         var code: u8 = 0;
         if (linux.getgid() != 0) code |= 1;

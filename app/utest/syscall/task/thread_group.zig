@@ -40,7 +40,7 @@ test "last thread (non-leader)'s exit status is reported" {
     S.leader_exited.store(0, .release);
 
     const non_leader_exit_code: usize = 77;
-    var ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    var ret = linux.fork();
     if (ret == 0) {
         // Child process: group leader
         _ = utest.task.spawnThread(S.workerExitsLast, non_leader_exit_code) catch linux.exit_group(2);
@@ -61,7 +61,7 @@ test "last thread (non-leader)'s exit status is reported" {
 
 test "last thread (leader)'s exit status is reported" {
     const leader_exit_code: usize = 88;
-    var ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    var ret = linux.fork();
     if (ret == 0) {
         // Child process: group leader
         _ = utest.task.spawnThread(S.workerExitsImmediately, 1) catch linux.exit_group(2);
@@ -92,7 +92,7 @@ test "thread group is not waitable until every member has exited" {
     defer _ = linux.close(to_worker[0]);
     defer _ = linux.close(to_worker[1]);
 
-    var ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    var ret = linux.fork();
     if (ret == 0) {
         // Child process: group leader
         _ = utest.task.spawnThread(S.workerBlocksThenExits, @intCast(to_worker[0])) catch linux.exit_group(2);

@@ -33,7 +33,7 @@ test "propagates to every thread in the same thread group" {
     defer _ = linux.close(to_parent[0]);
     defer _ = linux.close(to_parent[1]);
 
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         // Child process: group leader.
         const tgid = linux.getpid();

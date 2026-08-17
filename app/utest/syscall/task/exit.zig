@@ -1,6 +1,6 @@
 test "syscall: exit" {
     const expected_exit = 45;
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         _ = linux.syscall1(.exit, expected_exit);
         unreachable;
@@ -17,7 +17,7 @@ test "syscall: exit" {
 
 test "syscall: exit truncates the code to 8 bits" {
     const expected_exit: i32 = -1;
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         _ = linux.syscall1(.exit, @as(usize, @bitCast(@as(isize, expected_exit))));
         unreachable;

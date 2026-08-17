@@ -137,7 +137,7 @@ test "a single write wakes all readers blocked on the same pipe" {
     _ = try utest.task.spawnThread(S.readOne, @intCast(pfds[0]));
 
     // Fork a process that performs a single write of 2 bytes.
-    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    const ret = linux.fork();
     if (ret == 0) {
         const ts: linux.timespec = .{ .sec = 0, .nsec = 50_000_000 };
         _ = utest.time.clockNanoSleep(utest.time.CLOCK_MONOTONIC, 0, &ts, null);
