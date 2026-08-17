@@ -399,6 +399,64 @@ pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, 
 }
 
 // =============================================================
+// Sendfile
+// =============================================================
+
+/// syscall: sendfile
+pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: usize) ReturnType {
+    const out_file = getFile(out_fd) catch return .err(.badf);
+    const in_file = getFile(in_fd) catch return .err(.badf);
+
+    if (!in_file.access.readable or !out_file.access.writable) {
+        return .err(.badf);
+    }
+    if (offset != null and !in_file.seekable) {
+        return .err(.spipe);
+    }
+
+    var pos: usize = if (offset) |o| blk: {
+        if (o.* < 0) return .err(.inval);
+        break :blk @intCast(o.*);
+    } else in_file.offset;
+
+    // TODO: should be zero-copy
+    var buf: [4096]u8 = undefined;
+    var total: usize = 0;
+    var pending_err: ?ReturnType = null;
+    while (total < count) {
+        const chunk = @min(count - total, buf.len);
+        const nread = in_file.pread(buf[0..chunk], pos) catch |e| {
+            pending_err = mapReadError(e);
+            break;
+        };
+        if (nread.len == 0) break;
+
+        const nwritten = out_file.write(nread) catch |e| {
+            pending_err = writeError(e);
+            break;
+        };
+
+        pos += nwritten;
+        total += nwritten;
+        if (nwritten < nread.len) break;
+    }
+
+    // When offset pointer is given, file offset is not update.
+    if (offset) |o| {
+        o.* = @intCast(pos);
+    } else {
+        in_file.offset = pos;
+    }
+
+    // When at least one byte is transferred, error is ignored.
+    if (total == 0) {
+        if (pending_err) |e| return e;
+    }
+
+    return .success(@bitCast(total));
+}
+
+// =============================================================
 // Unlink
 // =============================================================
 
