@@ -1,4 +1,4 @@
-test "syscall: exit" {
+test "exit" {
     const expected_exit = 45;
     const ret = linux.fork();
     if (ret == 0) {
@@ -15,11 +15,11 @@ test "syscall: exit" {
     try testing.expectEqual(@as(u32, expected_exit << 8), status);
 }
 
-test "syscall: exit truncates the code to 8 bits" {
+test "exit truncates the code to 8 bits" {
     const expected_exit: i32 = -1;
     const ret = linux.fork();
     if (ret == 0) {
-        _ = linux.syscall1(.exit, @as(usize, @bitCast(@as(isize, expected_exit))));
+        _ = linux.exit(expected_exit);
         unreachable;
     }
 

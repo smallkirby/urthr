@@ -30,6 +30,32 @@ pub const task = @import("syscall/task.zig");
 pub const time = @import("syscall/time.zig");
 
 // =============================================================
+// Helpers
+// =============================================================
+
+pub fn runChild(T: anytype) !void {
+    const ret = linux.fork();
+    if (ret == 0) {
+        T.lambda() catch |e| {
+            linux.exit_group(@intFromError(e));
+        };
+        linux.exit_group(0);
+
+        unreachable;
+    }
+
+    const child_pid: linux.pid_t = @intCast(ret);
+    try testing.expect(child_pid > 0);
+
+    var status: u32 = undefined;
+    const wret = linux.wait4(child_pid, &status, 0, null);
+    try testing.expectEqual(@as(usize, @intCast(child_pid)), wret);
+
+    const exit_code = linux.W.EXITSTATUS(status);
+    return if (exit_code == 0) {} else @errorFromInt(@as(u16, @intCast(exit_code)));
+}
+
+// =============================================================
 // Test References
 // =============================================================
 
@@ -55,4 +81,5 @@ comptime {
 
 const std = @import("std");
 const linux = std.os.linux;
+const testing = std.testing;
 const options = @import("options");
