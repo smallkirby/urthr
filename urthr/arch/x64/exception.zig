@@ -12,7 +12,7 @@ const num_reserved_exceptions = 32;
 /// Returns null if the interrupt cannot be handled.
 pub const Handler = *const fn (vector: u64) ?void;
 /// ERET hook function signature.
-pub const EreturnHook = *const fn () void;
+pub const EreturnHook = *const fn (ctx: *Context) void;
 /// Page fault handler function signature.
 ///
 /// Returns true if the fault was handled.
@@ -77,8 +77,8 @@ pub fn setEreturnHook(f: EreturnHook) void {
 }
 
 /// Call the registered ERET hook, if any.
-pub fn callEreturnHook() void {
-    if (eret_hook) |f| f();
+pub fn callEreturnHook(ctx: *Context) void {
+    if (eret_hook) |f| f(ctx);
 }
 
 /// Dispatch an interrupt to the registered handler.
@@ -92,7 +92,7 @@ pub fn dispatch(ctx: *Context) void {
 
         if (pagefault_handler) |f| {
             if (f(far, if (ec.write) .write else .read)) {
-                callEreturnHook();
+                callEreturnHook(ctx);
                 return;
             }
         }

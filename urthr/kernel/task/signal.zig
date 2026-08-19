@@ -121,8 +121,7 @@ pub const State = struct {
 };
 
 /// Deliver all pending unblocked signals to the current thread.
-pub fn deliver() void {
-    const ctx = sched.getCurrentCtx();
+pub fn deliver(ctx: *Context) void {
     const th = sched.getCurrent();
 
     if (!isDeliverable(0, ctx)) {

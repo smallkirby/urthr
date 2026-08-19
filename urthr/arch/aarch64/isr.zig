@@ -29,7 +29,7 @@ pub const HandlerSignature = *const fn () ?void;
 pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType) bool;
 
 /// ERET hook function signature.
-pub const EreturnHook = *const fn () void;
+pub const EreturnHook = *const fn (ctx: *Context) void;
 /// Hook called before returning to EL0.
 var eret_hook: ?EreturnHook = null;
 
@@ -66,8 +66,8 @@ pub fn setEreturnHook(f: EreturnHook) void {
 }
 
 /// Call the ERET hook if registered.
-pub fn callEreturnHook() void {
-    if (eret_hook) |f| f();
+pub fn callEreturnHook(ctx: *Context) void {
+    if (eret_hook) |f| f(ctx);
 }
 
 // =============================================================
@@ -237,7 +237,7 @@ fn handleDataAbort(ctx: *Context) void {
 
     if (pagefault_handler) |f| {
         if (f(far, if (iss.wnr == .write) .write else .read)) {
-            callEreturnHook();
+            callEreturnHook(ctx);
             return;
         }
     }
@@ -247,7 +247,7 @@ fn handleDataAbort(ctx: *Context) void {
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {
     if (handler) |f| {
         if (f()) |_| {
-            callEreturnHook();
+            callEreturnHook(ctx);
             return;
         }
     }

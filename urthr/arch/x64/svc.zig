@@ -68,7 +68,7 @@ export fn svc(ctx: *Context) callconv(.c) void {
     }
 
     // Deliver any pending signals before returning to userspace.
-    exception.callEreturnHook();
+    exception.callEreturnHook(ctx);
 }
 
 /// SYSCALL entry point.

@@ -51,7 +51,7 @@ pub fn svc(ctx: *Context) void {
     }
 
     // Deliver any pending signals before returning to userspace.
-    isr.callEreturnHook();
+    isr.callEreturnHook(ctx);
 }
 
 // =============================================================
