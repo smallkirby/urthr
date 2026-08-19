@@ -54,7 +54,7 @@ fn handlePageFault(far: usize, access: common.mem.AccessType) bool {
     th.vmm.faultIn(far, access) catch |err| {
         // Failed to handle the fault. Immediately terminate the current thread.
         log.warn("Unhandled #PF: TGID={d} ID={d} FAR=0x{X} ACCESS={} ERR={}", .{ th.group.getTgid(), th.id, far, access, err });
-        signal.pushSync(.segv);
+        signal.pushSync(.segv, far);
     };
 
     return true;

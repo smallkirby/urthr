@@ -116,6 +116,8 @@ pub const State = struct {
     blocked: Mask = 0,
     /// User-space address of the sigreturn trampoline page.
     trampoline: ?usize = null,
+    /// Faulting address.
+    fault: usize = 0,
 };
 
 /// Deliver all pending unblocked signals to the current thread.
@@ -180,25 +182,39 @@ pub fn sigreturn() void {
 
             // Restore x0–x30.
             const ctx_regs: *[31]u64 = @ptrCast(ctx);
-            ctx_regs.* = frame.regs;
+            ctx_regs.* = frame.mcontext.regs;
             // Restore SP, PC, PSTATE.
-            ctx.sp_el0 = frame.sp;
-            ctx.pc = frame.pc;
-            ctx.pstate = frame.pstate;
+            ctx.sp_el0 = frame.mcontext.sp;
+            ctx.pc = frame.mcontext.pc;
+            ctx.pstate = frame.mcontext.pstate;
 
             break :blk frame.saved_mask;
         },
 
         .x86_64 => blk: {
             const frame: *const SigFrame = @ptrFromInt(ctx.rsp);
+            const mc = &frame.mcontext;
 
-            // Restore R15–RDI.
-            const ctx_regs: *[15]u64 = @ptrCast(ctx);
-            ctx_regs.* = frame.regs;
+            // Restore general-purpose registers.
+            ctx.r8 = mc.r8;
+            ctx.r9 = mc.r9;
+            ctx.r10 = mc.r10;
+            ctx.r11 = mc.r11;
+            ctx.r12 = mc.r12;
+            ctx.r13 = mc.r13;
+            ctx.r14 = mc.r14;
+            ctx.r15 = mc.r15;
+            ctx.rdi = mc.rdi;
+            ctx.rsi = mc.rsi;
+            ctx.rbp = mc.rbp;
+            ctx.rbx = mc.rbx;
+            ctx.rdx = mc.rdx;
+            ctx.rax = mc.rax;
+            ctx.rcx = mc.rcx;
             // Restore RSP, RIP, RFLAGS.
-            ctx.rsp = frame.rsp;
-            ctx.rip = frame.rip;
-            ctx.rflags = frame.rflags;
+            ctx.rsp = mc.rsp;
+            ctx.rip = mc.rip;
+            ctx.rflags = mc.flags;
 
             break :blk frame.saved_mask;
         },
@@ -302,7 +318,7 @@ pub fn blocksFor(mask: Mask, deadline_ns: ?u64) ?SigInt {
 /// to ensure that the signal is always delivered to avoid infinite fault loops.
 ///
 /// If the signal is blocked or already pending, this function immediately terminates the current thread.
-pub fn pushSync(signo: Signal) void {
+pub fn pushSync(signo: Signal, fault: ?usize) void {
     const th = sched.getCurrent();
     const bit: u6 = @intCast(@intFromEnum(signo) - 1);
     const mask = @as(Mask, 1) << bit;
@@ -311,6 +327,7 @@ pub fn pushSync(signo: Signal) void {
         task.exit(.{ .signal = signo });
     }
 
+    th.sigstate.fault = if (fault) |addr| addr else 0;
     th.sigstate.blocked &= ~mask;
     th.sigstate.pending |= mask;
 }
@@ -320,38 +337,128 @@ pub fn pushSync(signo: Signal) void {
 // =============================================================
 
 /// Register context saved onto the user stack when a signal is delivered.
+///
+/// Compatible with `ucontext_t` in the Linux ABI.
 pub const SigFrame = switch (builtin.cpu.arch) {
     .aarch64 => extern struct {
-        /// General-purpose registers x0–x30.
-        regs: [31]u64,
-        /// User SP.
-        sp: u64,
-        /// User PC at signal entry.
-        pc: u64,
-        /// PSTATE.
-        pstate: u64,
-        /// Signal mask to restore on sigreturn.
-        saved_mask: Mask,
-        /// Signal number that caused this frame.
-        signo: SigInt,
+        /// Context flags.
+        flags: u64 = 0,
+        /// Not used.
+        link: u64 = 0,
+        /// Stack information.
+        stack: extern struct {
+            /// Bottom of the stack.
+            sp: usize,
+            /// Stack flags.
+            flags: i32 = 2, // disabled
+            /// Size of the alternate stack region.
+            size: usize = 0,
+        },
+        /// Signal mask.
+        saved_mask: Mask = 0,
+        /// Not used.
+        _rsvd: [120]u8 = [_]u8{0} ** 120,
+        /// CPU context.
+        mcontext: extern struct {
+            /// Fault address.
+            fault_addr: u64,
+            /// General-purpose registers x0–x30.
+            regs: [31]u64 = [_]u64{0} ** 31,
+            /// User SP.
+            sp: u64,
+            /// User PC at signal entry.
+            pc: u64,
+            /// User PSTATE.
+            pstate: u64,
+        } align(16),
     },
 
     .x86_64 => extern struct {
-        /// General-purpose registers R15–RDI.
-        regs: [15]u64,
-        /// User RSP.
-        rsp: u64,
-        /// User RIP at signal entry.
-        rip: u64,
-        /// RFLAGS.
-        rflags: u64,
-        /// Signal mask to restore on sigreturn.
+        /// Context flags.
+        flags: u64 = 0,
+        /// Not used.
+        link: u64 = 0,
+        /// Stack information.
+        stack: extern struct {
+            /// Bottom of the stack.
+            sp: usize,
+            /// Stack flags.
+            flags: i32 = 2, // disabled
+            /// Size of the alternate stack region.
+            size: usize = 0,
+        },
+        /// CPU context.
+        mcontext: extern struct {
+            r8: u64,
+            r9: u64,
+            r10: u64,
+            r11: u64,
+            r12: u64,
+            r13: u64,
+            r14: u64,
+            r15: u64,
+            rdi: u64,
+            rsi: u64,
+            rbp: u64,
+            rbx: u64,
+            rdx: u64,
+            rax: u64,
+            rcx: u64,
+            rsp: u64,
+            rip: u64,
+            flags: u64,
+        },
+        /// Saved signal mask.
         saved_mask: Mask,
-        /// Signal number that caused this frame.
-        signo: SigInt,
     },
 
     else => @compileError("Unsupported architecture."),
+};
+comptime {
+    urd.comptimeAssert(
+        @offsetOf(SigFrame, "mcontext") == switch (builtin.cpu.arch) {
+            .aarch64 => 176,
+            .x86_64 => 40,
+            else => unreachable,
+        },
+        "Invalid mcontext offset.",
+        .{},
+    );
+}
+
+/// Signal information passed to a signal handler.
+const SigInfo = extern struct {
+    /// Signal number.
+    signo: i32,
+    /// Error number.
+    errno: i32 = 0,
+    /// Cause of the signal.
+    code: i32 = 0,
+    /// Reserved.
+    _rsvd0: u32 = 0,
+    /// Signal-specific information.
+    sigfield: extern union {
+        fault: extern struct {
+            /// Faulting address.
+            addr: usize,
+            /// Padding.
+            _rsvd1: [104]u8 = [_]u8{0} ** 104,
+        },
+        zero: extern struct {
+            _rsvd: [112]u8 = [_]u8{0} ** 112,
+        },
+    } = .{ .zero = .{} },
+};
+comptime {
+    urd.comptimeAssert(@bitSizeOf(SigInfo) == 128 * 8, "Invalid SigInfo size.", .{});
+}
+
+/// Stack frame pushed before delivering a signal.
+const Frame = extern struct {
+    /// CPU context.
+    sigframe: SigFrame,
+    /// Signal information.
+    siginfo: SigInfo,
 };
 
 /// Check if signals can be delivered in the current context.
@@ -382,50 +489,99 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
 
     switch (builtin.cpu.arch) {
         .aarch64 => {
-            const frame: *SigFrame = @ptrFromInt((ctx.sp_el0 - @sizeOf(SigFrame)));
+            // Align the frame to 16 bytes.
+            const frame: *Frame = @ptrFromInt((ctx.sp_el0 - @sizeOf(Frame)) & ~@as(u64, 0xF));
             const regs: *const [31]u64 = @ptrCast(ctx);
 
             // Save user context into the sigframe.
-            frame.* = .{
-                .regs = regs.*,
-                .sp = ctx.sp_el0,
-                .pc = ctx.pc,
-                .pstate = ctx.pstate,
-                .saved_mask = th.sigstate.blocked,
-                .signo = signo,
-            };
+            const sf = &frame.sigframe;
+            {
+                sf.* = std.mem.zeroes(SigFrame);
+                sf.saved_mask = th.sigstate.blocked;
+                sf.mcontext = .{
+                    .fault_addr = th.sigstate.fault,
+                    .regs = regs.*,
+                    .sp = ctx.sp_el0,
+                    .pc = ctx.pc,
+                    .pstate = ctx.pstate,
+                };
+            }
+
+            // Push signal information.
+            const si = &frame.siginfo;
+            {
+                si.* = std.mem.zeroes(SigInfo);
+                si.signo = @intCast(signo);
+                si.sigfield = switch (@as(Signal, @enumFromInt(signo))) {
+                    .segv => .{ .fault = .{
+                        .addr = th.sigstate.fault,
+                    } },
+                    else => .{ .zero = .{} },
+                };
+            }
 
             // Modify user context to execute the signal handler.
             ctx.x0 = signo;
+            ctx.x1 = @intFromPtr(si);
+            ctx.x2 = @intFromPtr(sf);
             ctx.pc = action.handler;
             ctx.sp_el0 = @intFromPtr(frame);
             ctx.x30 = trampoline;
         },
 
         .x86_64 => {
-            // Align the frame so that RSP is 16-byte aligned.
-            const frame_addr = (ctx.rsp - @sizeOf(SigFrame)) & ~@as(u64, 0xF);
-            const frame: *SigFrame = @ptrFromInt(frame_addr);
-            const regs: *const [15]u64 = @ptrCast(ctx);
+            // Align the frame to 16 bytes.
+            const frame: *Frame = @ptrFromInt((ctx.rsp - @sizeOf(Frame)) & ~@as(u64, 0xF));
 
             // Save user context into the sigframe.
-            frame.* = .{
-                .regs = regs.*,
-                .rsp = ctx.rsp,
-                .rip = ctx.rip,
-                .rflags = ctx.rflags,
-                .saved_mask = th.sigstate.blocked,
-                .signo = signo,
-            };
+            const sf = &frame.sigframe;
+            {
+                sf.* = std.mem.zeroes(SigFrame);
+                sf.mcontext = .{
+                    .r8 = ctx.r8,
+                    .r9 = ctx.r9,
+                    .r10 = ctx.r10,
+                    .r11 = ctx.r11,
+                    .r12 = ctx.r12,
+                    .r13 = ctx.r13,
+                    .r14 = ctx.r14,
+                    .r15 = ctx.r15,
+                    .rdi = ctx.rdi,
+                    .rsi = ctx.rsi,
+                    .rbp = ctx.rbp,
+                    .rbx = ctx.rbx,
+                    .rdx = ctx.rdx,
+                    .rax = ctx.rax,
+                    .rcx = ctx.rcx,
+                    .rsp = ctx.rsp,
+                    .rip = ctx.rip,
+                    .flags = ctx.rflags,
+                };
+            }
+
+            // Push signal information.
+            const si = &frame.siginfo;
+            {
+                si.* = std.mem.zeroes(SigInfo);
+                si.signo = @intCast(signo);
+                si.sigfield = switch (@as(Signal, @enumFromInt(signo))) {
+                    .segv => .{ .fault = .{
+                        .addr = th.sigstate.fault,
+                    } },
+                    else => .{ .zero = .{} },
+                };
+            }
 
             // Push the trampoline address as the return address for the handler.
-            const ret_slot: *u64 = @ptrFromInt(frame_addr - @sizeOf(u64));
+            const ret_slot: *u64 = @ptrFromInt(@intFromPtr(frame) - @sizeOf(u64));
             ret_slot.* = trampoline;
 
             // Modify user context to execute the signal handler.
             ctx.rdi = signo;
+            ctx.rsi = @intFromPtr(si);
+            ctx.rdx = @intFromPtr(sf);
             ctx.rip = action.handler;
-            ctx.rsp = frame_addr - @sizeOf(u64);
+            ctx.rsp = @intFromPtr(frame) - @sizeOf(u64);
         },
 
         else => @compileError("Unsupported architecture."),
