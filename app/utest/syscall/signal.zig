@@ -2,6 +2,7 @@ comptime {
     _ = @import("signal/kill.zig");
     _ = @import("signal/rt_sigaction.zig");
     _ = @import("signal/rt_sigprocmask.zig");
+    _ = @import("signal/rt_sigsuspend.zig");
     _ = @import("signal/rt_sigtimedwait.zig");
     _ = @import("signal/sigaltstack.zig");
 }
@@ -52,6 +53,15 @@ pub fn sigProcMask(how: i32, set: ?*const u64, oldset: ?*u64, sigsetsize: usize)
 /// The bit corresponding to the given signal in a signal mask.
 pub fn sigBit(signo: std.os.linux.SIG) u64 {
     return @as(u64, 1) << @intCast(@intFromEnum(signo) - 1);
+}
+
+/// Raw rt_sigsuspend syscall wrapper.
+pub fn sigSuspend(set: *const u64, sigsetsize: usize) usize {
+    return std.os.linux.syscall2(
+        .rt_sigsuspend,
+        @intFromPtr(set),
+        sigsetsize,
+    );
 }
 
 /// Raw rt_sigtimedwait syscall wrapper.
