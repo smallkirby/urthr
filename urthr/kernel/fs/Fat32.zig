@@ -9,7 +9,7 @@ bpb: BpbInfo,
 /// Root directory inode.
 root: *InodeImpl,
 /// Lock to protect FAT32 entries and directory entries.
-lock: SpinLock = .{},
+lock: Mutex = .{},
 /// Memory allocator.
 allocator: Allocator,
 
@@ -1846,4 +1846,4 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
 const sync = urd.sync;
-const SpinLock = sync.SpinLock;
+const Mutex = sync.Mutex;
