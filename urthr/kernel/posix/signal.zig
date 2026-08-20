@@ -197,6 +197,25 @@ pub fn sysRtSigTimedWait(set: *const signal.Mask, info: ?*SigInfo, timeout: ?*co
     return .success(signo);
 }
 
+/// syscall: rt_sigsuspend
+pub fn sysRtSigSuspend(set: *const signal.Mask, sigsetsize: usize) ReturnType {
+    if (sigsetsize != @sizeOf(signal.Mask)) {
+        return .err(.inval);
+    }
+
+    const th = sched.getCurrent();
+    const unblockable =
+        (@as(signal.Mask, 1) << (@intFromEnum(signal.Signal.kill) - 1)) |
+        (@as(signal.Mask, 1) << (@intFromEnum(signal.Signal.stop) - 1));
+
+    const saved = th.sigstate.blocked;
+    th.sigstate.blocked = set.* & ~unblockable;
+    signal.waitExcept(th.sigstate.blocked);
+    th.sigstate.saved_mask = saved;
+
+    return .err(.intr);
+}
+
 /// Signal information type.
 const SigInfo = extern struct {
     /// Signal number.

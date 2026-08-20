@@ -118,6 +118,8 @@ pub const State = struct {
     trampoline: ?usize = null,
     /// Faulting address.
     fault: usize = 0,
+    /// Mask to restore once the next pending signal is processed.
+    saved_mask: ?Mask = null,
 };
 
 /// Deliver all pending unblocked signals to the current thread.
@@ -143,6 +145,12 @@ pub fn deliver(ctx: *Context) void {
 
         // Clear pending bit.
         th.sigstate.pending &= ~(@as(Mask, 1) << bit);
+
+        // Restore the saved mask.
+        if (th.sigstate.saved_mask) |orig| {
+            th.sigstate.blocked = orig;
+            th.sigstate.saved_mask = null;
+        }
 
         // Ignore if the handler is set to ignore.
         if (action.handler == Action.sig_ignore) continue;
@@ -308,6 +316,42 @@ pub fn blocksFor(mask: Mask, deadline_ns: ?u64) ?SigInt {
         }
 
         if (!fired) return null;
+    }
+}
+
+/// Block the current thread until one of the signals not in the given mask becomes pending.
+///
+/// The matching signal is left pending.
+pub fn waitExcept(mask: Mask) void {
+    const th = sched.getCurrent();
+    const wanted = ~mask;
+
+    while (true) {
+        var event: Event = .{};
+        var waiter: Waiter = .{
+            .thread = th,
+            .mask = wanted,
+            .event = &event,
+        };
+
+        // Check if any matching signal is already pending.
+        {
+            const ie = waiters_lock.lockDisableIrq();
+            defer waiters_lock.unlockRestoreIrq(ie);
+
+            if (th.sigstate.pending & wanted != 0) return;
+            waiters.append(&waiter);
+        }
+
+        // Wait for a matching signal to be pushed.
+        _ = event.wait(null);
+        {
+            const ie = waiters_lock.lockDisableIrq();
+            defer waiters_lock.unlockRestoreIrq(ie);
+            waiters.remove(&waiter);
+        }
+
+        if (th.sigstate.pending & wanted != 0) return;
     }
 }
 
@@ -536,6 +580,7 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             const sf = &frame.sigframe;
             {
                 sf.* = std.mem.zeroes(SigFrame);
+                sf.saved_mask = th.sigstate.blocked;
                 sf.mcontext = .{
                     .r8 = ctx.r8,
                     .r9 = ctx.r9,
