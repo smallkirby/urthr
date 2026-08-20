@@ -171,20 +171,13 @@ test "an anonymous private mapping is zero-filled on first access" {
 }
 
 test "accessing an address outside of any mapping raises SIGSEGV" {
-    const pid = linux.fork();
-    try testing.expect(pid >= 0);
-
-    if (pid == 0) {
-        const ptr: *allowzero volatile u8 = @ptrFromInt(0);
-        ptr.* = 1; // SEGV
-        unreachable;
-    }
-
-    var status: u32 = undefined;
-    const wret = linux.wait4(@intCast(pid), &status, 0, null);
-    try testing.expectEqual(.SUCCESS, linux.errno(wret));
-    try testing.expect(linux.W.IFSIGNALED(status));
-    try testing.expectEqual(linux.SIG.SEGV, linux.W.TERMSIG(status));
+    try utest.expectRunChildSignaled(linux.SIG.SEGV, 0, struct {
+        pub fn lambda(addr: usize) noreturn {
+            const ptr: *allowzero volatile u8 = @ptrFromInt(addr);
+            ptr.* = 1; // SEGV
+            unreachable;
+        }
+    });
 }
 
 test "writing to a read-only mapping raises SIGSEGV" {
@@ -198,20 +191,13 @@ test "writing to a read-only mapping raises SIGSEGV" {
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
     defer _ = linux.munmap(@ptrFromInt(ret), len);
 
-    const pid = linux.fork();
-    try testing.expect(pid >= 0);
-
-    if (pid == 0) {
-        const ptr: *volatile u8 = @ptrFromInt(ret); // SEGV
-        ptr.* = 1;
-        unreachable;
-    }
-
-    var status: u32 = undefined;
-    const wret = linux.wait4(@intCast(pid), &status, 0, null);
-    try testing.expectEqual(.SUCCESS, linux.errno(wret));
-    try testing.expect(linux.W.IFSIGNALED(status));
-    try testing.expectEqual(linux.SIG.SEGV, linux.W.TERMSIG(status));
+    try utest.expectRunChildSignaled(linux.SIG.SEGV, ret, struct {
+        pub fn lambda(addr: usize) noreturn {
+            const ptr: *volatile u8 = @ptrFromInt(addr); // SEGV
+            ptr.* = 1;
+            unreachable;
+        }
+    });
 }
 
 // =============================================================

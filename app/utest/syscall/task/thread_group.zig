@@ -40,45 +40,35 @@ test "last thread (non-leader)'s exit status is reported" {
     S.leader_exited.store(0, .release);
 
     const non_leader_exit_code: usize = 77;
-    var ret = linux.fork();
-    if (ret == 0) {
-        // Child process: group leader
-        _ = utest.task.spawnThread(S.workerExitsLast, non_leader_exit_code) catch linux.exit_group(2);
+    try utest.expectRunChild(non_leader_exit_code << 8, struct {
+        pub fn lambda(_: usize) noreturn {
+            _ = utest.task.spawnThread(
+                S.workerExitsLast,
+                non_leader_exit_code,
+            ) catch linux.exit_group(2);
 
-        // Exit as the leader first, while the worker thread is still alive.
-        S.leader_exited.store(1, .release);
-        linux.exit(1);
-    }
-
-    const child_pid: linux.pid_t = @intCast(ret);
-    try testing.expect(child_pid > 0);
-
-    var status: u32 = undefined;
-    ret = linux.wait4(child_pid, &status, 0, null);
-    try testing.expectEqual(@as(usize, @intCast(child_pid)), ret);
-    try testing.expectEqual(@as(u32, non_leader_exit_code << 8), status);
+            // Exit as the leader first, while the worker thread is still alive.
+            S.leader_exited.store(1, .release);
+            linux.exit(1);
+        }
+    });
 }
 
 test "last thread (leader)'s exit status is reported" {
     const leader_exit_code: usize = 88;
-    var ret = linux.fork();
-    if (ret == 0) {
-        // Child process: group leader
-        _ = utest.task.spawnThread(S.workerExitsImmediately, 1) catch linux.exit_group(2);
+    try utest.expectRunChild(leader_exit_code << 8, struct {
+        pub fn lambda(_: usize) noreturn {
+            _ = utest.task.spawnThread(
+                S.workerExitsImmediately,
+                1,
+            ) catch linux.exit_group(2);
 
-        // Give the worker some opportunity to exit and leave the group.
-        for (0..100) |_| _ = linux.sched_yield();
+            // Give the worker some opportunity to exit and leave the group.
+            for (0..100) |_| _ = linux.sched_yield();
 
-        linux.exit(leader_exit_code);
-    }
-
-    const child_pid: linux.pid_t = @intCast(ret);
-    try testing.expect(child_pid > 0);
-
-    var status: u32 = undefined;
-    ret = linux.wait4(child_pid, &status, 0, null);
-    try testing.expectEqual(@as(usize, @intCast(child_pid)), ret);
-    try testing.expectEqual(@as(u32, leader_exit_code << 8), status);
+            linux.exit(leader_exit_code);
+        }
+    });
 }
 
 test "thread group is not waitable until every member has exited" {
