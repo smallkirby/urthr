@@ -38,11 +38,17 @@ _sid: thread.Sid,
 /// Credential of this group.
 _credential: Credential = .{},
 
+/// List node for the process table.
+_pt_node: PTable.Node = .{},
+
 /// Protects fields of this struct.
 _lock: SpinLock = .{},
 
 /// List of threads sharing the same thread group.
 pub const MemberList = typing.InlineDoublyLinkedList(Thread, "tg_sibling");
+
+/// Tree of processes keyed by TGID.
+pub const PTable = common.RbTree(Self, "_pt_node", cmpByTgid, cmpKeyTgid);
 
 /// Create a new thread group whose sole member and leader is `leader`.
 ///
@@ -152,6 +158,16 @@ pub fn markDying(self: *Self, status: thread.ExitStatus) void {
 /// Get the exit status for this group if it is marked dying.
 pub fn dyingStatus(self: *const Self) ?thread.ExitStatus {
     return if (self._dying) self._exit_status else null;
+}
+
+/// Compare two thread groups by TGID.
+fn cmpByTgid(a: *const Self, b: *const Self) std.math.Order {
+    return std.math.order(a._tgid, b._tgid);
+}
+
+/// Compare a TGID to a thread group by TGID.
+fn cmpKeyTgid(tgid: thread.Tgid, g: *const Self) std.math.Order {
+    return std.math.order(tgid, g._tgid);
 }
 
 // =============================================================

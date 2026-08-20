@@ -129,6 +129,7 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         .parent = cur.group.ref(),
     };
     group.addMember(th);
+    registerGroup(group);
 
     // Register as a child of the current thread group.
     {
@@ -379,6 +380,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         };
         group.addMember(th);
         if (!flags.thread) {
+            registerGroup(group);
             const zombie_ie = zombie_lock.lockDisableIrq();
             defer zombie_lock.unlockRestoreIrq(zombie_ie);
             cur.group.children.append(th);
@@ -427,6 +429,8 @@ pub fn exit(status: thread.ExitStatus) noreturn {
 
     // Leave the thread group.
     const is_last = cur.group.leave(cur);
+    if (is_last) unregisterGroup(cur.group);
+
     // Switch to the next thread.
     sched.exitCurrent(if (is_last) .moribund else .dead);
 
@@ -575,8 +579,54 @@ fn matchesChild(parent: *const Thread, pid: i32, child: *const Thread) bool {
     return child.group.getPgid() == @as(u32, @bitCast(-pid)); // any child with PGID == -PID.
 }
 
+/// Find a process with the given TGID.
+pub fn findProcess(tgid: thread.Tgid) ?*ThreadGroup {
+    const ie = ptable_lock.lockDisableIrq();
+    defer ptable_lock.unlockRestoreIrq(ie);
+
+    const node = ptable.find(tgid) orelse return null;
+    return node.container();
+}
+
+/// Invoke `action` for every live process with the given PGID.
+///
+/// Returns whether the action is invoked for at least one group.
+pub fn forEachProcess(pgid: thread.Pgid, ctx: anytype, action: fn (@TypeOf(ctx), *ThreadGroup) void) bool {
+    const ie = ptable_lock.lockDisableIrq();
+    defer ptable_lock.unlockRestoreIrq(ie);
+
+    var found = false;
+    var it = ptable.iterator();
+    while (it.next()) |node| {
+        const group = node.container();
+        if (group.getPgid() != pgid) continue;
+        found = true;
+        action(ctx, group);
+    }
+    return found;
+}
+
 // =============================================================
 // Internals
+
+/// Tree of live processes.
+var ptable: ThreadGroup.PTable = .{};
+/// Protects process table.
+var ptable_lock: SpinLock = .{};
+
+/// Register a thread group.
+fn registerGroup(group: *ThreadGroup) void {
+    const ie = ptable_lock.lockDisableIrq();
+    defer ptable_lock.unlockRestoreIrq(ie);
+    ptable.insert(group);
+}
+
+/// Unregister a thread group.
+fn unregisterGroup(group: *ThreadGroup) void {
+    const ie = ptable_lock.lockDisableIrq();
+    defer ptable_lock.unlockRestoreIrq(ie);
+    ptable.delete(group);
+}
 
 /// Allocate a new thread ID.
 fn allocateId() thread.Id {

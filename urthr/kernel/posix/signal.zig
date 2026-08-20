@@ -103,32 +103,89 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
 
 /// syscall: kill
 pub fn sysKill(pid: i32, signum: Signal) ReturnType {
-    if (signum == .check) {
-        return .success(0);
-    }
-    if (@intFromEnum(signum) <= 0 or @intFromEnum(signum) > signal.num_signals) {
+    if (@intFromEnum(signum) < 0 or @intFromEnum(signum) > signal.num_signals) {
         return .err(.inval);
     }
 
-    // Resolve target process group or PID.
-    const cur = sched.getCurrent();
-    const tgid: u32 = if (pid > 0)
-        @bitCast(pid)
-    else if (pid == 0)
-        cur.group.getPgid()
-    else
-        return .err(.nosys); // negative pid (process group) not implemented
+    const should_deliver = signum != .check;
+    const target_signal: signal.Signal = @enumFromInt(@intFromEnum(signum));
+    const sender = sched.getCurrent().group.getCredential();
 
-    // Only self-targeting is supported for now.
-    if (tgid != cur.group.getTgid() and tgid != cur.group.getPgid()) {
-        urd.unimplemented("kill: not self-targeting.");
+    // Single process identified by TGID.
+    if (pid > 0) {
+        const tgid: u32 = @bitCast(pid);
+        const group = urd.task.findProcess(tgid) orelse {
+            return .err(.srch);
+        };
+        if (!hasKillPermission(sender, group.getCredential())) {
+            return .err(.perm);
+        }
+        if (should_deliver) {
+            signal.pushTo(group.getLeader(), target_signal);
+        }
+
+        return .success(0);
     }
 
-    // Deliver the signal to the target thread.
-    const target = cur; // self-targeting only for now
-    signal.pushTo(target, @enumFromInt(@intFromEnum(signum)));
+    // Every process the caller has permission to signal.
+    if (pid == -1) {
+        // TODO: not implemented.
+        return .err(.nosys);
+    }
+
+    // Every process in a process group.
+    const pgid: u32 = if (pid == 0) sched.getCurrent().group.getPgid() else @bitCast(-pid);
+    var ctx: KillPgCtx = .{
+        .sender = sender,
+        .signo = target_signal,
+        .act = should_deliver,
+        .done = false,
+    };
+    if (!urd.task.forEachProcess(pgid, &ctx, killProcess)) {
+        return .err(.srch);
+    }
+    if (!ctx.done) {
+        return .err(.perm);
+    }
 
     return .success(0);
+}
+
+const KillPgCtx = struct {
+    /// Credential of the sending process.
+    sender: Credential,
+    /// Signal to deliver.
+    signo: signal.Signal,
+    /// Whether to actually deliver the signal.
+    act: bool,
+    /// Whether at least one matching process granted permission.
+    done: bool,
+};
+
+/// Deliver the signal to to a single process in the target process group.
+fn killProcess(ctx: *KillPgCtx, group: *urd.task.ThreadGroup) void {
+    if (!hasKillPermission(ctx.sender, group.getCredential())) {
+        return;
+    }
+
+    // Mark as delivered.
+    ctx.done = true;
+
+    // Send a signal if requested.
+    if (ctx.act) {
+        signal.pushTo(group.getLeader(), ctx.signo);
+    }
+}
+
+/// Whether the sender is allowed to send a signal to the target.
+fn hasKillPermission(sender: Credential, target: Credential) bool {
+    if (sender.isPrivileged()) {
+        return true;
+    }
+    return sender.euid == target.uid or
+        sender.euid == target.suid or
+        sender.uid == target.uid or
+        sender.uid == target.suid;
 }
 
 const How = enum(i32) {
@@ -258,5 +315,6 @@ const std = @import("std");
 const urd = @import("urthr");
 const sched = urd.sched;
 const signal = urd.task.signal;
+const Credential = urd.task.Credential;
 const ReturnType = urd.syscall.ReturnType;
 const Timespec = urd.posix.Timespec;

@@ -20,6 +20,8 @@ pub const ErrorEnum = enum(i64) {
     perm = -1,
     /// No such file or directory.
     noent = -2,
+    /// No such process.
+    srch = -3,
     /// Interrupted.
     intr = -4,
     /// No child processes.
