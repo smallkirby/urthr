@@ -471,6 +471,7 @@ fn becomeZombie(th: *Thread) void {
     // Notify the parent group that a child has exited.
     if (th.parent) |p| {
         p.child_exit_cv.signal();
+        signal.pushTo(p.getLeader(), .child);
     }
 }
 

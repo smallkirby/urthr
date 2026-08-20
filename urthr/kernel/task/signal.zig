@@ -664,6 +664,7 @@ fn generateTrampoline() Trampoline {
 /// Get a default handler for the given signal number.
 fn getDefaultHandler(signo: Signal) *const fn (Signal) void {
     return switch (signo) {
+        .child => defaultIgnore,
         else => defaultAbort,
     };
 }
@@ -672,6 +673,9 @@ fn getDefaultHandler(signo: Signal) *const fn (Signal) void {
 fn defaultAbort(signo: Signal) void {
     task.exit(.{ .signal = signo });
 }
+
+/// Default signal handler that does nothing.
+fn defaultIgnore(_: Signal) void {}
 
 // =============================================================
 // Imports
