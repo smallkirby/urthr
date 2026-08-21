@@ -21,7 +21,7 @@ allocator: Allocator,
 /// DMA allocator for request buffers.
 dma: DmaAllocator,
 /// Serializes access to the queue.
-lock: SpinLock = .{},
+lock: Mutex = .{},
 
 /// Sector size in bytes.
 const sector_size = 512;
@@ -359,4 +359,4 @@ const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;
 const virtio = @import("virtio.zig");
 const urd = @import("urthr");
-const SpinLock = urd.sync.SpinLock;
+const Mutex = urd.sync.Mutex;
