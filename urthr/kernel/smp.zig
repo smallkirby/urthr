@@ -8,6 +8,9 @@ const substack_pages = substack_size / urd.mem.page_size;
 /// Mapping from logical CPU ID to architecture-specific core ID.
 var idmap = [_]u64{0} ** board.num_cpus;
 
+/// This core's logical CPU ID.
+var logical_id: usize linksection(pcpu.section) = 0;
+
 /// Initialize the SMP subsystem.
 ///
 /// Wakes up all secondary cores.
@@ -40,13 +43,8 @@ pub fn init() urd.mem.Error!void {
 }
 
 /// Get the logical CPU ID of the current core.
-pub fn getLogicalCoreId() ?usize {
-    const core_id = arch.getCoreId();
-    for (idmap, 0..) |id, i| {
-        if (id == core_id) {
-            return i;
-        }
-    } else return null;
+pub fn getLogicalCoreId() usize {
+    return pcpu.get(&logical_id);
 }
 
 /// Counter indicating how many cores have been waked up.
@@ -80,18 +78,25 @@ fn zsubmain() !void {
     // Initialize per-CPU data.
     urd.pcpu.localInit(logical_core);
 
+    // Record this core's logical ID.
+    pcpu.ptr(&logical_id).* = logical_core;
+
     // Initializing scheduler.
     try urd.sched.initLocal();
 
     // Initialize timer.
     urd.time.initLocal();
 
+    // Enable system call subsystem for this core.
+    arch.initSyscall();
+
     // Increment the waked counter to notify the main core that this core is awake.
     _ = waked.fetchAdd(1, .release);
 
-    // TODO: not implemented.
-    _ = arch.intr.maskAll();
-    while (true) asm volatile ("nop");
+    // Start the scheduler.
+    urd.sched.reschedule();
+
+    while (true) arch.halt();
 }
 
 // =============================================================
@@ -105,3 +110,4 @@ const arch = @import("arch").impl;
 const common = @import("common");
 const bits = common.bits;
 const urd = @import("urthr");
+const pcpu = urd.pcpu;

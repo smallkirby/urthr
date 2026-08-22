@@ -4,7 +4,7 @@
 //! These variables are placed in the `.data..percpu` section.
 
 /// Section name where per-CPU data is placed.
-pub const section = ".data..percpu";
+pub const section = common.pcpu.section;
 
 /// Alignment of per-CPU data.
 const percpu_align = urd.mem.size_4kib;
@@ -73,7 +73,7 @@ pub fn localInit(cpu: usize) void {
 
 /// Get the address of the per-CPU variable.
 pub inline fn ptr(comptime pointer: anytype) @TypeOf(pointer) {
-    return @ptrFromInt(arch.getPerCpuBase() +% @intFromPtr(pointer));
+    return common.pcpu.ptrAt(arch.getPerCpuBase(), pointer);
 }
 
 /// Get the value of the per-CPU variable.

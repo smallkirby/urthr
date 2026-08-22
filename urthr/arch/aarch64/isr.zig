@@ -2,8 +2,7 @@
 extern const exception_table: *void;
 
 /// Whether we are currently handling an exception.
-/// TODO: should be per-CPU.
-var in_handling: bool = false;
+var in_handling: bool linksection(common.pcpu.section) = false;
 
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
@@ -89,7 +88,7 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     w.log("Type: {s}", .{kind});
     w.log("", .{});
 
-    if (in_handling) {
+    if (percpu(&in_handling).*) {
         w.log("!!! Double fault detected !!!", .{});
 
         // Call the terminator if set.
@@ -102,7 +101,7 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
             am.wfe();
         }
     }
-    in_handling = true;
+    percpu(&in_handling).* = true;
 
     // Print system registers.
     const esr = am.mrs(.esr_el1);
@@ -173,6 +172,11 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) void {
     while (true) {
         am.wfe();
     }
+}
+
+/// Get the address of a per-CPU variable for the current core.
+inline fn percpu(comptime v: anytype) @TypeOf(v) {
+    return common.pcpu.ptrAt(am.mrs(.tpidr_el1), v);
 }
 
 // =============================================================

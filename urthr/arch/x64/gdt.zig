@@ -41,7 +41,7 @@ pub fn localInit(cpu: usize) void {
 }
 
 /// Per-CPU mirror of the current thread's kernel stack top.
-export var ksp_top: usize linksection(".data..percpu") = 0;
+export var ksp_top: usize linksection(common.pcpu.section) = 0;
 
 /// Set the kernel stack used on transitions from Ring-3 to Ring-0.
 pub fn setKernelStack(addr: usize) void {
@@ -49,8 +49,7 @@ pub fn setKernelStack(addr: usize) void {
     currentTss().setRsp(0, addr);
 
     // Record the kernel stack top in the per-CPU variable.
-    const ksp: *usize = @ptrFromInt(arch.getPerCpuBase() +% @intFromPtr(&ksp_top));
-    ksp.* = addr;
+    common.pcpu.ptrAt(arch.getPerCpuBase(), &ksp_top).* = addr;
 }
 
 /// Get the TSS of the calling CPU.

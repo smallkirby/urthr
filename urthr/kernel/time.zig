@@ -14,15 +14,6 @@ pub fn initGlobal() void {
     urd.exception.setHandler(arch.timer.ppi_intid, timerHandler) catch {
         @panic("Failed to set timer interrupt handler.");
     };
-}
-
-/// Initialize the timer for the calling CPU.
-///
-/// Must be called on each CPU after GIC CPU interface initialization.
-pub fn initLocal() void {
-    arch.timer.enable();
-    armTimer();
-    board.enableIrq(arch.timer.ppi_intid);
 
     // Register sleep checker as a timer callback.
     _ = register(sleep_checker_interval_us, &checkSleepers) catch {
@@ -33,6 +24,15 @@ pub fn initLocal() void {
     _ = register(sleep_checker_interval_us, &checkItimers) catch {
         @panic("Failed to register itimer checker timer callback.");
     };
+}
+
+/// Initialize the timer for the calling CPU.
+///
+/// Must be called on each CPU after GIC CPU interface initialization.
+pub fn initLocal() void {
+    arch.timer.enable();
+    armTimer();
+    board.enableIrq(arch.timer.ppi_intid);
 }
 
 /// Register a periodic timer callback.

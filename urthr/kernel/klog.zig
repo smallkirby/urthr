@@ -70,11 +70,16 @@ pub fn anyLog(
         );
     };
 
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     writer.print(
         level_str ++ " " ++ scope_str ++ fmt ++ "\r\n",
         args,
     ) catch {};
 }
+
+var lock: SpinLock = .{};
 
 // =============================================================
 // Imports
@@ -83,4 +88,6 @@ pub fn anyLog(
 const std = @import("std");
 const io = std.io;
 const options = @import("options");
+const urd = @import("urthr");
+const SpinLock = urd.sync.SpinLock;
 const console = @import("console.zig");

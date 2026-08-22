@@ -34,8 +34,7 @@ var eret_hook: ?EreturnHook = null;
 var pagefault_handler: ?PageFaultHandler = null;
 
 /// Whether we are currently handling an exception.
-/// TODO: should be per-CPU.
-var in_handling = false;
+var in_handling: bool linksection(common.pcpu.section) = false;
 
 /// Initialize the IDT for this CPU.
 pub fn initLocal() void {
@@ -144,7 +143,7 @@ fn defaultHandler(ctx: *Context) void {
     w.log("Vector: {d} ({s})", .{ ctx.vector, exception.name() });
     w.log("", .{});
 
-    if (in_handling) {
+    if (percpu(&in_handling).*) {
         w.log("!!! Double fault detected !!!", .{});
 
         if (terminator) |term_fn| {
@@ -155,7 +154,7 @@ fn defaultHandler(ctx: *Context) void {
             am.hlt();
         }
     }
-    in_handling = true;
+    percpu(&in_handling).* = true;
 
     // Print exception context.
     w.log("Error Code: 0x{X:0>16}", .{ctx.ec});
@@ -206,6 +205,11 @@ fn defaultHandler(ctx: *Context) void {
     while (true) {
         am.hlt();
     }
+}
+
+/// Get the address of a per-CPU variable for the current core.
+inline fn percpu(comptime v: anytype) @TypeOf(v) {
+    return common.pcpu.ptrAt(arch.getPerCpuBase(), v);
 }
 
 // =============================================================
@@ -418,6 +422,7 @@ const units = common.units;
 const Console = common.Console;
 const UnsafeWriter = common.UnsafeWriter;
 const am = @import("asm.zig");
+const arch = @import("arch.zig");
 const gdt = @import("gdt.zig");
 const isr = @import("isr.zig");
 const StackIterator = @import("StackIterator.zig");

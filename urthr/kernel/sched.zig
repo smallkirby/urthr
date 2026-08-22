@@ -265,12 +265,12 @@ fn accountRuntime() void {
     cur.runtime_us += (delta_ticks * std.time.us_per_s) / freq;
 
     if (options.idle_watchdog != 0) {
-        if (urd.smp.getLogicalCoreId()) |id| {
-            if (id == 0 and getIdle().runtime_us >= options.idle_watchdog * std.time.us_per_s) {
-                @branchHint(.cold);
-                log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
-                urd.eol(0);
-            }
+        if (urd.smp.getLogicalCoreId() == 0 and
+            getIdle().runtime_us >= options.idle_watchdog * std.time.us_per_s)
+        {
+            @branchHint(.cold);
+            log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
+            urd.eol(0);
         }
     }
 }
