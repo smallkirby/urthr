@@ -338,6 +338,50 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
     while (scan < end) {
         const node = self.tree.find(scan) orelse return Error.NoSuchMapping;
         const vma = node.container();
+        const vma_end = vma.start + vma.size;
+
+        // Split the head portion that keeps the original permission.
+        if (vma.start < scan) {
+            const head = try urd.mem.bin.create(VmArea);
+            errdefer urd.mem.bin.destroy(head);
+            head.* = .{
+                .start = vma.start,
+                .size = scan - vma.start,
+                .perm = vma.perm,
+                .backing = vma.backing,
+            };
+            switch (head.backing) {
+                .anon => {},
+                .file => |fb| fb.file.ref(),
+            }
+            self.tree.insert(head);
+
+            self.tree.delete(vma);
+            vma.backing = vma.getBackingAt(scan);
+            vma.start = scan;
+            vma.size = vma_end - scan;
+            self.tree.insert(vma);
+        }
+
+        // Split the tail portion that keeps the original permission.
+        if (vma_end > end) {
+            const tail = try urd.mem.bin.create(VmArea);
+            errdefer urd.mem.bin.destroy(tail);
+            tail.* = .{
+                .start = end,
+                .size = vma_end - end,
+                .perm = vma.perm,
+                .backing = vma.getBackingAt(end),
+            };
+            switch (tail.backing) {
+                .anon => {},
+                .file => |fb| fb.file.ref(),
+            }
+            self.tree.insert(tail);
+
+            vma.size = end - vma.start;
+        }
+
         vma.perm = perm;
         scan = vma.start + vma.size;
     }
