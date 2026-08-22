@@ -11,8 +11,16 @@ pub const Error = error{
 
 /// Information about the loaded executable.
 pub const LoadInfo = struct {
+    /// Interpreter path.
+    interp: ?[]const u8 = null,
+    /// Load bias.
+    bias: usize,
     /// Entry point address.
     entry: usize,
+    /// Entry point address of the main executable.
+    ///
+    /// Specified when the main executable is loaded by an interpreter.
+    entry2: ?usize = null,
     /// Program break.
     brk: usize,
     /// Virtual address of program header table (AT_PHDR).
@@ -27,6 +35,13 @@ pub const LoadInfo = struct {
     setuid: ?u32 = null,
     /// Effective GID if set.
     setgid: ?u32 = null,
+
+    /// Release resources allocated for the load information.
+    pub fn deinit(self: *const LoadInfo) void {
+        if (self.interp) |interp| {
+            urd.mem.bin.free(interp);
+        }
+    }
 };
 
 /// Maximum number of bytes inspected while looking for a shebang line.
@@ -76,11 +91,33 @@ pub fn parseShebang(filename: []const u8, allocator: Allocator) Error!?Shebang {
 }
 
 /// Load an ELF executable from the filesystem.
-///
-/// Returns the entry point address of the loaded executable.
-///
-/// TODO: support dynamic linking.
 pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
+    const main_hint = 0x0100_0000;
+    const dyn_hint = 0x2_0000_0000;
+
+    // Load main executable image.
+    const main_info = try loadImage(th, filename, main_hint);
+    defer main_info.deinit();
+    var info = main_info;
+
+    // Load interpreter if specified.
+    if (main_info.interp) |interp| {
+        const interp_info = try loadImage(th, interp, dyn_hint);
+        defer interp_info.deinit();
+
+        info.bias = interp_info.bias;
+        info.entry = interp_info.entry;
+        info.entry2 = main_info.entry;
+        info.interp = null;
+    }
+
+    return info;
+}
+
+/// Load an ELF image.
+///
+/// The load address is chosen based on the given hint from the free virtual address space.
+fn loadImage(th: *Thread, filename: []const u8, hint: usize) Error!LoadInfo {
     const file = try fs.open(filename, .read_only, urd.mem.bin);
     defer file.unref();
     if (file.size() < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
@@ -91,14 +128,35 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
 
     // Validate ELF header.
     const ehdr = std.elf.Header.read(&reader.interface) catch return Error.InvalidElf;
-    if (ehdr.type != .EXEC) return Error.InvalidElf;
     if (!ehdr.is_64) return Error.InvalidElf;
     if (ehdr.endian != builtin.cpu.arch.endian()) return Error.InvalidElf;
     if (ehdr.phentsize != @sizeOf(Elf64_Phdr)) return Error.InvalidElf;
 
+    switch (ehdr.type) {
+        .EXEC, .DYN => {},
+        else => return Error.InvalidElf,
+    }
+
+    // Decide the load bias.
+    const bias = switch (ehdr.type) {
+        // Always load at the specified address.
+        .EXEC => 0,
+        // Find a free region to load the binary.
+        .DYN => blk: {
+            var iter = PhdrIterator.init(&reader, ehdr);
+            const pt_range = try calcLoadRange(&iter);
+            const base = th.vmm.findFreeRegion(hint, pt_range.size());
+            break :blk base - pt_range.start;
+        },
+        else => unreachable,
+    };
+
+    // Initialize load information.
     const mode = file.getMode();
     var info = std.mem.zeroInit(LoadInfo, .{
-        .entry = ehdr.entry,
+        .interp = null,
+        .bias = bias,
+        .entry = ehdr.entry + bias,
         .phdr_entsize = ehdr.phentsize,
         .phdr_num = ehdr.phnum,
         .setuid = if (mode.flags.suid) file.getUid() else null,
@@ -111,23 +169,29 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
         // Find which PT_LOAD segment contains the phdr table.
         if (phdr.p_type == std.elf.PT_LOAD and info.phdr_addr == 0) {
             if (phdr.p_offset <= ehdr.phoff and ehdr.phoff < phdr.p_offset + phdr.p_filesz) {
-                info.phdr_addr = phdr.p_vaddr + (ehdr.phoff - phdr.p_offset);
+                info.phdr_addr = phdr.p_vaddr + bias + (ehdr.phoff - phdr.p_offset);
             }
         }
 
         // Map each segment into memory.
         switch (phdr.p_type) {
             std.elf.PT_LOAD => {
-                const end = try mapLoadSegment(phdr, th, &reader);
+                const end = try mapLoadSegment(phdr, th, bias, &reader);
                 info.brk = @max(info.brk, end);
             },
 
             std.elf.PT_TLS => {
                 rtt.expectEqual(0, info.tp);
-                info.tp = try mapTlsSegment(phdr, th);
+                info.tp = try mapTlsSegment(phdr, th, bias);
             },
 
-            std.elf.PT_INTERP => return Error.NotSupported,
+            std.elf.PT_INTERP => {
+                if (phdr.p_filesz == 0) return Error.InvalidElf;
+                var buf: [128]u8 = undefined;
+                reader.seekTo(phdr.p_offset);
+                reader.interface.readSliceAll(buf[0..phdr.p_filesz]) catch return Error.InvalidElf;
+                info.interp = try urd.mem.bin.dupe(u8, buf[0 .. phdr.p_filesz - 1]);
+            },
 
             else => continue,
         }
@@ -139,9 +203,10 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
 /// Maps a PT_LOAD segment of ELF.
 ///
 /// Returns the program break after loading the segment.
-fn mapLoadSegment(phdr: std.elf.Elf64_Phdr, th: *Thread, reader: *Reader) Error!usize {
-    const va_start_aligned = std.mem.alignBackward(usize, phdr.p_vaddr, urd.mem.page_size);
-    const va_end_aligned = std.mem.alignForward(usize, phdr.p_vaddr + phdr.p_memsz, urd.mem.page_size);
+fn mapLoadSegment(phdr: Elf64_Phdr, th: *Thread, bias: usize, reader: *Reader) Error!usize {
+    const p_vaddr = phdr.p_vaddr + bias;
+    const va_start_aligned = std.mem.alignBackward(usize, p_vaddr, urd.mem.page_size);
+    const va_end_aligned = std.mem.alignForward(usize, p_vaddr + phdr.p_memsz, urd.mem.page_size);
     const size_aligned = va_end_aligned - va_start_aligned;
 
     // Validate the program header.
@@ -156,7 +221,7 @@ fn mapLoadSegment(phdr: std.elf.Elf64_Phdr, th: *Thread, reader: *Reader) Error!
     );
 
     // Read segment data into mapped memory.
-    const offset_in_memory = phdr.p_vaddr - va_start_aligned;
+    const offset_in_memory = p_vaddr - va_start_aligned;
     const segment = memory[offset_in_memory..][0..phdr.p_memsz];
     reader.seekTo(phdr.p_offset);
     reader.interface.readSliceAll(segment[0..phdr.p_filesz]) catch return error.InvalidElf;
@@ -178,7 +243,7 @@ fn mapLoadSegment(phdr: std.elf.Elf64_Phdr, th: *Thread, reader: *Reader) Error!
 /// Maps a PT_TLS segment of ELF to the thread's TLS area.
 ///
 /// Returns the thread pointer value.
-fn mapTlsSegment(phdr: std.elf.Elf64_Phdr, th: *Thread) Error!usize {
+fn mapTlsSegment(phdr: Elf64_Phdr, th: *Thread, bias: usize) Error!usize {
     const tcp_size = 16;
 
     const alignment = @max(phdr.p_align, 1);
@@ -190,7 +255,7 @@ fn mapTlsSegment(phdr: std.elf.Elf64_Phdr, th: *Thread) Error!usize {
     const tp = @as([*]u8, @ptrFromInt(tp_addr))[0..total_size];
 
     // Copy TLS initialization image from the loaded segment.
-    const src = @as([*]const u8, @ptrFromInt(phdr.p_vaddr))[0..phdr.p_filesz];
+    const src = @as([*]const u8, @ptrFromInt(phdr.p_vaddr + bias))[0..phdr.p_filesz];
     @memcpy(tp[tcp_size..][0..phdr.p_filesz], src);
 
     // Zero-clear the remaining memory.
@@ -199,6 +264,35 @@ fn mapTlsSegment(phdr: std.elf.Elf64_Phdr, th: *Thread) Error!usize {
 
     return tp_addr;
 }
+
+/// Scan the program headers to find the range of PT_LOAD segments.
+fn calcLoadRange(iter: *PhdrIterator) Error!common.Range {
+    var start: usize = std.math.maxInt(usize);
+    var end: usize = 0;
+    while (try iter.next()) |phdr| {
+        if (phdr.p_type != std.elf.PT_LOAD) continue;
+
+        const pstart = std.mem.alignBackward(
+            usize,
+            phdr.p_vaddr,
+            page_size,
+        );
+        const pend = std.mem.alignForward(
+            usize,
+            phdr.p_vaddr + phdr.p_memsz,
+            page_size,
+        );
+
+        start = @min(start, pstart);
+        end = @max(end, pend);
+    }
+
+    return .{ .start = start, .end = end };
+}
+
+// =============================================================
+// Helpers
+// =============================================================
 
 /// Implements std.Io.Reader interface for reading ELF files.
 const Reader = struct {
@@ -318,4 +412,5 @@ const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
+const page_size = urd.mem.page_size;
 const Thread = urd.task.thread.Thread;

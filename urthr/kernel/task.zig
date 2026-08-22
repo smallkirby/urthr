@@ -752,6 +752,12 @@ fn setupUserImage(
 
         // AT_PAGESZ.
         try scon.appendAux(.new(.pagesz, mem.page_size));
+
+        // AT_BASE.
+        try scon.appendAux(.new(.base, ldr_info.bias));
+
+        // AT_ENTRY.
+        try scon.appendAux(.new(.entry, ldr_info.entry2 orelse ldr_info.entry));
     }
     const usp = try scon.finalize();
 

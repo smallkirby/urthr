@@ -402,6 +402,19 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
     }
 }
 
+/// Find the first free virtual address region of the given size starting from the given address.
+pub fn findFreeRegion(self: *Self, start: usize, size: usize) usize {
+    var candidate = start;
+    var it = self.tree.iterator();
+    while (it.next()) |node| {
+        const vma = node.container();
+        if (vma.start + vma.size <= candidate) continue;
+        if (vma.start >= candidate + size) break;
+        candidate = vma.start + vma.size;
+    }
+    return candidate;
+}
+
 /// Extend the program break to the given address.
 ///
 /// Returns the new program break address after extension.
@@ -486,19 +499,6 @@ fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
             urd.mem.bin.destroy(vma);
         }
     }
-}
-
-/// Find the first free virtual address region of the given size starting from the given address.
-fn findFreeRegion(self: *Self, start: usize, size: usize) usize {
-    var candidate = start;
-    var it = self.tree.iterator();
-    while (it.next()) |node| {
-        const vma = node.container();
-        if (vma.start + vma.size <= candidate) continue;
-        if (vma.start >= candidate + size) break;
-        candidate = vma.start + vma.size;
-    }
-    return candidate;
 }
 
 /// RB tree type of VmArea.
