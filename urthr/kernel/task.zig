@@ -188,6 +188,14 @@ pub fn execve(
     // =============================================================
     // No error can be returned after this point.
 
+    // Reset signal handlers.
+    {
+        const new_handlers = try current.sigstate.handlers.reset(allocator);
+        current.sigstate.handlers.deinit(allocator);
+        current.sigstate.handlers = new_handlers;
+        current.sigstate.trampoline = null;
+    }
+
     // Clean up memories.
     allocator.free(name);
     for (argv) |arg| {

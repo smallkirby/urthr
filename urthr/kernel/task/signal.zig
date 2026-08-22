@@ -91,6 +91,20 @@ pub const Handlers = struct {
         return new_handlers;
     }
 
+    /// Create a handler table for forked process.
+    ///
+    /// Only ignored signals are preserved.
+    pub fn reset(self: *const Handlers, allocator: Allocator) Allocator.Error!*Handlers {
+        const new_handlers = try allocator.create(Handlers);
+        new_handlers.* = .{};
+        for (self.actions, 0..) |action, i| {
+            if (action.handler == Action.sig_ignore) {
+                new_handlers.actions[i].handler = Action.sig_ignore;
+            }
+        }
+        return new_handlers;
+    }
+
     /// Increment the reference count to share this handler table.
     pub fn ref(self: *Handlers) *Handlers {
         self.refcnt += 1;
