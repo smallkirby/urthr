@@ -58,6 +58,7 @@ echo_normal "Applying $defconfig (output: $output_dir)"
 make O="$output_dir" DEFCONFIG="$defconfig" defconfig
 
 echo_normal "Building"
+make O="$output_dir" -j"$(nproc)" busybox-dirclean
 make O="$output_dir" -j"$(nproc)"
 
 echo_normal "Done: $output_dir/target"
