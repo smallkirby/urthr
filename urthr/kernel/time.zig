@@ -305,6 +305,9 @@ fn getCurrentTimestampUs() Ktimestamp {
 fn timerHandler(_: urd.exception.Vector) void {
     armTimer();
 
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     const now_us = getCurrentTimestampUs();
     var it = entries.iter();
     while (it.next()) |entry| {
