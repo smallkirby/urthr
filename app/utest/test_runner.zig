@@ -66,6 +66,9 @@ pub fn main(init: std.process.Init) !void {
     }
     log.info("Summary: {d} passed, {d} skipped, {d} failed.", .{ ok_count, skip_count, fail_count });
 
+    // Dump kernel trace.
+    dumpPerfTrace();
+
     if (fail_count > 0) {
         for (fail_tests.items) |test_name| {
             log.info("  - {s}", .{test_name});
@@ -73,6 +76,27 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     } else {
         std.process.exit(0);
+    }
+}
+
+/// Dump the kernel trace to a file.
+fn dumpPerfTrace() void {
+    const nr: u64 = 513;
+    const ret: u64 = if (builtin.cpu.arch.isAARCH64())
+        asm volatile ("svc #0"
+            : [ret] "={x0}" (-> u64),
+            : [number] "{x8}" (nr),
+            : .{ .memory = true })
+    else if (builtin.cpu.arch.isX86())
+        asm volatile ("syscall"
+            : [ret] "={rax}" (-> u64),
+            : [number] "{rax}" (nr),
+            : .{ .rcx = true, .r11 = true, .memory = true })
+    else
+        @compileError("unsupported architecture");
+
+    if (@as(i64, @bitCast(ret)) < 0) {
+        log.warn("Failed to dump kernel trace: {d}", .{@as(i64, @bitCast(ret))});
     }
 }
 
