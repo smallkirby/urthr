@@ -4,7 +4,7 @@
 pub const dump_path = "/PERFLOG";
 
 /// Number of records currently held in the given core's buffer.
-pub fn len(core: usize) usize {
+fn len(core: usize) usize {
     const c = &cores[core];
     const ie = c.lock.lockDisableIrq();
     defer c.lock.unlockRestoreIrq(ie);
@@ -12,7 +12,7 @@ pub fn len(core: usize) usize {
 }
 
 /// Get the i-th oldest record currently in the given core's buffer.
-pub fn at(core: usize, i: usize) Record {
+fn at(core: usize, i: usize) Record {
     const c = &cores[core];
     const ie = c.lock.lockDisableIrq();
     defer c.lock.unlockRestoreIrq(ie);
@@ -46,6 +46,8 @@ pub fn record(payload: EventPayload) void {
 
 /// Record the name of the current thread.
 pub fn recordThreadName(name: []const u8) void {
+    if (!options.enable_perf) return;
+
     var buf: [perf.ThreadName.max_len]u8 = @splat(0);
     const n = @min(name.len, buf.len);
     @memcpy(buf[0..n], name[0..n]);
@@ -54,8 +56,9 @@ pub fn recordThreadName(name: []const u8) void {
 
 /// Write the buffered records to a file mounted on the root filesystem.
 pub fn dump() fs.Error!void {
-    const allocator = urd.mem.bin;
+    if (!options.enable_perf) return;
 
+    const allocator = urd.mem.bin;
     const file = fs.open(
         dump_path,
         .write_only,
@@ -136,7 +139,7 @@ const CoreBuffer = struct {
     lock: SpinLock = .{},
 };
 
-var cores: [board.num_cpus]CoreBuffer = @splat(.{});
+var cores: [if (options.enable_perf) board.num_cpus else 0]CoreBuffer = @splat(.{});
 
 // =============================================================
 // Imports
