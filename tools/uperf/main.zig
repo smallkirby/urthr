@@ -95,6 +95,11 @@ pub fn main(init: std.process.Init) !void {
             .pid = cpu_pid_base + core,
             .args = .{ .sort_index = @intCast(core * 2 + 1) },
         });
+        try s.write(ThreadNameEvent{
+            .pid = cpu_pid_base + core,
+            .tid = 0,
+            .args = .{ .name = "Running" },
+        });
     }
 
     // Collect the known name for each core and thread pair.
