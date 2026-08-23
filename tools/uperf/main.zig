@@ -7,6 +7,7 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const args = try init.minimal.args.toSlice(allocator);
     defer allocator.free(args);
+    defer thread_names.deinit();
 
     if (args.len != 1 + 2) {
         log.err("Usage: {s} <input> <output.json>", .{args[0]});
@@ -55,34 +56,53 @@ pub fn main(init: std.process.Init) !void {
         max_core = @max(max_core, rec.core);
         max_ts = @max(max_ts, rec.timestamp_ns);
     }
+    cpu_pid_base = max_core + 1;
 
     // Start conversion.
     var s: std.json.Stringify = .{ .writer = w };
     try s.beginArray();
 
-    // Record core names.
+    // Record core names and their scheduling processes.
     // Using process name metadata events for this purpose.
     var core: u32 = 0;
     while (core <= max_core) : (core += 1) {
-        var core_name_buf: [16]u8 = undefined;
+        var name_buf: [16]u8 = undefined;
+
+        // Record core name.
         try s.write(CoreNameEvent{
             .pid = core,
             .args = .{ .name = try std.fmt.bufPrint(
-                &core_name_buf,
-                "Core#{d}",
+                &name_buf,
+                "Threads#{d}",
                 .{core},
             ) },
+        });
+        try s.write(ProcessSortIndexEvent{
+            .pid = core,
+            .args = .{ .sort_index = @intCast(core * 2) },
+        });
+
+        // Record scheduling process name.
+        try s.write(CoreNameEvent{
+            .pid = cpu_pid_base + core,
+            .args = .{ .name = try std.fmt.bufPrint(
+                &name_buf,
+                "Switch#{d}",
+                .{core},
+            ) },
+        });
+        try s.write(ProcessSortIndexEvent{
+            .pid = cpu_pid_base + core,
+            .args = .{ .sort_index = @intCast(core * 2 + 1) },
         });
     }
 
     // Collect the known name for each core and thread pair.
     {
-        // Collect names.
-        var thread_names = std.AutoHashMap(
+        thread_names = std.AutoHashMap(
             ThreadKey,
             [perf.ThreadName.max_len]u8,
         ).init(allocator);
-        defer thread_names.deinit();
         for (records) |rec| {
             if (rec.payload.event() != .thread_name) continue;
             try thread_names.put(
@@ -90,8 +110,10 @@ pub fn main(init: std.process.Init) !void {
                 rec.payload.data.thread_name.name,
             );
         }
+    }
 
-        // Emits thread name events.
+    // Emits thread name events.
+    {
         var iter = thread_names.iterator();
         while (iter.next()) |entry| {
             const name = entry.value_ptr.*;
@@ -109,8 +131,10 @@ pub fn main(init: std.process.Init) !void {
     defer pending.deinit();
     for (records) |rec| {
         switch (rec.payload.event()) {
-            .thread_name => {
-                // already handled.
+            .thread_name,
+            .sched_switch,
+            => {
+                // Handled later.
             },
             .syscall_enter => {
                 try pending.put(rec.tid, rec);
@@ -119,7 +143,7 @@ pub fn main(init: std.process.Init) !void {
                 const enter = pending.fetchRemove(rec.tid) orelse {
                     continue;
                 };
-                try writeEvent(
+                try writeSvcEvent(
                     &s,
                     enter.value,
                     rec.timestamp_ns - enter.value.timestamp_ns,
@@ -132,7 +156,26 @@ pub fn main(init: std.process.Init) !void {
     var it = pending.iterator();
     while (it.next()) |entry| {
         const enter = entry.value_ptr.*;
-        try writeEvent(&s, enter, max_ts - enter.timestamp_ns);
+        try writeSvcEvent(&s, enter, max_ts - enter.timestamp_ns);
+    }
+
+    // Pair up sched_switch records per core into running slices.
+    {
+        const last_switch = try allocator.alloc(?perf.Record, max_core + 1);
+        defer allocator.free(last_switch);
+        @memset(last_switch, null);
+
+        for (records) |rec| {
+            if (rec.payload.event() != .sched_switch) continue;
+            if (last_switch[rec.core]) |prev| {
+                try writeSchedEvent(&s, prev, rec.timestamp_ns - prev.timestamp_ns);
+            }
+            last_switch[rec.core] = rec;
+        }
+        for (last_switch) |maybe_prev| {
+            const prev = maybe_prev orelse continue;
+            try writeSchedEvent(&s, prev, max_ts - prev.timestamp_ns);
+        }
     }
 
     // Flush the JSON output.
@@ -167,6 +210,16 @@ const CoreNameEvent = struct {
     args: struct { name: []const u8 },
 };
 
+const ProcessSortIndexEvent = struct {
+    name: []const u8 = "process_sort_index",
+    /// Category. Metadata.
+    ph: []const u8 = "M",
+    /// Logical core ID.
+    pid: u32,
+    /// Desired display order among processes.
+    args: struct { sort_index: i32 },
+};
+
 const ThreadNameEvent = struct {
     name: []const u8 = "thread_name",
     /// Category. Metadata.
@@ -187,17 +240,49 @@ const ThreadKey = struct {
     tid: u32,
 };
 
+/// Known name for each core and thread pair.
+var thread_names: std.AutoHashMap(ThreadKey, [perf.ThreadName.max_len]u8) = undefined;
+/// Process ID base for the per-core scheduling process.
+var cpu_pid_base: u32 = undefined;
+
+/// Write a sched_switch record and its duration as a complete event.
+fn writeSchedEvent(s: *std.json.Stringify, event: perf.Record, duration_ns: u64) !void {
+    var name_buf: [32]u8 = undefined;
+    const name = blk: {
+        const raw = thread_names.get(.{
+            .core = event.core,
+            .tid = event.tid,
+        }) orelse break :blk try std.fmt.bufPrint(
+            &name_buf,
+            "#{d}",
+            .{event.tid},
+        );
+        const len = std.mem.indexOfScalar(u8, &raw, 0) orelse raw.len;
+        @memcpy(name_buf[0..len], raw[0..len]);
+        break :blk name_buf[0..len];
+    };
+
+    try s.write(TraceEvent{
+        .name = name,
+        .cat = "sched",
+        .pid = cpu_pid_base + event.core,
+        .tid = 0,
+        .ts = event.timestamp_ns / std.time.ns_per_us,
+        .dur = duration_ns / std.time.ns_per_us,
+    });
+}
+
 /// Write an enter record and its duration as a complete event.
-fn writeEvent(s: *std.json.Stringify, enter: perf.Record, duration_ns: u64) !void {
-    const nr = enter.payload.data.syscall_enter.nr;
+fn writeSvcEvent(s: *std.json.Stringify, event: perf.Record, duration_ns: u64) !void {
+    const nr = event.payload.data.syscall_enter.nr;
 
     var name_buf: [16]u8 = undefined;
     try s.write(TraceEvent{
         .name = try std.fmt.bufPrint(&name_buf, "SVC#{d}", .{nr}),
         .cat = "syscall",
-        .pid = enter.core,
-        .tid = enter.tid,
-        .ts = enter.timestamp_ns / std.time.ns_per_us,
+        .pid = event.core,
+        .tid = event.tid,
+        .ts = event.timestamp_ns / std.time.ns_per_us,
         .dur = duration_ns / std.time.ns_per_us,
     });
 }

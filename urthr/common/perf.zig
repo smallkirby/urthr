@@ -8,6 +8,8 @@ pub const Event = enum(u8) {
     syscall_exit,
     /// A thread was assigned the given name.
     thread_name,
+    /// A thread was switched into the CPU.
+    sched_switch,
 };
 
 /// Syscall Enter event payload.
@@ -31,6 +33,9 @@ pub const ThreadName = extern struct {
     name: [max_len]u8,
 };
 
+/// Scheduler Switch event payload.
+pub const SchedSwitch = extern struct {};
+
 /// Event-specific payload.
 pub const EventPayload = extern struct {
     /// Kind of event.
@@ -40,6 +45,7 @@ pub const EventPayload = extern struct {
         syscall_enter: SyscallEnter,
         syscall_exit: SyscallExit,
         thread_name: ThreadName,
+        sched_switch: SchedSwitch,
     },
 
     /// Type of the data associated with the given event tag.
