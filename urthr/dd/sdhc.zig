@@ -209,12 +209,15 @@ const vtable_impl = struct {
         const ie = lock.lockDisableIrq();
         defer lock.unlockRestoreIrq(ie);
 
-        for (0..(buffer.len / block_size)) |i| {
-            readBlock(
+        var done: usize = 0;
+        while (done < buffer.len / block_size) {
+            const chunk_blocks = @min(buffer.len / block_size - done, max_blocks_per_xfer);
+            readBlocks(
                 self,
-                @intCast(lba + i),
-                buffer[i * block_size .. (i + 1) * block_size],
+                @intCast(lba + done),
+                buffer[done * block_size .. (done + chunk_blocks) * block_size],
             );
+            done += chunk_blocks;
         }
 
         return buffer.len;
@@ -234,12 +237,15 @@ const vtable_impl = struct {
         const ie = lock.lockDisableIrq();
         defer lock.unlockRestoreIrq(ie);
 
-        for (0..(buffer.len / block_size)) |i| {
-            writeBlock(
+        var done: usize = 0;
+        while (done < buffer.len / block_size) {
+            const chunk_blocks = @min(buffer.len / block_size - done, max_blocks_per_xfer);
+            writeBlocks(
                 self,
-                @intCast(lba + i),
-                buffer[i * block_size .. (i + 1) * block_size],
+                @intCast(lba + done),
+                buffer[done * block_size .. (done + chunk_blocks) * block_size],
             );
+            done += chunk_blocks;
         }
 
         return buffer.len;
@@ -557,44 +563,49 @@ fn setupTransaction(base_freq: ?u64) void {
 // I/O
 // =============================================================
 
-/// Read a single 512-byte block from the SD card.
+/// Maximum number of 512B blocks that can be transferred in a single command.
+const max_blocks_per_xfer = @min(std.math.maxInt(u16) / block_size, std.math.maxInt(u16));
+
+/// Read one or more contiguous 512-byte blocks from the SD card in a single command.
 ///
 /// Uses ADMA2 if supported, otherwise falls back to PIO.
-fn readBlock(ci: *const CardInfo, lba: u32, buf: []u8) void {
-    rtt.expectEqual(buf.len, block_size);
+fn readBlocks(ci: *const CardInfo, lba: u32, buf: []u8) void {
+    rtt.expect(buf.len > 0);
+    rtt.expect(buf.len % block_size == 0);
+    rtt.expect(buf.len / block_size <= max_blocks_per_xfer);
 
     const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
+    const cmd: CmdIdx = .{ .cmd = if (buf.len == block_size)
+        .read_single_block
+    else
+        .read_multiple_block };
 
     if (adma2_avail) {
-        ioBlockAdma2(.{ .cmd = .read_single_block }, addr, buf);
+        ioBlockAdma2(cmd, addr, buf);
     } else {
-        readBlockPio(addr, buf);
+        _ = issueCmd(cmd, addr, buf).unwrap();
     }
 }
 
-/// Read a single block using PIO mode.
-fn readBlockPio(addr: u32, buf: []u8) void {
-    _ = issueCmd(.{ .cmd = .read_single_block }, addr, buf).unwrap();
-}
-
-/// Write a single 512-byte block to the SD card.
+/// Write one or more contiguous 512-byte blocks to the SD card in a single command.
 ///
 /// Uses ADMA2 if supported, otherwise falls back to PIO.
-fn writeBlock(ci: *const CardInfo, lba: u32, buf: []const u8) void {
-    rtt.expectEqual(buf.len, block_size);
+fn writeBlocks(ci: *const CardInfo, lba: u32, buf: []const u8) void {
+    rtt.expect(buf.len > 0);
+    rtt.expect(buf.len % block_size == 0);
+    rtt.expect(buf.len / block_size <= max_blocks_per_xfer);
 
     const addr = if (ci.spec == .sdhc_sdxc) lba else lba * block_size;
+    const cmd: CmdIdx = .{ .cmd = if (buf.len == block_size)
+        .write_single_block
+    else
+        .write_multiple_block };
 
     if (adma2_avail) {
-        ioBlockAdma2(.{ .cmd = .write_single_block }, addr, @constCast(buf));
+        ioBlockAdma2(cmd, addr, @constCast(buf));
     } else {
-        writeBlockPio(addr, buf);
+        _ = issueCmd(cmd, addr, @constCast(buf)).unwrap();
     }
-}
-
-/// Read a single block using PIO mode.
-fn writeBlockPio(addr: u32, buf: []const u8) void {
-    _ = issueCmd(.{ .cmd = .write_single_block }, addr, @constCast(buf)).unwrap();
 }
 
 /// Transfer a single block using ADMA2.
@@ -687,7 +698,18 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
     sdhc.write(Argument, .{ .value = argval });
 
     // Set data if present.
-    const use_adma2 = adma2_avail and if (data) |d| d.len >= block_size else false;
+    const use_adma2 = adma2_avail and
+        if (data) |d| d.len >= block_size else false;
+    const is_multiblock = if (data) |d|
+        d.len % block_size == 0 and d.len / block_size > 1
+    else
+        false;
+    const nblocks: u16 = if (is_multiblock) @intCast(data.?.len / block_size) else 1;
+    const xfer_bsize: u12 = if (is_multiblock)
+        block_size
+    else
+        @intCast(if (data) |d| d.len else 0);
+
     if (data) |buf| {
         if (buf.len % 4 != 0) {
             @panic("SDHC data buffer length must be multiple of 4 bytes.");
@@ -697,9 +719,9 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
         sdhc.write(TransferMode, .{
             .dma_enable = use_adma2,
             .block_count_enable = true,
-            .auto_cmd_enable = .disabled,
+            .auto_cmd_enable = if (is_multiblock) .cmd12 else .disabled,
             .data_direction = Direction.of(cmd),
-            .multi_block = if (use_adma2 or buf.len > block_size) .multiple else .single,
+            .multi_block = if (is_multiblock) .multiple else .single,
             .response_type = .r1,
             .response_err_check = false,
             .response_int_disable = false,
@@ -707,10 +729,10 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
 
         // Set block size and count.
         sdhc.write(Bsize, .{
-            .bsize = @intCast(buf.len),
+            .bsize = xfer_bsize,
             .boundary = .k4,
         });
-        sdhc.writei(Bcount16, 1);
+        sdhc.writei(Bcount16, nblocks);
     }
 
     // Set command.
@@ -751,26 +773,29 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
                 sdhc.waitFor(
                     NormalIntStatus,
                     .{ .transfer_complete = true },
-                    .ms(1),
+                    .ms(1000),
                 );
                 dma.syncForCpu(@intFromPtr(buf.ptr), buf.len);
             } else {
-                sdhc.waitFor(
-                    NormalIntStatus,
-                    .{ .buf_read_ready = true },
-                    .ms(1),
-                );
+                var off: usize = 0;
+                while (off < buf.len) : (off += xfer_bsize) {
+                    sdhc.waitFor(
+                        NormalIntStatus,
+                        .{ .buf_read_ready = true },
+                        .ms(1000),
+                    );
 
-                const buf_len = buf.len / @sizeOf(u32);
-                const p: [*]u32 = @ptrCast(@alignCast(&buf[0]));
-                for (0..buf_len) |i| {
-                    p[i] = bits.fromLittleEndian(sdhc.read(BufferDataPort).value);
+                    const words = xfer_bsize / @sizeOf(u32);
+                    const p: [*]u32 = @ptrCast(@alignCast(&buf[off]));
+                    for (0..words) |i| {
+                        p[i] = bits.fromLittleEndian(sdhc.read(BufferDataPort).value);
+                    }
                 }
 
                 sdhc.waitFor(
                     NormalIntStatus,
                     .{ .transfer_complete = true },
-                    .ms(1),
+                    .ms(1000),
                 );
             },
             .write => if (use_adma2) {
@@ -780,22 +805,25 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
                     .ms(100),
                 );
             } else {
-                sdhc.waitFor(
-                    NormalIntStatus,
-                    .{ .buf_write_ready = true },
-                    .ms(1),
-                );
+                var off: usize = 0;
+                while (off < buf.len) : (off += xfer_bsize) {
+                    sdhc.waitFor(
+                        NormalIntStatus,
+                        .{ .buf_write_ready = true },
+                        .ms(1000),
+                    );
 
-                const buf_len = buf.len / @sizeOf(u32);
-                const p: [*]const u32 = @ptrCast(@alignCast(&buf[0]));
-                for (0..buf_len) |i| {
-                    sdhc.write(BufferDataPort, .{ .value = bits.toLittleEndian(p[i]) });
+                    const words = xfer_bsize / @sizeOf(u32);
+                    const p: [*]const u32 = @ptrCast(@alignCast(&buf[off]));
+                    for (0..words) |i| {
+                        sdhc.write(BufferDataPort, .{ .value = bits.toLittleEndian(p[i]) });
+                    }
                 }
 
                 sdhc.waitFor(
                     NormalIntStatus,
                     .{ .transfer_complete = true },
-                    .ms(1),
+                    .ms(1000),
                 );
             },
         }
@@ -849,8 +877,12 @@ const CmdIdx = union(enum) {
         set_blocklen = 16,
         /// READ_SINGLE_BLOCK
         read_single_block = 17,
+        /// READ_MULTIPLE_BLOCK
+        read_multiple_block = 18,
         /// WRITE_SINGLE_BLOCK
         write_single_block = 24,
+        /// WRITE_MULTIPLE_BLOCK
+        write_multiple_block = 25,
         /// APP_CMD
         app_cmd = 55,
     },
@@ -1004,7 +1036,9 @@ const ResponseType = enum(u3) {
                 .send_status,
                 .set_blocklen,
                 .read_single_block,
+                .read_multiple_block,
                 .write_single_block,
+                .write_multiple_block,
                 .app_cmd,
                 => .r1,
 
@@ -1616,10 +1650,12 @@ const Direction = enum(u1) {
                 .send_status,
                 .set_blocklen,
                 .read_single_block,
+                .read_multiple_block,
                 .app_cmd,
                 => .read,
 
                 .write_single_block,
+                .write_multiple_block,
                 => .write,
             },
 
