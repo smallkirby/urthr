@@ -1,15 +1,10 @@
 extern var utest_init_ptr: ?*std.process.Init;
 
 const Tag = enum {
-    /// Run only the specified test.
-    only,
     /// Skip this test.
     skip,
 
     pub fn from(s: []const u8) ?Tag {
-        if (std.mem.containsAtLeast(u8, s, 1, "tag:ONLY")) {
-            return .only;
-        }
         if (std.mem.containsAtLeast(u8, s, 1, "tag:SKIP")) {
             return .skip;
         }
@@ -40,28 +35,10 @@ pub fn main(init: std.process.Init) !void {
         log.info("Test filter: {s}", .{pattern});
     }
 
-    // Find tag:ONLY tests.
-    const has_tag_only = for (builtin.test_functions) |test_fn| {
-        if (Tag.from(test_fn.name) == .only) {
-            break true;
-        }
-    } else false;
-
-    if (has_tag_only) {
-        // Run only the tag:ONLY tests.
-        log.info("Found tag:ONLY tests. Skipping other tests.", .{});
-        for (builtin.test_functions) |test_fn| {
-            if (Tag.from(test_fn.name) == .only and matchesFilter(test_fn.name, filters)) {
-                runSingle(test_fn, init.gpa);
-            }
-        }
-        std.process.exit(0);
-    } else {
-        // Run all tests.
-        for (builtin.test_functions) |test_fn| {
-            if (matchesFilter(test_fn.name, filters)) {
-                runSingle(test_fn, init.gpa);
-            }
+    // Run all tests.
+    for (builtin.test_functions) |test_fn| {
+        if (matchesFilter(test_fn.name, filters)) {
+            runSingle(test_fn, init.gpa);
         }
     }
     log.info("Summary: {d} passed, {d} skipped, {d} failed.", .{ ok_count, skip_count, fail_count });
