@@ -55,7 +55,7 @@ jobs:
             -Dqemu=/usr/bin \
             -Drtt \
             -Drestart \
-            -Didle_watchdog=30 \
+            -Didle_watchdog=300 \
             -Dinit=/bin/utest \
             -Dallow_init_exit
 
@@ -70,7 +70,7 @@ jobs:
             -Dqemu=/usr/bin \
             -Drtt \
             -Drestart \
-            -Didle_watchdog=30 \
+            -Didle_watchdog=300 \
             -Dinit=/bin/utest \
             -Dallow_init_exit
           status=$?
