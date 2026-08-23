@@ -29,8 +29,8 @@ test "fails with EINVAL when size is zero" {
 
 inline fn isset(set: *const linux.cpu_set_t, cpu: u32) bool {
     const idx = cpu / @bitSizeOf(usize);
-    const bit = cpu % @bitSizeOf(usize);
-    return (set.*[idx] & (1 << bit)) != 0;
+    const bit: std.math.Log2Int(usize) = @intCast(cpu % @bitSizeOf(usize));
+    return (set.*[idx] & (@as(usize, 1) << bit)) != 0;
 }
 
 // =============================================================

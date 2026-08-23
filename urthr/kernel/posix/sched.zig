@@ -22,8 +22,12 @@ pub fn sysSchedGetAffinity(pid: usize, size: usize, mask: [*]CpuSet) ReturnType 
         set.clear();
     }
 
-    // TODO: mark only Core#0 as available for now.
-    sets[0].bits[0] = bits.set(sets[0].bits[0], 0);
+    // Mark all cores participating in scheduling.
+    for (0..board.num_cpus) |i| {
+        const word = i / @bitSizeOf(CpuMaskT);
+        const bit = i % @bitSizeOf(CpuMaskT);
+        sets[0].bits[word] = bits.set(sets[0].bits[word], bit);
+    }
 
     return .success(@intCast(num_sets * @sizeOf(CpuSet)));
 }
@@ -55,6 +59,7 @@ const CpuSet = extern struct {
 const std = @import("std");
 const common = @import("common");
 const bits = common.bits;
+const board = @import("board").impl;
 const urd = @import("urthr");
 const sched = urd.sched;
 const ReturnType = urd.syscall.ReturnType;
