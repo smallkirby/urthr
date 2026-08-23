@@ -94,9 +94,10 @@ fn zsubmain() !void {
     _ = waked.fetchAdd(1, .release);
 
     // Start the scheduler.
-    urd.sched.reschedule();
-
-    while (true) arch.halt();
+    while (true) {
+        urd.sched.reschedule();
+        arch.halt();
+    }
 }
 
 // =============================================================
