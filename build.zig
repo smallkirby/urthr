@@ -334,6 +334,21 @@ pub fn build(b: *std.Build) !void {
     };
     iu.installArtifact(mkfont, .host, .bin);
 
+    const uperf = blk: {
+        const exe = b.addExecutable(.{
+            .name = "uperf",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/uperf/main.zig"),
+                .target = tools_target,
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("common", common_module);
+
+        break :blk exe;
+    };
+    iu.installArtifact(uperf, .host, .bin);
+
     // =============================================================
     // Preprocess
     // =============================================================
