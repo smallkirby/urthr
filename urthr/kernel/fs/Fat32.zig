@@ -731,14 +731,44 @@ fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
     return @ptrCast(file);
 }
 
+/// Pair of cluster number and its offset from the start of the file.
+const ClsOff = struct {
+    /// Cluster number.
+    cluster: Cluster,
+    /// Offset of the cluster from the start of the file.
+    file_offset: u64,
+};
+
 const FileImpl = struct {
     /// FAT32 filesystem this file belongs to.
     fat32: *Self,
     /// Starting cluster of the file.
     start_cluster: Cluster,
+    /// Cache of the cluster accessed by the most recent read or write.
+    cache: ?ClsOff = null,
 
     pub fn from(file: *fs.File) *FileImpl {
         return @ptrCast(@alignCast(file.ctx));
+    }
+
+    /// Find the cluster and its file offset that contains the target byte offset within a file.
+    ///
+    /// Use cached cluster information, fallback to iterating the FAT chain if necessary.
+    fn seekCluster(self: *FileImpl, target: u64) fs.Error!ClsOff {
+        const bytes_per_cluster = @as(u64, self.fat32.bpb.sec_per_clus) * sector_size;
+        var clus, var clus_file_offset = if (self.cache) |c|
+            if (c.file_offset <= target)
+                .{ c.cluster, c.file_offset }
+            else
+                .{ self.start_cluster, @as(u64, 0) }
+        else
+            .{ self.start_cluster, @as(u64, 0) };
+
+        while (clus_file_offset + bytes_per_cluster <= target) : (clus_file_offset += bytes_per_cluster) {
+            clus = try self.fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
+        }
+
+        return .{ .cluster = clus, .file_offset = clus_file_offset };
     }
 };
 
@@ -801,11 +831,9 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
     defer fat32.lock.unlock();
 
     // Seek to the cluster that contains `offset`.
-    var clus = ctx.start_cluster; // cluster number of the current position in the file
-    var clus_file_offset: u64 = 0; // offset of the current cluster in the file
-    while (clus_file_offset + bytes_per_cluster <= offset) : (clus_file_offset += bytes_per_cluster) {
-        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
-    }
+    const clsoff = try ctx.seekCluster(offset);
+    const clus = clsoff.cluster;
+    const clus_file_offset = clsoff.file_offset;
 
     // Clamp the read to the remaining file bytes.
     const remaining = file_size - offset;
@@ -840,6 +868,12 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
         }
     }
 
+    // Update cache to the last cluster read.
+    ctx.cache = .{
+        .cluster = cur_clus,
+        .file_offset = cur_clus_file_offset,
+    };
+
     return bytes_read;
 }
 
@@ -865,11 +899,9 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     const total_len = zero_len + buf.len;
 
     // Seek to the cluster that contains `dst_start`.
-    var clus = ctx.start_cluster; // cluster number of the current position in the file
-    var clus_file_offset: u64 = 0; // offset of the current cluster in the file
-    while (clus_file_offset + bytes_per_cluster <= dst_start) : (clus_file_offset += bytes_per_cluster) {
-        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
-    }
+    const clsoff = try ctx.seekCluster(offset);
+    const clus = clsoff.cluster;
+    const clus_file_offset = clsoff.file_offset;
 
     // Write sector by sector, zero-filling the gap or copying data.
     var written: u64 = 0;
@@ -915,6 +947,12 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
         }
     }
 
+    // Update cache to the last cluster written.
+    ctx.cache = .{
+        .cluster = cur_clus,
+        .file_offset = cur_clus_file_offset,
+    };
+
     // Update the directory entry.
     const new_size = offset + buf.len;
     if (new_size > old_size) {
@@ -934,7 +972,6 @@ fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
     const ctx = FileImpl.from(file);
     const fat32 = ctx.fat32;
     const inode = file.path.dentry.inode;
-    const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
 
     // No size change.
     if (new_size == inode.size) {
@@ -952,17 +989,18 @@ fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
 
     // Walk to the cluster that will remain the new last cluster of the chain.
     const last_kept_offset = if (new_size == 0) 0 else new_size - 1;
-    var clus = ctx.start_cluster;
-    var clus_file_offset: u64 = 0;
-    while (clus_file_offset + bytes_per_cluster <= last_kept_offset) : (clus_file_offset += bytes_per_cluster) {
-        clus = try fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
-    }
+    const clsoff = try ctx.seekCluster(last_kept_offset);
+    const clus = clsoff.cluster;
+    const clus_file_offset = clsoff.file_offset;
 
     // Free the rest of the chain and terminate it at the kept cluster.
     if (try fat32.getNextCluster(clus)) |next| {
         try fat32.freeCluster(next);
         try fat32.setFatEntry(clus, fat_eoc_min);
     }
+
+    // Update the cache.
+    ctx.cache = .{ .cluster = clus, .file_offset = clus_file_offset };
 
     inode.size = new_size;
     try fat32.updateDirEntrySize(inode.number, new_size);
