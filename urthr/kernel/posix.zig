@@ -12,7 +12,7 @@ pub const Timespec = extern struct {
     /// Seconds.
     sec: i64,
     /// Nanoseconds.
-    nsec: u32,
+    nsec: i64,
 };
 
 pub const ErrorEnum = enum(i64) {

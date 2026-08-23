@@ -22,7 +22,7 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
 
     // Block until the absolute deadline.
     if (flags == .abstime) {
-        const deadline_ns: u64 = @as(u64, @intCast(rqtp.sec)) * std.time.ns_per_s + rqtp.nsec;
+        const deadline_ns: u64 = @as(u64, @intCast(rqtp.sec)) * std.time.ns_per_s + @as(u64, @intCast(rqtp.nsec));
         const now_ns = urd.time.getCurrentTimestamp();
         if (deadline_ns > now_ns) {
             const remaining_us = (deadline_ns - now_ns) / std.time.ns_per_us;
@@ -50,7 +50,7 @@ pub fn sysNanoSleep(rqtp: *const Timespec, rmtp: ?*Timespec) ReturnType {
 
 /// Sleep for the relative duration specified by `rqtp`.
 fn sleepRelative(rqtp: *const Timespec, rmtp: ?*Timespec) void {
-    const us = rqtp.sec * std.time.us_per_s + rqtp.nsec / std.time.ns_per_us;
+    const us = rqtp.sec * std.time.us_per_s + @divTrunc(rqtp.nsec, std.time.ns_per_us);
     urd.time.sleepUs(@intCast(us));
 
     // No signals now. So remaining time is always zero.

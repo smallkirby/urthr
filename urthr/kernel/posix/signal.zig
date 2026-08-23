@@ -238,7 +238,7 @@ pub fn sysRtSigTimedWait(set: *const signal.Mask, info: ?*SigInfo, timeout: ?*co
 
     const deadline_ns: ?u64 = if (timeout) |t| blk: {
         if (t.nsec >= std.time.ns_per_s) return .err(.inval);
-        const dur_ns = @as(u64, @intCast(t.sec)) * std.time.ns_per_s + t.nsec;
+        const dur_ns = @as(u64, @intCast(t.sec)) * std.time.ns_per_s + @as(u64, @intCast(t.nsec));
         break :blk urd.time.getCurrentTimestamp() + dur_ns;
     } else null;
 

@@ -8,11 +8,11 @@ test "succeeds for CLOCK_REALTIME and CLOCK_MONOTONIC" {
     var tp: linux.timespec = undefined;
     const ret1 = time.clockGetTime(time.CLOCK_REALTIME, &tp);
     try testing.expectEqual(.SUCCESS, linux.errno(ret1));
-    try testing.expect(tp.nsec < std.time.ns_per_s);
+    try testing.expect(tp.nsec >= 0 and tp.nsec < std.time.ns_per_s);
 
     const ret2 = time.clockGetTime(time.CLOCK_MONOTONIC, &tp);
     try testing.expectEqual(.SUCCESS, linux.errno(ret2));
-    try testing.expect(tp.nsec < std.time.ns_per_s);
+    try testing.expect(tp.nsec >= 0 and tp.nsec < std.time.ns_per_s);
 }
 
 // =============================================================
