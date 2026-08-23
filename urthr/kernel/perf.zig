@@ -44,6 +44,14 @@ pub fn record(payload: EventPayload) void {
     if (c.count < buffer_len) c.count += 1;
 }
 
+/// Record the name of the current thread.
+pub fn recordThreadName(name: []const u8) void {
+    var buf: [perf.ThreadName.max_len]u8 = @splat(0);
+    const n = @min(name.len, buf.len);
+    @memcpy(buf[0..n], name[0..n]);
+    record(.init(.thread_name, .{ .name = buf }));
+}
+
 /// Write the buffered records to a file mounted on the root filesystem.
 pub fn dump() fs.Error!void {
     const allocator = urd.mem.bin;

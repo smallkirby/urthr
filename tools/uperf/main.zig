@@ -65,7 +65,7 @@ pub fn main(init: std.process.Init) !void {
     var core: u32 = 0;
     while (core <= max_core) : (core += 1) {
         var core_name_buf: [16]u8 = undefined;
-        try s.write(ProcessNameEvent{
+        try s.write(CoreNameEvent{
             .pid = core,
             .args = .{ .name = try std.fmt.bufPrint(
                 &core_name_buf,
@@ -75,11 +75,43 @@ pub fn main(init: std.process.Init) !void {
         });
     }
 
+    // Collect the known name for each core and thread pair.
+    {
+        // Collect names.
+        var thread_names = std.AutoHashMap(
+            ThreadKey,
+            [perf.ThreadName.max_len]u8,
+        ).init(allocator);
+        defer thread_names.deinit();
+        for (records) |rec| {
+            if (rec.payload.event() != .thread_name) continue;
+            try thread_names.put(
+                .{ .core = rec.core, .tid = rec.tid },
+                rec.payload.data.thread_name.name,
+            );
+        }
+
+        // Emits thread name events.
+        var iter = thread_names.iterator();
+        while (iter.next()) |entry| {
+            const name = entry.value_ptr.*;
+            const len = std.mem.indexOfScalar(u8, &name, 0) orelse name.len;
+            try s.write(ThreadNameEvent{
+                .pid = entry.key_ptr.core,
+                .tid = entry.key_ptr.tid,
+                .args = .{ .name = name[0..len] },
+            });
+        }
+    }
+
     // Pair up enter and exit records per thread.
     var pending = std.AutoHashMap(u32, perf.Record).init(allocator);
     defer pending.deinit();
     for (records) |rec| {
         switch (rec.payload.event()) {
+            .thread_name => {
+                // already handled.
+            },
             .syscall_enter => {
                 try pending.put(rec.tid, rec);
             },
@@ -125,14 +157,34 @@ const TraceEvent = struct {
     dur: u64,
 };
 
-const ProcessNameEvent = struct {
+const CoreNameEvent = struct {
     name: []const u8 = "process_name",
     /// Category. Metadata.
     ph: []const u8 = "M",
-    /// Process ID.
+    /// Logical core ID.
     pid: u32,
     /// Name of the process.
     args: struct { name: []const u8 },
+};
+
+const ThreadNameEvent = struct {
+    name: []const u8 = "thread_name",
+    /// Category. Metadata.
+    ph: []const u8 = "M",
+    /// Logical core ID.
+    pid: u32,
+    /// Thread ID.
+    tid: u32,
+    /// Name of the thread.
+    args: struct { name: []const u8 },
+};
+
+/// Key identifying a thread within a specific core's track.
+const ThreadKey = struct {
+    /// Logical core ID.
+    core: u32,
+    /// Thread ID.
+    tid: u32,
 };
 
 /// Write an enter record and its duration as a complete event.

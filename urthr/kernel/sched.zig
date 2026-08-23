@@ -217,6 +217,11 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
 /// Do some deferred work for the previous thread.
 export fn onSwitchedIn(prev: *anyopaque) callconv(.c) void {
     urd.task.onSwitchedOut(@ptrCast(@alignCast(prev)));
+
+    const cur = getCurrent();
+    if (cur.last_exec_start == 0) {
+        urd.perf.recordThreadName(cur.name);
+    }
 }
 
 /// Pick the next thread from the ready queue eligible to run on this core.

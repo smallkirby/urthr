@@ -6,6 +6,8 @@ pub const Event = enum(u8) {
     syscall_enter,
     /// Exited a syscall.
     syscall_exit,
+    /// A thread was assigned the given name.
+    thread_name,
 };
 
 /// Syscall Enter event payload.
@@ -20,6 +22,15 @@ pub const SyscallExit = extern struct {
     nr: u64,
 };
 
+/// Thread Name event payload.
+pub const ThreadName = extern struct {
+    /// Maximum length of a thread name.
+    pub const max_len = 32;
+
+    /// Thread name.
+    name: [max_len]u8,
+};
+
 /// Event-specific payload.
 pub const EventPayload = extern struct {
     /// Kind of event.
@@ -28,6 +39,7 @@ pub const EventPayload = extern struct {
     data: extern union {
         syscall_enter: SyscallEnter,
         syscall_exit: SyscallExit,
+        thread_name: ThreadName,
     },
 
     /// Type of the data associated with the given event tag.
