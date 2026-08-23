@@ -75,6 +75,17 @@ pub fn enqueue(th: *Thread) void {
     qready.append(th);
 }
 
+/// Set the CPU affinity mask of a thread.
+///
+/// Marks the thread as needing rescheduling so that it's immediately migrated to eligible cores.
+pub fn setAffinity(th: *Thread, mask: u64) void {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    th.affinity = mask;
+    th.need_resched = true;
+}
+
 /// Enqueue a thread only if it is currently blocked.
 ///
 /// If the thread is not blocked, nop.
@@ -150,14 +161,17 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
         return lock.unlockRestoreIrq(ie);
     };
 
-    if (next_state == .running and qready.isEmpty()) {
+    // Get the next thread from the ready queue eligible to run on this core.
+    const core_bit = @as(u64, 1) << @intCast(urd.smp.getLogicalCoreId());
+    const next = pickNext();
+    if (next == getIdle() and
+        next_state == .running and
+        getCurrent().affinity & core_bit != 0)
+    {
         return lock.unlockRestoreIrq(ie);
     }
 
     const prev = blk: {
-        // Get the next thread from the ready queue.
-        const next = pickNext();
-
         // Account runtime before switching away from the current thread.
         accountRuntime();
 
@@ -205,11 +219,21 @@ export fn onSwitchedIn(prev: *anyopaque) callconv(.c) void {
     urd.task.onSwitchedOut(@ptrCast(@alignCast(prev)));
 }
 
-/// Pick the next thread to run from the ready queue.
+/// Pick the next thread from the ready queue eligible to run on this core.
 ///
-/// Falls back to the idle thread if the ready queue is empty.
+/// Falls back to the idle thread if no other thread is eligible to run on this core.
 fn pickNext() *Thread {
-    return qready.popFirst() orelse getIdle();
+    rtt.expect(lock.isLocked());
+
+    const core_bit = @as(u64, 1) << @intCast(urd.smp.getLogicalCoreId());
+
+    var it = qready.iter();
+    while (it.next()) |th| {
+        if (th.affinity & core_bit != 0) {
+            qready.remove(th);
+            return th;
+        }
+    } else return getIdle();
 }
 
 /// Get the currently running thread.

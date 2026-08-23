@@ -44,6 +44,8 @@ pub const Thread = struct {
     runtime_us: u64 = 0,
     /// Raw timer ticks when this thread last started executing.
     last_exec_start: u64 = 0,
+    /// CPU affinity mask.
+    affinity: u64 = ~@as(u64, 0),
 
     /// Memory manager.
     vmm: *task.Vmm,
@@ -52,6 +54,12 @@ pub const Thread = struct {
 
     /// Thread list node.
     head: ThreadList.Head = .{},
+
+    comptime {
+        if (board.num_cpus > @bitSizeOf(@FieldType(Thread, "affinity"))) {
+            @compileError("Affinity mask is too small to represent all cores.");
+        }
+    }
 };
 
 /// Default stack size for threads.
@@ -157,6 +165,7 @@ pub const ChildrenList = typing.InlineDoublyLinkedList(Thread, "sibling");
 const common = @import("common");
 const typing = common.typing;
 const arch = @import("arch").impl;
+const board = @import("board").impl;
 const urd = @import("urthr");
 const task = urd.task;
 const sync = urd.sync;

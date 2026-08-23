@@ -17,6 +17,22 @@ test "for the caller's own pid succeeds" {
     try testing.expectEqual(true, isset(&set, 0));
 }
 
+test "reflects a mask previously set via sched_setaffinity" {
+    // Restrict to core#1 only.
+    var want: linux.cpu_set_t = std.mem.zeroes(linux.cpu_set_t);
+    want[0] = 1 << 1;
+    try linux.sched_setaffinity(0, &want);
+
+    var got: linux.cpu_set_t = undefined;
+    const ret = linux.sched_getaffinity(0, @sizeOf(linux.cpu_set_t), &got);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+
+    try testing.expectEqual(false, isset(&got, 0));
+    try testing.expectEqual(true, isset(&got, 1));
+    try testing.expectEqual(false, isset(&got, 2));
+    try testing.expectEqual(false, isset(&got, 3));
+}
+
 test "fails with EINVAL when size is zero" {
     var set: linux.cpu_set_t = undefined;
     const ret = linux.sched_getaffinity(0, 0, &set);
