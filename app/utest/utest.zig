@@ -111,6 +111,8 @@ comptime {
     _ = @import("syscall/system.zig");
     _ = @import("syscall/task.zig");
     _ = @import("syscall/time.zig");
+
+    _ = @import("bench/io.zig");
 }
 
 // =============================================================
