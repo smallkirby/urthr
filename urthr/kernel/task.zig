@@ -32,7 +32,7 @@ const stack_base = 0x7FFF_FF00_0000;
 /// Spin lock for scheduler and thread management.
 var lock: SpinLock = .{};
 /// Thread ID assigned to the next created thread.
-var id_next: thread.Id = 1;
+var id_next: std.atomic.Value(thread.Id) = .init(1);
 
 /// Dead threads waiting to be reaped by their parent.
 var zombie_list: ThreadList = .{};
@@ -638,10 +638,7 @@ fn unregisterGroup(group: *ThreadGroup) void {
 
 /// Allocate a new thread ID.
 fn allocateId() thread.Id {
-    const id = id_next;
-    id_next +%= 1;
-
-    return id;
+    return id_next.fetchAdd(1, .monotonic);
 }
 
 /// Information needed to start executing a user thread.
