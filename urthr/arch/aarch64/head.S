@@ -45,12 +45,15 @@ _start:
   mov   x0, #(0b0101 << 0)  // EL1h
   msr   SPSR_EL2, x0
 
-  // Setup EL2.
-  blr   =setupEl2
-
   // Set EL1 stack pointer.
   ldr   x0, =_boot_stack
   msr   SP_EL1, x0
+  mov   sp, x0
+
+  // Setup EL2.
+  ldr   x0, =setupEl2
+  blr   x0
+
   // Set return address to el1_entry.
   ldr   x0, =.Lel1_entry
   msr   ELR_EL2, x0

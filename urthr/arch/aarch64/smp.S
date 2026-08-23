@@ -77,7 +77,8 @@ _substart:
   // Setup EL1.
   mov   sp,  x5
   mov   x19, x4
-  blr   =setupEl1
+  ldr   x0, =setupEl1
+  blr   x0
 
   // Jump to the kernel subcore entry point.
   br    x19
