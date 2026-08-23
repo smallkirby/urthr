@@ -64,6 +64,8 @@ pub fn start() !void {
 
     // Initialize idle thread runtime accounting.
     getCurrent().last_exec_start = arch.timer.getCount();
+
+    urd.perf.recordThreadName(getCurrent().name);
 }
 
 /// Add a thread to the ready queue.
@@ -222,6 +224,7 @@ export fn onSwitchedIn(prev: *anyopaque) callconv(.c) void {
     if (cur.last_exec_start == 0) {
         urd.perf.recordThreadName(cur.name);
     }
+    urd.perf.record(.init(.sched_switch, .{}));
 }
 
 /// Pick the next thread from the ready queue eligible to run on this core.
