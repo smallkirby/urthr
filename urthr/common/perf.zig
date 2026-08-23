@@ -59,6 +59,8 @@ pub const Record = extern struct {
     timestamp_ns: u64,
     /// ID of the thread.
     tid: u32,
+    /// Logical ID of the core.
+    core: u32,
     /// Event-specific payload.
     payload: EventPayload,
 };

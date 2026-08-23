@@ -3,21 +3,23 @@
 /// Path of the dump file on the mounted root filesystem.
 pub const dump_path = "/PERFLOG";
 
-/// Number of records currently held in the buffer.
-pub fn len() usize {
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
-    return count;
+/// Number of records currently held in the given core's buffer.
+pub fn len(core: usize) usize {
+    const c = &cores[core];
+    const ie = c.lock.lockDisableIrq();
+    defer c.lock.unlockRestoreIrq(ie);
+    return c.count;
 }
 
-/// Get the i-th oldest record currently in the buffer.
-pub fn at(i: usize) Record {
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
+/// Get the i-th oldest record currently in the given core's buffer.
+pub fn at(core: usize, i: usize) Record {
+    const c = &cores[core];
+    const ie = c.lock.lockDisableIrq();
+    defer c.lock.unlockRestoreIrq(ie);
 
-    rtt.expect(i < count);
-    const oldest = (head + buffer_len - count) % buffer_len;
-    return buffer[(oldest + i) % buffer_len];
+    rtt.expect(i < c.count);
+    const oldest = (c.head + buffer_len - c.count) % buffer_len;
+    return c.buffer[(oldest + i) % buffer_len];
 }
 
 /// Record an event with the current timestamp and thread ID.
@@ -26,17 +28,20 @@ pub fn record(payload: EventPayload) void {
 
     const timestamp_ns: u64 = @intCast((@as(u128, arch.timer.getCount()) * std.time.ns_per_s) / arch.timer.getFreq());
     const tid = urd.sched.getCurrent().id;
+    const core = urd.smp.getLogicalCoreId();
+    const c = &cores[core];
 
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
+    const ie = c.lock.lockDisableIrq();
+    defer c.lock.unlockRestoreIrq(ie);
 
-    buffer[head] = .{
+    c.buffer[c.head] = .{
         .timestamp_ns = timestamp_ns,
         .tid = tid,
+        .core = @intCast(core),
         .payload = payload,
     };
-    head = (head + 1) % buffer_len;
-    if (count < buffer_len) count += 1;
+    c.head = (c.head + 1) % buffer_len;
+    if (c.count < buffer_len) c.count += 1;
 }
 
 /// Write the buffered records to a file mounted on the root filesystem.
@@ -63,11 +68,45 @@ pub fn dump() fs.Error!void {
         else => return err,
     };
 
-    const n = len();
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const rec = at(i);
-        _ = try file.write(std.mem.asBytes(&rec));
+    var cursors = [_]usize{0} ** board.num_cpus;
+    var lens: [board.num_cpus]usize = undefined;
+    for (0..board.num_cpus) |core| lens[core] = len(core);
+
+    var wbuf: [256]Record = undefined;
+    var wlen: usize = 0;
+
+    while (true) {
+        // Select the oldest record among all cores' buffers.
+        const core = blk: {
+            var pick: ?usize = null;
+            var pick_ts: u64 = undefined;
+            for (0..board.num_cpus) |c| {
+                if (cursors[c] >= lens[c]) continue;
+
+                const ts = at(c, cursors[c]).timestamp_ns;
+                if (pick == null or ts < pick_ts) {
+                    pick = c;
+                    pick_ts = ts;
+                }
+            }
+            break :blk pick orelse break;
+        };
+
+        // Push the record into the buffer.
+        wbuf[wlen] = at(core, cursors[core]);
+        wlen += 1;
+        cursors[core] += 1;
+
+        // Flush the buffered records.
+        if (wlen == wbuf.len) {
+            _ = try file.write(std.mem.sliceAsBytes(wbuf[0..wlen]));
+            wlen = 0;
+        }
+    }
+
+    // Flush remaining records in the buffer.
+    if (wlen > 0) {
+        _ = try file.write(std.mem.sliceAsBytes(wbuf[0..wlen]));
     }
 }
 
@@ -75,16 +114,21 @@ pub fn dump() fs.Error!void {
 // Internals
 // =============================================================
 
-/// Number of records the ring buffer can hold.
+/// Number of records each core's ring buffer can hold.
 const buffer_len: usize = 8192;
 
-var buffer: [buffer_len]Record = undefined;
-/// Index of the next slot to write.
-var head: usize = 0;
-/// Number of valid records in the buffer.
-var count: usize = 0;
-/// Protects buffers.
-var lock: SpinLock = .{};
+/// Per-core ring buffer of recorded events.
+const CoreBuffer = struct {
+    buffer: [buffer_len]Record = undefined,
+    /// Index of the next slot to write.
+    head: usize = 0,
+    /// Number of valid records in the buffer.
+    count: usize = 0,
+    /// Protects this core's buffer.
+    lock: SpinLock = .{},
+};
+
+var cores: [board.num_cpus]CoreBuffer = @splat(.{});
 
 // =============================================================
 // Imports
@@ -93,11 +137,11 @@ var lock: SpinLock = .{};
 const std = @import("std");
 const options = @import("options");
 const arch = @import("arch").impl;
+const board = @import("board").impl;
 const urd = @import("urthr");
 const common = @import("common");
 const rtt = common.rtt;
 const perf = common.perf;
-const Event = perf.Event;
 const Record = perf.Record;
 const EventPayload = perf.EventPayload;
 const SpinLock = urd.sync.SpinLock;
