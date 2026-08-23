@@ -704,10 +704,10 @@ pub fn enableIrq(_: usize) void {}
 
 /// IRQ handler function.
 fn handleIrq(vector: u64) ?void {
-    defer arch.lapic.eoi();
-
     if (exception_handler) |f| {
         const ret = f(vector);
+
+        arch.lapic.eoi();
 
         if (urd.sched.shouldReschedule()) {
             urd.sched.reschedule();
@@ -715,6 +715,7 @@ fn handleIrq(vector: u64) ?void {
 
         return ret;
     } else {
+        arch.lapic.eoi();
         return null;
     }
 }
