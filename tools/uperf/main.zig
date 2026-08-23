@@ -73,7 +73,7 @@ pub fn main(init: std.process.Init) !void {
             .pid = core,
             .args = .{ .name = try std.fmt.bufPrint(
                 &name_buf,
-                "Threads#{d}",
+                "Threads#CPU{d}",
                 .{core},
             ) },
         });
@@ -87,7 +87,7 @@ pub fn main(init: std.process.Init) !void {
             .pid = cpu_pid_base + core,
             .args = .{ .name = try std.fmt.bufPrint(
                 &name_buf,
-                "Switch#{d}",
+                "Switch#CPU{d}",
                 .{core},
             ) },
         });
@@ -157,11 +157,13 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    // Unterminated syscalls stay open.
+    // Syscalls with no matching exit (e.g. exit/exit_group, which never
+    // return) are rendered as an instant marker instead of stretching them
+    // out to the end of the trace.
     var it = pending.iterator();
     while (it.next()) |entry| {
         const enter = entry.value_ptr.*;
-        try writeSvcEvent(&s, enter, max_ts - enter.timestamp_ns);
+        try writeSvcEvent(&s, enter, 0);
     }
 
     // Pair up sched_switch records per core into running slices.
