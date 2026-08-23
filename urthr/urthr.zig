@@ -7,6 +7,7 @@ pub const klog = @import("kernel/klog.zig");
 pub const mem = @import("kernel/mem.zig");
 pub const net = @import("kernel/net.zig");
 pub const pcpu = @import("kernel/pcpu.zig");
+pub const perf = @import("kernel/perf.zig");
 pub const posix = @import("kernel/posix.zig");
 pub const proc = @import("kernel/proc.zig");
 pub const rng = @import("kernel/rng.zig");

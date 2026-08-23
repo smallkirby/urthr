@@ -109,6 +109,7 @@ if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     // Debug system calls.
 
     .new("ping",        512,    sysPing),
+    .new("perf_dump",   513,    sysPerfDump),
 }
 
 // =============================================================
@@ -234,6 +235,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     // Debug system calls.
 
     .new("ping",                 512,   sysPing),
+    .new("perf_dump",            513,   sysPerfDump),
 }
 else [_]Descriptor{}
 ;
@@ -291,6 +293,9 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
 
     trace("call: {d} ({s})", .{ nr, std.enums.tagName(SyscallEnum, @enumFromInt(nr)) orelse "unknown" });
 
+    perf.record(.init(.syscall_enter, .{ .nr = nr }));
+    defer perf.record(.init(.syscall_exit, .{ .nr = nr }));
+
     const ret = if (syscall_table[nr]) |handler| handler.f(
         arg1,
         arg2,
@@ -309,6 +314,18 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
 /// syscall: ping
 fn sysPing() ReturnType {
     log.debug("pong", .{});
+
+    return .success(0);
+}
+
+/// syscall: perf_dump
+///
+/// Dumps the recorded performance trace events to a file on the root filesystem.
+fn sysPerfDump() ReturnType {
+    urd.perf.dump() catch |err| {
+        log.warn("perf_dump: failed to dump trace events: {}", .{err});
+        return .err(.inval);
+    };
 
     return .success(0);
 }
@@ -520,6 +537,7 @@ const std = @import("std");
 const log = std.log.scoped(.syscall);
 const arch = @import("arch").impl;
 const urd = @import("urthr");
+const perf = urd.perf;
 const trace = urd.trace.scoped(.syscall, .syscall);
 const posix = urd.posix;
 const ErrorEnum = posix.ErrorEnum;

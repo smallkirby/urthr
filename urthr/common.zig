@@ -5,6 +5,7 @@ pub const block = @import("common/block.zig");
 pub const mem = @import("common/mem.zig");
 pub const mmio = @import("common/mmio.zig");
 pub const pcpu = @import("common/pcpu.zig");
+pub const perf = @import("common/perf.zig");
 pub const pio = @import("common/pio.zig");
 pub const regex = @import("common/regex.zig");
 pub const rtt = @import("common/rtt.zig");
