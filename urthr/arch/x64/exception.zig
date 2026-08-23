@@ -35,17 +35,21 @@ var pagefault_handler: ?PageFaultHandler = null;
 
 /// Whether we are currently handling an exception.
 var in_handling: bool linksection(common.pcpu.section) = false;
+/// Whether the shared IDT has been initialized.
+var initialized: std.atomic.Value(bool) = .init(false);
 
 /// Initialize the IDT for this CPU.
 pub fn initLocal() void {
-    idt.init();
+    if (!initialized.swap(true, .acq_rel)) {
+        idt.init();
 
-    // Use the dedicated interrupt stack for the double fault handler
-    // so that a stack overflow does not turn into a triple fault.
-    idt.setIst(@intFromEnum(Exception.df), 1);
+        // Use the dedicated interrupt stack for the double fault handler
+        // so that a stack overflow does not turn into a triple fault.
+        idt.setIst(@intFromEnum(Exception.df), 1);
 
-    // Use a separate dedicated interrupt stack for the page fault handler.
-    idt.setIst(@intFromEnum(Exception.pf), 2);
+        // Use a separate dedicated interrupt stack for the page fault handler.
+        idt.setIst(@intFromEnum(Exception.pf), 2);
+    }
 
     idt.load();
 }
