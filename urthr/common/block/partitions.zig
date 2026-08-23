@@ -138,7 +138,7 @@ pub const Mbr = struct {
 
         // Read the MBR sector.
         var buf: [size]u8 = undefined;
-        try dev.readBlock(0, &buf);
+        try dev.readBlocks(0, &buf);
 
         // Parse partition table entries.
         // Note that tables are not aligned.
@@ -160,7 +160,7 @@ pub const Mbr = struct {
     /// Check if the given device uses MBR partitioning scheme.
     pub fn isMine(dev: Device) block.Error!bool {
         var buf: [size]u8 = undefined;
-        try dev.readBlock(0, &buf);
+        try dev.readBlocks(0, &buf);
 
         // Check signature.
         return std.mem.eql(u8, buf[offset_signature .. offset_signature + 2], &signature);
@@ -179,7 +179,7 @@ pub const Gpt = struct {
     /// Check if the given device uses GPT partitioning scheme.
     pub fn isMine(dev: Device) block.Error!bool {
         var buf: [size]u8 = undefined;
-        try dev.readBlock(header_lba, &buf);
+        try dev.readBlocks(header_lba, &buf);
 
         return std.mem.eql(u8, buf[0..signature.len], signature);
     }
@@ -191,7 +191,7 @@ pub const Gpt = struct {
 
         // Read GPT header.
         var hbuf: [size]u8 = undefined;
-        try dev.readBlock(header_lba, &hbuf);
+        try dev.readBlocks(header_lba, &hbuf);
         const header = GptHeader.from(&hbuf);
 
         // Find the partition entry array.
@@ -208,7 +208,7 @@ pub const Gpt = struct {
         var lba = entry_lba;
         while (entries_read < num_entries) : (lba += 1) {
             var buf: [size]u8 = undefined;
-            try dev.readBlock(lba, &buf);
+            try dev.readBlocks(lba, &buf);
 
             // Iterate over entries in a block read.
             var i: usize = 0;

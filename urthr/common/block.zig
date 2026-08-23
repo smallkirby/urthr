@@ -62,21 +62,21 @@ pub const Device = struct {
         return self.vtable.blockCount(self.ptr);
     }
 
-    /// Read a single block from the device into the given buffer.
+    /// Read one or more contiguous blocks from the device into the given buffer.
     ///
-    /// The buffer size must be equal to the block size.
-    pub fn readBlock(self: Self, lba: Lba, buffer: []u8) Error!void {
-        if (buffer.len != self.getBlockSize()) {
+    /// The buffer size must be a multiple of the block size.
+    pub fn readBlocks(self: Self, lba: Lba, buffer: []u8) Error!void {
+        if (buffer.len % self.getBlockSize() != 0) {
             return Error.InvalidArgument;
         }
 
         _ = try self.vtable.read(self.ptr, lba, buffer);
     }
 
-    /// Write a single block to the device from the given buffer.
+    /// Write one or more contiguous blocks to the device from the given buffer.
     ///
-    /// The buffer size must be multiple of the block size.
-    pub fn writeBlock(self: Self, lba: Lba, data: []const u8) Error!void {
+    /// The buffer size must be a multiple of the block size.
+    pub fn writeBlocks(self: Self, lba: Lba, data: []const u8) Error!void {
         if (data.len % self.getBlockSize() != 0) {
             return Error.InvalidArgument;
         }
