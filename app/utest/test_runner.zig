@@ -79,13 +79,17 @@ fn dumpPerfTrace() void {
 
 /// Whether the test name matches one of the given filter regexes.
 fn matchesFilter(name: []const u8, filters: []const []const u8) bool {
-    if (filters.len == 0) {
-        return true;
-    }
+    var has_include = false;
+    var include_matched = false;
     for (filters) |f| {
-        if (regex.isMatch(f, name)) return true;
+        if (f.len > 0 and f[0] == '!') {
+            if (regex.isMatch(f[1..], name)) return false;
+        } else {
+            has_include = true;
+            if (regex.isMatch(f, name)) include_matched = true;
+        }
     }
-    return false;
+    return !has_include or include_matched;
 }
 
 /// Exit code a child process uses to report its test's outcome to the parent.
