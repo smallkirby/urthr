@@ -206,7 +206,7 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
         };
     }
 
-    flush();
+    flushGlobal();
 }
 
 fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, allocator: PageAllocator) Error!void {
@@ -225,7 +225,7 @@ fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permiss
         desc.uattr.uxn = !perm.ux;
     }
 
-    flush();
+    flushGlobal();
 }
 
 fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: PageAllocator) Error!void {
@@ -241,7 +241,7 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: Pa
         try lookupInvalidate(root._tbl, cur_va, level, allocator);
     }
 
-    flush();
+    flushGlobal();
 }
 
 /// Lookup the page descriptor for the given virtual address and invalidate it.
@@ -344,11 +344,22 @@ pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
     });
 
     // Should use ASID to avoid flushing the entire TLB, but it's not implemented yet.
-    flush();
+    flushLocal();
 }
 
-/// Flush all TLB entries.
-fn flush() void {
+/// Flush all TLB entries on every CPU.
+fn flushGlobal() void {
+    asm volatile (
+        \\isb
+        \\dsb ishst
+        \\tlbi vmalle1is
+        \\dsb ish
+        \\isb
+    );
+}
+
+/// Flush this core's TLB entries.
+fn flushLocal() void {
     asm volatile (
         \\isb
         \\dsb sy
