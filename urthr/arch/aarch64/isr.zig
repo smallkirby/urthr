@@ -200,7 +200,10 @@ export fn serrorCurElSp0(ctx: *Context) callconv(.c) void {
 }
 
 export fn syncCurElSpx(ctx: *Context) callconv(.c) void {
-    return defaultHandler(ctx, "Synchronous, Current EL, SP_ELx");
+    switch (am.mrs(.esr_el1).ec) {
+        .dabort_cur => return handleDataAbortKernel(ctx),
+        else => return defaultHandler(ctx, "Synchronous, Current EL, SP_ELx"),
+    }
 }
 
 export fn irqCurElSpx(ctx: *Context) callconv(.c) void {
@@ -226,7 +229,7 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
         .svc_a64 => return svc.svc(ctx),
 
         // Data abort.
-        .dabort_lower => return handleDataAbort(ctx),
+        .dabort_lower => return handleDataAbortUser(ctx),
 
         // Unhandled.
         else => return defaultHandler(ctx, "Synchronous, Lower EL, A64"),
@@ -234,7 +237,7 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
 }
 
 /// Handle a data abort taken from EL0.
-fn handleDataAbort(ctx: *Context) void {
+fn handleDataAbortUser(ctx: *Context) void {
     const esr = am.mrs(.esr_el1);
     const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
     const far = am.mrsi(.far_el1);
@@ -246,6 +249,20 @@ fn handleDataAbort(ctx: *Context) void {
         }
     }
     return defaultHandler(ctx, "Synchronous, Lower EL, A64 (Data Abort)");
+}
+
+/// Handle a data abort taken while running in EL1.
+fn handleDataAbortKernel(ctx: *Context) void {
+    const esr = am.mrs(.esr_el1);
+    const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
+    const far = am.mrsi(.far_el1);
+
+    if (pagefault_handler) |f| {
+        if (f(far, if (iss.wnr == .write) .write else .read)) {
+            return;
+        }
+    }
+    return defaultHandler(ctx, "Synchronous, Current EL, SP_ELx (Data Abort)");
 }
 
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {

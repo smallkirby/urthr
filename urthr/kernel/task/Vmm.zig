@@ -27,6 +27,8 @@ brk: usize = 0,
 mmap_hint: usize = mmap_base,
 /// Number of tasks sharing this address space.
 refcnt: usize = 1,
+/// Forces exclusive access to VMM.
+lock: SpinLock = .{},
 
 /// Base virtual address for anonymous mmap allocations.
 const mmap_base: usize = 0x0000_0040_0000_0000;
@@ -73,15 +75,21 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     allocator.destroy(self);
 }
 
-/// Clone this VM, copying all mapped pages into a new page table.
+/// Clone this VM into a new page table.
 ///
-/// The child shares no physical pages with the parent.
+/// Already-present pages are shared between the parent and the child as COW.
+///
+/// Both the parent's and the child's mappings of a shared page are write-protected,
+/// so that the first write triggers a fault and be copied to a new page.
 pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
     const child = try new(
         allocator,
         self.as.kernelOnly(),
     );
     errdefer child.deinit(allocator);
+
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
 
     var it = self.tree.iterator();
     while (it.next()) |node| {
@@ -95,7 +103,15 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
             vma.backing,
         );
 
-        // Copy only the pages that are already present in the parent.
+        // Share only the pages that are already present in the parent.
+        const perm: Permission = .{
+            .ur = vma.perm.ur,
+            .uw = false, // write-protect for COW
+            .ux = vma.perm.ux,
+            .kr = vma.perm.kr,
+            .kw = false, // write-protect for COW
+            .kx = vma.perm.kx,
+        };
         var offset: usize = 0;
         while (offset < vma.size) : (offset += urd.mem.page_size) {
             const va = vma.start + offset;
@@ -105,19 +121,26 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
                 urd.mem.page,
             ) orelse continue; // if not mapped, just continue.
 
-            const page = try urd.mem.page.allocPagesP(1);
-            errdefer urd.mem.page.freePagesP(page);
+            // Mark this physical page as shared.
+            try urd.mem.pageref.share(parent_pa);
+
+            // Map to child as read-only.
             try arch.mmu.map4kb(child.as, .{
                 .va = va,
-                .pa = @intFromPtr(page.ptr),
+                .pa = parent_pa,
                 .size = urd.mem.page_size,
-                .perm = vma.perm,
+                .perm = perm,
                 .attr = .normal,
             }, .{ .exact = true }, urd.mem.page);
 
-            const src = urd.mem.page.translateV(@as([*]u8, @ptrFromInt(parent_pa))[0..urd.mem.page_size]);
-            const dst = urd.mem.page.translateV(@as([]u8, page));
-            @memcpy(dst, src);
+            // Change the parent's mapping to read-only.
+            try arch.mmu.remap4kb(
+                self.as,
+                va,
+                urd.mem.page_size,
+                perm,
+                urd.mem.page,
+            );
         }
     }
 
@@ -246,6 +269,9 @@ pub fn reserve(
 ///
 /// If the page is already backed, this function is nop.
 pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
     const page_va = std.mem.alignBackward(usize, va, urd.mem.page_size);
 
     const vma = if (self.tree.find(va)) |n| n.container() else {
@@ -255,14 +281,17 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
         return Error.PermissionDenied;
     }
 
-    // Already backed. Nothing to do.
+    // Already backed.
     if (arch.mmu.translateWalk(
         self.as.select(page_va),
         page_va,
         urd.mem.page,
-    ) != null) {
-        return;
-    }
+    )) |pa| return switch (access) {
+        // Handle copy-on-write if possible.
+        .write => try self.breakCow(vma, page_va, pa),
+        // Can't handle.
+        .read => {},
+    };
 
     // Allocate a physical page.
     const page = try urd.mem.page.allocPagesP(1);
@@ -289,12 +318,50 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
     }, .{ .exact = true }, urd.mem.page);
 }
 
+/// Handles a write fault on a page that is possibly shared as COW.
+fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
+    // Last reference to this page, so we can just make it writable again.
+    if (urd.mem.pageref.count(pa) == 1) {
+        return try arch.mmu.remap4kb(
+            self.as,
+            va,
+            urd.mem.page_size,
+            vma.perm,
+            urd.mem.page,
+        );
+    }
+
+    // Allocate new physical page and copy the contents.
+    const page = try urd.mem.page.allocPagesP(1);
+    errdefer urd.mem.page.freePagesP(page);
+
+    const src = urd.mem.page.translateV(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
+    const dst = urd.mem.page.translateV(@as([]u8, page));
+    @memcpy(dst, src);
+
+    // Map as the original permission.
+    try arch.mmu.map4kb(self.as, .{
+        .va = va,
+        .pa = @intFromPtr(page.ptr),
+        .size = urd.mem.page_size,
+        .perm = vma.perm,
+        .attr = .normal,
+    }, .{ .exact = true }, urd.mem.page);
+
+    if (urd.mem.pageref.unref(pa)) {
+        urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
+    }
+}
+
 /// Unmap the given user-space virtual address range.
 ///
 /// If some of the specified range is not mapped, no operation is performed for that region.
 pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
+
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
 
     // Free physical pages backing the range.
     for (0..size / urd.mem.page_size) |i| {
@@ -308,8 +375,10 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
             continue;
         };
 
-        // Free physical pages.
-        urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
+        // Free the physical page only if this was the last owner.
+        if (urd.mem.pageref.unref(pa)) {
+            urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
+        }
         // Unmap the page.
         arch.mmu.unmap4kb(
             self.as,
@@ -331,6 +400,9 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
 pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
+
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
 
     // Verify the whole range is backed by VMAs and update their permission.
     var scan: usize = vaddr;
@@ -389,11 +461,28 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
     // Update permission of pages that are already backed.
     var off: usize = 0;
     while (off < size) : (off += urd.mem.page_size) {
+        const va = vaddr + off;
+
+        // If this page is shared by COW, keep it write-protected.
+        const pa = arch.mmu.translateWalk(
+            self.as.select(va),
+            va,
+            urd.mem.page,
+        );
+        const rperm = if (pa != null and urd.mem.pageref.count(pa.?) > 1) Permission{
+            .ur = perm.ur,
+            .uw = false, // write-protect for COW
+            .ux = perm.ux,
+            .kr = perm.kr,
+            .kw = false, // write-protect for COW
+            .kx = perm.kx,
+        } else perm;
+
         arch.mmu.remap4kb(
             self.as,
-            vaddr + off,
+            va,
             urd.mem.page_size,
-            perm,
+            rperm,
             urd.mem.page,
         ) catch |e| switch (e) {
             error.InvalidMapping => continue, // not mapped, skip it.
@@ -589,3 +678,4 @@ const RbTree = common.RbTree;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const Permission = common.mem.Permission;
+const SpinLock = urd.sync.SpinLock;

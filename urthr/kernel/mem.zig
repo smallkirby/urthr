@@ -8,8 +8,11 @@ pub const dma = @import("mem/dma.zig");
 pub const page = buddy_impl.interface;
 /// Allocator implementing `common.mem.IoAllocator` interface.
 pub const phys = phys_impl.interface;
+/// Reference manager for physical pages.
+pub const pageref = @import("mem/pageref.zig");
 /// Virtual memory allocator.
 pub const virt = @import("mem/virt.zig");
+/// Virtual memory layout of Urthr kernel.
 pub const vmap = @import("mem/vmemmap.zig");
 
 /// Virtual address type.
@@ -117,6 +120,9 @@ pub fn initAllocators() Error!void {
 
     // Bin allocator.
     bin_impl.init(page);
+
+    // Page reference manager.
+    pageref.init(bin);
 
     // I/O allocator.
     phys_impl.init();
