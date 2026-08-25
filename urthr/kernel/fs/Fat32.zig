@@ -8,6 +8,9 @@ device: block.Device,
 bpb: BpbInfo,
 /// Root directory inode.
 root: *InodeImpl,
+/// Hint of the next free cluster to start searching from.
+free_clus_hint: Cluster,
+
 /// Lock to protect FAT32 entries and directory entries.
 lock: Mutex = .{},
 /// Memory allocator.
@@ -55,6 +58,7 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
         .bpb = bpb,
         .allocator = allocator,
         .root = root,
+        .free_clus_hint = bpb.root_clus,
     };
     return self;
 }
@@ -1220,8 +1224,13 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
     var current_fat_sector: u64 = std.math.maxInt(u64);
 
     // Iterate through the FATs to find a free cluster.
-    var clus = root_clus;
-    while (clus < total_fat_entries) : (clus += 1) {
+    var clus = if (root_clus <= self.free_clus_hint and self.free_clus_hint < total_fat_entries)
+        self.free_clus_hint
+    else
+        root_clus;
+
+    var visited: u64 = 0;
+    while (visited < total_fat_entries - root_clus) : (visited += 1) {
         const fat_offset = clus * fat_entry_size;
         const fat_sector = @as(u64, self.bpb.rsvd_sec_cnt) + fat_offset / sector_size;
         const entry_offset = fat_offset % sector_size;
@@ -1242,8 +1251,14 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
             // Link to previous cluster if provided.
             if (prev) |p| try self.setFatEntry(p, clus);
 
+            // Update free cluster hint.
+            self.free_clus_hint = clus + 1;
+
             return clus;
         }
+
+        clus += 1;
+        if (clus >= total_fat_entries) clus = root_clus;
     }
 
     return fs.Error.NoSpace;
@@ -1251,6 +1266,10 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
 
 /// Free the cluster chain starting from the given cluster.
 fn freeCluster(self: *Self, clus: Cluster) fs.Error!void {
+    if (clus < self.free_clus_hint) {
+        self.free_clus_hint = clus;
+    }
+
     var current = clus;
     while (true) {
         const next = try self.getNextCluster(current);
