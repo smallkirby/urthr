@@ -6,6 +6,8 @@ var qready: ThreadList = .{};
 var idle: *Thread linksection(pcpu.section) = undefined;
 /// Currently running thread.
 var current: ?*Thread linksection(pcpu.section) = null;
+/// Lock that must be released after new thread has been switched-in.
+var pending_unlock: ?*SpinLock linksection(pcpu.section) = null;
 
 /// Spin lock for scheduler and thread management.
 var lock: SpinLock = .{};
@@ -152,7 +154,7 @@ fn kstackTopOf(th: *Thread) usize {
 
 /// Select the next thread to run and switch to it.
 ///
-/// If the caller lock is provided, it is released before switching and re-acquired on return.
+/// If the caller lock is provided, it is released after the current thread has been switched-out.
 ///
 /// If `skip` is provided and points to a true value, returns immediately.
 fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*const bool) void {
@@ -189,11 +191,10 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
         // Switch user-space page table if needed.
         arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
 
-        // Release lock before switching. IRQs remain disabled until restored.
-        lock.unlock();
-        if (caller_lock) |l| l.unlock();
+        // Stash the caller's lock so it can be released after switch-out.
+        pcpu.ptr(&pending_unlock).* = caller_lock;
 
-        // Switch to the next thread.
+        // Switch to the next thread. IRQs remain disabled.
         break :blk arch.thread.switchContext(
             &cur.sp,
             &next.sp,
@@ -204,7 +205,7 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
 
     {
         // Do deferred work for the previous thread.
-        onSwitchedIn(prev);
+        onSwitchedIn(@ptrCast(@alignCast(prev)));
 
         // Update the last switch-in timestamp.
         updateLastExecTimestamp();
@@ -217,9 +218,19 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
 /// Called by a newly switched-in thread when a thread is switched out.
 ///
 /// Do some deferred work for the previous thread.
-export fn onSwitchedIn(prev: *anyopaque) callconv(.c) void {
-    urd.task.onSwitchedOut(@ptrCast(@alignCast(prev)));
+export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
+    // Unlock scheduler and the caller's lock if provided.
+    lock.unlock();
+    const pending = pcpu.ptr(&pending_unlock);
+    if (pending.*) |l| {
+        pending.* = null;
+        l.unlock();
+    }
 
+    // Do deferred work for the previous thread.
+    urd.task.onSwitchedOut(prev);
+
+    // Perf recording.
     const cur = getCurrent();
     if (cur.last_exec_start == 0) {
         urd.perf.recordThreadName(cur.name);
