@@ -29,6 +29,14 @@ pub fn unlock(self: *Self) void {
     self._cv.signal();
 }
 
+/// Check if the mutex is currently held by any thread.
+///
+/// Note that this does not guarantee that the mutex will remain unlocked after this function.
+/// Even if this mutex is locked by another thread, this function returns `true`.
+pub fn isLocked(self: *Self) bool {
+    return self._locked;
+}
+
 // =============================================================
 // Imports
 // =============================================================

@@ -23,6 +23,20 @@ dma: DmaAllocator,
 /// Serializes access to the queue.
 lock: Mutex = .{},
 
+/// Persistent DMA buffers.
+bufs: struct {
+    /// Buffer for request header.
+    req: DmaMemory,
+    /// Buffer for status byte.
+    status: DmaMemory,
+    /// Data for transferred data.
+    ///
+    /// Grown on demand.
+    data: DmaMemory = undefined,
+    /// Capacity in bytes actually backing `data` buffer.
+    data_cap: usize = 0,
+},
+
 /// Sector size in bytes.
 const sector_size = 512;
 /// Index of the request queue.
@@ -58,11 +72,19 @@ pub fn init(dev: virtio.Device, dma: DmaAllocator, allocator: Allocator) Error!S
     // Complete device initialization.
     dev.finishInit();
 
+    // Allocate the request and status buffers.
+    const req_mem = try dma.allocBytes(@sizeOf(Request), .normal);
+    const status_mem = try dma.allocBytes(@sizeOf(Status), .normal);
+
     return .{
         .dev = dev,
         .config = config,
         .dma = dma,
         .allocator = allocator,
+        .bufs = .{
+            .req = req_mem,
+            .status = status_mem,
+        },
     };
 }
 
@@ -141,17 +163,15 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
 
     const vq = self.dev.getQueue(queue_index) orelse return Error.DeviceError;
 
-    // Allocate DMA-capable buffers.
+    // Reuse DMA-capable buffers.
     const data_buf_size = count * sector_size;
-    const data_mem = try self.dma.allocBytes(data_buf_size, .normal);
-    defer self.dma.freeBytes(data_mem);
+    try self.ensureDataCapacity(data_buf_size);
+    const data_mem = self.bufs.data;
 
-    const req_mem = try self.dma.allocBytes(@sizeOf(Request), .normal);
-    defer self.dma.freeBytes(req_mem);
+    const req_mem = self.bufs.req;
     const req: *Request = @ptrFromInt(req_mem.cpu);
 
-    const status_mem = try self.dma.allocBytes(@sizeOf(Status), .normal);
-    defer self.dma.freeBytes(status_mem);
+    const status_mem = self.bufs.status;
     const status: *Status = @ptrFromInt(status_mem.cpu);
 
     req.* = .{
@@ -231,18 +251,16 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
         return Error.InvalidDevice;
     }
 
-    // Allocate DMA-capable buffers.
-    const data_mem = try self.dma.allocBytes(data.len, .normal);
-    defer self.dma.freeBytes(data_mem);
+    // Reuse DMA-capable buffers.
+    try self.ensureDataCapacity(data.len);
+    const data_mem = self.bufs.data;
     @memcpy(@as([*]u8, @ptrFromInt(data_mem.cpu))[0..data.len], data);
     self.dma.syncForDevice(data_mem.cpu, data.len);
 
-    const req_mem = try self.dma.allocBytes(@sizeOf(Request), .normal);
-    defer self.dma.freeBytes(req_mem);
+    const req_mem = self.bufs.req;
     const req: *Request = @ptrFromInt(req_mem.cpu);
 
-    const status_mem = try self.dma.allocBytes(@sizeOf(Status), .normal);
-    defer self.dma.freeBytes(status_mem);
+    const status_mem = self.bufs.status;
     const status: *Status = @ptrFromInt(status_mem.cpu);
 
     req.* = .{
@@ -295,6 +313,31 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
         log.err("write failed: status={d}", .{status.*});
         return Error.IoError;
     }
+}
+
+/// Ensure that the size of DMA buffer for transferring data has at least `size` bytes.
+///
+/// The buffer is grown if necessary.
+/// Caller must hold the lock.
+fn ensureDataCapacity(self: *Self, size: usize) Error!void {
+    rtt.expect(self.lock.isLocked());
+    if (size <= self.bufs.data_cap) return;
+
+    if (self.bufs.data_cap > 0) {
+        self.dma.freeBytes(.{
+            .cpu = self.bufs.data.cpu,
+            .bus = self.bufs.data.bus,
+            .size = self.bufs.data_cap,
+        });
+    }
+
+    const new = std.mem.alignForward(
+        usize,
+        size,
+        DmaAllocator.page_size,
+    );
+    self.bufs.data = try self.dma.allocBytes(new, .normal);
+    self.bufs.data_cap = new;
 }
 
 /// Virtio-blk device configuration.
@@ -357,6 +400,7 @@ const block = common.block;
 const mmio = common.mmio;
 const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;
 const virtio = @import("virtio.zig");
 const urd = @import("urthr");
 const Mutex = urd.sync.Mutex;
