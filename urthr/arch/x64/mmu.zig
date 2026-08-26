@@ -19,6 +19,18 @@ pub const MapArgument = struct {
 pub const MapOptions = struct {
     /// Returns an error if the given addresses are not aligned to the given granule size.
     exact: bool = true,
+    /// Whether to flush the TLB after the mapping is installed.
+    flush: bool = true,
+};
+
+pub const RemapOptions = struct {
+    /// Whether to flush the TLB after the operation completes.
+    flush: bool = true,
+};
+
+pub const UnmapOptions = struct {
+    /// Whether to flush the TLB after the operation completes.
+    flush: bool = true,
 };
 
 /// Describes a virtual address space.
@@ -106,23 +118,23 @@ pub fn map1gb(as: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: P
 }
 
 /// Changes permissions of an existing VA range using 4KiB pages.
-pub fn remap4kb(as: AddressSpace, va: usize, size: usize, perm: Permission, allocator: PageAllocator) Error!void {
-    return remapImpl(as.select(va), va, size, .@"4kb", perm, allocator);
+pub fn remap4kb(as: AddressSpace, va: usize, size: usize, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
+    return remapImpl(as.select(va), va, size, .@"4kb", perm, opts, allocator);
 }
 
 /// Unmaps the VA range using 4KiB pages.
-pub fn unmap4kb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
-    return unmapImpl(as.select(va), va, size, .@"4kb", allocator);
+pub fn unmap4kb(as: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"4kb", opts, allocator);
 }
 
 /// Unmaps the VA range using 2MiB pages.
-pub fn unmap2mb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
-    return unmapImpl(as.select(va), va, size, .@"2mb", allocator);
+pub fn unmap2mb(as: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"2mb", opts, allocator);
 }
 
 /// Unmaps the VA range using 1GiB pages.
-pub fn unmap1gb(as: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
-    return unmapImpl(as.select(va), va, size, .@"1gb", allocator);
+pub fn unmap1gb(as: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"1gb", opts, allocator);
 }
 
 /// Enable MMU.
@@ -165,6 +177,11 @@ pub fn initPat() void {
         .pa6 = .uc_minus,
         .pa7 = .uc,
     });
+}
+
+/// Flushes all TLBs across all cores.
+pub fn flushTlb() void {
+    flushAll();
 }
 
 /// Switch the user-space address space to the user address space of `pt`.
@@ -320,11 +337,11 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
         };
     }
 
-    flushAll();
+    if (opts.flush) flushAll();
 }
 
 /// Changes permissions of an existing virtual address range using the given granule size.
-fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, allocator: PageAllocator) Error!void {
+fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
 
@@ -350,11 +367,11 @@ fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permiss
         entry.xd = !(perm.kx or perm.ux);
     }
 
-    flushAll();
+    if (opts.flush) flushAll();
 }
 
 /// Unmaps the given virtual address range using the given granule size.
-fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: PageAllocator) Error!void {
+fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, opts: UnmapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
 
@@ -377,7 +394,7 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: Pa
         );
     }
 
-    flushAll();
+    if (opts.flush) flushAll();
 }
 
 /// Lookup the page table entry for the given virtual address and invalidate it.

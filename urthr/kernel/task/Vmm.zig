@@ -91,6 +91,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
 
+    var need_flush = false;
     var it = self.tree.iterator();
     while (it.next()) |node| {
         const vma = node.container();
@@ -131,7 +132,10 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
                 .size = urd.mem.page_size,
                 .perm = perm,
                 .attr = .normal,
-            }, .{ .exact = true }, urd.mem.page);
+            }, .{
+                .exact = true,
+                .flush = false,
+            }, urd.mem.page);
 
             // Change the parent's mapping to read-only.
             try arch.mmu.remap4kb(
@@ -139,10 +143,15 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
                 va,
                 urd.mem.page_size,
                 perm,
+                .{ .flush = false },
                 urd.mem.page,
             );
+
+            need_flush = true;
         }
     }
+
+    if (need_flush) arch.mmu.flushTlb();
 
     child.brk = self.brk;
     child.mmap_hint = self.mmap_hint;
@@ -185,6 +194,7 @@ pub fn map(self: *Self, vaddr: usize, size: usize, perm: Permission) Error![]u8 
             self.as,
             va,
             urd.mem.page_size,
+            .{},
             urd.mem.page,
         ) catch unreachable;
     }
@@ -327,6 +337,7 @@ fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
             va,
             urd.mem.page_size,
             vma.perm,
+            .{},
             urd.mem.page,
         );
     }
@@ -364,6 +375,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     defer self.lock.unlockRestoreIrq(ie);
 
     // Free physical pages backing the range.
+    var need_flush = false;
     for (0..size / urd.mem.page_size) |i| {
         const va = vaddr + i * urd.mem.page_size;
         const pa = arch.mmu.translateWalk(
@@ -384,9 +396,14 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
             self.as,
             va,
             urd.mem.page_size,
+            .{ .flush = false },
             urd.mem.page,
         ) catch {};
+
+        need_flush = true;
     }
+
+    if (need_flush) arch.mmu.flushTlb();
 
     // Update tree.
     try self.deleteFromVmTree(vaddr, size);
@@ -483,6 +500,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
             va,
             urd.mem.page_size,
             rperm,
+            .{},
             urd.mem.page,
         ) catch |e| switch (e) {
             error.InvalidMapping => continue, // not mapped, skip it.

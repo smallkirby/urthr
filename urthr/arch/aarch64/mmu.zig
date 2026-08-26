@@ -33,6 +33,18 @@ pub const MapArgument = struct {
 pub const MapOptions = struct {
     /// Returns an error if the given addresses are not aligned to the given granule size.
     exact: bool = true,
+    /// Whether to flush the TLB after the operation completes.
+    flush: bool = true,
+};
+
+pub const RemapOptions = struct {
+    /// Whether to flush the TLB after the operation completes.
+    flush: bool = true,
+};
+
+pub const UnmapOptions = struct {
+    /// Whether to flush the TLB after the operation completes.
+    flush: bool = true,
 };
 
 const Granule = enum {
@@ -147,23 +159,23 @@ pub fn map1gb(pt: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: P
 }
 
 /// Changes permissions of an existing VA range using 4KiB pages.
-pub fn remap4kb(pt: AddressSpace, va: usize, size: usize, perm: Permission, allocator: PageAllocator) Error!void {
-    return remapImpl(pt.select(va), va, size, .@"4kb", perm, allocator);
+pub fn remap4kb(pt: AddressSpace, va: usize, size: usize, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
+    return remapImpl(pt.select(va), va, size, .@"4kb", perm, opts, allocator);
 }
 
 /// Unmaps the VA range using 4KiB pages.
-pub fn unmap4kb(pt: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
-    return unmapImpl(pt.select(va), va, size, .@"4kb", allocator);
+pub fn unmap4kb(pt: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(pt.select(va), va, size, .@"4kb", opts, allocator);
 }
 
 /// Unmaps the VA range using 2MiB pages.
-pub fn unmap2mb(pt: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
-    return unmapImpl(pt.select(va), va, size, .@"2mb", allocator);
+pub fn unmap2mb(pt: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(pt.select(va), va, size, .@"2mb", opts, allocator);
 }
 
 /// Unmaps the VA range using 1GiB pages.
-pub fn unmap1gb(pt: AddressSpace, va: usize, size: usize, allocator: PageAllocator) Error!void {
-    return unmapImpl(pt.select(va), va, size, .@"1gb", allocator);
+pub fn unmap1gb(pt: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(pt.select(va), va, size, .@"1gb", opts, allocator);
 }
 
 fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, allocator: PageAllocator) Error!void {
@@ -206,10 +218,10 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
         };
     }
 
-    flushGlobal();
+    if (opts.flush) flushGlobal();
 }
 
-fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, allocator: PageAllocator) Error!void {
+fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
 
@@ -225,10 +237,10 @@ fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permiss
         desc.uattr.uxn = !perm.ux;
     }
 
-    flushGlobal();
+    if (opts.flush) flushGlobal();
 }
 
-fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: PageAllocator) Error!void {
+fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, opts: UnmapOptions, allocator: PageAllocator) Error!void {
     const granule = mg.granule();
     const level = mg.level();
 
@@ -241,7 +253,7 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, allocator: Pa
         try lookupInvalidate(root._tbl, cur_va, level, allocator);
     }
 
-    flushGlobal();
+    if (opts.flush) flushGlobal();
 }
 
 /// Lookup the page descriptor for the given virtual address and invalidate it.
@@ -345,6 +357,11 @@ pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
 
     // Should use ASID to avoid flushing the entire TLB, but it's not implemented yet.
     flushLocal();
+}
+
+/// Flushes all TLBs across all cores.
+pub fn flushTlb() void {
+    flushGlobal();
 }
 
 /// Flush all TLB entries on every CPU.

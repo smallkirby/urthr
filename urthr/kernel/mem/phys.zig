@@ -208,7 +208,7 @@ fn unmapPage(virt: Virt, max: usize) Error!usize {
     // Unmap using 1GiB pages if possible.
     if (isMappableAs(virt, 0, max, common.mem.size_1gib)) {
         const unmap_size = util.rounddown(max, common.mem.size_1gib);
-        try arch.mmu.unmap1gb(pt, virt, unmap_size, allocator);
+        try arch.mmu.unmap1gb(pt, virt, unmap_size, .{}, allocator);
         return unmap_size;
     }
 
@@ -218,7 +218,7 @@ fn unmapPage(virt: Virt, max: usize) Error!usize {
             util.rounddown(max, common.mem.size_2mib),
             common.mem.size_1gib - (virt % common.mem.size_1gib),
         );
-        try arch.mmu.unmap2mb(pt, virt, unmap_size, allocator);
+        try arch.mmu.unmap2mb(pt, virt, unmap_size, .{}, allocator);
         return unmap_size;
     }
 
@@ -228,7 +228,7 @@ fn unmapPage(virt: Virt, max: usize) Error!usize {
             max,
             common.mem.size_2mib - (virt % common.mem.size_2mib),
         );
-        try arch.mmu.unmap4kb(pt, virt, unmap_size, allocator);
+        try arch.mmu.unmap4kb(pt, virt, unmap_size, .{}, allocator);
         return unmap_size;
     }
 }

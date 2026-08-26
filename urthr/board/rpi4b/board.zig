@@ -227,6 +227,7 @@ pub fn deinitSubcoreWakeup() void {
         urd.mem.getInitAddressSpace(),
         kentry,
         kentry,
+        .{},
         urd.mem.page,
     ) catch {};
 }

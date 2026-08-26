@@ -108,6 +108,7 @@ pub fn valloc(size: usize) Error![]u8 {
             pt,
             vaddr,
             mem.page_size,
+            .{},
             mem.page,
         ) catch {};
 
@@ -159,6 +160,7 @@ fn releaseArea(area: *VmArea) void {
             pt,
             vms.virt,
             vms.size,
+            .{},
             mem.page,
         ) catch {};
         mem.page.freePagesP(@as([*]u8, @ptrFromInt(vms.phys))[0..vms.size]);

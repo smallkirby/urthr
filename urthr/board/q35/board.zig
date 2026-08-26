@@ -221,6 +221,7 @@ pub fn remapNormal(old: PageAllocator, new: PageAllocator) common.mem.Error!void
         as,
         range.start,
         npages * page_size,
+        .{},
         new,
     );
     for (0..npages) |i| {
@@ -643,6 +644,7 @@ pub fn deinitSubcoreWakeup() void {
         urd.mem.getInitAddressSpace(),
         arch.smp.trampoline_phys,
         urd.mem.page_size,
+        .{},
         urd.mem.page,
     ) catch {};
 }
