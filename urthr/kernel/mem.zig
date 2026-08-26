@@ -24,6 +24,7 @@ pub const page_size = common.mem.size_4kib;
 pub const size_4kib = common.mem.size_4kib;
 pub const size_2mib = common.mem.size_2mib;
 pub const size_1gib = common.mem.size_1gib;
+pub const page_shift = std.math.log2_int(usize, size_4kib);
 
 /// Init task's page table.
 var init_as: arch.mmu.AddressSpace = .{};
@@ -122,7 +123,7 @@ pub fn initAllocators() Error!void {
     bin_impl.init(page);
 
     // Page reference manager.
-    pageref.init(bin);
+    try pageref.init(bin, avails);
 
     // I/O allocator.
     phys_impl.init();

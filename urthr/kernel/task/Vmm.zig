@@ -123,7 +123,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
             ) orelse continue; // if not mapped, just continue.
 
             // Mark this physical page as shared.
-            try urd.mem.pageref.share(parent_pa);
+            urd.mem.pageref.share(parent_pa);
 
             // Map to child as read-only.
             try arch.mmu.map4kb(child.as, .{
