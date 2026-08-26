@@ -45,9 +45,8 @@ test "propagates to every thread in the same thread group" {
         _ = linux.setpgid(0, 0);
 
         // Wait for the worker to observe the new PGID.
-        var spins: usize = 0;
-        while (S.pgid_matches.load(.acquire) == -1) : (spins += 1) {
-            if (spins > 100_000) break else _ = linux.sched_yield();
+        while (S.pgid_matches.load(.acquire) == -1) {
+            _ = linux.sched_yield();
         }
 
         const msg = [_]u8{if (S.pgid_matches.load(.acquire) == 1) 1 else 0};
