@@ -214,14 +214,28 @@ pub fn enableIrq(id: usize) void {
     }
 }
 
+/// Destination of a SGI.
+pub const SgiTarget = union(enum) {
+    /// List of target CPU interface IDs.
+    target: []const u8,
+    /// All PEs in the system, excluding the caller.
+    all,
+};
+
 /// Send a SGI to the specified interfaces.
 ///
 /// Supports only affnity level 0.
-pub fn sendSgi(id: u4, target: []const u8) void {
-    var target_list: u16 = 0;
-    for (target) |cpu_id| {
-        target_list = bits.set(target_list, cpu_id);
-    }
+pub fn sendSgi(id: u4, dest: SgiTarget) void {
+    const target_list, const irm: reg.IccSgi1r.Irm = switch (dest) {
+        .target => |target| blk: {
+            var target_list: u16 = 0;
+            for (target) |cpu_id| {
+                target_list = bits.set(target_list, cpu_id);
+            }
+            break :blk .{ target_list, .specified };
+        },
+        .all => .{ 0, .all },
+    };
 
     am.msr(.icc_sgi1r_el1, reg.IccSgi1r{
         .aff1 = 0,
@@ -229,7 +243,7 @@ pub fn sendSgi(id: u4, target: []const u8) void {
         .aff3 = 0,
         .target_list = target_list,
         .intid = id,
-        .irm = .specified,
+        .irm = irm,
     });
 }
 

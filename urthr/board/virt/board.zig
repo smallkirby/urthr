@@ -9,6 +9,9 @@ pub const ExceptionHandler = *const fn (u64) ?void;
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
 
+/// SGI ID used for the TLB shootdown IPI.
+pub const tlb_shootdown_vector = 0;
+
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
 
@@ -417,6 +420,11 @@ pub fn initIrqLocal() common.mem.PageAllocator.Error!void {
 /// Enable an interrupt by ID.
 pub fn enableIrq(id: usize) void {
     arch.gicv3.enableIrq(id);
+}
+
+/// Send an IPI to all cores except the caller.
+pub fn sendIpiAll(id: u64) void {
+    arch.gicv3.sendSgi(@intCast(id), .all);
 }
 
 /// IRQ handler function.

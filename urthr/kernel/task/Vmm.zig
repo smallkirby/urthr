@@ -88,10 +88,12 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
     );
     errdefer child.deinit(allocator);
 
+    // Request TLB shootdown if needed.
+    var need_flush = false;
+    defer if (need_flush) self.flushTlb();
+
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
-
-    var need_flush = false;
     var it = self.tree.iterator();
     while (it.next()) |node| {
         const vma = node.container();
@@ -150,8 +152,6 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
             need_flush = true;
         }
     }
-
-    if (need_flush) arch.mmu.flushTlb();
 
     child.brk = self.brk;
     child.mmap_hint = self.mmap_hint;
@@ -279,6 +279,10 @@ pub fn reserve(
 ///
 /// If the page is already backed, this function is nop.
 pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void {
+    // Request TLB shootdown if needed after mapping changes.
+    var need_flush = false;
+    defer if (need_flush) self.flushTlb();
+
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
 
@@ -298,7 +302,10 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
         urd.mem.page,
     )) |pa| return switch (access) {
         // Handle copy-on-write if possible.
-        .write => try self.breakCow(vma, page_va, pa),
+        .write => {
+            try self.breakCow(vma, page_va, pa);
+            need_flush = true;
+        },
         // Can't handle.
         .read => {},
     };
@@ -325,7 +332,11 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
         .size = urd.mem.page_size,
         .perm = vma.perm,
         .attr = .normal,
-    }, .{ .exact = true }, urd.mem.page);
+    }, .{
+        .exact = true,
+        .flush = false,
+    }, urd.mem.page);
+    need_flush = true;
 }
 
 /// Handles a write fault on a page that is possibly shared as COW.
@@ -337,7 +348,7 @@ fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
             va,
             urd.mem.page_size,
             vma.perm,
-            .{},
+            .{ .flush = false },
             urd.mem.page,
         );
     }
@@ -357,7 +368,10 @@ fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
         .size = urd.mem.page_size,
         .perm = vma.perm,
         .attr = .normal,
-    }, .{ .exact = true }, urd.mem.page);
+    }, .{
+        .exact = true,
+        .flush = false,
+    }, urd.mem.page);
 
     if (urd.mem.pageref.unref(pa)) {
         urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
@@ -371,11 +385,14 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
 
+    // Request TLB shootdown if needed after unmapping pages.
+    var need_flush = false;
+    defer if (need_flush) self.flushTlb();
+
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
 
     // Free physical pages backing the range.
-    var need_flush = false;
     for (0..size / urd.mem.page_size) |i| {
         const va = vaddr + i * urd.mem.page_size;
         const pa = arch.mmu.translateWalk(
@@ -403,8 +420,6 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
         need_flush = true;
     }
 
-    if (need_flush) arch.mmu.flushTlb();
-
     // Update tree.
     try self.deleteFromVmTree(vaddr, size);
 }
@@ -417,6 +432,10 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
 pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!void {
     rtt.expectEqual(0, vaddr % urd.mem.page_size);
     rtt.expectEqual(0, size % urd.mem.page_size);
+
+    // Request TLB shootdown if needed after remapping pages.
+    var need_flush = false;
+    defer if (need_flush) self.flushTlb();
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -500,12 +519,13 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
             va,
             urd.mem.page_size,
             rperm,
-            .{},
+            .{ .flush = false },
             urd.mem.page,
         ) catch |e| switch (e) {
             error.InvalidMapping => continue, // not mapped, skip it.
             else => return e,
         };
+        need_flush = true;
     }
 }
 
@@ -543,6 +563,12 @@ pub fn extendProgramBreak(self: *Self, addr: usize) Error!usize {
 // =============================================================
 // Internals
 // =============================================================
+
+/// Flush this core's TLB, and request a TLB shootdown if needed.
+fn flushTlb(self: *const Self) void {
+    arch.mmu.flush();
+    if (self.refcnt > 1) urd.ipi.tlbShootdown();
+}
 
 /// Insert a VMA into the tree.
 fn insertToVmTree(self: *Self, vma: *VmArea) void {

@@ -63,9 +63,17 @@ pub fn setTrigger(id: usize, trigger: gicd.Trigger) void {
     gicd.setTriggerType(id, trigger);
 }
 
+/// Destination of a SGI.
+pub const SgiTarget = union(enum) {
+    /// List of target CPU interface IDs.
+    target: []const u8,
+    /// All CPU interfaces, excluding the caller.
+    all,
+};
+
 /// Send a SGI to the specified interfaces.
-pub fn sendSgi(id: u4, target: []const u8) void {
-    gicd.sendSgi(id, target);
+pub fn sendSgi(id: u4, dest: SgiTarget) void {
+    gicd.sendSgi(id, dest);
 }
 
 /// Get the interrupt ID of the signaled interrupt.
@@ -179,16 +187,22 @@ const gicd = struct {
     }
 
     /// Send a Software Generated Interrupt to the specified interfaces.
-    pub fn sendSgi(id: u4, target: []const u8) void {
-        var target_list: u8 = 0;
-        for (target) |cpu_id| {
-            target_list = bits.set(target_list, cpu_id);
-        }
+    pub fn sendSgi(id: u4, dest: SgiTarget) void {
+        const target_list, const filter: Sgir.Target = switch (dest) {
+            .target => |target| blk: {
+                var target_list: u8 = 0;
+                for (target) |cpu_id| {
+                    target_list = bits.set(target_list, cpu_id);
+                }
+                break :blk .{ target_list, .filter };
+            },
+            .all => .{ 0, .all },
+        };
 
         mod.write(Sgir, .{
             .sgi_id = id,
             .target_list = target_list,
-            .filter = .filter,
+            .filter = filter,
         });
     }
 

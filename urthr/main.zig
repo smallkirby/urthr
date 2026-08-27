@@ -97,6 +97,11 @@ fn zmain() !void {
     urd.time.initGlobal();
     urd.time.initLocal();
 
+    // Initialize IPI subsystem.
+    log.debug("Initializing IPI.", .{});
+    urd.ipi.initGlobal();
+    urd.ipi.initLocal();
+
     // Start periodic console timer.
     urd.console.initTimer();
 

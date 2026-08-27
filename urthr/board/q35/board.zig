@@ -31,6 +31,8 @@ var xhc: ?*dd.usb.Xhc = null;
 const xhci_vector: u8 = 0x40;
 /// IDT vector assigned to the virtio-net interrupt.
 const virtio_net_vector: u8 = 0x41;
+/// IDT vector assigned to the TLB shootdown IPI.
+pub const tlb_shootdown_vector: u8 = 0x42;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -703,6 +705,11 @@ pub fn initIrqLocal() PageAllocator.Error!void {
 ///
 /// TODO: supports I/O APIC.
 pub fn enableIrq(_: usize) void {}
+
+/// Send an IPI to all cores except the caller.
+pub fn sendIpiAll(vector: u64) void {
+    arch.lapic.sendIpiAllExclSelf(@intCast(vector));
+}
 
 /// IRQ handler function.
 fn handleIrq(vector: u64) ?void {

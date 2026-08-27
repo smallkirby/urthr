@@ -179,11 +179,6 @@ pub fn initPat() void {
     });
 }
 
-/// Flushes all TLBs across all cores.
-pub fn flushTlb() void {
-    flushAll();
-}
-
 /// Switch the user-space address space to the user address space of `pt`.
 ///
 /// If `pt` has no user table, the user table is cleared.
@@ -337,7 +332,7 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
         };
     }
 
-    if (opts.flush) flushAll();
+    if (opts.flush) flush();
 }
 
 /// Changes permissions of an existing virtual address range using the given granule size.
@@ -367,7 +362,7 @@ fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permiss
         entry.xd = !(perm.kx or perm.ux);
     }
 
-    if (opts.flush) flushAll();
+    if (opts.flush) flush();
 }
 
 /// Unmaps the given virtual address range using the given granule size.
@@ -394,7 +389,7 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, opts: UnmapOp
         );
     }
 
-    if (opts.flush) flushAll();
+    if (opts.flush) flush();
 }
 
 /// Lookup the page table entry for the given virtual address and invalidate it.
@@ -469,8 +464,8 @@ fn getIndex(level: Level, va: usize) usize {
     return (va >> (page_shift_4k + (@as(u6, 3 - level) * 9))) & 0x1FF;
 }
 
-/// Flush all TLB entries by reloading CR3.
-fn flushAll() void {
+/// Flush all TLB entries of this core by reloading CR3.
+pub fn flush() void {
     const cr3 = asm volatile (
         \\mov %%cr3, %[out]
         : [out] "=r" (-> u64),

@@ -87,6 +87,9 @@ fn zsubmain() !void {
     // Initialize timer.
     urd.time.initLocal();
 
+    // Enable IPI infrastructure.
+    urd.ipi.initLocal();
+
     // Enable system call subsystem for this core.
     arch.initSyscall();
 

@@ -135,6 +135,18 @@ pub fn wakeCore(dest_apic_id: u8, entry: usize) void {
     rtt.expectEqual(std.mem.zeroes(Esr), readErrors());
 }
 
+/// Send a fixed-vector IPI to all other CPUs, excluding the caller.
+pub fn sendIpiAllExclSelf(vector: u8) void {
+    lapic.writez(IcrLow, .{
+        .vector = vector,
+        .delivery_mode = .fixed,
+        .level = .assert,
+        .trigger_mode = .edge,
+        .dest_shorthand = .all_excl_self,
+    });
+    lapic.waitFor(IcrLow, .{ .delivery_status = .idle }, null);
+}
+
 /// Clear the Error Status Register without reading it.
 fn clearErrors() void {
     lapic.writez(Esr, .{});

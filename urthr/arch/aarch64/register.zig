@@ -1060,7 +1060,7 @@ pub const IccSgi1r = packed struct(u64) {
     /// Reserved.
     _56: u8 = 0,
 
-    const Irm = enum(u1) {
+    pub const Irm = enum(u1) {
         /// Routed to the PEs specified Aff3.Aff2.Aff1.<target_list>
         specified = 0,
         /// Routed to all PEs in the system excluding self.
