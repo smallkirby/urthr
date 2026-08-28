@@ -226,14 +226,29 @@ export fn serrorCurElSpx(ctx: *Context) callconv(.c) void {
 export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
     switch (am.mrs(.esr_el1).ec) {
         // System call.
-        .svc_a64 => return svc.svc(ctx),
+        .svc_a64 => {
+            setIrq(true);
+            defer setIrq(false);
+            return svc.svc(ctx);
+        },
 
         // Data abort.
-        .dabort_lower => return handleDataAbortUser(ctx),
+        .dabort_lower => {
+            setIrq(true);
+            defer setIrq(false);
+            return handleDataAbortUser(ctx);
+        },
 
         // Unhandled.
         else => return defaultHandler(ctx, "Synchronous, Lower EL, A64"),
     }
+}
+
+/// Enable or disable IRQs.
+fn setIrq(mask: bool) void {
+    var daif = am.mrs(.daif);
+    daif.i = mask;
+    am.msr(.daif, daif);
 }
 
 /// Handle a data abort taken from EL0.

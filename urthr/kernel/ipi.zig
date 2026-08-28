@@ -24,8 +24,8 @@ pub fn initLocal() void {
 pub fn tlbShootdown() void {
     if (board.num_cpus == 1) return;
 
-    const ie = tlb_shootdown_lock.lockDisableIrq();
-    defer tlb_shootdown_lock.unlockRestoreIrq(ie);
+    tlb_shootdown_lock.lock();
+    defer tlb_shootdown_lock.unlock();
 
     // Send a TLB shootdown IPI to all other cores.
     board.sendIpiAll(board.tlb_shootdown_vector);

@@ -155,7 +155,9 @@ export fn syscallEntry() callconv(.naked) noreturn {
         \\movdqu %%xmm7, 112(%%rsp)
         \\
         // Dispatch to the Zig SVC handler.
+        \\sti
         \\call svc
+        \\cli
         \\
         // Restore XMM registers.
         // TODO: use FXRSTOR instruction.
