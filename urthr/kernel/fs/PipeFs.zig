@@ -45,7 +45,7 @@ const InodeImpl = struct {
     buf_len: usize = 0,
 
     /// Lock protecting all fields below.
-    lock: SpinLock = .{},
+    lock: Mutex = .{},
     /// Signaled when data becomes available.
     rcv: CondVar = .{},
     /// Signaled when buffer space becomes available.
@@ -259,8 +259,8 @@ fn frRead(file: *fs.File, buf: []u8, _: usize) fs.Error!usize {
     const ctx: *FileCtx = @ptrCast(@alignCast(file.ctx));
     const pipe = ctx.pipe;
 
-    const ie = pipe.lock.lockDisableIrq();
-    defer pipe.lock.unlockRestoreIrq(ie);
+    pipe.lock.lock();
+    defer pipe.lock.unlock();
 
     while (pipe.isEmpty()) {
         if (pipe.writers == 0) return 0; // EOF
@@ -277,8 +277,8 @@ fn frWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
     const ctx: *FileCtx = @ptrCast(@alignCast(file.ctx));
     const pipe = ctx.pipe;
 
-    const ie = pipe.lock.lockDisableIrq();
-    defer pipe.lock.unlockRestoreIrq(ie);
+    pipe.lock.lock();
+    defer pipe.lock.unlock();
 
     while (pipe.isFull()) {
         if (pipe.readers == 0) {
@@ -302,7 +302,7 @@ fn fClose(context: *anyopaque, allocator: Allocator) void {
     const ctx: *FileCtx = @ptrCast(@alignCast(context));
     const pipe = ctx.pipe;
 
-    const ie = pipe.lock.lockDisableIrq();
+    pipe.lock.lock();
     switch (ctx.end) {
         .read => {
             pipe.readers -= 1;
@@ -313,7 +313,7 @@ fn fClose(context: *anyopaque, allocator: Allocator) void {
             if (pipe.writers == 0) pipe.rcv.broadcast();
         },
     }
-    pipe.lock.unlockRestoreIrq(ie);
+    pipe.lock.unlock();
 
     allocator.destroy(ctx);
 }
@@ -357,5 +357,5 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
 const signal = urd.task.signal;
-const SpinLock = urd.sync.SpinLock;
+const Mutex = urd.sync.Mutex;
 const CondVar = urd.sync.CondVar;
