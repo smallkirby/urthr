@@ -8,6 +8,8 @@ var idle: *Thread linksection(pcpu.section) = undefined;
 var current: ?*Thread linksection(pcpu.section) = null;
 /// Lock that must be released after new thread has been switched-in.
 var pending_unlock: ?*SpinLock linksection(pcpu.section) = null;
+/// Counter of disabled preemption on this core.
+var preempt_disable_count: usize linksection(pcpu.section) = 0;
 
 /// Spin lock for scheduler and thread management.
 var lock: SpinLock = .{};
@@ -139,7 +141,22 @@ pub fn exitCurrent(state: thread.State) noreturn {
 
 /// Check if the current thread needs to be rescheduled and yield if possible.
 pub fn shouldReschedule() bool {
+    if (pcpu.get(&preempt_disable_count) != 0) return false;
     return if (getCurrentNullable()) |c| c.need_resched else false;
+}
+
+/// Disable context switching on this core.
+///
+/// This does not mask IRQs.
+pub fn preemptDisable() void {
+    pcpu.ptr(&preempt_disable_count).* += 1;
+}
+
+/// Re-enable context switching on this core.
+pub fn preemptEnable() void {
+    const count = pcpu.ptr(&preempt_disable_count);
+    rtt.expect(count.* > 0);
+    count.* -= 1;
 }
 
 /// Mark the currently running thread as needing rescheduling.

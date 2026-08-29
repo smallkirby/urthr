@@ -24,6 +24,13 @@ pub fn initLocal() void {
 pub fn tlbShootdown() void {
     if (board.num_cpus == 1) return;
 
+    urd.sched.preemptDisable();
+    defer urd.sched.preemptEnable();
+
+    const ie = arch.intr.getMask();
+    arch.intr.unmaskAll();
+    defer arch.intr.setMask(ie);
+
     tlb_shootdown_lock.lock();
     defer tlb_shootdown_lock.unlock();
 

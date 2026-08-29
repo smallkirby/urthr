@@ -151,9 +151,23 @@ pub const intr = struct {
         return @bitCast(daif);
     }
 
+    /// Get exception mask.
+    pub fn getMask() u64 {
+        return @bitCast(am.mrs(.daif));
+    }
+
     /// Set exception mask.
     pub fn setMask(daif: u64) void {
         am.msr(.daif, @bitCast(daif));
+    }
+
+    /// Unmask IRQ and FIQ.
+    pub fn unmaskAll() void {
+        var daif = am.mrs(.daif);
+        daif.i = false;
+        daif.f = false;
+        am.msr(.daif, daif);
+        am.isb();
     }
 
     /// Set the exception handler function.

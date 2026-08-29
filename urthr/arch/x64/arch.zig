@@ -114,6 +114,16 @@ pub const intr = struct {
             : .{ .memory = true });
     }
 
+    /// Get exception mask.
+    pub fn getMask() u64 {
+        return asm volatile (
+            \\pushfq
+            \\popq %[flags]
+            : [flags] "=r" (-> u64),
+            :
+            : .{ .memory = true });
+    }
+
     /// Set exception mask.
     pub fn setMask(flags: u64) void {
         asm volatile (
