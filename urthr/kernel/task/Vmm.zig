@@ -90,7 +90,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
 
     // Request TLB shootdown if needed.
     var need_flush = false;
-    defer if (need_flush) self.flushTlb(.global);
+    defer if (need_flush) self.flushTlb(.global, null);
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -279,14 +279,21 @@ pub fn reserve(
 ///
 /// If the page is already backed, this function is nop.
 pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void {
+    const page_va = std.mem.alignBackward(
+        usize,
+        va,
+        urd.mem.page_size,
+    );
+
     // Request TLB shootdown if needed after mapping changes.
-    var flush: ?FlushScope = null;
-    defer if (flush) |scope| self.flushTlb(scope);
+    var flush: ?Scope = null;
+    defer if (flush) |scope| self.flushTlb(scope, .{
+        .addr = page_va,
+        .len = urd.mem.page_size,
+    });
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
-
-    const page_va = std.mem.alignBackward(usize, va, urd.mem.page_size);
 
     const vma = if (self.tree.find(va)) |n| n.container() else {
         return Error.NoSuchMapping;
@@ -392,7 +399,10 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
 
     // Request TLB shootdown if needed after unmapping pages.
     var need_flush = false;
-    defer if (need_flush) self.flushTlb(.global);
+    defer if (need_flush) self.flushTlb(.global, .{
+        .addr = vaddr,
+        .len = size,
+    });
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -440,7 +450,10 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
 
     // Request TLB shootdown if needed after remapping pages.
     var need_flush = false;
-    defer if (need_flush) self.flushTlb(.global);
+    defer if (need_flush) self.flushTlb(.global, .{
+        .addr = vaddr,
+        .len = size,
+    });
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -569,22 +582,32 @@ pub fn extendProgramBreak(self: *Self, addr: usize) Error!usize {
 // Internals
 // =============================================================
 
-/// Scope of a TLB flush.
-const FlushScope = enum {
-    /// Flush only the calling core's TLB.
-    ///
-    /// Safe when the change just adds a mapping or widens permissions.
-    local,
-    /// Flush the calling core's TLB and shoot down every other core.
-    ///
-    /// Required when the change removes a mapping, narrows permissions,
-    /// or changes a virtual address to a different physical page.
-    global,
+/// Virtual address range covered by a TLB flush.
+const FlushRange = struct {
+    /// Virtual address.
+    addr: usize,
+    /// Length in bytes.
+    len: usize,
 };
 
-fn flushTlb(self: *const Self, scope: FlushScope) void {
-    arch.mmu.flush();
-    if (scope == .global and self.refcnt > 1) urd.ipi.tlbShootdown();
+/// Invalidate the TLB after a page table change.
+fn flushTlb(self: *const Self, scope: Scope, range: ?FlushRange) void {
+    const ascope: Scope = if (arch.mmu.tlb.supports_global) scope else .local;
+
+    if (range) |r| {
+        arch.mmu.tlb.invalidateRange(self.as, r.addr, r.len, ascope);
+    } else {
+        arch.mmu.tlb.invalidateAll(self.as, ascope);
+    }
+
+    if (comptime !arch.mmu.tlb.supports_global) {
+        if (scope == .global and self.refcnt > 1) {
+            urd.ipi.tlbShootdown(if (range) |r| .{
+                .addr = r.addr,
+                .len = r.len,
+            } else null);
+        }
+    }
 }
 
 /// Insert a VMA into the tree.
@@ -740,3 +763,4 @@ const arch = @import("arch").impl;
 const urd = @import("urthr");
 const Permission = common.mem.Permission;
 const SpinLock = urd.sync.SpinLock;
+const Scope = arch.mmu.tlb.Scope;

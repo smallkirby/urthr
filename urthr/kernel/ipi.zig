@@ -1,8 +1,5 @@
 //! IPI implementation.
 
-/// Serializes concurrent TLB shootdown operations.
-var tlb_shootdown_lock: SpinLock = .{};
-
 /// Initialize the global IPI infrastructure.
 pub fn initGlobal() void {
     urd.exception.setHandler(
@@ -18,10 +15,26 @@ pub fn initLocal() void {
     board.enableIrq(board.tlb_shootdown_vector);
 }
 
+// =============================================================
+// TLB shootdown
+
+/// Serializes concurrent TLB shootdown operations.
+var tlb_shootdown_lock: SpinLock = .{};
+/// Range of the currently processing TLB shootdown.
+var tlb_shootdown_range: ?Range = null;
+
+/// Virtual address range to invalidate.
+const Range = struct {
+    /// Virtual address.
+    addr: usize,
+    /// Length in bytes.
+    len: usize,
+};
+
 /// Flush the TLB on every other core.
 ///
 /// The caller is responsible for flushing its own local TLB.
-pub fn tlbShootdown() void {
+pub fn tlbShootdown(range: ?Range) void {
     if (board.num_cpus == 1) return;
 
     urd.sched.preemptDisable();
@@ -34,6 +47,9 @@ pub fn tlbShootdown() void {
     tlb_shootdown_lock.lock();
     defer tlb_shootdown_lock.unlock();
 
+    tlb_shootdown_range = range;
+    defer tlb_shootdown_range = null;
+
     // Send a TLB shootdown IPI to all other cores.
     board.sendIpiAll(board.tlb_shootdown_vector);
 
@@ -43,8 +59,20 @@ pub fn tlbShootdown() void {
 
 /// Handler invoked when a core receives a TLB shootdown IPI.
 fn handleTlbShootdown(_: urd.exception.Vector) void {
-    // Flush local TLB entries.
-    arch.mmu.flush();
+    // Invalidate local TLB entries.
+    if (tlb_shootdown_range) |range| {
+        arch.mmu.tlb.invalidateRange(
+            undefined,
+            range.addr,
+            range.len,
+            .local,
+        );
+    } else {
+        arch.mmu.tlb.invalidateAll(
+            undefined,
+            .local,
+        );
+    }
     // Acknowledge the IPI.
     urd.sync.syncAllCores();
 }

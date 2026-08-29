@@ -332,7 +332,7 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
         };
     }
 
-    if (opts.flush) flush();
+    if (opts.flush) reloadCr3();
 }
 
 /// Changes permissions of an existing virtual address range using the given granule size.
@@ -362,7 +362,7 @@ fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permiss
         entry.xd = !(perm.kx or perm.ux);
     }
 
-    if (opts.flush) flush();
+    if (opts.flush) reloadCr3();
 }
 
 /// Unmaps the given virtual address range using the given granule size.
@@ -389,7 +389,7 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, opts: UnmapOp
         );
     }
 
-    if (opts.flush) flush();
+    if (opts.flush) reloadCr3();
 }
 
 /// Lookup the page table entry for the given virtual address and invalidate it.
@@ -464,19 +464,6 @@ fn getIndex(level: Level, va: usize) usize {
     return (va >> (page_shift_4k + (@as(u6, 3 - level) * 9))) & 0x1FF;
 }
 
-/// Flush all TLB entries of this core by reloading CR3.
-pub fn flush() void {
-    const cr3 = asm volatile (
-        \\mov %%cr3, %[out]
-        : [out] "=r" (-> u64),
-    );
-    asm volatile (
-        \\mov %[in], %%cr3
-        :
-        : [in] "r" (cr3),
-        : .{ .memory = true });
-}
-
 /// Get the cacheability bits for the given attribute.
 fn getAttrBits(attr: Attribute) AttrBits {
     const pattype: regs.PatType = switch (attr) {
@@ -521,6 +508,70 @@ fn allocNewTable(allocator: PageAllocator, T: type) Error![]T {
     @memset(table, std.mem.zeroInit(T, .{ .present = false }));
 
     return table;
+}
+
+/// TLB maintenance.
+pub const tlb = struct {
+    /// Whether IPI is not needed for cross-CPU TLB shootdown.
+    pub const supports_global = false;
+
+    /// Number of pages above which a range invalidation falls back to a full flush.
+    const range_max = 64;
+
+    pub const Scope = enum {
+        /// Local to this core.
+        local,
+        /// All CPUs.
+        global,
+    };
+
+    /// Invalidate all TLB entries.
+    pub fn invalidateAll(_: AddressSpace, scope: Scope) void {
+        switch (scope) {
+            .local => reloadCr3(),
+            .global => @panic("Global TLB invalidation not supported"),
+        }
+    }
+
+    /// Invalidate the TLB entries covering the given virtual address range.
+    pub fn invalidateRange(_: AddressSpace, va: usize, len: usize, scope: Scope) void {
+        if (scope == .global) {
+            @panic("Global TLB invalidation not supported");
+        }
+
+        const npages = (len + size_4k - 1) / size_4k;
+        if (npages == 0) {
+            return;
+        }
+
+        // Fall back to full flush.
+        if (npages > range_max) {
+            return reloadCr3();
+        }
+
+        // Invalidate page by page.
+        var curp = std.mem.alignBackward(usize, va, size_4k);
+        const end = va +% len;
+        while (curp < end) : (curp += size_4k) {
+            asm volatile ("invlpg (%[p])"
+                :
+                : [p] "r" (curp),
+                : .{ .memory = true });
+        }
+    }
+};
+
+/// Reload CR3 to flush all TLB entries of this core.
+fn reloadCr3() void {
+    const cr3 = asm volatile (
+        \\mov %%cr3, %[out]
+        : [out] "=r" (-> u64),
+    );
+    asm volatile (
+        \\mov %[in], %%cr3
+        :
+        : [in] "r" (cr3),
+        : .{ .memory = true });
 }
 
 // =============================================================

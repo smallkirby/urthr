@@ -477,6 +477,86 @@ fn getAttrIndex(attr: Attribute) u3 {
     };
 }
 
+/// TLB maintenance.
+pub const tlb = struct {
+    /// Whether IPI is needed for cross-CPU TLB shootdown.
+    pub const supports_global = true;
+
+    /// Number of pages above which a range invalidation falls back to a full flush.
+    const range_max = 64;
+
+    pub const Scope = enum {
+        /// Local to this core.
+        local,
+        /// All CPUs.
+        global,
+    };
+
+    /// Invalidate all TLB entries.
+    pub fn invalidateAll(_: AddressSpace, scope: Scope) void {
+        switch (scope) {
+            .local => asm volatile (
+                \\dsb nshst
+                \\tlbi vmalle1
+                \\dsb nsh
+                \\isb
+            ),
+            .global => asm volatile (
+                \\dsb ishst
+                \\tlbi vmalle1is
+                \\dsb ish
+                \\isb
+            ),
+        }
+    }
+
+    /// Invalidate the TLB entries covering the given virtual address range.
+    pub fn invalidateRange(as: AddressSpace, va: usize, len: usize, scope: Scope) void {
+        const npages = (len + page_size - 1) / page_size;
+        if (npages == 0) {
+            return;
+        }
+
+        // Fall back to full flush.
+        if (npages > range_max) {
+            return invalidateAll(as, scope);
+        }
+
+        const start = std.mem.alignBackward(usize, va, page_size);
+        const end = va +% len;
+        switch (scope) {
+            .local => {
+                asm volatile ("dsb nshst");
+                var page = start;
+                while (page < end) : (page += page_size) {
+                    asm volatile ("tlbi vaae1, %[arg]"
+                        :
+                        : [arg] "r" (page >> page_shift),
+                    );
+                }
+                asm volatile (
+                    \\dsb nsh
+                    \\isb
+                );
+            },
+            .global => {
+                asm volatile ("dsb ishst");
+                var page = start;
+                while (page < end) : (page += page_size) {
+                    asm volatile ("tlbi vaae1is, %[arg]"
+                        :
+                        : [arg] "r" (page >> page_shift),
+                    );
+                }
+                asm volatile (
+                    \\dsb ish
+                    \\isb
+                );
+            },
+        }
+    }
+};
+
 // =============================================================
 // Aarch64 structures
 // =============================================================
