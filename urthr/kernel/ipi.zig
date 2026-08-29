@@ -22,6 +22,8 @@ pub fn initLocal() void {
 var tlb_shootdown_lock: SpinLock = .{};
 /// Range of the currently processing TLB shootdown.
 var tlb_shootdown_range: ?Range = null;
+/// Cores that have not yet acknowledged the current shootdown.
+var tlb_shootdown_pending: std.atomic.Value(u64) = .init(0);
 
 /// Virtual address range to invalidate.
 const Range = struct {
@@ -34,6 +36,8 @@ const Range = struct {
 /// Flush the TLB on every other core.
 ///
 /// The caller is responsible for flushing its own local TLB.
+///
+/// Blocks until every other core has acknowledged.
 pub fn tlbShootdown(range: ?Range) void {
     if (board.num_cpus == 1) return;
 
@@ -47,19 +51,25 @@ pub fn tlbShootdown(range: ?Range) void {
     tlb_shootdown_lock.lock();
     defer tlb_shootdown_lock.unlock();
 
+    const others = ((@as(u64, 1) << board.num_cpus) - 1) &
+        ~(@as(u64, 1) << @intCast(urd.smp.getLogicalCoreId()));
+
     tlb_shootdown_range = range;
     defer tlb_shootdown_range = null;
+    tlb_shootdown_pending.store(others, .release);
 
     // Send a TLB shootdown IPI to all other cores.
     board.sendIpiAll(board.tlb_shootdown_vector);
-
-    // Wait for all other cores to acknowledge.
-    urd.sync.syncAllCores();
+    while (tlb_shootdown_pending.load(.acquire) != 0) {
+        std.atomic.spinLoopHint();
+    }
 }
 
 /// Handler invoked when a core receives a TLB shootdown IPI.
 fn handleTlbShootdown(_: urd.exception.Vector) void {
-    // Invalidate local TLB entries.
+    const bit = @as(u64, 1) << @intCast(urd.smp.getLogicalCoreId());
+    if (tlb_shootdown_pending.load(.acquire) & bit == 0) return;
+
     if (tlb_shootdown_range) |range| {
         arch.mmu.tlb.invalidateRange(
             undefined,
@@ -73,14 +83,16 @@ fn handleTlbShootdown(_: urd.exception.Vector) void {
             .local,
         );
     }
-    // Acknowledge the IPI.
-    urd.sync.syncAllCores();
+
+    // Acknowledge the request.
+    _ = tlb_shootdown_pending.fetchAnd(~bit, .release);
 }
 
 // =============================================================
 // Imports
 // =============================================================
 
+const std = @import("std");
 const board = @import("board").impl;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
