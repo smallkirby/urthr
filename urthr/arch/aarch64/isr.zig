@@ -227,15 +227,15 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
     switch (am.mrs(.esr_el1).ec) {
         // System call.
         .svc_a64 => {
-            setIrq(true);
-            defer setIrq(false);
+            maskIrq(false);
+            defer maskIrq(true);
             return svc.svc(ctx);
         },
 
         // Data abort.
         .dabort_lower => {
-            setIrq(true);
-            defer setIrq(false);
+            maskIrq(false);
+            defer maskIrq(true);
             return handleDataAbortUser(ctx);
         },
 
@@ -245,7 +245,7 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
 }
 
 /// Enable or disable IRQs.
-fn setIrq(mask: bool) void {
+fn maskIrq(mask: bool) void {
     var daif = am.mrs(.daif);
     daif.i = mask;
     am.msr(.daif, daif);
