@@ -90,7 +90,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
 
     // Request TLB shootdown if needed.
     var need_flush = false;
-    defer if (need_flush) self.flushTlb();
+    defer if (need_flush) self.flushTlb(.global);
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -280,8 +280,8 @@ pub fn reserve(
 /// If the page is already backed, this function is nop.
 pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void {
     // Request TLB shootdown if needed after mapping changes.
-    var need_flush = false;
-    defer if (need_flush) self.flushTlb();
+    var flush: ?FlushScope = null;
+    defer if (flush) |scope| self.flushTlb(scope);
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -303,8 +303,8 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
     )) |pa| return switch (access) {
         // Handle copy-on-write if possible.
         .write => {
-            try self.breakCow(vma, page_va, pa);
-            need_flush = true;
+            const repointed = try self.breakCow(vma, page_va, pa);
+            flush = if (repointed) .global else .local;
         },
         // Can't handle.
         .read => {},
@@ -336,14 +336,16 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
         .exact = true,
         .flush = false,
     }, urd.mem.page);
-    need_flush = true;
+    flush = .local;
 }
 
 /// Handles a write fault on a page that is possibly shared as COW.
-fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
+///
+/// Returns true when the virtual address was repointed at a newly allocated page.
+fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!bool {
     // Last reference to this page, so we can just make it writable again.
     if (urd.mem.pageref.count(pa) == 1) {
-        return try arch.mmu.remap4kb(
+        try arch.mmu.remap4kb(
             self.as,
             va,
             urd.mem.page_size,
@@ -351,6 +353,7 @@ fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
             .{ .flush = false },
             urd.mem.page,
         );
+        return false;
     }
 
     // Allocate new physical page and copy the contents.
@@ -376,6 +379,8 @@ fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!void {
     if (urd.mem.pageref.unref(pa)) {
         urd.mem.page.freePagesP(@as([*]u8, @ptrFromInt(pa))[0..urd.mem.page_size]);
     }
+
+    return true;
 }
 
 /// Unmap the given user-space virtual address range.
@@ -387,7 +392,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
 
     // Request TLB shootdown if needed after unmapping pages.
     var need_flush = false;
-    defer if (need_flush) self.flushTlb();
+    defer if (need_flush) self.flushTlb(.global);
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -435,7 +440,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
 
     // Request TLB shootdown if needed after remapping pages.
     var need_flush = false;
-    defer if (need_flush) self.flushTlb();
+    defer if (need_flush) self.flushTlb(.global);
 
     const ie = self.lock.lockDisableIrq();
     defer self.lock.unlockRestoreIrq(ie);
@@ -564,10 +569,22 @@ pub fn extendProgramBreak(self: *Self, addr: usize) Error!usize {
 // Internals
 // =============================================================
 
-/// Flush this core's TLB, and request a TLB shootdown if needed.
-fn flushTlb(self: *const Self) void {
+/// Scope of a TLB flush.
+const FlushScope = enum {
+    /// Flush only the calling core's TLB.
+    ///
+    /// Safe when the change just adds a mapping or widens permissions.
+    local,
+    /// Flush the calling core's TLB and shoot down every other core.
+    ///
+    /// Required when the change removes a mapping, narrows permissions,
+    /// or changes a virtual address to a different physical page.
+    global,
+};
+
+fn flushTlb(self: *const Self, scope: FlushScope) void {
     arch.mmu.flush();
-    if (self.refcnt > 1) urd.ipi.tlbShootdown();
+    if (scope == .global and self.refcnt > 1) urd.ipi.tlbShootdown();
 }
 
 /// Insert a VMA into the tree.
