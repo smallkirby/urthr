@@ -490,6 +490,7 @@ pub fn build(b: *std.Build) !void {
                 exe.entry = .{ .symbol_name = "_start" };
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/uaccess.S"));
             },
             .x86_64 => {},
             else => unreachable,

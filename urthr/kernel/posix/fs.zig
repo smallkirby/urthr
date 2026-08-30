@@ -290,47 +290,78 @@ const Whence = enum(i32) {
 /// syscall: write
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
-    const out = @as([*]const u8, @ptrFromInt(buf));
-    const n = file.write(out[0..count]) catch |e|
-        return writeError(e);
-    return .success(@bitCast(n));
+    return switch (writeFrom(file, buf, count, null)) {
+        .full, .partial => |n| .success(@bitCast(n)),
+        .fault => .err(.fault),
+        .io => |e| writeError(e),
+    };
 }
 
 /// syscall: writev
 pub fn sysWritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
     if (iovcnt == 0) return .success(0);
-    if (iov == null) return .err(.fault);
-
-    const iovs = iov.?[0..iovcnt];
+    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
 
     var total: usize = 0;
-    for (iovs) |v| {
-        total += file.write(v.slice()) catch |e|
-            return writeError(e);
-    }
+    for (0..iovcnt) |i| {
+        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
+            return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault);
+        };
+        switch (writeFrom(file, @intFromPtr(v.base), v.len, null)) {
+            .full => |n| total += n,
+            .partial => |n| return .success(@bitCast(total + n)),
 
+            .fault => return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault),
+
+            .io => |e| return if (total != 0)
+                .success(@bitCast(total))
+            else
+                writeError(e),
+        }
+    }
     return .success(@bitCast(total));
 }
 
 /// syscall: pwritev
 pub fn sysPwritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     if (iovcnt == 0) return .success(0);
-    if (iov == null) return .err(.fault);
-
-    const offset = bits.concat(u64, offset_h, offset_l);
+    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
-    const iovs = iov.?[0..iovcnt];
 
-    var pos: usize = @intCast(offset);
+    var pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
     var total: usize = 0;
-    for (iovs) |v| {
-        const n = file.pwrite(v.slice(), pos) catch |e|
-            return writeError(e);
-        pos += n;
-        total += n;
-    }
+    for (0..iovcnt) |i| {
+        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
+            return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault);
+        };
+        switch (writeFrom(file, @intFromPtr(v.base), v.len, pos)) {
+            .full => |n| {
+                total += n;
+                pos += n;
+            },
+            .partial => |n| return .success(@bitCast(total + n)),
 
+            .fault => return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault),
+
+            .io => |e| return if (total != 0)
+                .success(@bitCast(total))
+            else
+                writeError(e),
+        }
+    }
     return .success(@bitCast(total));
 }
 
@@ -353,49 +384,199 @@ pub fn sysFtruncate(fd: usize, length: i64) ReturnType {
 /// syscall: read
 pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
-    const out = @as([*]u8, @ptrFromInt(buf));
-    const n = file.read(out[0..count]) catch |e|
-        return mapReadError(e);
-    return .success(@bitCast(n.len));
+    return switch (readInto(file, buf, count, null)) {
+        .full, .partial => |n| .success(@bitCast(n)),
+        .fault => .err(.fault),
+        .io => |e| mapReadError(e),
+    };
 }
 
 // syscall: readv
 pub fn sysReadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
     if (iovcnt == 0) return .success(0);
-    if (iov == null) return .err(.fault);
-
-    const iovs = iov.?[0..iovcnt];
+    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
 
     var total: usize = 0;
-    for (iovs) |v| {
-        const n = file.read(v.slice()) catch |e|
-            return mapReadError(e);
-        total += n.len;
-    }
+    for (0..iovcnt) |i| {
+        const vec = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
+            return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault);
+        };
+        switch (readInto(file, @intFromPtr(vec.base), vec.len, null)) {
+            .full => |n| total += n,
+            .partial => |n| return .success(@bitCast(total + n)),
 
+            .fault => return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault),
+
+            .io => |e| return if (total != 0)
+                .success(@bitCast(total))
+            else
+                mapReadError(e),
+        }
+    }
     return .success(@bitCast(total));
 }
 
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     if (iovcnt == 0) return .success(0);
-    if (iov == null) return .err(.fault);
-
-    const offset = bits.concat(u64, offset_h, offset_l);
+    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
-    const iovs = iov.?[0..iovcnt];
 
-    var pos: usize = @intCast(offset);
+    var pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
     var total: usize = 0;
-    for (iovs) |v| {
-        const r = file.pread(v.slice(), pos) catch |e|
-            return mapReadError(e);
-        pos += r.len;
-        total += r.len;
+    for (0..iovcnt) |i| {
+        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
+            return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault);
+        };
+        switch (readInto(file, @intFromPtr(v.base), v.len, pos)) {
+            .full => |n| {
+                total += n;
+                pos += n;
+            },
+            .partial => |n| return .success(@bitCast(total + n)),
+
+            .fault => return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault),
+
+            .io => |e| return if (total != 0)
+                .success(@bitCast(total))
+            else
+                mapReadError(e),
+        }
+    }
+    return .success(@bitCast(total));
+}
+
+// =============================================================
+// User data helper
+// =============================================================
+
+/// Result of a single transfer over the bounce buffer.
+const XferResult = union(enum) {
+    /// All requested bytes were transferred.
+    full: usize,
+    /// Fewer than requested were transferred.
+    partial: usize,
+    /// Invalid user address.
+    fault,
+    /// I/O error occurred.
+    io: urd.fs.Error,
+};
+
+/// Size in bytes of the bounce buffer.
+const bounce_size = 4096;
+
+/// Read up to `count` bytes from `file` into user memory.
+///
+/// When the file position is provided, the file's own position is not advanced.
+///
+/// TODO: should not use bounce buffer to avoid extra memory copy overhead.
+fn readInto(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult {
+    if (count == 0) {
+        return .{ .full = 0 };
+    }
+    if (!urd.uaccess.accessOk(uaddr, count)) {
+        return .fault;
     }
 
-    return .success(@bitCast(total));
+    var buf: [bounce_size]u8 = undefined;
+    var done: usize = 0;
+    while (done < count) {
+        // Read data into the bounce buffer
+        const want = @min(count - done, buf.len);
+        const r = blk: {
+            const res = if (pos) |p|
+                file.pread(buf[0..want], p + done)
+            else
+                file.read(buf[0..want]);
+
+            if (res) |r| {
+                break :blk r;
+            } else |e| {
+                return if (done != 0)
+                    .{ .partial = done }
+                else
+                    .{ .io = e };
+            }
+        };
+        // Copy the read data to user memory.
+        if (r.len != 0) {
+            urd.uaccess.copyToUser(uaddr + done, r) catch return if (done != 0)
+                .{ .partial = done }
+            else
+                .fault;
+            done += r.len;
+        }
+        // Check if we've reached EOF.
+        if (r.len < want or !file.seekable) {
+            return if (done == count)
+                .{ .full = done }
+            else
+                .{ .partial = done };
+        }
+    }
+    return .{ .full = done };
+}
+
+/// Write up to `count` bytes from user memory at `uaddr` into `file`.
+///
+/// When the file position is provided, the file's own position is not advanced.
+///
+/// TODO: should not use bounce buffer to avoid extra memory copy overhead.
+fn writeFrom(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult {
+    if (count == 0) {
+        return .{ .full = 0 };
+    }
+    if (!urd.uaccess.accessOk(uaddr, count)) {
+        return .fault;
+    }
+
+    var buf: [bounce_size]u8 = undefined;
+    var done: usize = 0;
+    while (done < count) {
+        // Copy data from user memory into the bounce buffer.
+        const want = @min(count - done, buf.len);
+        urd.uaccess.copyFromUser(buf[0..want], uaddr + done) catch {
+            return if (done != 0) .{ .partial = done } else .fault;
+        };
+        // Write the data from the bounce buffer into the file.
+        const w = blk: {
+            const res = if (pos) |p|
+                file.pwrite(buf[0..want], p + done)
+            else
+                file.write(buf[0..want]);
+
+            if (res) |r| {
+                break :blk r;
+            } else |e| {
+                return if (done != 0)
+                    .{ .partial = done }
+                else
+                    .{ .io = e };
+            }
+        };
+        done += w;
+
+        if (w < want) {
+            return if (done == count)
+                .{ .full = done }
+            else
+                .{ .partial = done };
+        }
+    }
+    return .{ .full = done };
 }
 
 // =============================================================
@@ -1499,7 +1680,6 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
         return .err(.again);
     defer allocator.free(path);
 
-    const out = @as([*]u8, @ptrFromInt(buf));
     if (size == 0) {
         return .err(.inval);
     }
@@ -1507,8 +1687,8 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
         return .err(.range);
     }
 
-    @memcpy(out[0..path.len], path);
-    out[path.len] = 0; // null-terminate
+    urd.uaccess.copyToUser(buf, path) catch return .err(.fault);
+    urd.uaccess.copyToUser(buf + path.len, "\x00") catch return .err(.fault);
 
     return .success(@bitCast(path.len));
 }

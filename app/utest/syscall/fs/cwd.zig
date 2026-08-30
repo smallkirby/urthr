@@ -63,6 +63,11 @@ test "getcwd with a too-small buffer fails with ERANGE" {
     try testing.expectEqual(.RANGE, linux.errno(rc));
 }
 
+test "getcwd into an unmapped buffer fails with EFAULT" {
+    const rc = linux.getcwd(@ptrFromInt(0xDEAD0000), 4096);
+    try testing.expectEqual(.FAULT, linux.errno(rc));
+}
+
 // =============================================================
 // Helpers
 // =============================================================
