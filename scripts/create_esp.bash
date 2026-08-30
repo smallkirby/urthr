@@ -14,15 +14,11 @@ out=$2
 
 MiB=$((1024 * 1024))
 start_mib=1
-size_mib=2048
+size_mib=4096
 
 echo_normal "Creating disk image: $out"
-dd \
-  if=/dev/zero \
-  of="$out" \
-  bs=1M \
-  count=$size_mib \
-  2>/dev/null
+rm -f "$out"
+truncate -s "${size_mib}M" "$out"
 
 echo_normal "Creating GPT with an EFI System Partition"
 parted -s "$out" mklabel gpt
