@@ -60,7 +60,7 @@ var dma: DmaAllocator = undefined;
 var adma2_avail = false;
 
 /// Serializes access to the SD Host Controller.
-var lock: SpinLock = .{};
+var lock: Mutex = .{};
 
 // =============================================================
 // API
@@ -206,8 +206,8 @@ const vtable_impl = struct {
             return block.Error.InvalidArgument;
         }
 
-        const ie = lock.lockDisableIrq();
-        defer lock.unlockRestoreIrq(ie);
+        lock.lock();
+        defer lock.unlock();
 
         var done: usize = 0;
         while (done < buffer.len / block_size) {
@@ -234,8 +234,8 @@ const vtable_impl = struct {
             return block.Error.InvalidArgument;
         }
 
-        const ie = lock.lockDisableIrq();
-        defer lock.unlockRestoreIrq(ie);
+        lock.lock();
+        defer lock.unlock();
 
         var done: usize = 0;
         while (done < buffer.len / block_size) {
@@ -2350,4 +2350,4 @@ const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
-const SpinLock = urd.sync.SpinLock;
+const Mutex = urd.sync.Mutex;
