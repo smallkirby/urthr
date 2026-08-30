@@ -967,15 +967,14 @@ const Socket = struct {
     rq: std.DoublyLinkedList,
     /// Wait queue.
     cv: CondVar,
-    /// Lock to protect the wait queue.
-    _lock: SpinLock,
-    _lock_ie: u64,
+    /// Serializes socket state access.
+    _lock: Mutex,
 
     pub fn wait(self: *Socket) void {
         rtt.expect(self.state != .free);
 
-        const ie = self._lock.lockDisableIrq();
-        defer self._lock.unlockRestoreIrq(ie);
+        self._lock.lock();
+        defer self._lock.unlock();
 
         self.cv.wait(&self._lock);
     }
@@ -983,18 +982,15 @@ const Socket = struct {
     pub fn wake(self: *Socket) void {
         rtt.expect(self.state != .free);
 
-        const ie = self._lock.lockDisableIrq();
-        defer self._lock.unlockRestoreIrq(ie);
-
         self.cv.signal();
     }
 
     pub fn lock(self: *Socket) void {
-        self._lock_ie = self._lock.lockDisableIrq();
+        self._lock.lock();
     }
 
     pub fn unlock(self: *Socket) void {
-        self._lock.unlockRestoreIrq(self._lock_ie);
+        self._lock.unlock();
     }
 
     /// Push the segment to the retransmission queue.
@@ -1295,6 +1291,7 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const CondVar = urd.sync.CondVar;
 const SpinLock = urd.sync.SpinLock;
+const Mutex = urd.sync.Mutex;
 const fs = urd.fs;
 const net = urd.net;
 const IpAddr = net.ip.IpAddr;
