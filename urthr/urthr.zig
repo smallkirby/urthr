@@ -18,6 +18,7 @@ pub const sync = @import("kernel/sync.zig");
 pub const syscall = @import("kernel/syscall.zig");
 pub const task = @import("kernel/task.zig");
 pub const time = @import("kernel/time.zig");
+pub const uaccess = @import("kernel/uaccess.zig");
 
 pub const trace = @import("trace.zig");
 

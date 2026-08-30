@@ -20,7 +20,7 @@ pub const EreturnHook = *const fn (ctx: *Context) void;
 /// or a signal has been queued for delivery).
 ///
 /// Returns false if the fault is unrecoverable.
-pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType) bool;
+pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType, user: bool) bool;
 
 /// Interrupt Descriptor Table.
 var idt: Idt align(idt_align) = undefined;
@@ -93,11 +93,20 @@ pub fn dispatch(ctx: *Context) void {
         const ec: PfErrorCode = @bitCast(@as(u32, @truncate(ctx.ec)));
         const far = am.readCr2();
 
-        if (pagefault_handler) |f| {
-            if (f(far, if (ec.write) .write else .read)) {
+        if (pagefault_handler) |pf| {
+            if (pf(
+                far,
+                if (ec.write) .write else .read,
+                ec.user,
+            )) {
                 callEreturnHook(ctx);
                 return;
             }
+        }
+
+        if (uaccess.fixupFor(ctx.rip)) |fixup| {
+            ctx.rip = fixup;
+            return;
         }
     }
 
@@ -429,4 +438,5 @@ const am = @import("asm.zig");
 const arch = @import("arch.zig");
 const gdt = @import("gdt.zig");
 const isr = @import("isr.zig");
+const uaccess = @import("uaccess.zig");
 const StackIterator = @import("StackIterator.zig");

@@ -25,7 +25,7 @@ pub const HandlerSignature = *const fn () ?void;
 /// or a signal has been queued for delivery).
 ///
 /// Returns false if the fault is unrecoverable.
-pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType) bool;
+pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType, user: bool) bool;
 
 /// ERET hook function signature.
 pub const EreturnHook = *const fn (ctx: *Context) void;
@@ -257,8 +257,12 @@ fn handleDataAbortUser(ctx: *Context) void {
     const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
     const far = am.mrsi(.far_el1);
 
-    if (pagefault_handler) |f| {
-        if (f(far, if (iss.wnr == .write) .write else .read)) {
+    if (pagefault_handler) |pf| {
+        if (pf(
+            far,
+            if (iss.wnr == .write) .write else .read,
+            true,
+        )) {
             callEreturnHook(ctx);
             return;
         }
@@ -272,11 +276,21 @@ fn handleDataAbortKernel(ctx: *Context) void {
     const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
     const far = am.mrsi(.far_el1);
 
-    if (pagefault_handler) |f| {
-        if (f(far, if (iss.wnr == .write) .write else .read)) {
+    if (pagefault_handler) |pf| {
+        if (pf(
+            far,
+            if (iss.wnr == .write) .write else .read,
+            false,
+        )) {
             return;
         }
     }
+
+    if (uaccess.fixupFor(ctx.pc)) |fixup| {
+        ctx.pc = fixup;
+        return;
+    }
+
     return defaultHandler(ctx, "Synchronous, Current EL, SP_ELx (Data Abort)");
 }
 
@@ -366,3 +380,4 @@ const am = @import("asm.zig");
 const regs = @import("register.zig");
 const StackIterator = @import("StackIterator.zig");
 const svc = @import("svc.zig");
+const uaccess = @import("uaccess.zig");

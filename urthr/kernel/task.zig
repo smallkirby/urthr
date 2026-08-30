@@ -48,11 +48,14 @@ pub fn init() void {
 /// Handle a page fault.
 ///
 /// Backs the faulting page on demand, or delivers a signal if the access cannot be satisfied.
-fn handlePageFault(far: usize, access: common.mem.AccessType) bool {
+fn handlePageFault(far: usize, access: common.mem.AccessType, user: bool) bool {
     const th = sched.getCurrent();
 
     th.vmm.faultIn(far, access) catch |err| {
-        // Failed to handle the fault. Immediately terminate the current thread.
+        // Can't handle kernel page fault.
+        if (!user) return false;
+
+        // Send a SIGSEGV signal to the faulting thread.
         log.warn("Unhandled #PF: TGID={d} ID={d} FAR=0x{X} ACCESS={} ERR={}", .{ th.group.getTgid(), th.id, far, access, err });
         signal.pushSync(.segv, far);
     };

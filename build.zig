@@ -428,12 +428,14 @@ pub fn build(b: *std.Build) !void {
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/uaccess.S"));
             },
             .x86_64 => {
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/head.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/switch.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/thread.S"));
                 exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/smp.S"));
+                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/uaccess.S"));
             },
             else => unreachable,
         }

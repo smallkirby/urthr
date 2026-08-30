@@ -7,6 +7,7 @@ pub const psci = @import("psci.zig");
 pub const smp = @import("smp.zig");
 pub const timer = @import("timer.zig");
 pub const thread = @import("thread.zig");
+pub const uaccess = @import("uaccess.zig");
 
 pub const StackIterator = @import("StackIterator.zig");
 
