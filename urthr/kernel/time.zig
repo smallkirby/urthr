@@ -83,6 +83,13 @@ pub fn getCurrentTimestamp() Ktimestamp {
     return @truncate(count * 1_000_000_000 / freq);
 }
 
+/// Get the current wall-clock time in nanoseconds since the UNIX epoch.
+///
+/// TODO: implement wall-clock.
+pub fn getRealtime() Ktimestamp {
+    return getCurrentTimestamp();
+}
+
 // =============================================================
 // Sleep Queue
 // =============================================================

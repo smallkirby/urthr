@@ -77,6 +77,71 @@ pub const Path = struct {
     mount: ?*Mount,
 };
 
+/// Timestamp in nanoseconds since the UNIX epoch.
+pub const Timestamp = struct {
+    /// Nanoseconds since the epoch.
+    ns: u64,
+
+    /// The zero timestamp.
+    pub const zero = Timestamp{ .ns = 0 };
+
+    /// The current time.
+    pub fn now() Timestamp {
+        return .{ .ns = urd.time.getRealtime() };
+    }
+
+    /// Build a timestamp from the given time.
+    pub fn from(sec: i64, nsec: i64) error{InvalidArgument}!Timestamp {
+        if (sec < 0 or nsec < 0 or nsec >= std.time.ns_per_s) {
+            return error.InvalidArgument;
+        }
+        const s: u64 = @intCast(sec);
+        const n: u64 = @intCast(nsec);
+        if (s > (std.math.maxInt(u64) - n) / std.time.ns_per_s) {
+            // Overflow.
+            return error.InvalidArgument;
+        }
+        return .{ .ns = s * std.time.ns_per_s + n };
+    }
+
+    /// Split into a pair of seconds and nanoseconds.
+    pub fn to(self: Timestamp) struct { sec: i64, nsec: i64 } {
+        return .{
+            .sec = @intCast(self.ns / std.time.ns_per_s),
+            .nsec = @intCast(self.ns % std.time.ns_per_s),
+        };
+    }
+
+    pub fn none(self: Timestamp) bool {
+        return std.meta.eql(self, .zero);
+    }
+};
+
+/// Timestamps.
+pub const Times = struct {
+    /// Time of last access.
+    atime: Timestamp = .zero,
+    /// Time of last modification.
+    mtime: Timestamp = .zero,
+    /// Time of last status change.
+    ctime: Timestamp = .zero,
+
+    /// Create new timestamps with all fields set to the current time.
+    pub fn now() Times {
+        const t = Timestamp.now();
+        return .{
+            .atime = t,
+            .mtime = t,
+            .ctime = t,
+        };
+    }
+
+    /// Check if all timestamps are zero.
+    pub fn none(self: Times) bool {
+        return self.ctime.none() and self.mtime.none() and self.atime.none();
+    }
+};
+
 /// Access permission.
 pub const Permission = struct {
     /// Readable.

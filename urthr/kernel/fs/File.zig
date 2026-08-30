@@ -160,6 +160,7 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
         self.offset,
     );
     self.offset += @intCast(num_read);
+    self.inode().times.atime = .now();
 
     return buf[0..num_read];
 }
@@ -174,6 +175,7 @@ pub fn pread(self: *Self, buf: []u8, pos: usize) Error![]u8 {
         buf,
         pos,
     );
+    self.inode().times.atime = .now();
     return buf[0..num_read];
 }
 
@@ -183,6 +185,7 @@ pub fn write(self: *Self, buf: []const u8) Error!usize {
     if (!self.access.writable) return Error.BadAccess;
 
     if (self.ops.write) |f| {
+        self.utimeUpdate();
         const num_written = try f(
             self,
             buf,
@@ -201,6 +204,7 @@ pub fn pwrite(self: *Self, buf: []const u8, pos: usize) Error!usize {
     if (!self.access.writable) return Error.BadAccess;
 
     if (self.ops.write) |f| {
+        self.utimeUpdate();
         return f(self, buf, pos);
     } else {
         return Error.Unsupported;
@@ -215,6 +219,7 @@ pub fn truncate(self: *Self, new_size: usize) Error!void {
     if (!self.access.writable) return Error.BadAccess;
 
     if (self.ops.truncate) |f| {
+        self.utimeUpdate();
         return f(self, new_size);
     } else {
         return Error.Unsupported;
@@ -307,6 +312,11 @@ pub fn getMode(self: *const Self) fs.FileMode {
     return self.inode().mode;
 }
 
+/// Get the access, modification, and status-change timestamps of this file.
+pub fn getTimes(self: *const Self) fs.Times {
+    return self.inode().times;
+}
+
 /// Get the user ID of the owner.
 pub fn getUid(self: *const Self) u32 {
     return self.inode().uid;
@@ -320,6 +330,14 @@ pub fn getGid(self: *const Self) u32 {
 /// Helper function to get the inode associated with this file.
 fn inode(self: *const Self) *Inode {
     return self.path.dentry.inode;
+}
+
+/// Set the modification and status-change timestamps to the current time.
+fn utimeUpdate(self: *Self) void {
+    const now = fs.Timestamp.now();
+    const times = &self.inode().times;
+    times.mtime = now;
+    times.ctime = now;
 }
 
 // =============================================================

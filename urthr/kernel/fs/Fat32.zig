@@ -96,6 +96,7 @@ const inode_vtable = fs.Inode.Ops{
     .rmdir = &irmdir,
     .chmod = &ichmod,
     .rename = &irename,
+    .utimes = &iutimes,
     .deinit = &ideinit,
 };
 
@@ -152,6 +153,7 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
                     .size = result.entry.file_size,
                     .ftype = if (result.entry.attr.directory) .directory else .regular,
                     .mode = mode,
+                    .times = readTimeFields(result.entry),
                     .iops = inode_vtable,
                     .fops = file_vtable,
                 },
@@ -256,6 +258,26 @@ fn ichmod(inode: *fs.Inode, mode: fs.FileMode) fs.Error!void {
     try self.device.writeBlocks(pos.sector, &buf);
 }
 
+/// Persist the file's timestamps into its on-disk directory entry.
+fn iutimes(inode: *fs.Inode) fs.Error!void {
+    const ctx = InodeImpl.from(inode);
+    const self = ctx.fat32;
+
+    // The root directory has no on-disk directory entry of its own.
+    if (inode == &self.root.common) return;
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    const pos = Position.fromInodeNumber(inode.number);
+    var buf: [sector_size]u8 = undefined;
+    try self.device.readBlocks(pos.sector, &buf);
+
+    const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+    writeTimeFields(ent, inode.times);
+    try self.device.writeBlocks(pos.sector, &buf);
+}
+
 /// Create a new file or directory under a directory inode.
 fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMode, _: Allocator) fs.Error!*fs.Inode {
     const ctx = InodeImpl.from(dir);
@@ -320,7 +342,8 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         .first_cluster_high = bits.extract(u16, clus, 16),
         .file_size = 0,
     });
-    writeTimeFields(&dent);
+    const create_times = fs.Times.now();
+    writeTimeFields(&dent, create_times);
 
     // Write the LFN entries followed by the SFN entry.
     var rawents: [LongNameEntry.max_entries + 1][@sizeOf(DirEntry)]u8 = undefined;
@@ -350,6 +373,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
             .size = 0,
             .ftype = ftype,
             .mode = mode,
+            .times = create_times,
             .iops = inode_vtable,
             .fops = file_vtable,
         },
@@ -985,10 +1009,13 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
 
     // Update the directory entry.
     const new_size = offset + buf.len;
-    if (new_size > old_size) {
-        inode.size = new_size;
-        try fat32.updateDirEntrySize(inode.number, new_size);
-    }
+    const grow = new_size > old_size;
+    if (grow) inode.size = new_size;
+    try fat32.updateDirEntry(
+        inode.number,
+        if (grow) new_size else null,
+        inode.times,
+    );
 
     return buf.len;
 }
@@ -1033,20 +1060,23 @@ fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
     ctx.cache = .{ .cluster = clus, .file_offset = clus_file_offset };
 
     inode.size = new_size;
-    try fat32.updateDirEntrySize(inode.number, new_size);
+    try fat32.updateDirEntry(inode.number, new_size, inode.times);
 }
 
-/// Update the file size field of the on-disk directory entry.
+/// Update mutable fields of the on-disk directory entry.
+///
+/// Fields specified as null do not change.
 ///
 /// Caller must hold `self.lock`.
-fn updateDirEntrySize(self: *Self, inum: fs.Inode.Number, new_size: usize) fs.Error!void {
+fn updateDirEntry(self: *Self, inum: fs.Inode.Number, size: ?usize, times: ?fs.Times) fs.Error!void {
     const pos = Position.fromInodeNumber(inum);
 
     var buf: [sector_size]u8 = undefined;
     try self.device.readBlocks(pos.sector, &buf);
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
-    ent.file_size = @intCast(new_size);
+    if (size) |sz| ent.file_size = @intCast(sz);
+    if (times) |t| writeTimeFields(ent, t);
 
     try self.device.writeBlocks(pos.sector, &buf);
 }
@@ -1320,11 +1350,138 @@ fn clus2dirents(buf: []const u8) []const DirEntry {
     return ptr[0 .. buf.len / @sizeOf(DirEntry)];
 }
 
-/// Fill the timestamp fields of a directory entry with the current time.
-fn writeTimeFields(dirent: *DirEntry) void {
-    // TODO: implement
-    _ = dirent;
+/// Write the given timestamps into the timestamp fields of a directory entry.
+fn writeTimeFields(dirent: *DirEntry, times: fs.Times) void {
+    const crt = ftime.encode(times.ctime);
+    dirent.create_time_tenth = crt.tenth;
+    dirent.create_time = @bitCast(crt.time);
+    dirent.create_date = @bitCast(crt.date);
+
+    const wrt = ftime.encode(times.mtime);
+    dirent.write_time = @bitCast(wrt.time);
+    dirent.write_date = @bitCast(wrt.date);
+
+    dirent.access_date = @bitCast(ftime.encode(times.atime).date);
 }
+
+/// Read the timestamp fields of a directory entry.
+fn readTimeFields(dirent: *const DirEntry) fs.Times {
+    return .{
+        .atime = ftime.decode(
+            @bitCast(dirent.access_date),
+            .{ .hour = 0, .min = 0, .sec = 0 },
+            0,
+        ),
+        .mtime = ftime.decode(
+            @bitCast(dirent.write_date),
+            @bitCast(dirent.write_time),
+            0,
+        ),
+        .ctime = ftime.decode(
+            @bitCast(dirent.create_date),
+            @bitCast(dirent.create_time),
+            dirent.create_time_tenth,
+        ),
+    };
+}
+
+/// Conversion between FS timestamp and the packed date fields of a FAT directory entry.
+const ftime = struct {
+    /// FAT epoch year.
+    const epoch_year = 1980;
+    /// Seconds between the UNIX epoch (1970) and the FAT epoch (1980).
+    const fat_epoch_unix: u64 = 315_532_800;
+
+    const Repr = struct {
+        /// Date.
+        date: Date,
+        /// Time.
+        time: Time,
+        /// Fine resolution (10ms units).
+        tenth: u8,
+    };
+
+    const Time = packed struct(u16) {
+        /// Seconds divided by 2.
+        sec: u5,
+        /// Minutes.
+        min: u6,
+        /// Hours.
+        hour: u5,
+    };
+
+    const Date = packed struct(u16) {
+        /// Day of the month. 1-origin.
+        day: u5,
+        /// Month. 1-origin.
+        month: u4,
+        /// Years since FAT epoch.
+        year: u7,
+    };
+
+    pub fn encode(ts: fs.Timestamp) Repr {
+        const total_secs = ts.ns / std.time.ns_per_s;
+        if (total_secs < fat_epoch_unix) {
+            return .{
+                .date = .{ .year = 0, .month = 1, .day = 1 },
+                .time = .{ .hour = 0, .min = 0, .sec = 0 },
+                .tenth = 0,
+            };
+        }
+
+        const es = std.time.epoch.EpochSeconds{ .secs = total_secs };
+        const yd = es.getEpochDay().calculateYearDay();
+        const md = yd.calculateMonthDay();
+        const ds = es.getDaySeconds();
+        const second = ds.getSecondsIntoMinute();
+        const sub_ns = ts.ns % std.time.ns_per_s;
+
+        return .{
+            .date = .{
+                .year = @intCast(yd.year - epoch_year),
+                .month = md.month.numeric(),
+                .day = @intCast(md.day_index + 1),
+            },
+            .time = .{
+                .hour = ds.getHoursIntoDay(),
+                .min = ds.getMinutesIntoHour(),
+                .sec = @intCast(second / 2),
+            },
+            .tenth = @intCast(@as(u32, second % 2) * 100 + sub_ns / (10 * std.time.ns_per_ms)),
+        };
+    }
+
+    pub fn decode(date: Date, time: Time, tenth: u8) fs.Timestamp {
+        if (@as(u16, @bitCast(date)) == 0) return .zero;
+        if (date.month < 1 or date.month > 12 or date.day < 1) return .zero;
+
+        const days = daysFromCivil(
+            epoch_year + @as(i64, date.year),
+            date.month,
+            date.day,
+        );
+        const second: u64 = @as(u64, time.sec) * 2 + tenth / 100;
+        const sub_ns: u64 = @as(u64, tenth % 100) * 10 * std.time.ns_per_ms;
+
+        const total_secs = @as(u64, @intCast(days)) * std.time.s_per_day +
+            @as(u64, time.hour) * std.time.s_per_hour +
+            @as(u64, time.min) * std.time.s_per_min + second;
+        return .{ .ns = total_secs * std.time.ns_per_s + sub_ns };
+    }
+
+    /// Days from the UNIX epoch to proleptic Gregorian.
+    ///
+    /// Using Howard Hinnant's algorithm.
+    fn daysFromCivil(year: i64, month: i64, day: i64) i64 {
+        const y = if (month <= 2) year - 1 else year;
+        const era = @divFloor(y, 400);
+        const yoe = y - era * 400;
+        const mp = @mod(month + 9, 12);
+        const doy = @divFloor(153 * mp + 2, 5) + day - 1;
+        const doe = yoe * 365 + @divFloor(yoe, 4) - @divFloor(yoe, 100) + doy;
+        return era * 146097 + doe - 719468;
+    }
+};
 
 /// Build the 11-byte SFN field for a name that already fits the 8.3 format.
 fn sfnArray(name: []const u8) [DirEntry.sfn_len]u8 {

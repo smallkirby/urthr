@@ -51,6 +51,11 @@ pub const Ops = struct {
     /// null if the filesystem does not support changing ownership.
     chown: ?*const fn (inode: *Inode, uid: ?u32, gid: ?u32) Error!void = null,
 
+    /// Persist the inode's current timestamps to the backing storage.
+    ///
+    /// null if the filesystem does not persist timestamps.
+    utimes: ?*const fn (inode: *Inode) Error!void = null,
+
     /// Move `child` named `old_name` under `dir` to `new_name` under `new_dir`.
     ///
     /// `replaced` is an existing inode at the destination that must be atomically replaced.
@@ -85,6 +90,8 @@ mode: fs.FileMode = .{},
 uid: u32 = 0,
 /// Group ID of the owner.
 gid: u32 = 0,
+/// Access, modification, and status-change timestamps.
+times: fs.Times = .{},
 
 /// Inode operations.
 iops: Ops,
@@ -123,7 +130,15 @@ pub fn mkdir(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Alloca
     }
 
     if (self.iops.create) |f| {
-        return f(self, name, .directory, mode, allocator);
+        const inode = try f(
+            self,
+            name,
+            .directory,
+            mode,
+            allocator,
+        );
+        if (inode.times.none()) inode.times = .now();
+        return inode;
     } else {
         return Error.Unsupported;
     }
@@ -138,7 +153,15 @@ pub fn create(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Alloc
     }
 
     if (self.iops.create) |f| {
-        return f(self, name, .regular, mode, allocator);
+        const inode = try f(
+            self,
+            name,
+            .regular,
+            mode,
+            allocator,
+        );
+        if (inode.times.none()) inode.times = .now();
+        return inode;
     } else {
         return Error.Unsupported;
     }
@@ -149,7 +172,11 @@ pub fn chmod(self: *Self, mode: fs.FileMode) Error!void {
     if (self.iops.chmod) |f| {
         try f(self, mode);
     }
+    // Update in-memory state.
     self.mode = mode;
+    self.times.ctime = .now();
+    // Update on-disk timestamps.
+    try self.persistTimes();
 }
 
 /// Change the owner user and/or group of this file.
@@ -159,8 +186,24 @@ pub fn chown(self: *Self, uid: ?u32, gid: ?u32) Error!void {
     if (self.iops.chown) |f| {
         try f(self, uid, gid);
     }
+    // Update in-memory state.
     if (uid) |v| self.uid = v;
     if (gid) |v| self.gid = v;
+    self.times.ctime = .now();
+    // Update on-disk timestamps.
+    try self.persistTimes();
+}
+
+/// Update the file's timestamps.
+///
+/// Timestamp specified as null does not change.
+pub fn utimes(self: *Self, atime: ?fs.Timestamp, mtime: ?fs.Timestamp) Error!void {
+    if (atime) |v| self.times.atime = v;
+    if (mtime) |v| self.times.mtime = v;
+    // Update in-memory state.
+    self.times.ctime = .now();
+    // Update on-disk timestamps.
+    try self.persistTimes();
 }
 
 /// Create a symbolic link under this inode with the given name, pointing to `target`.
@@ -172,7 +215,14 @@ pub fn symlink(self: *Self, name: []const u8, target: []const u8, allocator: All
     }
 
     if (self.iops.symlink) |f| {
-        return f(self, name, target, allocator);
+        const inode = try f(
+            self,
+            name,
+            target,
+            allocator,
+        );
+        if (inode.times.none()) inode.times = .now();
+        return inode;
     } else {
         return Error.Unsupported;
     }
@@ -184,7 +234,18 @@ pub fn rename(self: *Self, old_name: []const u8, child: *Inode, new_dir: *Inode,
     if (new_dir.ftype != .directory) return Error.NotDirectory;
 
     if (self.iops.rename) |f| {
-        return f(self, old_name, child, new_dir, new_name, replaced);
+        try f(
+            self,
+            old_name,
+            child,
+            new_dir,
+            new_name,
+            replaced,
+        );
+        // Update in-memory state.
+        child.times.ctime = .now();
+        // Update on-disk timestamps.
+        try child.persistTimes();
     } else {
         return Error.Unsupported;
     }
@@ -211,6 +272,17 @@ pub fn rmdir(self: *Self, child: *Inode) Error!void {
         return f(self, child);
     } else {
         return Error.Unsupported;
+    }
+}
+
+// =============================================================
+// Helpers
+// =============================================================
+
+/// Persist the inode's current timestamps.
+fn persistTimes(self: *Self) Error!void {
+    if (self.iops.utimes) |f| {
+        try f(self);
     }
 }
 

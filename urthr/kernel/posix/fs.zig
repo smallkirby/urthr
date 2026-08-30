@@ -869,8 +869,18 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
 /// syscall: fstat
 pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    statbuf.* = statFromFile(file);
+    return .success(0);
+}
 
-    statbuf.* = .{
+/// Build a stat structure from an open file.
+fn statFromFile(file: *urd.fs.File) Stat {
+    const times = file.getTimes();
+    const atime = times.atime.to();
+    const mtime = times.mtime.to();
+    const ctime = times.ctime.to();
+
+    return .{
         .st_dev = 0,
         .st_ino = file.path.dentry.inode.number,
         .st_mode = @bitCast(Mode.from(file)),
@@ -881,9 +891,19 @@ pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
         .st_size = @intCast(file.size()),
         .st_blksize = 512,
         .st_blocks = @intCast(file.size() / 512),
+        .st_atime = atime.sec,
+        .st_atime_nsec = atime.nsec,
+        .st_mtime = mtime.sec,
+        .st_mtime_nsec = mtime.nsec,
+        .st_ctime = ctime.sec,
+        .st_ctime_nsec = ctime.nsec,
     };
+}
 
-    return .success(0);
+/// Convert FS timestamp to a `statx` timestamp.
+fn statxTimestamp(ts: urd.fs.Timestamp) Statx.Timestamp {
+    const parts = ts.to();
+    return .{ .sec = parts.sec, .nsec = @intCast(parts.nsec) };
 }
 
 /// syscall: newfstatat
@@ -899,18 +919,7 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
         return mapOpenError(err);
     defer if (owned) file.unref();
 
-    statbuf.* = .{
-        .st_dev = 0, // TODO
-        .st_ino = file.path.dentry.inode.number,
-        .st_mode = @bitCast(Mode.from(file)),
-        .st_nlink = 1, // TODO
-        .st_uid = file.getUid(),
-        .st_gid = file.getGid(),
-        .st_rdev = 0, // TODO
-        .st_size = @intCast(file.size()),
-        .st_blksize = 512,
-        .st_blocks = @intCast(file.size() / 512),
-    };
+    statbuf.* = statFromFile(file);
 
     return .success(0);
 }
@@ -945,7 +954,7 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         return mapOpenError(err);
     defer if (owned) file.unref();
 
-    const zero_ts = Statx.Timestamp{ .sec = 0, .nsec = 0 };
+    const times = file.getTimes();
     statxbuf.* = .{
         .mask = 0x7FF,
         .blksize = 512,
@@ -958,10 +967,10 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         .size = @intCast(file.size()),
         .blocks = @intCast(file.size() / 512),
         .attributes_mask = 0,
-        .atime = zero_ts, // TODO
-        .btime = zero_ts, // TODO
-        .ctime = zero_ts, // TODO
-        .mtime = zero_ts, // TODO
+        .atime = statxTimestamp(times.atime),
+        .btime = statxTimestamp(times.ctime),
+        .ctime = statxTimestamp(times.ctime),
+        .mtime = statxTimestamp(times.mtime),
         .rdev_major = 0, // TODO
         .rdev_minor = 0, // TODO
         .dev_major = 0, // TODO
