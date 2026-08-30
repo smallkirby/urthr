@@ -32,6 +32,12 @@ if [ ! -f "$defconfig" ]; then
   exit 1
 fi
 
+export URTHR_BUSYBOX_CONFIG="$repo_root/scripts/buildroot/busybox.config"
+if [ ! -f "$URTHR_BUSYBOX_CONFIG" ]; then
+  echo_error "BusyBox config not found: $URTHR_BUSYBOX_CONFIG"
+  exit 1
+fi
+
 buildroot_src="$HOME/buildroot-${version}"
 output_dir="${2:-$buildroot_src/output-${arch}}"
 
