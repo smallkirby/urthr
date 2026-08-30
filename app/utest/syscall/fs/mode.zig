@@ -42,6 +42,7 @@ test "umask reduces the permission bits of a newly created directory" {
     const path = Test.base_dir ++ "mode1";
     const ret = linux.mkdirat(linux.AT.FDCWD, path, 0o777);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.rmdir(path);
 
     try testing.expectEqual(@as(u16, 0o755), try statMode(path) & 0o777);
 }

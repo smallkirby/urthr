@@ -5,6 +5,7 @@ test "mount proc onto a fresh directory succeeds and exposes proc files" {
 
     const mkdir_ret = linux.mkdir(dir_path, 0o755);
     try testing.expectEqual(.SUCCESS, linux.errno(mkdir_ret));
+    defer _ = linux.rmdir(dir_path);
 
     const mount_ret = linux.mount("proc", dir_path, "proc", 0, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(mount_ret));
@@ -23,6 +24,7 @@ test "mount with an unknown filesystem type fails with ENODEV" {
 
     const mkdir_ret = linux.mkdir(dir_path, 0o755);
     try testing.expectEqual(.SUCCESS, linux.errno(mkdir_ret));
+    defer _ = linux.rmdir(dir_path);
 
     const mount_ret = linux.mount("tmpfs", dir_path, "tmpfs", 0, 0);
     try testing.expectEqual(.NODEV, linux.errno(mount_ret));

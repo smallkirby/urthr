@@ -4,6 +4,7 @@ test "mkdirat creates a new directory that can be opened" {
 
     const ret = linux.mkdirat(linux.AT.FDCWD, path, 0o755);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.rmdir(path);
 
     var dir = try std.Io.Dir.openDirAbsolute(init.io, path, .{});
     dir.close(init.io);
@@ -14,6 +15,7 @@ test "mkdirat on an existing directory fails with EEXIST" {
 
     const ret1 = linux.mkdirat(linux.AT.FDCWD, path, 0o755);
     try testing.expectEqual(.SUCCESS, linux.errno(ret1));
+    defer _ = linux.rmdir(path);
 
     const ret2 = linux.mkdirat(linux.AT.FDCWD, path, 0o755);
     try testing.expectEqual(.EXIST, linux.errno(ret2));
@@ -38,6 +40,7 @@ test "mkdirat resolves relative to a directory fd" {
 
     const dir = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});
     defer dir.close(init.io);
+    defer _ = linux.rmdir(Test.base_dir ++ "mkdir3");
 
     const ret = linux.mkdirat(@intCast(dir.handle), "mkdir3", 0o755);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
@@ -56,6 +59,7 @@ test "mkdir creates a new directory" {
 
     const ret = linux.mkdir(path, 0o755);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.rmdir(path);
 
     var dir = try std.Io.Dir.openDirAbsolute(init.io, path, .{});
     dir.close(init.io);
