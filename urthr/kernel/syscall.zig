@@ -174,6 +174,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("rmdir",                84,    posix.fs.sysRmdir),
     .new("unlink",               87,    posix.fs.sysUnlink),
     .new("symlink",              88,    posix.fs.sysSymlink),
+    .new("chmod",                90,    posix.fs.sysChmod),
     .new("fchmod",               91,    posix.fs.sysFchmod),
     .new("chown",                92,    posix.fs.sysChown),
     .new("fchown",               93,    posix.fs.sysFchown),

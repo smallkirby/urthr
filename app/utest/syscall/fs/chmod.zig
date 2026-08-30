@@ -1,3 +1,6 @@
+// =============================================================
+// fchmodat
+
 test "syscall: fchmodat" {
     const ret = linux.fchmodat(linux.AT.FDCWD, utest.myname, 0o644);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
@@ -43,6 +46,43 @@ test "fchmodat resolves relative to a directory fd" {
 
     const ret = linux.fchmodat(@intCast(dir.handle), "utest", 0o644);
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
+}
+
+// =============================================================
+// chmod
+
+test "syscall: chmod" {
+    const ret = linux.chmod(utest.myname, 0o644);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+}
+
+test "chmod on a non-existent file fails with ENOENT" {
+    const ret = linux.chmod(Test.base_dir ++ "/no-such-file", 0o644);
+    try testing.expectEqual(.NOENT, linux.errno(ret));
+}
+
+test "chmod changes the permission bits" {
+    const path = Test.base_dir ++ "chmod1";
+    const fd = linux.open(
+        path,
+        .{ .ACCMODE = .WRONLY, .CREAT = true },
+        0o666,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+    defer _ = linux.unlink(path);
+
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.chmod(path, 0o600)));
+
+    var statxbuf: linux.Statx align(8) = undefined;
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.statx(
+        linux.AT.FDCWD,
+        path,
+        0,
+        linux.STATX.BASIC_STATS,
+        &statxbuf,
+    )));
+    try testing.expectEqual(@as(u16, 0o600), statxbuf.mode & 0o777);
 }
 
 // =============================================================

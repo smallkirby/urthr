@@ -1522,6 +1522,11 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType
     return .success(0);
 }
 
+/// syscall: chmod
+pub fn sysChmod(pathname: [*:0]const u8, mode: Mode) ReturnType {
+    return sysFchmodAt(cwd_fd, pathname, mode);
+}
+
 /// syscall: fchmod
 pub fn sysFchmod(fd: usize, mode: Mode) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
