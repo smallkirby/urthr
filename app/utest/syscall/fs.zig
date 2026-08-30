@@ -26,6 +26,7 @@ comptime {
     _ = @import("fs/truncate.zig");
     _ = @import("fs/umask.zig");
     _ = @import("fs/unlink.zig");
+    _ = @import("fs/utimensat.zig");
     _ = @import("fs/write.zig");
     _ = @import("fs/writev.zig");
 }

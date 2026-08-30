@@ -1645,6 +1645,73 @@ pub fn sysAccess(pathname: [*:0]const u8, mode: AccessFlags) ReturnType {
 }
 
 // =============================================================
+// utimensat
+// =============================================================
+
+/// Special `tv_nsec` value requesting the current time.
+const utime_now: i64 = (1 << 30) - 1;
+/// Special `tv_nsec` value requesting the timestamp to be left unchanged.
+const utime_omit: i64 = (1 << 30) - 2;
+
+/// syscall: utimensat
+pub fn sysUtimensAt(
+    dirfd: usize,
+    pathname: ?[*:0]const u8,
+    times: ?*align(1) const [2]posix.Timespec,
+    flags: AtFlags,
+) ReturnType {
+    if (flags._0 != 0 or flags.removedir or flags.symlink_follow or
+        flags.no_automount or flags.empty_path or flags._13 != 0)
+    {
+        return .err(.inval);
+    }
+
+    // Resolve the requested times.
+    const now = urd.fs.Timestamp.now();
+    var atime: ?urd.fs.Timestamp = now;
+    var mtime: ?urd.fs.Timestamp = now;
+    if (times) |t| {
+        atime = resolveUtime(t[0], now) catch return .err(.inval);
+        mtime = resolveUtime(t[1], now) catch return .err(.inval);
+    }
+
+    // Resolve the target.
+    var owned = true;
+    const file = if (pathname) |p| openFileAt(
+        dirfd,
+        std.mem.span(p),
+        .{},
+        urd.mem.bin,
+    ) catch |err| return mapOpenError(err) else blk: {
+        owned = false;
+        break :blk getFile(dirfd) catch return .err(.badf);
+    };
+    defer if (owned) file.unref();
+
+    // Nothing to do if both fields are UTIME_OMIT.
+    if (atime == null and mtime == null) return .success(0);
+
+    // Update the timestamps.
+    file.path.dentry.inode.utimes(atime, mtime) catch |err| return switch (err) {
+        urd.fs.Error.Unsupported => .err(.perm),
+        else => mapOpenError(err),
+    };
+
+    return .success(0);
+}
+
+/// Resolve timespec into a target timestamp.
+///
+/// Returns null when the field must be left unchanged.
+fn resolveUtime(ts: posix.Timespec, now: urd.fs.Timestamp) !?urd.fs.Timestamp {
+    return switch (ts.nsec) {
+        utime_omit => null,
+        utime_now => now,
+        else => try .from(ts.sec, ts.nsec),
+    };
+}
+
+// =============================================================
 // CWD
 // =============================================================
 
