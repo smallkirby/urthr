@@ -296,7 +296,7 @@ const SrWyrd = struct {
 
 /// Get the end address of the Wyrd binary.
 fn getEndAddress() usize {
-    return @intFromPtr(&__end) + 0x10; // TODO: why +0x10
+    return @intFromPtr(&__end);
 }
 
 // =============================================================

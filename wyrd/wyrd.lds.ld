@@ -46,6 +46,12 @@ SECTIONS
       __bss_end = .;
     } :data
 
+    .got : ALIGN(16)
+    {
+      *(.got .got.*)
+      *(.got.plt .got.plt.*)
+    } :data
+
     __end = .;
 }
 
