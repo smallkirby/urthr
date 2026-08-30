@@ -99,7 +99,38 @@ fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     };
 
     var termios: linux.termios = undefined;
-    _ = linux.tcgetattr(sr.handle, &termios);
+    if (linux.errno(linux.tcgetattr(sr.handle, &termios)) != .SUCCESS) {
+        return error.TcGetAttr;
+    }
+
+    // Raw mode.
+    termios.iflag.IGNBRK = false;
+    termios.iflag.BRKINT = false;
+    termios.iflag.PARMRK = false;
+    termios.iflag.ISTRIP = false;
+    termios.iflag.INLCR = false; // no NLCR translation
+    termios.iflag.IGNCR = false; // ignore CR
+    termios.iflag.ICRNL = false; // no CRNL translation
+    termios.iflag.IXON = false;
+    termios.iflag.IXOFF = false;
+    termios.oflag.OPOST = false; // no output processing
+    termios.lflag.ECHO = false; // no echo
+    termios.lflag.ECHONL = false;
+    termios.lflag.ICANON = false; // no canonical mode
+    termios.lflag.ISIG = false;
+    termios.lflag.IEXTEN = false;
+    termios.cflag.CSIZE = .CS8; // 8N1
+    termios.cflag.PARENB = false; // 8N1
+    termios.cflag.CSTOPB = false; // 8N1
+    termios.cflag.CRTSCTS = false;
+    termios.cflag.CREAD = true;
+    termios.cflag.CLOCAL = true;
+
+    // Set baudrate.
+    const cbaud: u32 = 0o010017;
+    var cflag: u32 = @bitCast(termios.cflag);
+    cflag = (cflag & ~cbaud) | @intFromEnum(speed);
+    termios.cflag = @bitCast(cflag);
     termios.ispeed = speed;
     termios.ospeed = speed;
 
@@ -107,7 +138,22 @@ fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     termios.cc[@intFromEnum(linux.V.MIN)] = 1;
     termios.cc[@intFromEnum(linux.V.TIME)] = 0;
 
-    _ = linux.tcsetattr(sr.handle, linux.TCSA.NOW, &termios);
+    if (linux.errno(linux.tcsetattr(
+        sr.handle,
+        linux.TCSA.NOW,
+        &termios,
+    )) != .SUCCESS) {
+        return error.TcSetAttr;
+    }
+
+    // Verify the baud rate was actually applied.
+    var check: linux.termios = undefined;
+    if (linux.errno(linux.tcgetattr(sr.handle, &check)) != .SUCCESS) {
+        return error.TcGetAttr;
+    }
+    if (@as(u32, @bitCast(check.cflag)) & cbaud != @intFromEnum(speed)) {
+        return error.BaudrateNotApplied;
+    }
 
     // Assert DTR and RTS.
     const TIOCMBIS: u32 = 0x5416;
