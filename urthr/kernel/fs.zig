@@ -321,21 +321,30 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
 }
 
 /// Create a directory under the given directory with the given name.
-pub fn mkdirAt(dir: Path, name: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
-    var cur = dir;
+pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
+    const parent, const basename = try resolveParent(
+        dir,
+        path,
+        allocator,
+    );
+    if (basename.len == 0) {
+        return Error.AlreadyExists;
+    }
+
+    var cur = parent;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
     const inode = try cur.dentry.inode.mkdir(
-        name,
+        basename,
         mode,
         allocator,
     );
 
     // Put the new directory into the dentry cache.
     const dentry = Dentry.create(
-        name,
+        basename,
         inode,
         cur.dentry,
         allocator,
@@ -351,36 +360,39 @@ pub fn mkdirAt(dir: Path, name: []const u8, mode: FileMode, allocator: Allocator
 
 /// Create a directory at the specified path.
 pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
-    const basename = std.fs.path.basenamePosix(s);
-    if (basename.len == 0) {
-        return Error.AlreadyExists;
-    }
-
-    // Lookup parent directory.
-    const dir = if (std.fs.path.dirnamePosix(s)) |dirname|
-        try resolvePath(sched.getCurrent().fs.cwd, dirname, allocator)
-    else
-        sched.getCurrent().fs.cwd;
-
-    return mkdirAt(dir, basename, mode, allocator);
+    return mkdirAt(
+        sched.getCurrent().fs.cwd,
+        s,
+        mode,
+        allocator,
+    );
 }
 
 /// Create a symbolic link under the given directory with the given name pointing to `target`.
-pub fn symlinkAt(dir: Path, name: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
-    var cur = dir;
+pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
+    const parent, const basename = try resolveParent(
+        dir,
+        linkpath,
+        allocator,
+    );
+    if (basename.len == 0) {
+        return Error.InvalidArgument;
+    }
+
+    var cur = parent;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
     const inode = try cur.dentry.inode.symlink(
-        name,
+        basename,
         target,
         allocator,
     );
 
     // Put the new symlink into the dentry cache.
     const dentry = Dentry.create(
-        name,
+        basename,
         inode,
         cur.dentry,
         allocator,
@@ -396,39 +408,26 @@ pub fn symlinkAt(dir: Path, name: []const u8, target: []const u8, allocator: All
 
 /// Create a symbolic link pointing to `target` at the specified path.
 pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) Error!*Inode {
-    const basename = std.fs.path.basenamePosix(linkpath);
+    return symlinkAt(
+        sched.getCurrent().fs.cwd,
+        linkpath,
+        target,
+        allocator,
+    );
+}
+
+/// Create a new regular file under the specified directory and open it.
+pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
+    const parent, const basename = try resolveParent(
+        dir,
+        path,
+        allocator,
+    );
     if (basename.len == 0) {
         return Error.InvalidArgument;
     }
 
-    // Lookup parent directory.
-    const dir = if (std.fs.path.dirnamePosix(linkpath)) |dirname|
-        try resolvePath(sched.getCurrent().fs.cwd, dirname, allocator)
-    else
-        sched.getCurrent().fs.cwd;
-
-    return symlinkAt(dir, basename, target, allocator);
-}
-
-/// Create a new regular file at the specified path and open it.
-pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
-    const basename = std.fs.path.basenamePosix(s);
-    if (basename.len == 0) {
-        return Error.InvalidArgument;
-    }
-
-    // Lookup parent directory.
-    const dir = if (std.fs.path.dirnamePosix(s)) |dirname|
-        try resolvePath(sched.getCurrent().fs.cwd, dirname, allocator)
-    else
-        sched.getCurrent().fs.cwd;
-
-    return createAt(dir, basename, mode, access, allocator);
-}
-
-/// Create a new regular file at the specified directory and open it.
-pub fn createAt(dir: Path, basename: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
-    var cur = dir;
+    var cur = parent;
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
     }
@@ -462,6 +461,17 @@ pub fn createAt(dir: Path, basename: []const u8, mode: FileMode, access: File.Ac
             .dentry = dentry,
             .mount = cur.mount,
         },
+        access,
+        allocator,
+    );
+}
+
+/// Create a new regular file at the specified path and open it.
+pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
+    return createAt(
+        sched.getCurrent().fs.cwd,
+        s,
+        mode,
         access,
         allocator,
     );
@@ -846,6 +856,17 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
     if (owned) cur.dentry.unref();
 
     return cur;
+}
+
+/// Split the given path into its parent directory and final component.
+fn resolveParent(base: Path, path: []const u8, allocator: Allocator) Error!struct { Path, []const u8 } {
+    const basename = std.fs.path.basenamePosix(path);
+    const parent = if (std.fs.path.dirnamePosix(path)) |dirname|
+        try resolvePath(base, dirname, allocator)
+    else
+        base;
+
+    return .{ parent, basename };
 }
 
 // =============================================================

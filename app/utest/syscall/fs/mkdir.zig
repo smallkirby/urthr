@@ -65,6 +65,75 @@ test "mkdir creates a new directory" {
     dir.close(init.io);
 }
 
+test "mkdirat resolves the intermediate components of a relative path" {
+    const init = utest.getInit();
+
+    const root = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});
+    defer root.close(init.io);
+
+    try testing.expectEqual(
+        .SUCCESS,
+        linux.errno(linux.mkdirat(@intCast(root.handle), "mkdir1", 0o755)),
+    );
+    defer _ = linux.rmdir(Test.base_dir ++ "mkdir1");
+
+    try testing.expectEqual(
+        .SUCCESS,
+        linux.errno(linux.mkdirat(@intCast(root.handle), "mkdir1/sub", 0o755)),
+    );
+    defer _ = linux.rmdir(Test.base_dir ++ "mkdir1/sub");
+
+    var created = try std.Io.Dir.openDirAbsolute(
+        init.io,
+        Test.base_dir ++ "mkdir1/sub",
+        .{},
+    );
+    created.close(init.io);
+}
+
+test "mkdirat on a relative path whose parent is missing fails with ENOENT" {
+    const init = utest.getInit();
+
+    const root = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});
+    defer root.close(init.io);
+
+    const rc = linux.mkdirat(@intCast(root.handle), "mkdir1/leaf", 0o755);
+    try testing.expectEqual(.NOENT, linux.errno(rc));
+}
+
+test "openat O_CREAT with a relative path creates the file under its subdirectory" {
+    const init = utest.getInit();
+
+    const root = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});
+    defer root.close(init.io);
+
+    try testing.expectEqual(
+        .SUCCESS,
+        linux.errno(linux.mkdirat(@intCast(root.handle), "mkdir1", 0o755)),
+    );
+    defer _ = linux.rmdir(Test.base_dir ++ "mkdir1");
+
+    try testing.expectEqual(
+        .SUCCESS,
+        linux.errno(linux.mkdirat(@intCast(root.handle), "mkdir1/sub", 0o755)),
+    );
+    defer _ = linux.rmdir(Test.base_dir ++ "mkdir1/sub");
+
+    const fd = linux.openat(
+        @intCast(root.handle),
+        "mkdir1/sub/subsub",
+        .{ .ACCMODE = .WRONLY, .CREAT = true },
+        0o644,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    _ = linux.close(@intCast(fd));
+    defer _ = linux.unlink(Test.base_dir ++ "mkdir1/sub/subsub");
+
+    const reopened = linux.openat(@intCast(root.handle), "mkdir1/sub/subsub", .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(reopened));
+    _ = linux.close(@intCast(reopened));
+}
+
 // =============================================================
 // Imports
 // =============================================================
