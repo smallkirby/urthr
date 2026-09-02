@@ -49,32 +49,42 @@ fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
 
     switch (@as(Request, @enumFromInt(request))) {
         .tcgets => {
-            const ret: *urd.input.Termios = @ptrFromInt(arg);
-            ret.* = urd.input.getTermios();
+            urd.uaccess.putUser(
+                urd.input.Termios,
+                arg,
+                urd.input.getTermios(),
+            ) catch return fs.Error.InvalidArgument;
         },
         .tcsets, .tcsetsw, .tcsetsf => {
-            const t: *const urd.input.Termios = @ptrFromInt(arg);
-            urd.input.setTermios(t.*);
+            const t = urd.uaccess.getUser(
+                urd.input.Termios,
+                arg,
+            ) catch return fs.Error.InvalidArgument;
+            urd.input.setTermios(t);
         },
         .tiocgwinsz => {
-            const ret: *WinSize = @ptrFromInt(arg);
-            ret.* = .{
+            urd.uaccess.putUser(WinSize, arg, .{
                 .row = 25,
                 .col = 80,
                 .xpixel = 0,
                 .ypixel = 0,
-            };
+            }) catch return fs.Error.InvalidArgument;
         },
         .tiocsctty => {
             // TODO
         },
         .tiocgpgrp => {
-            const ret: *u32 = @ptrFromInt(arg);
-            ret.* = console.fg_pgid;
+            urd.uaccess.putUser(
+                u32,
+                arg,
+                console.fg_pgid,
+            ) catch return fs.Error.InvalidArgument;
         },
         .tiocspgrp => {
-            const pgid: *const u32 = @ptrFromInt(arg);
-            console.fg_pgid = pgid.*;
+            console.fg_pgid = urd.uaccess.getUser(
+                u32,
+                arg,
+            ) catch return fs.Error.InvalidArgument;
         },
         else => return fs.Error.Unsupported,
     }

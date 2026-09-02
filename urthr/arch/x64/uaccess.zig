@@ -30,3 +30,13 @@ pub fn fixupFor(fault_pc: usize) ?usize {
         return null;
     }
 }
+
+/// Allow access to user-space memory by supervisor mode.
+pub fn allowUserAccess() void {
+    asm volatile ("stac");
+}
+
+/// Disallow access to user-space memory by supervisor mode.
+pub fn disallowUserAccess() void {
+    asm volatile ("clac");
+}

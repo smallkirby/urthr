@@ -10,8 +10,10 @@ __uaccess_copy_faultable_begin:
 .global __uaccess_copy
 __uaccess_copy:
   movq %rdx, %rcx
+  stac
   cld
   rep movsb
+  clac
   xorq %rax, %rax
   retq
 
@@ -20,4 +22,5 @@ __uaccess_copy_faultable_end:
 .global __uaccess_copy_fixup
 __uaccess_copy_fixup:
   movq %rcx, %rax
+  clac
   retq

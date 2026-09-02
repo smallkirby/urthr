@@ -18,10 +18,15 @@ pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, _: usize) Return
     } orelse return .success(0);
 
     if (wstatus) |ws| {
-        ws.* = switch (result.exit_status) {
+        const status: i32 = switch (result.exit_status) {
             .code => |c| (c & 0xFF) << 8,
             .signal => |s| @intCast(@intFromEnum(s) & 0x7F),
         };
+        urd.uaccess.putUser(
+            i32,
+            ws,
+            status,
+        ) catch return .err(.fault);
     }
 
     return .success(@intCast(result.pid));
@@ -119,28 +124,71 @@ const CloneFlags = packed struct(u64) {
 pub fn sysExecve(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8) ReturnType {
     const max_argv = 128;
     const max_envp = 128;
+    const arg_max = 8 * 1024;
 
-    // Construct argv and envp arrays.
+    // Copy the path every argv / envp string into a kernel-side buffer.
+    var bump: [arg_max]u8 = undefined;
+    var used: usize = 0;
+    const S = struct {
+        fn take(buf: []u8, off: *usize, uptr: usize) error{ Fault, TooBig }![]const u8 {
+            const s = urd.uaccess.copyString(buf[off.*..], uptr) catch {
+                return error.Fault;
+            };
+            const start = off.*;
+            off.* += s.len + 1; // +1 for NULL
+            if (off.* > buf.len) return error.TooBig;
+            return buf[start .. start + s.len];
+        }
+    };
+
+    // Copy path string to kernel.
+    const kpath = S.take(
+        &bump,
+        &used,
+        @intFromPtr(path),
+    ) catch |e| return switch (e) {
+        error.Fault => .err(.fault),
+        error.TooBig => .err(.toobig),
+    };
+
+    // Copy arguments to kernel.
     var args: [max_argv][]const u8 = undefined;
-    var envs: [max_envp][]const u8 = undefined;
-
     var argc: usize = 0;
-    while (argv[argc]) |arg| : (argc += 1) {
-        if (argc == max_argv) {
-            return .err(.toobig);
-        }
-        args[argc] = std.mem.span(arg);
+    while (true) : (argc += 1) {
+        if (argc == max_argv) return .err(.toobig);
+
+        const p = urd.uaccess.getUser(
+            usize,
+            @intFromPtr(argv) + argc * @sizeOf(usize),
+        ) catch return .err(.fault);
+        if (p == 0) break;
+
+        args[argc] = S.take(&bump, &used, p) catch |e| return switch (e) {
+            error.Fault => .err(.fault),
+            error.TooBig => .err(.toobig),
+        };
     }
+
+    // Copy environment variables to kernel.
+    var envs: [max_envp][]const u8 = undefined;
     var envc: usize = 0;
-    while (envp[envc]) |env| : (envc += 1) {
-        if (envc == max_envp) {
-            return .err(.toobig);
-        }
-        envs[envc] = std.mem.span(env);
+    while (true) : (envc += 1) {
+        if (envc == max_envp) return .err(.toobig);
+
+        const p = urd.uaccess.getUser(
+            usize,
+            @intFromPtr(envp) + envc * @sizeOf(usize),
+        ) catch return .err(.fault);
+        if (p == 0) break;
+
+        envs[envc] = S.take(&bump, &used, p) catch |e| return switch (e) {
+            error.Fault => .err(.fault),
+            error.TooBig => .err(.toobig),
+        };
     }
 
     urd.task.execve(
-        std.mem.span(path),
+        kpath,
         args[0..argc],
         envs[0..envc],
     ) catch |err| return switch (err) {
@@ -224,18 +272,18 @@ pub fn sysGetEgid() ReturnType {
 /// syscall: getresuid
 pub fn sysGetResUid(ruid: *u32, euid: *u32, suid: *u32) ReturnType {
     const cred = sched.getCurrent().group.getCredential();
-    ruid.* = cred.uid;
-    euid.* = cred.euid;
-    suid.* = cred.suid;
+    urd.uaccess.putUser(u32, ruid, cred.uid) catch return .err(.fault);
+    urd.uaccess.putUser(u32, euid, cred.euid) catch return .err(.fault);
+    urd.uaccess.putUser(u32, suid, cred.suid) catch return .err(.fault);
     return .success(0);
 }
 
 /// syscall: getresgid
 pub fn sysGetResGid(rgid: *u32, egid: *u32, sgid: *u32) ReturnType {
     const cred = sched.getCurrent().group.getCredential();
-    rgid.* = cred.gid;
-    egid.* = cred.egid;
-    sgid.* = cred.sgid;
+    urd.uaccess.putUser(u32, rgid, cred.gid) catch return .err(.fault);
+    urd.uaccess.putUser(u32, egid, cred.egid) catch return .err(.fault);
+    urd.uaccess.putUser(u32, sgid, cred.sgid) catch return .err(.fault);
     return .success(0);
 }
 
@@ -405,9 +453,11 @@ pub fn sysSetGroups(size: usize, list: [*]const u32) ReturnType {
         return .err(.inval);
     }
 
-    for (list[0..size], 0..) |gid, i| {
-        cred.groups[i] = gid;
-    }
+    urd.uaccess.copySliceFromUser(
+        u32,
+        cred.groups[0..size],
+        list,
+    ) catch return .err(.fault);
     cred.ngroups = @intCast(size);
     group.setCredential(cred);
 

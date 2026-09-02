@@ -1,15 +1,23 @@
 /// syscall: uname
 pub fn sysUname(buf: *UtsName) ReturnType {
-    std.mem.copyForwards(u8, &buf.sysname, "Urthr");
-    @memset(&buf.nodename, 0);
+    var uts = std.mem.zeroes(UtsName);
+    std.mem.copyForwards(u8, &uts.sysname, "Urthr");
+
     if (hostname) |h| {
-        std.mem.copyForwards(u8, &buf.nodename, h);
+        std.mem.copyForwards(u8, &uts.nodename, h);
     } else {
-        std.mem.copyForwards(u8, &buf.nodename, "urthr");
+        std.mem.copyForwards(u8, &uts.nodename, "urthr");
     }
-    std.mem.copyForwards(u8, &buf.release, urd.version);
-    std.mem.copyForwards(u8, &buf.version, urd.version);
-    std.mem.copyForwards(u8, &buf.machine, @tagName(builtin.cpu.arch));
+
+    std.mem.copyForwards(u8, &uts.release, urd.version);
+    std.mem.copyForwards(u8, &uts.version, urd.version);
+    std.mem.copyForwards(u8, &uts.machine, @tagName(builtin.cpu.arch));
+
+    urd.uaccess.putUser(
+        UtsName,
+        buf,
+        uts,
+    ) catch return .err(.fault);
 
     return .success(0);
 }
@@ -20,11 +28,17 @@ pub fn sysSetHostname(name: [*]const u8, len: usize) ReturnType {
         return .err(.inval);
     }
 
+    var namebuf: [max_hostname_len]u8 = undefined;
+    urd.uaccess.copyFromUser(
+        namebuf[0..len],
+        name,
+    ) catch return .err(.fault);
+
     if (hostname) |h| {
         urd.mem.bin.free(h);
         hostname = null;
     }
-    hostname = urd.mem.bin.dupe(u8, name[0..len]) catch {
+    hostname = urd.mem.bin.dupe(u8, namebuf[0..len]) catch {
         return .err(.nomem);
     };
 
@@ -56,7 +70,25 @@ pub fn sysGetRandom(buf: ?[*]u8, buflen: usize, flags: GetRandomFlags) ReturnTyp
     if (buflen == 0) return .success(0);
     if (buf == null) return .err(.fault);
 
-    urd.rng.getRandom(buf.?[0..buflen]);
+    const uaddr = @intFromPtr(buf.?);
+    if (!urd.uaccess.accessOk(uaddr, buflen)) return .err(.fault);
+
+    var chunk: [256]u8 = undefined;
+    var done: usize = 0;
+    while (done < buflen) {
+        const want = @min(chunk.len, buflen - done);
+        urd.rng.getRandom(chunk[0..want]);
+
+        urd.uaccess.copyToUser(
+            uaddr + done,
+            chunk[0..want],
+        ) catch return if (done != 0)
+            .success(@bitCast(done))
+        else
+            .err(.fault);
+
+        done += want;
+    }
 
     return .success(@bitCast(buflen));
 }

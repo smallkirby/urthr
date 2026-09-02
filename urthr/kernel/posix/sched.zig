@@ -17,13 +17,23 @@ pub fn sysSchedGetAffinity(pid: usize, size: usize, mask: [*]CpuSet) ReturnType 
         return .err(.inval);
     }
 
-    const sets = mask[0..num_sets];
-    for (sets) |*set| {
-        set.clear();
+    const uaddr = @intFromPtr(mask);
+    if (!urd.uaccess.accessOk(uaddr, num_sets * @sizeOf(CpuSet))) {
+        return .err(.fault);
     }
 
     // Report the affinity mask.
-    sets[0].bits[0] = cur.affinity & validCoreMask();
+    var set: CpuSet = undefined;
+    for (0..num_sets) |i| {
+        set.clear();
+        if (i == 0) set.bits[0] = cur.affinity & validCoreMask();
+
+        urd.uaccess.putUser(
+            CpuSet,
+            uaddr + i * @sizeOf(CpuSet),
+            set,
+        ) catch return .err(.fault);
+    }
 
     return .success(@intCast(num_sets * @sizeOf(CpuSet)));
 }
@@ -42,7 +52,11 @@ pub fn sysSchedSetAffinity(pid: usize, size: usize, mask: [*]const CpuSet) Retur
     }
 
     // Only bits corresponding to actually scheduled cores are meaningful.
-    const effective = mask[0].bits[0] & validCoreMask();
+    const kset = urd.uaccess.getUser(
+        CpuSet,
+        mask,
+    ) catch return .err(.fault);
+    const effective = kset.bits[0] & validCoreMask();
     if (effective == 0) {
         return .err(.inval);
     }
@@ -56,10 +70,19 @@ pub fn sysSchedSetAffinity(pid: usize, size: usize, mask: [*]const CpuSet) Retur
 /// syscall: getcpu
 pub fn sysGetCpu(cpu: ?*align(1) u32, node: ?*align(1) u32) ReturnType {
     if (cpu) |p| {
-        p.* = @intCast(urd.smp.getLogicalCoreId());
+        urd.uaccess.putUser(
+            u32,
+            p,
+            @intCast(urd.smp.getLogicalCoreId()),
+        ) catch return .err(.fault);
     }
     if (node) |p| {
-        p.* = 0; // No NUMA support
+        // No NUMA support
+        urd.uaccess.putUser(
+            u32,
+            p,
+            0,
+        ) catch return .err(.fault);
     }
 
     return .success(0);

@@ -18,13 +18,14 @@ pub fn accessOk(uaddr: usize, len: usize) bool {
 ///
 /// Returns error if the range is invalid or a byte cannot be read.
 /// On error, the contents of the destination buffer are undefined.
-pub fn copyFromUser(dst: []u8, uaddr: usize) Error!void {
-    if (!accessOk(uaddr, dst.len)) return Error.Fault;
+pub fn copyFromUser(dst: []u8, uaddr: anytype) Error!void {
+    const up = userAddress(uaddr);
+    if (!accessOk(up, dst.len)) return Error.Fault;
     if (dst.len == 0) return;
 
     const remaining = arch.uaccess.copy(
         dst.ptr,
-        @as([*]const u8, @ptrFromInt(uaddr)),
+        @as([*]const u8, @ptrFromInt(up)),
         dst.len,
     );
     if (remaining != 0) return Error.Fault;
@@ -34,28 +35,86 @@ pub fn copyFromUser(dst: []u8, uaddr: usize) Error!void {
 ///
 /// Returns error if the range is invalid or a byte cannot be written.
 /// On error, the contents of the user memory are undefined.
-pub fn copyToUser(uaddr: usize, src: []const u8) Error!void {
-    if (!accessOk(uaddr, src.len)) return Error.Fault;
+pub fn copyToUser(uaddr: anytype, src: []const u8) Error!void {
+    const up = userAddress(uaddr);
+    if (!accessOk(up, src.len)) return Error.Fault;
     if (src.len == 0) return;
 
     const remaining = arch.uaccess.copy(
-        @as([*]u8, @ptrFromInt(uaddr)),
+        @as([*]u8, @ptrFromInt(up)),
         src.ptr,
         src.len,
     );
     if (remaining != 0) return Error.Fault;
 }
 
+/// Copies a slice of `T` values from the kernel slice into the user address.
+pub fn copySliceToUser(comptime T: type, uaddr: anytype, src: []const T) Error!void {
+    try copyToUser(userAddress(uaddr), std.mem.sliceAsBytes(src));
+}
+
+/// Copies a slice of `T` values from the user address into the kernel slice.
+pub fn copySliceFromUser(comptime T: type, dst: []T, uaddr: anytype) Error!void {
+    try copyFromUser(std.mem.sliceAsBytes(dst), userAddress(uaddr));
+}
+
+/// Copies a NULL-terminated string from the user address.
+///
+/// Returns the string without the terminating NULL byte.
+pub fn copyString(dst: []u8, uaddr: usize) Error![]u8 {
+    var done: usize = 0;
+    while (done < dst.len) {
+        // Not cross page boundary.
+        const page_size = urd.mem.page_size;
+        const to_page = page_size - ((uaddr + done) & (page_size - 1));
+        const want = @min(to_page, dst.len - done);
+
+        // Copy from user space.
+        try copyFromUser(dst[done .. done + want], uaddr + done);
+
+        // Find the NULL-terminator.
+        if (std.mem.indexOfScalar(u8, dst[done .. done + want], 0)) |rel| {
+            return dst[0 .. done + rel];
+        }
+        done += want;
+    }
+
+    // NULL not found.
+    return Error.Fault;
+}
+
 /// Read a single value of type `T` from user address.
-pub fn getUser(comptime T: type, uptr: usize) Error!T {
+pub fn getUser(comptime T: type, uptr: anytype) Error!T {
     var val: T = undefined;
-    try copyFromUser(std.mem.asBytes(&val), uptr);
+    try copyFromUser(std.mem.asBytes(&val), userAddress(uptr));
     return val;
 }
 
 /// Write a single value of type `T` to user address.
-pub fn putUser(comptime T: type, uptr: usize, val: T) Error!void {
-    try copyToUser(uptr, std.mem.asBytes(&val));
+pub fn putUser(comptime T: type, uptr: anytype, val: T) Error!void {
+    try copyToUser(userAddress(uptr), std.mem.asBytes(&val));
+}
+
+/// Allow access to user-space memory by supervisor mode.
+pub fn allowUserAccess() void {
+    arch.uaccess.allowUserAccess();
+}
+
+/// Disallow access to user-space memory by supervisor mode.
+pub fn disallowUserAccess() void {
+    arch.uaccess.disallowUserAccess();
+}
+
+/// Convert the given value to a user pointer.
+fn userAddress(uaddr: anytype) usize {
+    return switch (@typeInfo(@TypeOf(uaddr))) {
+        .pointer => |pointer| switch (pointer.size) {
+            .one, .many, .c => @intFromPtr(uaddr),
+            .slice => @intFromPtr(uaddr.ptr),
+        },
+        .int => uaddr,
+        else => unreachable,
+    };
 }
 
 // =============================================================

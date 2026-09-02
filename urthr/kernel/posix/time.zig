@@ -5,8 +5,11 @@ pub fn sysClockGetTime(clock: ClockType, tp: *Timespec) ReturnType {
     }
 
     const ns = urd.time.getCurrentTimestamp();
-    tp.sec = @intCast(ns / std.time.ns_per_s);
-    tp.nsec = @intCast(ns % std.time.ns_per_s);
+    const ts = Timespec{
+        .sec = @intCast(ns / std.time.ns_per_s),
+        .nsec = @intCast(ns % std.time.ns_per_s),
+    };
+    urd.uaccess.putUser(Timespec, tp, ts) catch return .err(.fault);
 
     return .success(0);
 }
@@ -16,13 +19,17 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     if (std.enums.tagName(@TypeOf(clock), clock) == null) {
         return .err(.inval);
     }
-    if (rqtp.nsec >= std.time.ns_per_s) {
+    const req = urd.uaccess.getUser(
+        Timespec,
+        rqtp,
+    ) catch return .err(.fault);
+    if (req.nsec >= std.time.ns_per_s) {
         return .err(.inval);
     }
 
     // Block until the absolute deadline.
     if (flags == .abstime) {
-        const deadline_ns: u64 = @as(u64, @intCast(rqtp.sec)) * std.time.ns_per_s + @as(u64, @intCast(rqtp.nsec));
+        const deadline_ns: u64 = @as(u64, @intCast(req.sec)) * std.time.ns_per_s + @as(u64, @intCast(req.nsec));
         const now_ns = urd.time.getCurrentTimestamp();
         if (deadline_ns > now_ns) {
             const remaining_us = (deadline_ns - now_ns) / std.time.ns_per_us;
@@ -32,32 +39,36 @@ pub fn sysClockNanoSleep(clock: ClockType, flags: SleepFlags, rqtp: *const Times
     }
 
     // Block until the specified duration has passed.
-    sleepRelative(rqtp, rmtp);
-
-    return .success(0);
+    return sleepRelative(req, rmtp);
 }
 
 /// syscall: nanosleep
 pub fn sysNanoSleep(rqtp: *const Timespec, rmtp: ?*Timespec) ReturnType {
-    if (rqtp.nsec >= std.time.ns_per_s) {
+    const req = urd.uaccess.getUser(
+        Timespec,
+        rqtp,
+    ) catch return .err(.fault);
+    if (req.nsec >= std.time.ns_per_s) {
         return .err(.inval);
     }
 
-    sleepRelative(rqtp, rmtp);
-
-    return .success(0);
+    return sleepRelative(req, rmtp);
 }
 
-/// Sleep for the relative duration specified by `rqtp`.
-fn sleepRelative(rqtp: *const Timespec, rmtp: ?*Timespec) void {
-    const us = rqtp.sec * std.time.us_per_s + @divTrunc(rqtp.nsec, std.time.ns_per_us);
+/// Sleep for the relative duration specified by `req`.
+fn sleepRelative(req: Timespec, rmtp: ?*Timespec) ReturnType {
+    const us = req.sec * std.time.us_per_s + @divTrunc(req.nsec, std.time.ns_per_us);
     urd.time.sleepUs(@intCast(us));
 
     // No signals now. So remaining time is always zero.
     if (rmtp) |r| {
-        r.sec = 0;
-        r.nsec = 0;
+        urd.uaccess.putUser(Timespec, r, .{
+            .sec = 0,
+            .nsec = 0,
+        }) catch return .err(.fault);
     }
+
+    return .success(0);
 }
 
 /// syscall: setitimer
@@ -67,18 +78,22 @@ pub fn sysSetItimer(which: ItimerWhich, new_value: *const ItimerVal, old_value: 
         return .err(.nosys);
     }
 
+    const knew_value = urd.uaccess.getUser(
+        ItimerVal,
+        new_value,
+    ) catch return .err(.fault);
     const th = sched.getCurrent();
     const old = urd.time.setItimer(
         th,
-        new_value.it_value.toNs(),
-        new_value.it_interval.toNs(),
+        knew_value.it_value.toNs(),
+        knew_value.it_interval.toNs(),
     );
 
     if (old_value) |out| {
-        out.* = .{
+        urd.uaccess.putUser(ItimerVal, out, .{
             .it_value = .fromNs(old.value_ns),
             .it_interval = .fromNs(old.interval_ns),
-        };
+        }) catch return .err(.fault);
     }
 
     return .success(0);

@@ -15,6 +15,22 @@ export fn setupHead() callconv(.c) void {
             : [in] "r" (cr4),
             : .{ .memory = true });
     }
+
+    // Enable SMAP / SMEP.
+    {
+        var cr4 = asm volatile (
+            \\mov %%cr4, %[out]
+            : [out] "=r" (-> regs.Cr4),
+            :
+            : .{ .memory = true });
+        cr4.smap = true;
+        cr4.smep = true;
+        asm volatile (
+            \\mov %[in], %%cr4
+            :
+            : [in] "r" (cr4),
+            : .{ .memory = true });
+    }
 }
 
 // =============================================================

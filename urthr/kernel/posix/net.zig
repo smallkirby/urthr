@@ -67,11 +67,16 @@ pub fn sysConnect(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
         return .err(.badf);
     };
 
-    (switch (addr.general.family) {
+    var sa = urd.uaccess.getUser(
+        SockAddr,
+        addr,
+    ) catch return .err(.fault);
+
+    (switch (sa.general.family) {
         .inet => SocketFs.connect(
             file,
-            .from(&addr.ipv4.addr),
-            urd.net.util.fromNetEndian(addr.ipv4.port),
+            .from(&sa.ipv4.addr),
+            urd.net.util.fromNetEndian(sa.ipv4.port),
         ),
         else => return .err(.inval),
     }) catch |err| return switch (err) {
@@ -95,11 +100,16 @@ pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
         return .err(.badf);
     };
 
-    (switch (addr.general.family) {
+    var sa = urd.uaccess.getUser(
+        SockAddr,
+        addr,
+    ) catch return .err(.fault);
+
+    (switch (sa.general.family) {
         .inet => SocketFs.bind(
             file,
-            .from(&addr.ipv4.addr),
-            urd.net.util.fromNetEndian(addr.ipv4.port),
+            .from(&sa.ipv4.addr),
+            urd.net.util.fromNetEndian(sa.ipv4.port),
         ),
         else => return .err(.inval),
     }) catch |err| return switch (err) {
@@ -116,19 +126,31 @@ pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
 /// syscall: sendto
 pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, addr: ?*SockAddr, addrlen: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
-    const data = buf[0..len];
+
+    const data = urd.mem.bin.alloc(u8, len) catch return .err(.nomem);
+    defer urd.mem.bin.free(data);
+    urd.uaccess.copyFromUser(
+        data,
+        buf,
+    ) catch return .err(.fault);
 
     // If a destination is explicitly provided, use the address.
-    const dest: ?SocketFs.Endpoint = if (addr) |sa|
-        if (addrlen < @sizeOf(SockAddr) or sa.general.family != .inet)
-            return .err(.inval)
-        else
-            .{
-                .addr = .from(&sa.ipv4.addr),
-                .port = urd.net.util.fromNetEndian(sa.ipv4.port),
-            }
-    else
-        null;
+    var kaddr: SockAddr = undefined;
+    const dest: ?SocketFs.Endpoint = if (addr) |sa| blk: {
+        kaddr = urd.uaccess.getUser(
+            SockAddr,
+            sa,
+        ) catch return .err(.fault);
+
+        if (addrlen < @sizeOf(SockAddr) or kaddr.general.family != .inet) {
+            return .err(.inval);
+        }
+
+        break :blk .{
+            .addr = .from(&kaddr.ipv4.addr),
+            .port = urd.net.util.fromNetEndian(kaddr.ipv4.port),
+        };
+    } else null;
 
     const written = SocketFs.sendTo(
         file,
@@ -149,21 +171,37 @@ pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, addr: ?*SockAd
 /// syscall: recvfrom
 pub fn sysRecvFrom(sockfd: usize, buf: [*]u8, len: usize, _: i32, addr: ?*SockAddr, addrlen: ?*u32) ReturnType {
     const file = getFile(sockfd) catch return .err(.badf);
-    const out = buf[0..len];
+    if (!urd.uaccess.accessOk(@intFromPtr(buf), len)) return .err(.fault);
+
+    const out = urd.mem.bin.alloc(u8, len) catch return .err(.nomem);
+    defer urd.mem.bin.free(out);
 
     const result = SocketFs.recvFrom(file, out) catch |e| return switch (e) {
         fs.Error.WouldBlock => .err(.again),
         fs.Error.BadAccess => .err(.badf),
         else => .err(.again),
     };
+    urd.uaccess.copyToUser(
+        buf,
+        out[0..result.len],
+    ) catch return .err(.fault);
 
     // Fill in the sender's address if requested.
     if (addr) |sa| {
-        sa.* = .{ .ipv4 = .{
+        const ksa: SockAddr = .{ .ipv4 = .{
             .port = urd.net.util.toNetEndian(result.port),
             .addr = result.addr.toBytes(),
         } };
-        if (addrlen) |al| al.* = @sizeOf(SockAddr);
+        urd.uaccess.putUser(
+            SockAddr,
+            sa,
+            ksa,
+        ) catch return .err(.fault);
+        if (addrlen) |al| urd.uaccess.putUser(
+            u32,
+            al,
+            @sizeOf(SockAddr),
+        ) catch return .err(.fault);
     }
     return .success(@bitCast(result.len));
 }
@@ -197,7 +235,20 @@ const MsgHdr = extern struct {
 /// syscall: recvmsg
 pub fn sysRecvMsg(sockfd: usize, msg: *align(1) MsgHdr, _: i32) ReturnType {
     const file = getFile(sockfd) catch return .err(.badf);
-    const iovs = msg.iov[0..msg.iovlen];
+    var kmsg = urd.uaccess.getUser(
+        MsgHdr,
+        msg,
+    ) catch return .err(.fault);
+
+    const iovs = urd.mem.bin.alloc(Iovec, kmsg.iovlen) catch {
+        return .err(.nomem);
+    };
+    defer urd.mem.bin.free(iovs);
+    urd.uaccess.copySliceFromUser(
+        Iovec,
+        iovs,
+        kmsg.iov,
+    ) catch return .err(.fault);
 
     var total: usize = 0;
     for (iovs) |v| total += v.len;
@@ -216,19 +267,32 @@ pub fn sysRecvMsg(sockfd: usize, msg: *align(1) MsgHdr, _: i32) ReturnType {
     for (iovs) |v| {
         const n = @min(v.len, result.len - off);
         if (n == 0) break;
-        @memcpy(v.base[0..n], buf[off..][0..n]);
+        urd.uaccess.copyToUser(
+            v.base,
+            buf[off..][0..n],
+        ) catch return .err(.fault);
         off += n;
     }
 
     // Fill in the sender's address if requested.
-    if (msg.name) |addr| {
-        addr.* = .{ .ipv4 = .{
+    if (kmsg.name) |addr| {
+        const ksa: SockAddr = .{ .ipv4 = .{
             .port = urd.net.util.toNetEndian(result.port),
             .addr = result.addr.toBytes(),
         } };
-        msg.namelen = @sizeOf(SockAddr);
+        urd.uaccess.putUser(
+            SockAddr,
+            addr,
+            ksa,
+        ) catch return .err(.fault);
+        kmsg.namelen = @sizeOf(SockAddr);
     }
-    msg.flags = 0;
+    kmsg.flags = 0;
+    urd.uaccess.putUser(
+        MsgHdr,
+        msg,
+        kmsg,
+    ) catch return .err(.fault);
 
     return .success(@bitCast(result.len));
 }
@@ -335,12 +399,26 @@ pub fn sysGetSockOpt(fd: usize, level: SockOptLevel, optname: i32, optval: ?*ali
     switch (level) {
         .socket => switch (@as(SocketOptName, @enumFromInt(optname))) {
             .socket_error => {
-                const val = optval orelse return .err(.inval);
-                const len = optlen orelse return .err(.inval);
-                if (len.* < @sizeOf(i32)) return .err(.inval);
+                const valp = optval orelse return .err(.inval);
+                const lenp = optlen orelse return .err(.inval);
 
-                val.* = 0;
-                len.* = @sizeOf(i32);
+                const len = urd.uaccess.getUser(
+                    u32,
+                    lenp,
+                ) catch return .err(.fault);
+                if (len < @sizeOf(i32)) return .err(.inval);
+
+                urd.uaccess.putUser(
+                    i32,
+                    valp,
+                    0,
+                ) catch return .err(.fault);
+                urd.uaccess.putUser(
+                    u32,
+                    lenp,
+                    @sizeOf(i32),
+                ) catch return .err(.fault);
+
                 return .success(0);
             },
             else => return .err(.noprotoopt),

@@ -81,20 +81,24 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
     // Save old action if requested.
     if (oldact) |old| {
         const cur = th.sigstate.handlers.actions[bit];
-        old.* = .{
+        urd.uaccess.putUser(SigAction, old, .{
             .handler = cur.handler,
             .flags = cur.flags,
             .restorer = 0,
             .mask = cur.mask,
-        };
+        }) catch return .err(.fault);
     }
 
     // Set new action if requested.
     if (act) |new| {
+        const knew = urd.uaccess.getUser(
+            SigAction,
+            new,
+        ) catch return .err(.fault);
         th.sigstate.handlers.actions[bit] = .{
-            .handler = new.handler,
-            .flags = new.flags,
-            .mask = new.mask,
+            .handler = knew.handler,
+            .flags = knew.flags,
+            .mask = knew.mask,
         };
     }
 
@@ -209,14 +213,22 @@ pub fn sysRtSigProcMask(how: How, set: ?*const signal.Mask, oldset: ?*signal.Mas
 
     // Save old blocked mask if requested.
     if (oldset) |old| {
-        old.* = th.sigstate.blocked;
+        urd.uaccess.putUser(
+            signal.Mask,
+            old,
+            th.sigstate.blocked,
+        ) catch return .err(.fault);
     }
 
     if (set) |new| {
+        const knew = urd.uaccess.getUser(
+            signal.Mask,
+            new,
+        ) catch return .err(.fault);
         switch (how) {
-            .block => th.sigstate.blocked |= new.*,
-            .unblock => th.sigstate.blocked &= ~new.*,
-            .setmask => th.sigstate.blocked = new.*,
+            .block => th.sigstate.blocked |= knew,
+            .unblock => th.sigstate.blocked &= ~knew,
+            .setmask => th.sigstate.blocked = knew,
             _ => return .err(.inval),
         }
 
@@ -237,18 +249,28 @@ pub fn sysRtSigTimedWait(set: *const signal.Mask, info: ?*SigInfo, timeout: ?*co
     }
 
     const deadline_ns: ?u64 = if (timeout) |t| blk: {
-        if (t.nsec >= std.time.ns_per_s) return .err(.inval);
-        const dur_ns = @as(u64, @intCast(t.sec)) * std.time.ns_per_s + @as(u64, @intCast(t.nsec));
+        const ts = urd.uaccess.getUser(
+            Timespec,
+            t,
+        ) catch return .err(.fault);
+        if (ts.nsec >= std.time.ns_per_s) return .err(.inval);
+        const dur_ns = @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
         break :blk urd.time.getCurrentTimestamp() + dur_ns;
     } else null;
 
+    const kset = urd.uaccess.getUser(
+        signal.Mask,
+        set,
+    ) catch return .err(.fault);
     const signo = signal.blocksFor(
-        set.*,
+        kset,
         deadline_ns,
     ) orelse return .err(.again);
 
     if (info) |i| {
-        i.* = .{ .signo = @intCast(signo) };
+        urd.uaccess.putUser(SigInfo, i, .{
+            .signo = @intCast(signo),
+        }) catch return .err(.fault);
     }
 
     return .success(signo);
@@ -265,8 +287,12 @@ pub fn sysRtSigSuspend(set: *const signal.Mask, sigsetsize: usize) ReturnType {
         (@as(signal.Mask, 1) << (@intFromEnum(signal.Signal.kill) - 1)) |
         (@as(signal.Mask, 1) << (@intFromEnum(signal.Signal.stop) - 1));
 
+    const kset = urd.uaccess.getUser(
+        signal.Mask,
+        set,
+    ) catch return .err(.fault);
     const saved = th.sigstate.blocked;
-    th.sigstate.blocked = set.* & ~unblockable;
+    th.sigstate.blocked = kset & ~unblockable;
     signal.waitExcept(th.sigstate.blocked);
     th.sigstate.saved_mask = saved;
 

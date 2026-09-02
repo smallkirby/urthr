@@ -667,6 +667,9 @@ fn setupUserImage(
     var exec_filename = filename;
     var exec_argv = argv;
 
+    urd.uaccess.allowUserAccess();
+    defer urd.uaccess.disallowUserAccess();
+
     // Resolve a shebang line first.
     var rewritten_argv: ?[][]const u8 = null;
     const shebang = try loader.parseShebang(filename, allocator);

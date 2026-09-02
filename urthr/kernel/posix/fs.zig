@@ -3,6 +3,9 @@
 /// File descriptor representing the current working directory.
 const cwd_fd: usize = @bitCast(@as(i64, -100));
 
+/// Maximum byte length of a path including NULL-terminator copied in from user space.
+const path_max = 4096;
+
 /// Vectorized I/O struct.
 const Iovec = extern struct {
     /// Starting address.
@@ -22,7 +25,8 @@ const Iovec = extern struct {
 /// syscall: openat
 pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: Mode) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const file = resolveOpenFile(
         dirfd,
@@ -166,8 +170,12 @@ pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
         return .err(.mfile);
     };
 
-    pipefd[0] = @intCast(rfd);
-    pipefd[1] = @intCast(wfd);
+    const fds = [2]i32{ @intCast(rfd), @intCast(wfd) };
+    urd.uaccess.copySliceToUser(i32, pipefd, &fds) catch {
+        cur.fs.fdtbl.close(rfd) catch {};
+        cur.fs.fdtbl.close(wfd) catch {};
+        return .err(.fault);
+    };
 
     return .success(0);
 }
@@ -596,8 +604,9 @@ pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: u
     }
 
     var pos: usize = if (offset) |o| blk: {
-        if (o.* < 0) return .err(.inval);
-        break :blk @intCast(o.*);
+        const off = urd.uaccess.getUser(i64, o) catch return .err(.fault);
+        if (off < 0) return .err(.inval);
+        break :blk @intCast(off);
     } else in_file.offset;
 
     // TODO: should be zero-copy
@@ -624,7 +633,7 @@ pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: u
 
     // When offset pointer is given, file offset is not update.
     if (offset) |o| {
-        o.* = @intCast(pos);
+        urd.uaccess.putUser(i64, o, @intCast(pos)) catch return .err(.fault);
     } else {
         in_file.offset = pos;
     }
@@ -644,7 +653,8 @@ pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: u
 /// syscall: unlinkat
 pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     if (flags.removedir) {
         rmdirFileAt(dirfd, s, allocator) catch |err| return mapRmdirError(err);
@@ -684,7 +694,8 @@ pub fn sysRmdir(pathname: [*:0]const u8) ReturnType {
 /// syscall: mkdirat
 pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const umask = sched.getCurrent().fs.umask;
     const effective_mode = umask.apply(mode.to());
@@ -710,8 +721,10 @@ pub fn sysMkdir(pathname: [*:0]const u8, mode: Mode) ReturnType {
 /// syscall: symlinkat
 pub fn sysSymlinkAt(target: [*:0]const u8, newdirfd: usize, linkpath: [*:0]const u8) ReturnType {
     const allocator = urd.mem.bin;
-    const target_s = std.mem.span(target);
-    const linkpath_s = std.mem.span(linkpath);
+    var tbuf: [path_max]u8 = undefined;
+    var lbuf: [path_max]u8 = undefined;
+    const target_s = copyPath(&tbuf, target) catch return .err(.fault);
+    const linkpath_s = copyPath(&lbuf, linkpath) catch return .err(.fault);
 
     _ = symlinkFileAt(
         newdirfd,
@@ -741,11 +754,15 @@ pub fn sysSymlink(target: [*:0]const u8, linkpath: [*:0]const u8) ReturnType {
 
 /// syscall: renameat
 pub fn sysRenameAt(olddirfd: usize, oldpath: [*:0]const u8, newdirfd: usize, newpath: [*:0]const u8) ReturnType {
+    var obuf: [path_max]u8 = undefined;
+    var nbuf: [path_max]u8 = undefined;
+    const olds = copyPath(&obuf, oldpath) catch return .err(.fault);
+    const news = copyPath(&nbuf, newpath) catch return .err(.fault);
     renameFileAt(
         olddirfd,
-        std.mem.span(oldpath),
+        olds,
         newdirfd,
-        std.mem.span(newpath),
+        news,
         false,
         urd.mem.bin,
     ) catch |err| return mapRenameError(err);
@@ -769,11 +786,15 @@ pub fn sysRenameAt2(olddirfd: usize, oldpath: [*:0]const u8, newdirfd: usize, ne
         return .err(.inval);
     }
 
+    var obuf: [path_max]u8 = undefined;
+    var nbuf: [path_max]u8 = undefined;
+    const olds = copyPath(&obuf, oldpath) catch return .err(.fault);
+    const news = copyPath(&nbuf, newpath) catch return .err(.fault);
     renameFileAt(
         olddirfd,
-        std.mem.span(oldpath),
+        olds,
         newdirfd,
-        std.mem.span(newpath),
+        news,
         flags.noreplace,
         urd.mem.bin,
     ) catch |err| return mapRenameError(err);
@@ -827,7 +848,8 @@ const MountFlags = packed struct(u64) {
 /// syscall: mount
 pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0]const u8, flags: MountFlags, _: ?*const anyopaque) ReturnType {
     const allocator = urd.mem.bin;
-    const s_target = std.mem.span(target);
+    var tbuf: [path_max]u8 = undefined;
+    const s_target = copyPath(&tbuf, target) catch return .err(.fault);
 
     // For remount, just check if the target path exists and is a mount point.
     if (flags.remount) {
@@ -840,8 +862,13 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
     }
 
     // Create a new filesystem instance based on the specified filesystem type.
+    var fsbuf: [path_max]u8 = undefined;
     const fstype = filesystem_type orelse return .err(.inval);
-    const new_fs = if (std.mem.eql(u8, std.mem.span(fstype), "proc")) blk: {
+    const fstype_s = copyPath(
+        &fsbuf,
+        fstype,
+    ) catch return .err(.fault);
+    const new_fs = if (std.mem.eql(u8, fstype_s, "proc")) blk: {
         const procfs = urd.fs.ProcFs.init(allocator) catch return .err(.nomem);
         break :blk procfs.filesystem();
     } else return .err(.nodev);
@@ -869,7 +896,11 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
 /// syscall: fstat
 pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
-    statbuf.* = statFromFile(file);
+    urd.uaccess.putUser(
+        Stat,
+        statbuf,
+        statFromFile(file),
+    ) catch return .err(.fault);
     return .success(0);
 }
 
@@ -909,7 +940,8 @@ fn statxTimestamp(ts: urd.fs.Timestamp) Statx.Timestamp {
 /// syscall: newfstatat
 pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) Stat, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     var owned = true;
     const file = if (flags.empty_path and s.len == 0) blk: {
@@ -919,7 +951,11 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
         return mapOpenError(err);
     defer if (owned) file.unref();
 
-    statbuf.* = statFromFile(file);
+    urd.uaccess.putUser(
+        Stat,
+        statbuf,
+        statFromFile(file),
+    ) catch return .err(.fault);
 
     return .success(0);
 }
@@ -939,7 +975,8 @@ pub fn sysLstat(pathname: [*:0]const u8, statbuf: *align(1) Stat) ReturnType {
 /// TODO: respect the `mask` argument.
 pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, statxbuf: *align(1) Statx) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     var owned = true;
     const file = if (flags.empty_path and s.len == 0) blk: {
@@ -955,7 +992,7 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
     defer if (owned) file.unref();
 
     const times = file.getTimes();
-    statxbuf.* = .{
+    const stx: Statx = .{
         .mask = 0x7FF,
         .blksize = 512,
         .attributes = 0, // TODO
@@ -984,6 +1021,9 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         .atomic_write_segments_max = 0, // TODO
         .dio_read_offset_align = 0, // TODO
         .atomic_write_unit_max_opt = 0, // TODO
+    };
+    urd.uaccess.putUser(Statx, statxbuf, stx) catch {
+        return .err(.fault);
     };
 
     return .success(0);
@@ -1326,11 +1366,15 @@ const FileType = enum(u4) {
 /// syscall: getdents64
 pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
     const allocator = urd.mem.bin;
+    const uaddr = @intFromPtr(ents);
+
     const file = getFile(fd) catch return .err(.badf);
     if (file.getType() != .directory) {
         return .err(.notdir);
     }
+    if (!urd.uaccess.accessOk(uaddr, count)) return .err(.fault);
 
+    var dbuf: [DirEnt64.struct_size + 256]u8 = undefined;
     var consumed: usize = 0;
     var iter = file.iterator() catch return .err(.again);
     while (true) {
@@ -1344,13 +1388,20 @@ pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
             else
                 break;
         }
+        if (dent_size > dbuf.len) return .err(.inval);
 
         DirEnt64.createCopy(
             ent.inum,
             .from(ent.type),
             ent.name,
-            ents[consumed..][0..dent_size],
+            dbuf[0..dent_size],
         );
+        urd.uaccess.copyToUser(uaddr + consumed, dbuf[0..dent_size]) catch {
+            return if (consumed == 0)
+                .err(.fault)
+            else
+                .success(@bitCast(consumed));
+        };
         consumed += dent_size;
     }
 
@@ -1513,7 +1564,8 @@ pub fn sysIoctl(fd: usize, request: u64, arg: usize) ReturnType {
 /// syscall: fchmodat
 pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const file = openFileAt(
         dirfd,
@@ -1573,7 +1625,8 @@ pub fn sysFchown(fd: usize, uid: u32, gid: u32) ReturnType {
 /// syscall: fchownat
 pub fn sysFchownAt(dirfd: usize, pathname: [*:0]const u8, uid: u32, gid: u32, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     var owned = true;
     const file = if (flags.empty_path and s.len == 0) blk: {
@@ -1628,9 +1681,11 @@ pub fn sysFaccessAt(dirfd: usize, pathname: [*:0]const u8, mode: AccessFlags) Re
         return .err(.inval);
     }
 
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
     const file = openFileAt(
         dirfd,
-        std.mem.span(pathname),
+        s,
         .{},
         urd.mem.bin,
     ) catch |err| return mapOpenError(err);
@@ -1671,15 +1726,24 @@ pub fn sysUtimensAt(
     var atime: ?urd.fs.Timestamp = now;
     var mtime: ?urd.fs.Timestamp = now;
     if (times) |t| {
-        atime = resolveUtime(t[0], now) catch return .err(.inval);
-        mtime = resolveUtime(t[1], now) catch return .err(.inval);
+        const tv = urd.uaccess.getUser(
+            [2]posix.Timespec,
+            t,
+        ) catch return .err(.fault);
+        atime = resolveUtime(tv[0], now) catch return .err(.inval);
+        mtime = resolveUtime(tv[1], now) catch return .err(.inval);
     }
 
     // Resolve the target.
+    var pbuf: [path_max]u8 = undefined;
+    const path_s: ?[]const u8 = if (pathname) |p|
+        copyPath(&pbuf, p) catch return .err(.fault)
+    else
+        null;
     var owned = true;
-    const file = if (pathname) |p| openFileAt(
+    const file = if (path_s) |p| openFileAt(
         dirfd,
-        std.mem.span(p),
+        p,
         .{},
         urd.mem.bin,
     ) catch |err| return mapOpenError(err) else blk: {
@@ -1718,7 +1782,8 @@ fn resolveUtime(ts: posix.Timespec, now: urd.fs.Timestamp) !?urd.fs.Timestamp {
 /// syscall: chdir
 pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     const allocator = urd.mem.bin;
-    const s = std.mem.span(pathname);
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const cur = sched.getCurrent();
     const path = urd.fs.resolve(s, allocator) catch |err| return switch (err) {
@@ -1800,15 +1865,12 @@ pub fn sysUmask(mask: Mode) ReturnType {
 /// - `timeout`: Upper limit in milliseconds on the amount of time that this function will block.
 ///     Negative value means an infinite timeout.
 pub fn sysPoll(fds: ?[*]PollFd, nfds: usize, timeout: i32) ReturnType {
-    if (timeout < 0) {
-        return sysPpoll(fds, nfds, null, null, 0);
-    }
+    const ns: ?u64 = if (timeout < 0)
+        null
+    else
+        @as(u64, @intCast(timeout)) * std.time.ns_per_ms;
 
-    const ts = posix.Timespec{
-        .sec = @divTrunc(timeout, std.time.ms_per_s),
-        .nsec = @intCast(@rem(timeout, std.time.ms_per_s) * std.time.ns_per_ms),
-    };
-    return sysPpoll(fds, nfds, &ts, null, 0);
+    return pollImpl(fds, nfds, ns);
 }
 
 /// syscall: ppoll
@@ -1825,6 +1887,19 @@ pub fn sysPpoll(
     _: ?*const anyopaque,
     _: usize,
 ) ReturnType {
+    const ns: ?u64 = if (tmop) |t| blk: {
+        const ts = urd.uaccess.getUser(
+            posix.Timespec,
+            t,
+        ) catch return .err(.fault);
+        break :blk @intCast(ts.sec * std.time.ns_per_s + @as(i64, @intCast(ts.nsec)));
+    } else null;
+
+    return pollImpl(fds, nfds, ns);
+}
+
+/// Shared implementation of poll.
+fn pollImpl(fds: ?[*]PollFd, nfds: usize, ns: ?u64) ReturnType {
     if (nfds > Event.max_multiwait) {
         return .err(.inval);
     }
@@ -1834,13 +1909,17 @@ pub fn sysPpoll(
 
     const kfds = mem.bin.alloc(PollFd, nfds) catch return .err(.nomem);
     defer mem.bin.free(kfds);
-    if (nfds > 0) @memcpy(kfds, fds.?[0..nfds]);
+    if (nfds > 0) urd.uaccess.copySliceFromUser(
+        PollFd,
+        kfds,
+        fds.?,
+    ) catch return .err(.fault);
 
     // Calculate deadline for blocking.
-    const deadline_ns = if (tmop) |t| blk: {
-        const dur_ns: u64 = @intCast(t.sec * std.time.ns_per_s + @as(i64, @intCast(t.nsec)));
-        break :blk urd.time.getCurrentTimestamp() + dur_ns;
-    } else null;
+    const deadline_ns = if (ns) |d|
+        urd.time.getCurrentTimestamp() + d
+    else
+        null;
 
     const done: usize = while (true) {
         var n_ready: usize = 0;
@@ -1899,7 +1978,11 @@ pub fn sysPpoll(
             sched.reschedule();
     };
 
-    if (nfds > 0) @memcpy(fds.?[0..nfds], kfds);
+    if (nfds > 0) urd.uaccess.copySliceToUser(
+        PollFd,
+        fds.?,
+        kfds,
+    ) catch return .err(.fault);
     return .success(@intCast(done));
 }
 
@@ -1947,6 +2030,11 @@ const PollEvents = packed struct(u16) {
 // =============================================================
 // Internal
 // =============================================================
+
+/// Copies a NULL-terminated path from user space.
+fn copyPath(buf: *[path_max]u8, user: [*:0]const u8) urd.uaccess.Error![]const u8 {
+    return urd.uaccess.copyString(buf, @intFromPtr(user));
+}
 
 /// Convert open-related error to syscall return type.
 fn mapOpenError(err: anyerror) ReturnType {

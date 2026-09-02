@@ -89,10 +89,17 @@ pub fn callEreturnHook(ctx: *Context) void {
 /// Called from the ISR common stub.
 pub fn dispatch(ctx: *Context) void {
     // Handle page fault exceptions specially.
-    if (ctx.vector == @intFromEnum(Exception.pf)) {
+    if (ctx.vector == @intFromEnum(Exception.pf)) blk: {
         const ec: PfErrorCode = @bitCast(@as(u32, @truncate(ctx.ec)));
         const far = am.readCr2();
 
+        // SMAP violation is unrecoverable.
+        const ac_set = @as(regs.Rflags, @bitCast(ctx.rflags)).ac;
+        const smap_violation = ec.present and !ec.user and !ac_set and
+            uaccess.fixupFor(ctx.rip) == null;
+        if (smap_violation) break :blk;
+
+        // Handle recoverable page faults.
         if (pagefault_handler) |pf| {
             if (pf(
                 far,
@@ -438,5 +445,6 @@ const am = @import("asm.zig");
 const arch = @import("arch.zig");
 const gdt = @import("gdt.zig");
 const isr = @import("isr.zig");
+const regs = @import("register.zig");
 const uaccess = @import("uaccess.zig");
 const StackIterator = @import("StackIterator.zig");

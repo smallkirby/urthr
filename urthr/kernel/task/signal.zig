@@ -197,6 +197,9 @@ pub fn sigreturn() void {
     const ctx = sched.getCurrentCtx();
     const th = sched.getCurrent();
 
+    urd.uaccess.allowUserAccess();
+    defer urd.uaccess.disallowUserAccess();
+
     const mask = switch (builtin.cpu.arch) {
         .aarch64 => blk: {
             const frame: *const SigFrame = @ptrFromInt(ctx.sp_el0);
@@ -539,6 +542,9 @@ fn isDeliverable(_: SigInt, ctx: *const Context) bool {
 
 /// Setup sigframe and modify the user context to execute the signal handler.
 fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !void {
+    urd.uaccess.allowUserAccess();
+    defer urd.uaccess.disallowUserAccess();
+
     const trampoline = if (th.sigstate.trampoline) |addr|
         addr
     else

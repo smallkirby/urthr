@@ -97,6 +97,9 @@ export fn svc(ctx: *Context) callconv(.c) void {
 export fn syscallEntry() callconv(.naked) noreturn {
     asm volatile (
         \\
+        \\cli
+        \\stac
+        \\
         // Spill a part of callee-saved registers onto the user stack.
         \\pushq %%r13
         \\pushq %%r14
@@ -139,6 +142,8 @@ export fn syscallEntry() callconv(.naked) noreturn {
         \\pushq -8(%%r13)  // Spilled R13
         \\pushq -16(%%r13) // Spilled R14
         \\pushq -24(%%r13) // Spilled R15
+        \\
+        \\clac
         \\
         \\movq %%rsp, %%rdi
         \\

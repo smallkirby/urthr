@@ -30,3 +30,13 @@ pub fn fixupFor(fault_pc: usize) ?usize {
         return null;
     }
 }
+
+/// Allow access to user-space memory by supervisor mode.
+///
+/// TODO: use PAN
+pub fn allowUserAccess() void {}
+
+/// Disallow access to user-space memory by supervisor mode.
+///
+/// TODO: use PAN
+pub fn disallowUserAccess() void {}
