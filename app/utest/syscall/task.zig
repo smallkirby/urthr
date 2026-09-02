@@ -42,6 +42,7 @@ comptime {
     _ = @import("task/setregid.zig");
     _ = @import("task/setresuid.zig");
     _ = @import("task/setresgid.zig");
+    _ = @import("task/setgroups.zig");
     _ = @import("task/thread_group.zig");
     _ = @import("task/wait4.zig");
 }

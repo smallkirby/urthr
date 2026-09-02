@@ -393,6 +393,27 @@ pub fn sysGetPgid(pid: i32) ReturnType {
     return .success(@intCast(cur.group.getPgid()));
 }
 
+/// syscall: setgroups
+pub fn sysSetGroups(size: usize, list: [*]const u32) ReturnType {
+    const group = sched.getCurrent().group;
+    var cred = group.getCredential();
+
+    if (!cred.isPrivileged()) {
+        return .err(.perm);
+    }
+    if (size > task.Credential.ngroups_max) {
+        return .err(.inval);
+    }
+
+    for (list[0..size], 0..) |gid, i| {
+        cred.groups[i] = gid;
+    }
+    cred.ngroups = @intCast(size);
+    group.setCredential(cred);
+
+    return .success(0);
+}
+
 /// syscall: setsid
 pub fn sysSetsid() ReturnType {
     const cur = sched.getCurrent();

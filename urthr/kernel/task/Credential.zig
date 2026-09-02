@@ -2,6 +2,9 @@
 
 const Self = @This();
 
+/// Maximum number of supplementary group IDs.
+pub const ngroups_max = 32;
+
 /// Real user ID.
 uid: u32 = 0,
 /// Real group ID.
@@ -14,6 +17,10 @@ egid: u32 = 0,
 suid: u32 = 0,
 /// Saved group ID.
 sgid: u32 = 0,
+/// Supplementary group IDs.
+groups: [ngroups_max]u32 = undefined,
+/// Number of valid entries in `groups`.
+ngroups: u32 = 0,
 
 /// Whether this credential has root privilege.
 pub fn isPrivileged(self: Self) bool {
