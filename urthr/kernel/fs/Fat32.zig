@@ -15,6 +15,8 @@ free_clus_hint: Cluster,
 lock: Mutex = .{},
 /// Memory allocator.
 allocator: Allocator,
+/// Write-back cache for FAT sectors.
+cache: SectorCache,
 
 /// Index of a cluster.
 const Cluster = u32;
@@ -53,12 +55,17 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
     };
     root.common.ref();
 
+    // Allocate buffer for sector cache.
+    const cache_buf = try allocator.alloc(u8, SectorCache.nslots * sector_size);
+    errdefer allocator.free(cache_buf);
+
     self.* = .{
         .device = device,
         .bpb = bpb,
         .allocator = allocator,
         .root = root,
         .free_clus_hint = bpb.root_clus,
+        .cache = .{ .data = cache_buf },
     };
     return self;
 }
@@ -179,6 +186,7 @@ fn ideinit(inode: *fs.Inode) void {
         => {
             ctx.fat32.lock.lock();
             defer ctx.fat32.lock.unlock();
+            defer ctx.fat32.flushCache();
 
             ctx.fat32.freeCluster(ctx.cluster) catch |err| {
                 log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
@@ -222,15 +230,16 @@ fn markEntryDeleted(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
 
     self.lock.lock();
     defer self.lock.unlock();
+    defer self.flushCache();
 
     const pos = Position.fromInodeNumber(child.number);
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(pos.sector, &buf);
+    try self.readBlocks(pos.sector, &buf);
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
     const sfn = ent.name;
     ent.markDeleted();
-    try self.device.writeBlocks(pos.sector, &buf);
+    try self.writeBlocks(pos.sector, &buf);
 
     const dir_inode = InodeImpl.from(dir);
     try self.deletePrecedingLfnEntries(dir_inode.cluster, pos, &sfn);
@@ -248,14 +257,15 @@ fn ichmod(inode: *fs.Inode, mode: fs.FileMode) fs.Error!void {
 
     self.lock.lock();
     defer self.lock.unlock();
+    defer self.flushCache();
 
     const pos = Position.fromInodeNumber(inode.number);
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(pos.sector, &buf);
+    try self.readBlocks(pos.sector, &buf);
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
     ent.attr.read_only = !isWritable(mode);
-    try self.device.writeBlocks(pos.sector, &buf);
+    try self.writeBlocks(pos.sector, &buf);
 }
 
 /// Persist the file's timestamps into its on-disk directory entry.
@@ -268,14 +278,15 @@ fn iutimes(inode: *fs.Inode) fs.Error!void {
 
     self.lock.lock();
     defer self.lock.unlock();
+    defer self.flushCache();
 
     const pos = Position.fromInodeNumber(inode.number);
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(pos.sector, &buf);
+    try self.readBlocks(pos.sector, &buf);
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
     writeTimeFields(ent, inode.times);
-    try self.device.writeBlocks(pos.sector, &buf);
+    try self.writeBlocks(pos.sector, &buf);
 }
 
 /// Create a new file or directory under a directory inode.
@@ -289,6 +300,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
 
     self.lock.lock();
     defer self.lock.unlock();
+    defer self.flushCache();
 
     // Allocate a new cluster for the file.
     const clus = try self.allocateCluster(null);
@@ -299,7 +311,7 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         var zero_buf = std.mem.zeroes([sector_size]u8);
         const lba = self.clusterToLba(clus);
         for (0..self.bpb.sec_per_clus) |sec| {
-            try self.device.writeBlocks(lba + sec, &zero_buf);
+            try self.writeBlocks(lba + sec, &zero_buf);
         }
     }
 
@@ -397,10 +409,11 @@ fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Ino
 
     self.lock.lock();
     defer self.lock.unlock();
+    defer self.flushCache();
 
     // Snapshot the existing directory entry.
     const old_pos = Position.fromInodeNumber(child.number);
-    try self.device.readBlocks(old_pos.sector, &buf);
+    try self.readBlocks(old_pos.sector, &buf);
     var ent_data = @as(*const DirEntry, @ptrCast(@alignCast(&buf[old_pos.offset]))).*;
     const old_sfn = ent_data.name;
 
@@ -424,13 +437,13 @@ fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Ino
     // Remove replaced directory entry and any LFN entries preceding it.
     if (replaced) |r| {
         const r_pos = Position.fromInodeNumber(r.number);
-        try self.device.readBlocks(r_pos.sector, &buf);
+        try self.readBlocks(r_pos.sector, &buf);
         const r_ent: *DirEntry = @ptrCast(@alignCast(&buf[r_pos.offset]));
         const r_sfn = r_ent.name;
 
         // Remove the directory entry.
         r_ent.markDeleted();
-        try self.device.writeBlocks(r_pos.sector, &buf);
+        try self.writeBlocks(r_pos.sector, &buf);
         // Remove the preceding LFN entries.
         try self.deletePrecedingLfnEntries(
             InodeImpl.from(new_dir).cluster,
@@ -467,12 +480,12 @@ fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Ino
 
     // Delete the old entry unless it was reused.
     if (new_pos.sector != old_pos.sector or new_pos.offset != old_pos.offset) {
-        try self.device.readBlocks(old_pos.sector, &buf);
+        try self.readBlocks(old_pos.sector, &buf);
         const old_ent: *DirEntry = @ptrCast(@alignCast(&buf[old_pos.offset]));
 
         // Remove the old directory entry.
         old_ent.markDeleted();
-        try self.device.writeBlocks(old_pos.sector, &buf);
+        try self.writeBlocks(old_pos.sector, &buf);
         // Remove the preceding LFN entries.
         try self.deletePrecedingLfnEntries(InodeImpl.from(old_dir).cluster, old_pos, &old_sfn);
     }
@@ -603,7 +616,7 @@ const DirIterator = struct {
                 }
 
                 const lba = self.fat32.clusterToLba(self.cluster);
-                try self.fat32.device.readBlocks(lba + sector_in_cluster, &self.buffer);
+                try self.fat32.readBlocks(lba + sector_in_cluster, &self.buffer);
                 self.buffer_valid = true;
             }
 
@@ -803,6 +816,11 @@ const FileImpl = struct {
 /// Release filesystem-specific resources associated with the file context.
 fn fclose(ctx: *anyopaque, allocator: Allocator) void {
     const file: *FileImpl = @ptrCast(@alignCast(ctx));
+
+    file.fat32.lock.lock();
+    file.fat32.flushCache();
+    file.fat32.lock.unlock();
+
     allocator.destroy(file);
 }
 
@@ -1043,6 +1061,7 @@ fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
 
     fat32.lock.lock();
     defer fat32.lock.unlock();
+    defer fat32.flushCache();
 
     // Walk to the cluster that will remain the new last cluster of the chain.
     const last_kept_offset = if (new_size == 0) 0 else new_size - 1;
@@ -1072,13 +1091,13 @@ fn updateDirEntry(self: *Self, inum: fs.Inode.Number, size: ?usize, times: ?fs.T
     const pos = Position.fromInodeNumber(inum);
 
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(pos.sector, &buf);
+    try self.readBlocks(pos.sector, &buf);
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
     if (size) |sz| ent.file_size = @intCast(sz);
     if (times) |t| writeTimeFields(ent, t);
 
-    try self.device.writeBlocks(pos.sector, &buf);
+    try self.writeBlocks(pos.sector, &buf);
 }
 
 // =============================================================
@@ -1138,7 +1157,7 @@ fn getNextCluster(self: *Self, cluster: Cluster) fs.Error!?Cluster {
 
     // Read FAT sector.
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(fat_sector, &buf);
+    try self.readBlocks(fat_sector, &buf);
 
     // Read FAT entry (little-endian u32) and apply mask.
     const entry = std.mem.readInt(
@@ -1189,7 +1208,7 @@ fn findDirSlot(self: *Self, start: Cluster, count: usize, opt: FindOption) fs.Er
         const clus_lba = self.clusterToLba(clus);
         for (0..self.bpb.sec_per_clus) |sec| {
             const lba = clus_lba + sec;
-            try self.device.readBlocks(lba, &buf);
+            try self.readBlocks(lba, &buf);
 
             // Iterate through all directory entries in the sector.
             for (clus2dirents(&buf), 0..) |ent, i| {
@@ -1226,7 +1245,7 @@ fn findDirSlot(self: *Self, start: Cluster, count: usize, opt: FindOption) fs.Er
         const new = try self.allocateCluster(cur);
         const lba = self.clusterToLba(new);
         for (0..self.bpb.sec_per_clus) |sec| {
-            try self.device.writeBlocks(lba + sec, &buf);
+            try self.writeBlocks(lba + sec, &buf);
         }
 
         if (avail_count == 0) {
@@ -1266,7 +1285,7 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
         const entry_offset = fat_offset % sector_size;
 
         if (fat_sector != current_fat_sector) {
-            try self.device.readBlocks(fat_sector, &buf);
+            try self.readBlocks(fat_sector, &buf);
             current_fat_sector = fat_sector;
         }
 
@@ -1319,7 +1338,7 @@ fn setFatEntry(self: *Self, cluster: Cluster, value: u32) fs.Error!void {
     const first_fat_sec = @as(u64, self.bpb.rsvd_sec_cnt) + sec_offset;
 
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(first_fat_sec, &buf);
+    try self.readBlocks(first_fat_sec, &buf);
 
     // Write the new FAT entry value to the temporary buffer.
     const old = std.mem.readInt(
@@ -1339,7 +1358,7 @@ fn setFatEntry(self: *Self, cluster: Cluster, value: u32) fs.Error!void {
     for (0..self.bpb.num_fats) |i| {
         const fat_sector = @as(u64, self.bpb.rsvd_sec_cnt) +
             i * self.bpb.fat_sz32 + sec_offset;
-        try self.device.writeBlocks(fat_sector, &buf);
+        try self.writeBlocks(fat_sector, &buf);
     }
 }
 
@@ -1564,7 +1583,7 @@ fn sfnExists(self: *Self, start: Cluster, sfn: *const [DirEntry.sfn_len]u8) fs.E
     while (true) {
         const clus_lba = self.clusterToLba(clus);
         for (0..self.bpb.sec_per_clus) |sec| {
-            try self.device.readBlocks(clus_lba + sec, &buf);
+            try self.readBlocks(clus_lba + sec, &buf);
 
             for (clus2dirents(&buf)) |ent| {
                 if (ent.isFree()) return false;
@@ -1620,9 +1639,9 @@ fn writeDirEntries(self: *Self, start: Position, entries: []const [@sizeOf(DirEn
     var buf: [sector_size]u8 = undefined;
 
     for (entries, 0..) |raw, i| {
-        try self.device.readBlocks(pos.sector, &buf);
+        try self.readBlocks(pos.sector, &buf);
         @memcpy(buf[pos.offset..][0..raw.len], &raw);
-        try self.device.writeBlocks(pos.sector, &buf);
+        try self.writeBlocks(pos.sector, &buf);
 
         if (i + 1 < entries.len) pos = try self.advanceDirPos(pos);
     }
@@ -1657,7 +1676,7 @@ fn deletePrecedingLfnEntries(
         const clus_lba = self.clusterToLba(clus);
         for (0..self.bpb.sec_per_clus) |sec| {
             const lba = clus_lba + sec;
-            try self.device.readBlocks(lba, &buf);
+            try self.readBlocks(lba, &buf);
 
             // Iterate over directory entries in the sector.
             for (clus2dirents(&buf), 0..) |ent, i| {
@@ -1720,10 +1739,10 @@ fn deletePrecedingLfnEntries(
 /// Mark the directory entry at `pos` as deleted.
 fn markPositionDeleted(self: *Self, pos: Position) fs.Error!void {
     var buf: [sector_size]u8 = undefined;
-    try self.device.readBlocks(pos.sector, &buf);
+    try self.readBlocks(pos.sector, &buf);
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
     ent.markDeleted();
-    try self.device.writeBlocks(pos.sector, &buf);
+    try self.writeBlocks(pos.sector, &buf);
 }
 
 /// Extract the stem part of a name for SFN.
@@ -1817,6 +1836,153 @@ const BpbInfo = struct {
         };
         @memcpy(&info.label, &bpb.vol_lab);
         return info;
+    }
+};
+
+// =============================================================
+// Sector cache
+// =============================================================
+
+/// Read blocks from the device into the given buffer.
+///
+/// When the requested size equals the sector size, cached I/O is used.
+fn readBlocks(self: *Self, lba: Lba, buf: []u8) fs.Error!void {
+    return if (buf.len == sector_size)
+        self.cache.read(self, lba, buf)
+    else
+        self.device.readBlocks(lba, buf);
+}
+
+/// Write blocks to the device from the given buffer.
+///
+/// When the provided data length equals the sector size, cached I/O is used.
+fn writeBlocks(self: *Self, lba: Lba, data: []const u8) fs.Error!void {
+    return if (data.len == sector_size)
+        self.cache.write(self, lba, data)
+    else
+        self.device.writeBlocks(lba, data);
+}
+
+/// Flush all cached sectors to the device.
+fn flushCache(self: *Self) void {
+    self.cache.flushAll(self);
+}
+
+/// Write-back cache for FAT sectors.
+const SectorCache = struct {
+    /// Number of cache slots.
+    ///
+    /// One slot caches a single sector.
+    const nslots = 64;
+
+    /// Cache entry slot type.
+    const Slot = struct {
+        /// Cached sector LBA.
+        lba: ?Lba = null,
+        /// Whether the buffered sector is dirty.
+        dirty: bool = false,
+        /// Timestamp at the last access.
+        stamp: u64 = 0,
+    };
+
+    /// Per-slot metadata.
+    slots: [nslots]Slot = [_]Slot{.{}} ** nslots,
+    /// Sector data for all cached entries.
+    data: []u8 = &.{},
+    /// Monotonic access counter.
+    clock: u64 = 0,
+
+    /// Read one sector at the given LBA into the given buffer.
+    ///
+    /// If the sector is cached, just returns the cached data.
+    /// If the sector is not cached, the sector is read from the device into the cache.
+    pub fn read(self: *SectorCache, fat32: *Self, lba: Lba, buf: []u8) fs.Error!void {
+        const index = self.find(lba) orelse blk: {
+            const slot = try self.reserve(fat32, lba);
+            fat32.device.readBlocks(lba, self.sector(slot)) catch |e| {
+                self.slots[slot].lba = null;
+                return e;
+            };
+            break :blk slot;
+        };
+        @memcpy(buf, self.sector(index));
+        self.touch(index);
+    }
+
+    /// Write one sector at the given LBA from the given buffer.
+    ///
+    /// If the sector is cached, it updates the cached data and marks it as dirty.
+    pub fn write(self: *SectorCache, fat32: *Self, lba: Lba, data: []const u8) fs.Error!void {
+        const i = self.find(lba) orelse try self.reserve(fat32, lba);
+        @memcpy(self.sector(i), data);
+        self.slots[i].dirty = true;
+        self.touch(i);
+    }
+
+    /// Flush all dirty cache slots to the device.
+    pub fn flushAll(self: *SectorCache, fat32: *Self) void {
+        for (&self.slots, 0..) |*s, i| {
+            if (!s.dirty) {
+                continue;
+            }
+            fat32.device.writeBlocks(
+                s.lba.?,
+                self.sector(i),
+            ) catch |e| {
+                log.err("failed to flush dirty cache: {t}", .{e});
+                continue; // keep it dirty
+            };
+            s.dirty = false;
+        }
+    }
+
+    /// Reserve a cache slot for the given LBA,
+    ///
+    /// When cache slots are full, the least-recently-used slot is evicted to the device.
+    /// Returns the index of the reserved cache slot.
+    fn reserve(self: *SectorCache, fat32: *Self, lba: Lba) fs.Error!usize {
+        var victim: usize = 0;
+        var oldest: u64 = std.math.maxInt(u64);
+        for (&self.slots, 0..) |*s, i| {
+            if (s.lba) |_| {
+                if (s.stamp < oldest) {
+                    oldest = s.stamp;
+                    victim = i;
+                }
+            } else {
+                victim = i;
+                break;
+            }
+        }
+
+        const slot = &self.slots[victim];
+        if (slot.dirty) {
+            try fat32.device.writeBlocks(
+                slot.lba.?,
+                self.sector(victim),
+            );
+            slot.dirty = false;
+        }
+        slot.lba = lba;
+        return victim;
+    }
+
+    /// Get a reference to the sector cache.
+    fn sector(self: *SectorCache, index: usize) []u8 {
+        return self.data[index * sector_size ..][0..sector_size];
+    }
+
+    /// Find a cache slot containing the sector with the given LBA.
+    fn find(self: *SectorCache, lba: Lba) ?usize {
+        for (&self.slots, 0..) |*s, i| {
+            if (s.lba == lba) return i;
+        } else return null;
+    }
+
+    /// Update the access timestamp for the given cache slot.
+    fn touch(self: *SectorCache, index: usize) void {
+        self.clock +%= 1;
+        self.slots[index].stamp = self.clock;
     }
 };
 
