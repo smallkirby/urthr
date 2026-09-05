@@ -63,6 +63,7 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
             .m_es = 0, // aarch64
             .f = false,
             .i = false,
+            .pan = true,
         })),
         .sp_el0 = 0,
         .tpidr_el0 = 0,

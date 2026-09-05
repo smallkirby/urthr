@@ -31,12 +31,50 @@ pub fn fixupFor(fault_pc: usize) ?usize {
     }
 }
 
+/// Whether FEAT_PAN is implemented and usable.
+export var pan_usable: u8 = 0;
+/// Whether support for PAN has been probed.
+var pan_probed: bool = false;
+
+/// Probe FEAT_PAN once and cache the result.
+pub fn probePan() void {
+    if (!pan_probed) {
+        @branchHint(.unlikely);
+        pan_probed = true;
+        pan_usable = @intFromBool(am.mrs(.id_aa64mmfr1_el1).pan != 0);
+    }
+
+    if (pan_usable == 0) {
+        return;
+    }
+
+    am.modifySreg(.sctlr_el1, .{ .span = false });
+    am.isb();
+    asm volatile ("msr PAN, #1" ::: .{ .memory = true });
+}
+
 /// Allow access to user-space memory by supervisor mode.
-///
-/// TODO: use PAN
-pub fn allowUserAccess() void {}
+pub fn allowUserAccess() void {
+    if (!pan_probed) {
+        @branchHint(.unlikely);
+        probePan();
+    }
+    if (pan_usable == 0) {
+        return;
+    }
+    asm volatile ("msr PAN, #0" ::: .{ .memory = true });
+}
 
 /// Disallow access to user-space memory by supervisor mode.
-///
-/// TODO: use PAN
-pub fn disallowUserAccess() void {}
+pub fn disallowUserAccess() void {
+    if (pan_usable == 0) {
+        return;
+    }
+    asm volatile ("msr PAN, #1" ::: .{ .memory = true });
+}
+
+// =============================================================
+// Imports
+// =============================================================
+
+const am = @import("asm.zig");

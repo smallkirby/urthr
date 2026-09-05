@@ -168,6 +168,7 @@ pub fn build(b: *std.Build) !void {
             .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
                 .strict_align,
                 .el3,
+                .pan,
             }),
             .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
                 .neon,
@@ -189,6 +190,7 @@ pub fn build(b: *std.Build) !void {
             .cpu_features_add = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
                 .strict_align,
                 .el3,
+                .pan,
             }),
             .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
                 .neon,

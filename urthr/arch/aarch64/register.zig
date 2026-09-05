@@ -34,6 +34,7 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     .{ .far_el3, Far },
     .{ .hcr_el2, HcrEl2 },
     .{ .id_aa64mmfr0_el1, IdAa64Mmfr0 },
+    .{ .id_aa64mmfr1_el1, IdAa64Mmfr1 },
     .{ .mair_el1, Mair },
     .{ .mpidr_el1, Mpidr },
     .{ .pfar_el1, Pfar },
@@ -644,6 +645,44 @@ pub const IdAa64Mmfr0 = packed struct(u64) {
         /// 56 bits, 64PB
         bits_56 = 0b1111,
     };
+};
+
+/// ID_AA64MMFR1_ELn.
+///
+/// Aarch64 Memory Model Feature Register 1.
+pub const IdAa64Mmfr1 = packed struct(u64) {
+    /// Hardware updates to Access flag and Dirty state in translation tables.
+    hafdbs: u4,
+    /// Number of VMID bits.
+    vmidbits: u4,
+    /// Virtualization Host Extensions.
+    vh: u4,
+    /// Hierarchical Permission Disables.
+    hpds: u4,
+    /// LORegions.
+    lo: u4,
+    /// Privileged Access Never.
+    pan: u4,
+    /// Whether PE can generate SError exceptions from speculative reads of memory.
+    specsei: u4,
+    /// Execute-never control distinction by stage 2.
+    xnx: u4,
+    /// Configurable delayed trapping of WFE.
+    twed: u4,
+    /// Enhanced Translation Synchronization.
+    ets: u4,
+    /// Hypervisor extended instructions.
+    hcx: u4,
+    /// AFP.
+    afp: u4,
+    /// nTLBPA.
+    ntlbpa: u4,
+    /// TIDCP1.
+    tidcp1: u4,
+    /// CMOW.
+    cmow: u4,
+    /// ECBHB.
+    ecbhb: u4,
 };
 
 /// MAIR_ELx.

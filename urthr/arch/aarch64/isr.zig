@@ -276,22 +276,40 @@ fn handleDataAbortKernel(ctx: *Context) void {
     const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
     const far = am.mrsi(.far_el1);
 
-    if (pagefault_handler) |pf| {
-        if (pf(
-            far,
-            if (iss.wnr == .write) .write else .read,
-            false,
-        )) {
+    // PAN violation is unrecoverable.
+    const spsr: regs.Spsr = @bitCast(ctx.pstate);
+    const pan_violation =
+        spsr.pan and
+        isPermissionFault(iss.dfsc) and
+        uaccess.fixupFor(ctx.pc) == null;
+
+    // Handle recoverable page faults.
+    if (!pan_violation) {
+        if (pagefault_handler) |pf| {
+            if (pf(
+                far,
+                if (iss.wnr == .write) .write else .read,
+                false,
+            )) {
+                return;
+            }
+        }
+
+        if (uaccess.fixupFor(ctx.pc)) |fixup| {
+            ctx.pc = fixup;
             return;
         }
     }
 
-    if (uaccess.fixupFor(ctx.pc)) |fixup| {
-        ctx.pc = fixup;
-        return;
-    }
-
     return defaultHandler(ctx, "Synchronous, Current EL, SP_ELx (Data Abort)");
+}
+
+/// Whether the given data abort fault status code denotes a permission fault.
+fn isPermissionFault(dfsc: regs.Esr.Dfsc) bool {
+    return switch (dfsc) {
+        .perm_lvl0, .perm_lvl1, .perm_lvl2, .perm_lvl3 => true,
+        else => false,
+    };
 }
 
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {

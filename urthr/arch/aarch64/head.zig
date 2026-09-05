@@ -11,6 +11,11 @@ export fn setupEl1() callconv(.c) void {
     var cpacr = am.mrs(.cpacr_el1);
     cpacr.fpen = 0b11; // Enable FP/SIMD at EL0 and EL1.
     am.msr(.cpacr_el1, cpacr);
+
+    // Enable PAN.
+    uaccess.probePan();
+
+    am.isb();
 }
 
 // =============================================================
@@ -18,3 +23,4 @@ export fn setupEl1() callconv(.c) void {
 // =============================================================
 
 const am = @import("asm.zig");
+const uaccess = @import("uaccess.zig");
