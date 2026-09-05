@@ -323,6 +323,13 @@ fn ensureDataCapacity(self: *Self, size: usize) Error!void {
     rtt.expect(self.lock.isLocked());
     if (size <= self.bufs.data_cap) return;
 
+    const new = std.mem.alignForward(
+        usize,
+        size,
+        DmaAllocator.page_size,
+    );
+    const new_mem = try self.dma.allocBytes(new, .normal);
+
     if (self.bufs.data_cap > 0) {
         self.dma.freeBytes(.{
             .cpu = self.bufs.data.cpu,
@@ -331,12 +338,7 @@ fn ensureDataCapacity(self: *Self, size: usize) Error!void {
         });
     }
 
-    const new = std.mem.alignForward(
-        usize,
-        size,
-        DmaAllocator.page_size,
-    );
-    self.bufs.data = try self.dma.allocBytes(new, .normal);
+    self.bufs.data = new_mem;
     self.bufs.data_cap = new;
 }
 
