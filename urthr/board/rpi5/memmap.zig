@@ -29,7 +29,7 @@ pub const loader = 0x008_0000;
 ///
 /// Kernel can use the region after it ensures that the region is free.
 pub const loader_reserved = Range{
-    .start = kernel - 0x10_0000,
+    .start = kernel - 0x8_0000,
     .end = kernel,
 };
 
