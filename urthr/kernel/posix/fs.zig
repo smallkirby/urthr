@@ -1378,17 +1378,18 @@ pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
     var consumed: usize = 0;
     var iter = file.iterator() catch return .err(.again);
     while (true) {
+        const resume_offset = iter.offset;
         const ent = (iter.next(allocator) catch return .err(.again)) orelse break;
         defer ent.deinit(allocator);
 
         const dent_size = DirEnt64.calcSize(ent.name);
-        if (count - consumed < dent_size) {
-            if (consumed == 0)
-                return .err(.inval)
+        if (count - consumed < dent_size or dent_size > dbuf.len) {
+            file.offset = resume_offset;
+            return if (consumed == 0)
+                .err(.inval)
             else
-                break;
+                .success(@bitCast(consumed));
         }
-        if (dent_size > dbuf.len) return .err(.inval);
 
         DirEnt64.createCopy(
             ent.inum,
@@ -1397,6 +1398,7 @@ pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
             dbuf[0..dent_size],
         );
         urd.uaccess.copyToUser(uaddr + consumed, dbuf[0..dent_size]) catch {
+            file.offset = resume_offset;
             return if (consumed == 0)
                 .err(.fault)
             else

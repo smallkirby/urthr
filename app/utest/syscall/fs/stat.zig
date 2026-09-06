@@ -364,6 +364,75 @@ test "getdents64 can find myself in /bin" {
     try testing.expect(saw_utest);
 }
 
+test "getdents64 with small buffer" {
+    const init = utest.getInit();
+
+    const dir_path = Test.base_dir ++ "gdrefill";
+    _ = linux.unlinkat(linux.AT.FDCWD, dir_path, linux.AT.REMOVEDIR);
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.mkdirat(
+        linux.AT.FDCWD,
+        dir_path,
+        0o755,
+    )));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, dir_path, linux.AT.REMOVEDIR);
+
+    var dir = try std.Io.Dir.openDirAbsolute(init.io, dir_path, .{});
+    defer dir.close(init.io);
+    const dfd: i32 = @intCast(dir.handle);
+
+    // Create files
+    const nfiles = 32;
+    for (0..nfiles) |i| {
+        var nbuf: [8]u8 = undefined;
+        const name = std.fmt.bufPrintZ(&nbuf, "g{d}", .{i}) catch unreachable;
+        const fd = linux.openat(dfd, name, .{
+            .ACCMODE = .WRONLY,
+            .CREAT = true,
+            .EXCL = true,
+        }, 0o644);
+        try testing.expectEqual(.SUCCESS, linux.errno(fd));
+        _ = linux.close(@intCast(fd));
+    }
+    defer for (0..nfiles) |i| {
+        var nbuf: [8]u8 = undefined;
+        const name = std.fmt.bufPrintZ(&nbuf, "g{d}", .{i}) catch unreachable;
+        _ = linux.unlinkat(dfd, name, 0);
+    };
+
+    // Iterate with a small buffer.
+    var iterdir = try std.Io.Dir.openDirAbsolute(init.io, dir_path, .{
+        .iterate = true,
+    });
+    defer iterdir.close(init.io);
+
+    var seen = [_]bool{false} ** nfiles;
+    var buf: [96]u8 = undefined;
+    while (true) {
+        const n = linux.getdents64(@intCast(iterdir.handle), &buf, buf.len);
+        try testing.expectEqual(.SUCCESS, linux.errno(n));
+        if (n == 0) break;
+
+        var off: usize = 0;
+        while (off < n) {
+            const reclen = std.mem.readInt(u16, buf[off + 16 ..][0..2], .little);
+            const name = std.mem.sliceTo(buf[off + 19 ..], 0);
+            if (name.len >= 2 and name[0] == 'g') {
+                const idx = std.fmt.parseInt(usize, name[1..], 10) catch unreachable;
+                try testing.expect(idx < nfiles);
+                try testing.expect(!seen[idx]); // never reported twice
+                seen[idx] = true;
+            }
+            off += reclen;
+        }
+    }
+
+    // Verify that all created files were seen.
+    for (seen, 0..) |ok, i| {
+        if (!ok) std.log.err("getdents64 dropped entry g{d}", .{i});
+        try testing.expect(ok);
+    }
+}
+
 const Stat = switch (builtin.cpu.arch) {
     .aarch64 => extern struct {
         /// Device ID.
