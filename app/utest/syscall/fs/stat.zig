@@ -433,6 +433,87 @@ test "getdents64 with small buffer" {
     }
 }
 
+test "getdents64 re-reads from the start after lseek to 0" {
+    const init = utest.getInit();
+
+    const dir_path = Test.base_dir ++ "gdseek";
+    _ = linux.unlinkat(linux.AT.FDCWD, dir_path, linux.AT.REMOVEDIR);
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.mkdirat(
+        linux.AT.FDCWD,
+        dir_path,
+        0o755,
+    )));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, dir_path, linux.AT.REMOVEDIR);
+
+    var dir = try std.Io.Dir.openDirAbsolute(init.io, dir_path, .{});
+    defer dir.close(init.io);
+    const dfd: i32 = @intCast(dir.handle);
+
+    // Create `nfiles` regular files in the directory.
+    const nfiles = 32;
+    for (0..nfiles) |i| {
+        var nbuf: [8]u8 = undefined;
+        const name = std.fmt.bufPrintZ(&nbuf, "h{d}", .{i}) catch unreachable;
+        const fd = linux.openat(dfd, name, .{
+            .ACCMODE = .WRONLY,
+            .CREAT = true,
+            .EXCL = true,
+        }, 0o644);
+        try testing.expectEqual(.SUCCESS, linux.errno(fd));
+        _ = linux.close(@intCast(fd));
+    }
+    defer for (0..nfiles) |i| {
+        var nbuf: [8]u8 = undefined;
+        const name = std.fmt.bufPrintZ(&nbuf, "h{d}", .{i}) catch unreachable;
+        _ = linux.unlinkat(dfd, name, 0);
+    };
+
+    var iterdir = try std.Io.Dir.openDirAbsolute(init.io, dir_path, .{
+        .iterate = true,
+    });
+    defer iterdir.close(init.io);
+    const ifd: i32 = @intCast(iterdir.handle);
+
+    // Partially consume the stream with a small buffer.
+    var small: [96]u8 = undefined;
+    const first = linux.getdents64(ifd, &small, small.len);
+    try testing.expectEqual(.SUCCESS, linux.errno(first));
+    try testing.expect(first > 0);
+
+    // Rewind the directory stream to the beginning.
+    try testing.expectEqual(@as(usize, 0), linux.lseek(
+        ifd,
+        0,
+        linux.SEEK.SET,
+    ));
+
+    // A full scan after the rewind must still report every entry.
+    var seen = [_]bool{false} ** nfiles;
+    var buf: [512]u8 = undefined;
+    while (true) {
+        const n = linux.getdents64(ifd, &buf, buf.len);
+        try testing.expectEqual(.SUCCESS, linux.errno(n));
+        if (n == 0) break;
+
+        var off: usize = 0;
+        while (off < n) {
+            const reclen = std.mem.readInt(u16, buf[off + 16 ..][0..2], .little);
+            const name = std.mem.sliceTo(buf[off + 19 ..], 0);
+            if (name.len >= 2 and name[0] == 'h') {
+                const idx = std.fmt.parseInt(usize, name[1..], 10) catch unreachable;
+                try testing.expect(idx < nfiles);
+                try testing.expect(!seen[idx]);
+                seen[idx] = true;
+            }
+            off += reclen;
+        }
+    }
+    for (seen, 0..) |ok, i| {
+        if (!ok) std.log.err("getdents64 dropped entry h{d} after rewind", .{i});
+        try testing.expect(ok);
+    }
+}
+
 const Stat = switch (builtin.cpu.arch) {
     .aarch64 => extern struct {
         /// Device ID.

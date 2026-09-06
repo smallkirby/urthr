@@ -780,6 +780,16 @@ const ClsOff = struct {
     file_offset: u64,
 };
 
+/// Saved position within a directory entry stream.
+const DirCursor = struct {
+    /// Total bytes consumed from the start of the directory stream.
+    consumed: usize,
+    /// Cluster the next entry starts in.
+    cluster: Cluster,
+    /// Byte offset of the next entry within `cluster`.
+    offset: usize,
+};
+
 const FileImpl = struct {
     /// FAT32 filesystem this file belongs to.
     fat32: *Self,
@@ -787,6 +797,8 @@ const FileImpl = struct {
     start_cluster: Cluster,
     /// Cache of the cluster accessed by the most recent read or write.
     cache: ?ClsOff = null,
+    /// Cached directory-stream cursor for sequential iteration.
+    dcursor: ?DirCursor = null,
 
     pub fn from(file: *fs.File) *FileImpl {
         return @ptrCast(@alignCast(file.ctx));
@@ -839,6 +851,7 @@ fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
 /// Get the next file entry in a directory file.
 fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
     const file = iter.file;
+    const ctx = FileImpl.from(file);
     const inode = InodeImpl.from(file.path.dentry.inode);
     const fat32 = inode.fat32;
 
@@ -849,12 +862,28 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
         .fat32 = fat32,
         .cluster = inode.cluster,
     };
-    diter.seek(iter.offset, allocator) catch return null;
+
+    // Resume from the cached cursor.
+    if (ctx.dcursor) |c| {
+        if (c.consumed == iter.offset) {
+            diter.cluster = c.cluster;
+            diter.offset = c.offset;
+            diter.consumed = c.consumed;
+        }
+    }
+    if (diter.consumed != iter.offset) {
+        diter.seek(iter.offset, allocator) catch return null;
+    }
 
     if (try diter.next(allocator)) |result| {
         defer result.deinit(allocator);
 
         iter.offset = diter.consumed;
+        ctx.dcursor = .{
+            .consumed = diter.consumed,
+            .cluster = diter.cluster,
+            .offset = diter.offset,
+        };
         return .{
             .name = try allocator.dupe(u8, result.name),
             .inum = result.pos.toInodeNumber(),
