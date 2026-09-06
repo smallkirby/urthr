@@ -170,6 +170,42 @@ test "an anonymous private mapping is zero-filled on first access" {
     }
 }
 
+test "a large anonymous mapping" {
+    const len = 64 * 1024 * 1024;
+    const page_size = 0x1000;
+
+    const ret = mem.mmap(
+        0,
+        len,
+        mem.PROT_READ | mem.PROT_WRITE,
+        mem.MAP_PRIVATE | mem.MAP_ANONYMOUS,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.munmap(@ptrFromInt(ret), len);
+
+    // Every page must be zero-filled on first access.
+    const ptr: [*]volatile u8 = @ptrFromInt(ret);
+    var current: usize = 0;
+    while (current * page_size < len) : (current += 1) {
+        const off = current * page_size;
+        try testing.expectEqual(0, ptr[off]);
+    }
+
+    // Check if the written data is correctly stored in each page.
+    current = 0;
+    while (current * page_size < len) : (current += 1) {
+        ptr[current * page_size] = @truncate(current);
+    }
+    current = 0;
+    while (current * page_size < len) : (current += 1) {
+        const off = current * page_size;
+        const want: u8 = @truncate(current);
+        if (ptr[off] != want) {
+            try testing.expectEqual(want, ptr[off]);
+        }
+    }
+}
+
 test "accessing an address outside of any mapping raises SIGSEGV" {
     try utest.expectRunChildSignaled(linux.SIG.SEGV, 0, struct {
         pub fn lambda(addr: usize) noreturn {

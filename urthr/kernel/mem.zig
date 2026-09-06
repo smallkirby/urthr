@@ -105,16 +105,29 @@ pub fn initAllocators() Error!void {
     // Page allocator.
     const kphys = board.getKernelPaddr();
     const avails = board.getDramRegion();
-    var reserveds = [_]Range{
+    {
+        var rcount: usize = 0;
+        var reserveds: [10]Range = undefined;
+
         // Kernel image
-        .{
+        reserveds[rcount] = .{
             .start = kphys,
             .end = kphys + kernelSize(),
-        },
+        };
+        rcount += 1;
         // Early allocator region
-        boot.getUsedRegion(),
-    };
-    buddy_impl.init(avails, &reserveds, log.debug);
+        reserveds[rcount] = boot.getUsedRegion();
+        rcount += 1;
+        // Board-specific temporary map.
+        for (board.getNormalTempMaps()) |range| {
+            reserveds[rcount] = range;
+            rcount += 1;
+        }
+
+        rtt.expect(rcount <= reserveds.len);
+
+        buddy_impl.init(avails, reserveds[0..rcount], log.debug);
+    }
 
     // Update page table virtual address.
     arch.mmu.relocate(&init_as, page);
