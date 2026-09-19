@@ -2,6 +2,7 @@
 
 pub const CondVar = @import("sync/CondVar.zig");
 pub const Event = @import("sync/Event.zig");
+pub const futex = @import("sync/futex.zig");
 pub const Mutex = @import("sync/Mutex.zig");
 pub const SpinLock = @import("sync/SpinLock.zig");
 

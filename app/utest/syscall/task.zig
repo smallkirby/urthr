@@ -22,6 +22,7 @@ comptime {
     _ = @import("task/clone.zig");
     _ = @import("task/exit.zig");
     _ = @import("task/fork.zig");
+    _ = @import("task/futex.zig");
     _ = @import("task/getpid.zig");
     _ = @import("task/gettid.zig");
     _ = @import("task/getuid.zig");
