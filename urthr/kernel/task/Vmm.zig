@@ -119,7 +119,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
         while (offset < vma.size) : (offset += urd.mem.page_size) {
             const va = vma.start + offset;
             const parent_pa = arch.mmu.translateWalk(
-                self.as.select(va),
+                self.as,
                 va,
                 urd.mem.page,
             ) orelse continue; // if not mapped, just continue.
@@ -304,7 +304,7 @@ pub fn faultIn(self: *Self, va: usize, access: common.mem.AccessType) Error!void
 
     // Already backed.
     if (arch.mmu.translateWalk(
-        self.as.select(page_va),
+        self.as,
         page_va,
         urd.mem.page,
     )) |pa| return switch (access) {
@@ -411,7 +411,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
     for (0..size / urd.mem.page_size) |i| {
         const va = vaddr + i * urd.mem.page_size;
         const pa = arch.mmu.translateWalk(
-            self.as.select(va),
+            self.as,
             va,
             urd.mem.page,
         ) orelse {
@@ -519,7 +519,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
 
         // If this page is shared by COW, keep it write-protected.
         const pa = arch.mmu.translateWalk(
-            self.as.select(va),
+            self.as,
             va,
             urd.mem.page,
         );
