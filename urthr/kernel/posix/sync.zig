@@ -6,7 +6,8 @@ pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _
         return .err(.fault);
     }
 
-    switch (op) {
+    // TODO: should handle private flag.
+    switch (op.command()) {
         .wait => {
             const utimeout = if (timeout) |t| blk: {
                 const ts = uaccess.getUser(Timespec, t) catch return .err(.fault);
@@ -43,10 +44,14 @@ pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _
             return .success(@intCast(woken));
         },
 
-        _ => return .err(.nosys),
+        _ => {
+            std.log.err("Unsupported futex operation: {d}", .{op});
+            @panic("Unsupported futex operation");
+        },
     }
 }
 
+/// Futex operation, might be coupled with private flag.
 const FutexOp = enum(i32) {
     /// Atomically verifies that the futex address still caintains the value,
     /// and sleeps awaiting a wakeup event on this futex address.
@@ -55,6 +60,17 @@ const FutexOp = enum(i32) {
     wake = 1,
 
     _,
+
+    const command_mask = 0x7F;
+    const private_flag = 0x80;
+
+    pub fn isPrivate(self: FutexOp) bool {
+        return (@intFromEnum(self) & private_flag) != 0;
+    }
+
+    pub fn command(self: FutexOp) FutexOp {
+        return @enumFromInt(@intFromEnum(self) & command_mask);
+    }
 };
 
 // =============================================================
