@@ -16,7 +16,7 @@ pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _
 
             const woken = sync.futex.wait(
                 @intFromPtr(uaddr),
-                @intCast(val),
+                @as(u32, @bitCast(val)),
                 current.vmm,
                 utimeout,
             ) catch |e| return switch (e) {
@@ -33,7 +33,7 @@ pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _
             const woken = sync.futex.wake(
                 @intFromPtr(uaddr),
                 current.vmm,
-                @intCast(val),
+                @as(u32, @bitCast(val)),
             ) catch |e| return switch (e) {
                 error.InvalidAddress => .err(.inval),
                 error.OutOfMemory => .err(.nomem),
