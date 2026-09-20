@@ -44,7 +44,6 @@ const WaitOptions = packed struct(u32) {
 /// syscall: clone
 pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp: usize, tls: usize) ReturnType {
     _ = parent_tidp;
-    _ = child_tidp;
     _ = tls;
 
     if (flags.fs) urd.unimplemented("clone: share FS");
@@ -61,6 +60,10 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
         .suspend_parent = flags.vfork,
         .thread = flags.thread,
         .sighand = flags.sighand,
+        .child_tidp = if (flags.child_clear_tid and child_tidp != 0)
+            @as(*u32, @ptrFromInt(child_tidp))
+        else
+            null,
     });
     const child = task.clone(
         ch_flags,
@@ -117,7 +120,11 @@ const CloneFlags = packed struct(u64) {
     /// Have the same thread group.
     thread: bool,
     /// Reserved.
-    _17: u47 = 0,
+    _17: u4 = 0,
+    /// Clear and futex-wake the word when the child exits.
+    child_clear_tid: bool,
+    /// Reserved.
+    _22: u42 = 0,
 };
 
 /// syscall: execve
@@ -204,8 +211,14 @@ pub fn sysExecve(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: 
 }
 
 /// syscall: set_tid_address
-pub fn sysSetTidAddress(_: usize) ReturnType {
-    return .err(.nosys);
+pub fn sysSetTidAddress(tidptr: usize) ReturnType {
+    const cur = sched.getCurrent();
+    cur.clear_child_tid = if (tidptr == 0)
+        null
+    else
+        @ptrFromInt(tidptr);
+
+    return .success(@intCast(cur.id));
 }
 
 /// syscall: arch_prctl

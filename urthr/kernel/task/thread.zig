@@ -19,6 +19,8 @@ pub const Thread = struct {
     /// Completion to signal on exit or execve when created by a vfork.
     vfork_done: ?*VforkWaiter = null,
 
+    /// User address to clear and futex-wake on exit.
+    clear_child_tid: ?*u32 = null,
     /// Signal handling state.
     sigstate: signal.State,
 

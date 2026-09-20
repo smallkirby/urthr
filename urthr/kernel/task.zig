@@ -286,7 +286,7 @@ pub fn enterUser(
 }
 
 /// Flags for thread cloning.
-pub const CloneFlags = packed struct {
+pub const CloneFlags = struct {
     /// Shares the same address space.
     vm: bool,
     /// Suspend the parent thread until the child thread exits.
@@ -295,6 +295,8 @@ pub const CloneFlags = packed struct {
     thread: bool,
     /// Shares the signal handler table with the caller.
     sighand: bool,
+    /// User address to be cleared and futex-woken when the child exits.
+    child_tidp: ?*u32 = null,
 };
 
 /// Clone the current thread.
@@ -388,6 +390,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .group = group,
             .vfork_done = if (flags.suspend_parent) &vforkw else null,
             .parent = if (flags.thread) null else cur.group.ref(),
+            .clear_child_tid = if (flags.child_tidp) |p| p else null,
         };
         group.addMember(th);
         if (!flags.thread) {
@@ -427,6 +430,12 @@ pub fn exit(status: thread.ExitStatus) noreturn {
         } else {
             @panic("Init process exited.");
         }
+    }
+
+    // Clear and futex-wake at the specified address.
+    if (cur.clear_child_tid) |ctid| {
+        urd.uaccess.putUser(u32, ctid, 0) catch {};
+        _ = urd.sync.futex.wake(@intFromPtr(ctid), cur.vmm, 1) catch {};
     }
 
     // Release thread resources.
