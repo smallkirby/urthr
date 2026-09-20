@@ -153,6 +153,9 @@ pub fn markDying(self: *Self, status: thread.ExitStatus) void {
     defer self._lock.unlockRestoreIrq(ie);
     self._dying = true;
     self._exit_status = status;
+
+    var it = self._members.iter();
+    while (it.next()) |th| sched.wake(th);
 }
 
 /// Get the exit status for this group if it is marked dying.
@@ -179,6 +182,7 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const typing = common.typing;
 const urd = @import("urthr");
+const sched = urd.sched;
 const SpinLock = urd.sync.SpinLock;
 const CondVar = urd.sync.CondVar;
 const thread = @import("thread.zig");
