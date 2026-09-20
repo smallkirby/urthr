@@ -77,6 +77,8 @@ pub const ErrorEnum = enum(i64) {
     eafnosupport = -97,
     /// Address already in use.
     addrinuse = -98,
+    /// Operation timed out.
+    timedout = -110,
     /// Connection refused.
     econnrefused = -111,
 };

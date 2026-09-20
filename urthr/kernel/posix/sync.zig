@@ -14,7 +14,7 @@ pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _
                 break :blk cur + @as(u64, @intCast(ts.sec * std.time.ns_per_s + ts.nsec));
             } else null;
 
-            sync.futex.wait(
+            const woken = sync.futex.wait(
                 @intFromPtr(uaddr),
                 @intCast(val),
                 current.vmm,
@@ -24,6 +24,7 @@ pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _
                 error.OutOfMemory => .err(.nomem),
                 error.NotExpected => .err(.again),
             };
+            if (!woken) return .err(.timedout);
 
             return .success(0);
         },
