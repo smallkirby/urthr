@@ -39,6 +39,14 @@ pub const Ops = struct {
     /// null if the filesystem does not support symbolic links.
     symlink: ?*const fn (dir: *Inode, name: []const u8, target: []const u8, allocator: Allocator) Error!*Inode = null,
 
+    /// Read the target of a symbolic link into the buffer.
+    /// If the buffer is too small to hold the entire content, the content is implicitly truncated.
+    ///
+    /// Returns the number of bytes written to the buffer.
+    ///
+    /// null if the filesystem does not support symbolic links.
+    readlink: ?*const fn (inode: *Inode, buf: []u8) Error!usize = null,
+
     /// Change a permission of the file.
     ///
     /// null if the filesystem does not support changing permission.
@@ -223,6 +231,20 @@ pub fn symlink(self: *Self, name: []const u8, target: []const u8, allocator: All
         );
         if (inode.times.none()) inode.times = .now();
         return inode;
+    } else {
+        return Error.Unsupported;
+    }
+}
+
+/// Read the target of this symbolic link into the buffer.
+/// If the buffer is too small to hold the entire content, the content is implicitly truncated.
+///
+/// Returns the number of bytes written to the buffer.
+pub fn readlink(self: *Self, buf: []u8) Error!usize {
+    if (self.ftype != .symlink) return Error.InvalidArgument;
+
+    if (self.iops.readlink) |f| {
+        return f(self, buf);
     } else {
         return Error.Unsupported;
     }

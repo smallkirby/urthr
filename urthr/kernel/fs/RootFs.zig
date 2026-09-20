@@ -72,6 +72,7 @@ const inode_vtable = fs.Inode.Ops{
     .lookup = &ilookup,
     .create = &icreate,
     .symlink = &isymlink,
+    .readlink = &ireadlink,
     .deinit = &ideinit,
 };
 
@@ -159,6 +160,16 @@ fn isymlink(dir: *fs.Inode, name: []const u8, target: []const u8, allocator: All
     self.entry_count += 1;
 
     return &inode.common;
+}
+
+/// readlink implementation.
+fn ireadlink(inode: *fs.Inode, buf: []u8) fs.Error!usize {
+    const ctx = InodeImpl.from(inode);
+    const target = ctx.symlink_target orelse return fs.Error.InvalidArgument;
+
+    const n = @min(target.len, buf.len);
+    @memcpy(buf[0..n], target[0..n]);
+    return n;
 }
 
 /// Lookup an inode by its name in the root directory.

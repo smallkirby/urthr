@@ -487,6 +487,37 @@ pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
     return path;
 }
 
+/// Read the target of a symbolic link at the specified path into the buffer.
+///
+/// If the buffer is too small, the content is implicitly truncated.
+///
+/// Returns the number of bytes written to the buffer.
+pub fn readlink(s: []const u8, buf: []u8, allocator: Allocator) Error!usize {
+    const path = try resolvePath(
+        sched.getCurrent().fs.cwd,
+        s,
+        allocator,
+    );
+    return path.dentry.inode.readlink(buf);
+}
+
+/// Read the target of a symbolic link relative to the given directory into the buffer.
+///
+/// If the buffer is too small, the content is implicitly truncated.
+///
+/// Returns the number of bytes written to the buffer.
+pub fn readlinkAt(dir: Path, s: []const u8, buf: []u8, allocator: Allocator) Error!usize {
+    if (std.fs.path.isAbsolute(s)) {
+        return Error.InvalidArgument;
+    }
+    if (dir.dentry.inode.ftype != .directory) {
+        return Error.NotDirectory;
+    }
+
+    const path = try resolvePath(dir, s, allocator);
+    return path.dentry.inode.readlink(buf);
+}
+
 /// Build the absolute path string for a given Path.
 ///
 /// Caller must free the returned slice after use.

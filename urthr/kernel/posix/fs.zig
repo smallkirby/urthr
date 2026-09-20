@@ -749,6 +749,38 @@ pub fn sysSymlink(target: [*:0]const u8, linkpath: [*:0]const u8) ReturnType {
 }
 
 // =============================================================
+// Readlink
+// =============================================================
+
+/// syscall: readlinkat
+pub fn sysReadLinkAt(dirfd: usize, pathname: [*:0]const u8, buf: usize, bufsize: usize) ReturnType {
+    const allocator = urd.mem.bin;
+    var pbuf: [path_max]u8 = undefined;
+    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
+
+    var tbuf: [path_max]u8 = undefined;
+    const n = readlinkFileAt(
+        dirfd,
+        s,
+        &tbuf,
+        allocator,
+    ) catch |err| return switch (err) {
+        urd.fs.Error.Unsupported => .err(.perm),
+        else => mapOpenError(err),
+    };
+
+    const copy_len = @min(n, bufsize);
+    urd.uaccess.copyToUser(buf, tbuf[0..copy_len]) catch return .err(.fault);
+
+    return .success(@bitCast(copy_len));
+}
+
+/// syscall: readlink
+pub fn sysReadLink(pathname: [*:0]const u8, buf: usize, bufsiz: usize) ReturnType {
+    return sysReadLinkAt(cwd_fd, pathname, buf, bufsiz);
+}
+
+// =============================================================
 // Rename
 // =============================================================
 
@@ -2235,6 +2267,29 @@ fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocat
         };
 
         return urd.fs.symlinkAt(dir.path, pathname, target, allocator);
+    }
+}
+
+/// Read the target of a symbolic link at the specified path, relative to the given directory file descriptor, into `buf`.
+fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!usize {
+    // Check if pathname is relative or absolute.
+    if (std.fs.path.isAbsolute(pathname)) {
+        // Absolute path. Ignore directory.
+        return urd.fs.readlink(pathname, buf, allocator);
+    } else if (dirfd == cwd_fd) {
+        // Relative to CWD.
+        const cur = sched.getCurrent();
+        return urd.fs.readlinkAt(cur.fs.cwd, pathname, buf, allocator);
+    } else {
+        // Relative to dirfd.
+        const cur = sched.getCurrent();
+        const dir = cur.fs.fdtbl.get(dirfd) catch {
+            return error.BadFileDescriptor;
+        } orelse {
+            return error.BadFileDescriptor;
+        };
+
+        return urd.fs.readlinkAt(dir.path, pathname, buf, allocator);
     }
 }
 
