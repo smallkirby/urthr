@@ -11,11 +11,6 @@ waiters: Waiter.List = .{},
 /// Set when the event is signaled but no thread was waiting.
 signaled: bool = false,
 
-/// Initialize event subsystem.
-pub fn init() void {
-    spawnChecker();
-}
-
 /// Block until this event is signaled or the deadline expires.
 ///
 /// Returns true if the event was signaled, false if the deadline expired.
@@ -46,23 +41,34 @@ pub fn waitAny(events: []const *Self, deadline_ns: ?u64) ?*Self {
     if (deadline_ns) |dl| {
         rtt.expect(events.len < max_multiwait);
 
-        var timer_event: Self = .{};
-        var timer_entry: DeadlineWaiter = .{
-            .event = &timer_event,
+        var timer: TimerEvent = .{ .deadline = .{
             .deadline_ns = dl,
-        };
-        registerDeadline(&timer_entry);
-        defer cancelDeadline(&timer_entry);
+            .callback = wakeTimerEvent,
+        } };
+        time.scheduleDeadline(&timer.deadline);
+        defer time.cancelDeadline(&timer.deadline);
 
         var all_events: [max_multiwait]*Self = undefined;
         @memcpy(all_events[0..events.len], events);
-        all_events[events.len] = &timer_event;
+        all_events[events.len] = &timer.event;
 
         const fired = waitAnyImpl(all_events[0 .. events.len + 1]);
-        return if (fired == &timer_event) null else fired;
+        return if (fired == &timer.event) null else fired;
     } else {
         return waitAnyImpl(events);
     }
+}
+
+/// Event paired with its deadline.
+const TimerEvent = struct {
+    event: Self = .{},
+    deadline: time.Deadline = undefined,
+};
+
+/// Wake the timer event paired with the given deadline.
+fn wakeTimerEvent(entry: *time.Deadline) void {
+    const timer: *TimerEvent = @fieldParentPtr("deadline", entry);
+    _ = timer.event.wake();
 }
 
 /// Block until any of the given events is signaled.
@@ -168,82 +174,6 @@ pub fn wakeAll(self: *Self) void {
     if (!woke_any) {
         // No live waiter was woken.
         self.signaled = true;
-    }
-}
-
-// =============================================================
-// Timeout handlers
-// =============================================================
-
-/// Entry for waking an Event after a deadline expires.
-///
-/// Allocated by the caller and must remain valid until cancelled or fired.
-const DeadlineWaiter = struct {
-    /// Event to wake when the deadline expires.
-    event: *Self,
-    /// Deadline in nanoseconds.
-    deadline_ns: u64,
-    /// Indicates if the deadline has already fired.
-    fired: bool = false,
-    /// List head.
-    _head: List.Head = .{},
-
-    const List = typing.InlineDoublyLinkedList(DeadlineWaiter, "_head");
-};
-
-/// Queue of pending deadline wake entries.
-var dq: DeadlineWaiter.List = .{};
-/// Spin lock protecting the deadline queue.
-var dlock: SpinLock = .{};
-
-/// Register an entry to wake its Event when the deadline expires.
-fn registerDeadline(entry: *DeadlineWaiter) void {
-    const ie = dlock.lockDisableIrq();
-    defer dlock.unlockRestoreIrq(ie);
-    dq.append(entry);
-}
-
-/// Cancel a previously registered deadline entry.
-///
-/// Safe to call even if already fired.
-fn cancelDeadline(entry: *DeadlineWaiter) void {
-    const ie = dlock.lockDisableIrq();
-    defer dlock.unlockRestoreIrq(ie);
-
-    if (!entry.fired) {
-        dq.remove(entry);
-        entry.fired = true;
-    }
-}
-
-/// Interval for checking event deadlines in microseconds.
-const deadline_check_interval_us: u64 = 10 * std.time.us_per_ms;
-
-/// Register the deadline checker as a periodic timer callback.
-fn spawnChecker() void {
-    _ = time.register(
-        deadline_check_interval_us,
-        &checkDeadlines,
-    ) catch {
-        @panic("Failed to register Event deadline checker.");
-    };
-}
-
-/// Wake all events whose deadline has passed.
-///
-/// Runs as a periodic timer callback in IRQ context.
-fn checkDeadlines() void {
-    const now_ns = time.getCurrentTimestamp();
-    const ie = dlock.lockDisableIrq();
-    defer dlock.unlockRestoreIrq(ie);
-
-    var iter = dq.iter();
-    while (iter.next()) |entry| {
-        if (now_ns >= entry.deadline_ns) {
-            dq.remove(entry);
-            entry.fired = true;
-            _ = entry.event.wake();
-        }
     }
 }
 

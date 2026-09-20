@@ -24,6 +24,11 @@ pub fn initGlobal() void {
     _ = register(sleep_checker_interval_us, &checkItimers) catch {
         @panic("Failed to register itimer checker timer callback.");
     };
+
+    // Register deadline checker as a timer callback.
+    _ = register(deadline_check_interval_us, &checkDeadlines) catch {
+        @panic("Failed to register deadline checker timer callback.");
+    };
 }
 
 /// Initialize the timer for the calling CPU.
@@ -258,6 +263,72 @@ fn checkItimers() void {
                 qitimer.remove(entry);
                 urd.mem.bin.destroy(entry);
             }
+        }
+    }
+}
+
+// =============================================================
+// Deadline Callbacks
+// =============================================================
+
+/// A one-shot callback scheduled to run once a given deadline has expired.
+pub const Deadline = struct {
+    /// Absolute expiration time in nanoseconds.
+    deadline_ns: u64,
+    /// Function to invoke once the deadline has expired..
+    callback: *const fn (*Deadline) void,
+    /// Indicates if the deadline has already fired or been cancelled.
+    fired: bool = false,
+    /// List head.
+    _head: List.Head = .{},
+
+    const List = common.typing.InlineDoublyLinkedList(Deadline, "_head");
+};
+
+/// Schedule the callback invoked once the deadline has expired.
+pub fn scheduleDeadline(entry: *Deadline) void {
+    entry.fired = false;
+
+    const ie = qdeadline_lock.lockDisableIrq();
+    defer qdeadline_lock.unlockRestoreIrq(ie);
+    qdeadline.append(entry);
+}
+
+/// Cancel a previously scheduled deadline.
+///
+/// Safe to call even if the deadline has already fired.
+pub fn cancelDeadline(entry: *Deadline) void {
+    const ie = qdeadline_lock.lockDisableIrq();
+    defer qdeadline_lock.unlockRestoreIrq(ie);
+
+    if (!entry.fired) {
+        qdeadline.remove(entry);
+        entry.fired = true;
+    }
+}
+
+/// Interval for checking deadline callbacks in microseconds.
+const deadline_check_interval_us: u64 = 10 * std.time.us_per_ms;
+
+/// Queue of pending deadline callbacks.
+var qdeadline: Deadline.List = .{};
+/// Spin lock protecting `qdeadline`.
+var qdeadline_lock: SpinLock = .{};
+
+/// Run every deadline callback whose expiration has passed.
+///
+/// Callbacks are called in a hard IRQ context.
+fn checkDeadlines() void {
+    const ie = qdeadline_lock.lockDisableIrq();
+    defer qdeadline_lock.unlockRestoreIrq(ie);
+
+    const now_ns = getCurrentTimestamp();
+    var it = qdeadline.iter();
+    while (it.next()) |entry| {
+        if (now_ns >= entry.deadline_ns) {
+            qdeadline.remove(entry);
+            entry.fired = true;
+            entry.callback(entry);
         }
     }
 }

@@ -6,11 +6,6 @@ pub const futex = @import("sync/futex.zig");
 pub const Mutex = @import("sync/Mutex.zig");
 pub const SpinLock = @import("sync/SpinLock.zig");
 
-/// Initialize the synchronization subsystem.
-pub fn init() void {
-    Event.init();
-}
-
 /// Block until every core has reached this point.
 pub fn syncAllCores() void {
     const ie = arch.intr.maskAll();

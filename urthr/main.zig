@@ -105,9 +105,6 @@ fn zmain() !void {
     // Start periodic console timer.
     urd.console.initTimer();
 
-    // Initialize sync primitives.
-    urd.sync.init();
-
     // Warm up secondary CPUs.
     log.info("Warming up secondary CPUs.", .{});
     try urd.smp.init();
