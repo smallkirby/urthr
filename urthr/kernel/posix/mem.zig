@@ -30,6 +30,7 @@ pub fn sysMprotect(addr: usize, len: usize, prot: Mprot) ReturnType {
 
     current.vmm.remap(addr, aligned_len, prot.permission()) catch |e| switch (e) {
         error.OutOfMemory => return ReturnType.err(.nomem),
+        error.PermissionDenied => return ReturnType.err(.nacces),
         else => return ReturnType.err(.inval),
     };
 

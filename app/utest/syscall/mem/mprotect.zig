@@ -79,6 +79,32 @@ test "changes the protection of the sub-range" {
     });
 }
 
+test "fails with EACCES when making a MAP_SHARED mapping of a read-only fd writable" {
+    const len = 0x1000;
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const map_ret = linux.syscall6(
+        .mmap,
+        0,
+        len,
+        mem.PROT_READ,
+        mem.MAP_SHARED,
+        @intCast(fd),
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(map_ret));
+    defer _ = linux.munmap(@ptrFromInt(map_ret), len);
+
+    const prot_ret = linux.mprotect(
+        @ptrFromInt(map_ret),
+        len,
+        .{ .READ = true, .WRITE = true },
+    );
+    try testing.expectEqual(.ACCES, linux.errno(prot_ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================

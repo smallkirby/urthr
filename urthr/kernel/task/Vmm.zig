@@ -441,7 +441,7 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
         // Write shared file-backed pages back to the file.
         if (self.tree.find(va)) |node| {
             const vma = node.container();
-            if (vma.shared and vma.backing == .file) {
+            if (vma.shared and vma.perm.uw and vma.backing == .file) {
                 try writeBackSharedPage(vma, va, pa);
             }
         }
@@ -535,6 +535,11 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
             self.tree.insert(tail);
 
             vma.size = end - vma.start;
+        }
+
+        // Backing file must be writable for shared writable mappings.
+        if (perm.uw and vma.shared and vma.backing == .file and !vma.backing.file.file.access.writable) {
+            return Error.PermissionDenied;
         }
 
         vma.perm = perm;
