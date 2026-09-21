@@ -265,7 +265,7 @@ const Arena = struct {
             }
 
             // Split the free list and retry.
-            self.splitRecursive(order + 1);
+            try self.splitRecursive(order + 1);
             break :retry try free_list.allocBlock();
         };
 
@@ -291,7 +291,9 @@ const Arena = struct {
     /// Split pages in the `order`-th freelist the `order - 1`-th freelist.
     ///
     /// If the `order`-th freelist is empty, this function is called recursively for larger list.
-    fn splitRecursive(self: *Arena, order: SizeOrder) void {
+    ///
+    /// Returns error if there's no larger block left to split.
+    fn splitRecursive(self: *Arena, order: SizeOrder) Error!void {
         rtt.expect(order != 0);
 
         const lower_order = order - 1;
@@ -299,9 +301,9 @@ const Arena = struct {
 
         // Ensure that the freelist is not empty.
         if (free_list.isEmpty()) {
-            if (order == avail_orders - 1) return;
+            if (order == avail_orders - 1) return Error.OutOfMemory;
 
-            self.splitRecursive(order + 1);
+            try self.splitRecursive(order + 1);
             rtt.expectEqual(false, free_list.isEmpty());
         }
 

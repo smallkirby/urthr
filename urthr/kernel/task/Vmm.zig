@@ -70,7 +70,8 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
         self.unmap(vma.start, vma.size) catch {};
     }
 
-    // TODO: free the page table pages themselves.
+    // Free the page table pages themselves.
+    arch.mmu.destroyAddressSpace(self.as, urd.mem.page);
 
     allocator.destroy(self);
 }

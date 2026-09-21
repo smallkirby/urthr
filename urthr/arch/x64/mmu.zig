@@ -94,6 +94,39 @@ pub fn createAddressSpace(allocator: PageAllocator) Error!AddressSpace {
     return .{ ._root = try createPageTable(allocator) };
 }
 
+/// Frees the user page tables of the given address space.
+///
+/// Actual data pages are not freed.
+pub fn destroyAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
+    if (!as._has_user) return;
+    const pt = as._root orelse return;
+
+    for (pt._tbl[0..root_half_ents]) |desc| if (desc.present and !desc.ps) {
+        const child = getTable(TableEntry, desc.next());
+        destroyTableRecursive(
+            allocator.translateV(child),
+            1,
+            allocator,
+        );
+    };
+    allocator.freePagesV(@as([*]u8, @ptrCast(pt._tbl.ptr))[0..size_4k]);
+}
+
+/// Recursively frees all table pages under the given table.
+fn destroyTableRecursive(tbl: []TableEntry, level: Level, allocator: PageAllocator) void {
+    if (level < 3) {
+        for (tbl) |desc| if (desc.present and !desc.ps) {
+            const child = getTable(TableEntry, desc.next());
+            destroyTableRecursive(
+                allocator.translateV(child),
+                level + 1,
+                allocator,
+            );
+        };
+    }
+    allocator.freePagesV(@as([*]u8, @ptrCast(tbl.ptr))[0..size_4k]);
+}
+
 /// Fix up the table addresses held by the address space.
 ///
 /// This function is intended to be called after identity-mapping is unmapped

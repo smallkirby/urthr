@@ -126,6 +126,29 @@ pub fn createPageTable(allocator: PageAllocator) Error!PageTable {
     return .{ ._tbl = try allocNewTable(allocator, TableDesc) };
 }
 
+/// Frees the user page tables of the given address space.
+///
+/// Actual data pages are not freed.
+pub fn destroyAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
+    const pt = as._l0 orelse return;
+    destroyTableRecursive(pt._tbl, 0, allocator);
+}
+
+/// Recursively frees all table pages under the given table.
+fn destroyTableRecursive(tbl: []TableDesc, level: Level, allocator: PageAllocator) void {
+    if (level < 3) {
+        for (tbl) |desc| if (desc.valid and desc.table) {
+            const child = getTable(TableDesc, desc.next());
+            destroyTableRecursive(
+                allocator.translateV(child),
+                level + 1,
+                allocator,
+            );
+        };
+    }
+    allocator.freePagesV(@as([*]u8, @ptrCast(tbl.ptr))[0..page_size]);
+}
+
 /// Allocate a new address space with fresh kernel and user root tables.
 pub fn createAddressSpace(allocator: PageAllocator) Error!AddressSpace {
     return .{
