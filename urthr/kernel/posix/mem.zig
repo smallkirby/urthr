@@ -66,12 +66,10 @@ const Mprot = packed struct(u32) {
 /// syscall: mmap
 pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, offset: usize) ReturnType {
     const cur = sched.getCurrent();
+    const shared = flags.shared or flags.shared_validate;
 
-    if (flags.shared or flags.shared_validate) {
-        return .err(.nosys); // MAP_SHARED is not supported.
-    }
-    if (!flags.private) {
-        return .err(.inval); // MAP_PRIVATE or MAP_SHARED must be specified.
+    if (shared == flags.private) {
+        return .err(.inval); // One of MAP_SHARED or MAP_PRIVATE must be specified.
     }
     if (fd == -1 and !flags.anonymous) {
         return .err(.inval); // Invalid combination.
@@ -104,6 +102,9 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
         if (!file.access.readable) {
             return .err(.nacces);
         }
+        if (shared and perm.uw and !file.access.writable) {
+            return .err(.nacces); // Shared writable mapping requires a writable fd.
+        }
 
         break :blk .{ .file = .{
             .file = file,
@@ -127,6 +128,7 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
             aligned_len,
             perm,
             backing,
+            shared,
         ) catch |e| switch (e) {
             error.OutOfMemory => return .err(.nomem),
             else => return .err(.inval),
@@ -141,6 +143,7 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
                 aligned_len,
                 perm,
                 backing,
+                shared,
             )) |_| {
                 cur.vmm.mmap_hint = addr + aligned_len;
                 return .success(@bitCast(addr));
@@ -156,6 +159,7 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
         aligned_len,
         perm,
         backing,
+        shared,
     ) catch |e| switch (e) {
         error.OutOfMemory => return .err(.nomem),
         else => return .err(.inval),

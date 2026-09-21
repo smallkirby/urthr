@@ -104,10 +104,10 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
             vma.size,
             vma.perm,
             vma.backing,
+            vma.shared,
         );
 
-        // Share only the pages that are already present in the parent.
-        const perm: Permission = .{
+        const perm: Permission = if (vma.shared) vma.perm else .{
             .ur = vma.perm.ur,
             .uw = false, // write-protect for COW
             .ux = vma.perm.ux,
@@ -127,7 +127,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
             // Mark this physical page as shared.
             urd.mem.pageref.share(parent_pa);
 
-            // Map to child as read-only.
+            // Map to child as read-only unless the mapping is shared.
             try arch.mmu.map4kb(child.as, .{
                 .va = va,
                 .pa = parent_pa,
@@ -139,8 +139,8 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
                 .flush = false,
             }, urd.mem.page);
 
-            // Change the parent's mapping to read-only.
-            try arch.mmu.remap4kb(
+            // Change the parent's mapping to read-only unless the mapping is shared.
+            if (!vma.shared) try arch.mmu.remap4kb(
                 self.as,
                 va,
                 urd.mem.page_size,
@@ -239,6 +239,7 @@ pub fn reserve(
     size: usize,
     perm: Permission,
     backing: Backing,
+    shared: bool,
 ) Error![]u8 {
     rtt.expectEqual(0, size % urd.mem.page_size);
 
@@ -260,6 +261,7 @@ pub fn reserve(
         .size = size,
         .perm = perm,
         .backing = backing,
+        .shared = shared,
     };
     switch (backing) {
         .anon => {},
@@ -390,6 +392,23 @@ fn breakCow(self: *Self, vma: *VmArea, va: usize, pa: usize) Error!bool {
     return true;
 }
 
+/// Writes the contents of the shared file-backed page back to its file.
+fn writeBackSharedPage(vma: *const VmArea, va: usize, pa: usize) Error!void {
+    rtt.expect(vma.shared and vma.backing == .file);
+    rtt.expect(vma.start <= va and va < vma.start + vma.size);
+
+    const fb = vma.backing.file;
+    const file_offset = fb.offset + (va - vma.start);
+
+    const file_size = fb.file.path.dentry.inode.size;
+    if (file_offset >= file_size) return;
+    const len = @min(urd.mem.page_size, file_size - file_offset);
+
+    const kptr: [*]u8 = @ptrFromInt(pa);
+    const kview = urd.mem.page.translateV(kptr)[0..urd.mem.page_size];
+    _ = try fb.file.pwrite(kview[0..len], file_offset);
+}
+
 /// Unmap the given user-space virtual address range.
 ///
 /// If some of the specified range is not mapped, no operation is performed for that region.
@@ -418,6 +437,14 @@ pub fn unmap(self: *Self, vaddr: usize, size: usize) Error!void {
             // If the page is not mapped, skip it.
             continue;
         };
+
+        // Write shared file-backed pages back to the file.
+        if (self.tree.find(va)) |node| {
+            const vma = node.container();
+            if (vma.shared and vma.backing == .file) {
+                try writeBackSharedPage(vma, va, pa);
+            }
+        }
 
         // Free the physical page only if this was the last owner.
         if (urd.mem.pageref.unref(pa)) {
@@ -475,6 +502,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
                 .size = scan - vma.start,
                 .perm = vma.perm,
                 .backing = vma.backing,
+                .shared = vma.shared,
             };
             switch (head.backing) {
                 .anon => {},
@@ -498,6 +526,7 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
                 .size = vma_end - end,
                 .perm = vma.perm,
                 .backing = vma.getBackingAt(end),
+                .shared = vma.shared,
             };
             switch (tail.backing) {
                 .anon => {},
@@ -651,6 +680,7 @@ fn deleteFromVmTree(self: *Self, start: usize, size: usize) Error!void {
                     .size = vma_end - end,
                     .perm = vma.perm,
                     .backing = backing,
+                    .shared = vma.shared,
                 };
                 self.tree.insert(right);
             }
@@ -711,6 +741,8 @@ const VmArea = struct {
     perm: Permission,
     /// What backs the contents of this area.
     backing: Backing = .anon,
+    /// Whether this mapping is shared across processes.
+    shared: bool = false,
 
     /// Node to construct RB tree of virtual memory areas.
     _rbnode: VmTree.Node = .{},

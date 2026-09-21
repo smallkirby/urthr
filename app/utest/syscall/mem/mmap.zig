@@ -28,14 +28,65 @@ test "fails with EINVAL for an unaligned MAP_FIXED address" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
-test "fails with ENOSYS for MAP_SHARED" {
+test "anonymous shared mapping is readable and writable by the same process" {
+    const len = 0x1000;
     const ret = mem.mmap(
         0,
-        0x1000,
+        len,
         mem.PROT_READ | mem.PROT_WRITE,
         mem.MAP_SHARED | mem.MAP_ANONYMOUS,
     );
-    try testing.expectEqual(.NOSYS, linux.errno(ret));
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.munmap(@ptrFromInt(ret), len);
+
+    const ptr: [*]u8 = @ptrFromInt(ret);
+    ptr[0] = 0x42;
+    try testing.expectEqual(@as(u8, 0x42), ptr[0]);
+}
+
+test "anonymous shared mapping is visible to a forked child" {
+    const len = 0x1000;
+    const ret = mem.mmap(
+        0,
+        len,
+        mem.PROT_READ | mem.PROT_WRITE,
+        mem.MAP_SHARED | mem.MAP_ANONYMOUS,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.munmap(@ptrFromInt(ret), len);
+
+    // Set initial value in the parent.
+    const ptr: [*]volatile u8 = @ptrFromInt(ret);
+    ptr[0] = 0x11;
+
+    // Check the initial value and set new value in the child.
+    const fork_ret = linux.fork();
+    if (fork_ret == 0) {
+        if (ptr[0] != 0x11) linux.exit_group(1);
+        ptr[0] = 0x22;
+        linux.exit_group(0);
+    }
+    try utest.expectWaitChild(@intCast(fork_ret), 0);
+
+    // Change by the child is visible to the parent.
+    try testing.expectEqual(@as(u8, 0x22), ptr[0]);
+}
+
+test "fails with EACCES for MAP_SHARED with PROT_WRITE on read-only fd" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const ret = linux.syscall6(
+        .mmap,
+        0,
+        0x1000,
+        mem.PROT_READ | mem.PROT_WRITE,
+        mem.MAP_SHARED,
+        @intCast(fd),
+        0,
+    );
+    try testing.expectEqual(.ACCES, linux.errno(ret));
 }
 
 test "with a file descriptor succeeds and reads the file's content lazily" {
@@ -234,6 +285,53 @@ test "writing to a read-only mapping raises SIGSEGV" {
             unreachable;
         }
     });
+}
+
+test "File-backed shared mapping writes back to the file on munmap" {
+    const Test = utest.fs.Test;
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const wfile = try t.createFile();
+    const content = "urthr";
+    try wfile.writeStreamingAll(init.io, content);
+    wfile.close(init.io);
+    defer t.deleteFile();
+
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ Test.file_name,
+        .{ .ACCMODE = .RDWR },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const ret = linux.syscall6(
+        .mmap,
+        0,
+        0x1000,
+        mem.PROT_READ | mem.PROT_WRITE,
+        mem.MAP_SHARED,
+        @intCast(fd),
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+
+    const ptr: [*]u8 = @ptrFromInt(ret);
+    ptr[0] = 'U';
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.munmap(
+        @ptrFromInt(ret),
+        0x1000,
+    )));
+
+    // The modification is visible when reading the file again.
+    var buf: [content.len]u8 = undefined;
+    const seek_ret = linux.lseek(@intCast(fd), 0, linux.SEEK.SET);
+    try testing.expectEqual(.SUCCESS, linux.errno(seek_ret));
+    const nread = linux.read(@intCast(fd), &buf, buf.len);
+    try testing.expectEqual(.SUCCESS, linux.errno(nread));
+    try testing.expectEqualSlices(u8, "Urthr", &buf);
 }
 
 // =============================================================
