@@ -1,5 +1,5 @@
 /// syscall: futex
-pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*const Timespec, _: ?*align(1) u32, _: i32) ReturnType {
+pub fn sysFutex(uaddr: *u32, op: FutexOp, val: i32, timeout: ?*align(1) const Timespec, _: ?*align(1) u32, _: i32) ReturnType {
     const current = urd.sched.getCurrent();
 
     if (!urd.uaccess.accessOk(@intFromPtr(uaddr), @sizeOf(u32))) {
