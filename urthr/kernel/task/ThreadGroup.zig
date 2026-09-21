@@ -37,6 +37,8 @@ _pgid: thread.Pgid,
 _sid: thread.Sid,
 /// Credential of this group.
 _credential: Credential = .{},
+/// Absolute path of the executable running as this group.
+_exe_path: ?[]const u8 = null,
 
 /// List node for the process table.
 _pt_node: PTable.Node = .{},
@@ -101,6 +103,29 @@ pub fn setCredential(self: *Self, credential: Credential) void {
     self._credential = credential;
 }
 
+/// Copy the absolute path of the executable running as this group into the buffer.
+///
+/// Returns the number of bytes written, or null if no executable path is recorded.
+pub fn getExePath(self: *Self, buf: []u8) ?usize {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    const path = self._exe_path orelse return null;
+    const n = @min(path.len, buf.len);
+    @memcpy(buf[0..n], path[0..n]);
+    return n;
+}
+
+/// Set the absolute path of the executable running as this group.
+pub fn setExePath(self: *Self, allocator: Allocator, path: []const u8) Allocator.Error!void {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    const copy = try allocator.dupe(u8, path);
+    if (self._exe_path) |old| allocator.free(old);
+    self._exe_path = copy;
+}
+
 /// Increment the reference count to share this thread group.
 pub fn ref(self: *Self) *Self {
     const ie = self._lock.lockDisableIrq();
@@ -116,6 +141,7 @@ pub fn deref(self: *Self, allocator: Allocator) void {
 
     self._refcnt -= 1;
     if (self._refcnt == 0) {
+        if (self._exe_path) |path| allocator.free(path);
         allocator.destroy(self);
     }
 }

@@ -57,6 +57,19 @@ test "symlinkat with a regular-file fd as dirfd fails with ENOTDIR" {
 // =============================================================
 // readlink / readlinkat
 
+test "readlinkat resolves /proc/self/exe to the running executable" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const ret = linux.readlinkat(
+        linux.AT.FDCWD,
+        "/proc/self/exe",
+        &buf,
+        buf.len,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    const n: usize = @intCast(ret);
+    try testing.expectEqualStrings(utest.myname, buf[0..n]);
+}
+
 test "readlinkat on a regular file fails with EINVAL" {
     const init = utest.getInit();
     var t = Test.init();

@@ -28,6 +28,8 @@ pub const Error = error{
 const num_stack_pages = 32;
 /// Base address of the user stack.
 const stack_base = 0x7FFF_FF00_0000;
+/// Maximum length of a path.
+const path_max = 512;
 
 /// Spin lock for scheduler and thread management.
 var lock: SpinLock = .{};
@@ -346,6 +348,11 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             cur.group.getSid(),
         );
         g.setCredential(cur.group.getCredential());
+
+        var exe_path_buf: [path_max]u8 = undefined;
+        if (cur.group.getExePath(&exe_path_buf)) |n|
+            try g.setExePath(mem.bin, exe_path_buf[0..n]);
+
         break :blk g;
     };
     errdefer group.deref(mem.bin);
@@ -716,6 +723,15 @@ fn setupUserImage(
     // Load the executable.
     const ldr_info = try loader.load(th, exec_filename);
     th.vmm.brk = ldr_info.brk;
+
+    // Record the absolute path of the executable.
+    {
+        const path = try urd.fs.resolve(exec_filename, allocator);
+        defer path.dentry.unref();
+        const abs = try urd.fs.getPath(path, allocator);
+        defer allocator.free(abs);
+        try th.group.setExePath(allocator, abs);
+    }
 
     // Apply set-user-ID and set-group-ID bits.
     if (ldr_info.setuid != null or ldr_info.setgid != null) {

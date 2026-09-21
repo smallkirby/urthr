@@ -4,25 +4,28 @@
 
 const Self = @This();
 
+///////////////////////////////////////////////////////////////
+// zig fmt: off
+
+/// Tree of the process file system.
+const tree = [_]NodeSpec{
+    .file   ("meminfo",     readMeminfo),
+    .dir    ("self",        &[_]NodeSpec{
+        .symlink    ("exe",      exeReadlink),
+    }),
+};
+
+// zig fmt: on
+///////////////////////////////////////////////////////////////
+
 /// Owned allocator for this filesystem.
 allocator: Allocator,
 /// Root inode of this filesystem.
 root_inode: *InodeImpl,
-/// Registered entries.
-entries: [max_entries]?Entry = [_]?Entry{null} ** max_entries,
-/// Number of registered entries.
-entry_count: usize = 0,
-
-/// Maximum number of entries that can be registered.
-const max_entries = 32;
-
-/// A registered virtual file entry.
-const Entry = struct {
-    /// File name.
-    name: []const u8,
-    /// Inode of the file.
-    inode: *InodeImpl,
-};
+/// Next inode number to allocate.
+///
+/// 1 is reserved for the root.
+next_inum: fs.Inode.Number = 2,
 
 /// Instantiate the process filesystem.
 pub fn init(allocator: Allocator) fs.Error!*Self {
@@ -37,7 +40,7 @@ pub fn init(allocator: Allocator) fs.Error!*Self {
             .number = 1,
             .size = 0,
             .ftype = .directory,
-            .iops = root_inode_vtable,
+            .iops = dir_inode_vtable,
             .fops = dir_file_vtable,
         },
         .procfs = self,
@@ -49,8 +52,8 @@ pub fn init(allocator: Allocator) fs.Error!*Self {
         .root_inode = root,
     };
 
-    // Create root proc files.
-    try self.registerFile("meminfo", readMeminfo);
+    // Spawn tree structure.
+    try self.buildTree(root, &tree);
 
     return self;
 }
@@ -64,40 +67,152 @@ pub fn filesystem(self: *Self) fs.FileSystem {
     };
 }
 
-/// Register a virtual file with the given name and read function.
-fn registerFile(self: *Self, name: []const u8, read_fn: ReadFn) fs.Error!void {
-    rtt.expect(self.entry_count < max_entries);
+// =============================================================
+// Tree structure
+// =============================================================
+
+/// Process filesystem node descriptor.
+const NodeSpec = struct {
+    /// Node name.
+    name: []const u8,
+    /// Node kind.
+    kind: Kind,
+
+    const Kind = union(enum) {
+        /// Regular file backed by a read function.
+        file: ReadFn,
+        /// Symbolic link backed by a readlink function.
+        symlink: ReadlinkFn,
+        /// Subdirectory holding more nodes.
+        dir: []const NodeSpec,
+    };
+
+    fn file(name: []const u8, read_fn: ReadFn) NodeSpec {
+        return .{ .name = name, .kind = .{ .file = read_fn } };
+    }
+
+    fn symlink(name: []const u8, readlink_fn: ReadlinkFn) NodeSpec {
+        return .{ .name = name, .kind = .{ .symlink = readlink_fn } };
+    }
+
+    fn dir(name: []const u8, children: []const NodeSpec) NodeSpec {
+        return .{ .name = name, .kind = .{ .dir = children } };
+    }
+};
+
+/// Register a regular file with the given name under the directory.
+fn registerFile(self: *Self, dir: *InodeImpl, name: []const u8, function: ReadFn) fs.Error!void {
+    rtt.expect(dir.entry_count < max_entries);
 
     const inode = try self.allocator.create(InodeImpl);
     errdefer self.allocator.destroy(inode);
     const name_copy = try self.allocator.dupe(u8, name);
     errdefer self.allocator.free(name_copy);
 
-    const inum = self.allocInum();
     inode.* = .{
         .common = .{
-            .number = inum,
+            .number = self.allocInum(),
             .size = 0,
             .ftype = .regular,
             .iops = file_inode_vtable,
             .fops = freg_vtable,
         },
         .procfs = self,
-        .read_fn = read_fn,
+        .read_fn = function,
     };
     inode.common.ref();
 
-    self.entries[self.entry_count] = .{
+    dir.entries[dir.entry_count] = .{
         .name = name_copy,
         .inode = inode,
     };
-    self.entry_count += 1;
+    dir.entry_count += 1;
 }
 
-/// Allocate a new inode number for a virtual file.
-fn allocInum(self: *Self) usize {
-    rtt.expect(self.entry_count < max_entries);
-    return self.entry_count + 2;
+/// Register a subdirectory with the given name under the directory.
+///
+/// Returns the newly created subdirectory inode.
+fn registerDir(self: *Self, dir: *InodeImpl, name: []const u8) fs.Error!*InodeImpl {
+    rtt.expect(dir.entry_count < max_entries);
+
+    const inode = try self.allocator.create(InodeImpl);
+    errdefer self.allocator.destroy(inode);
+    const name_copy = try self.allocator.dupe(u8, name);
+    errdefer self.allocator.free(name_copy);
+
+    inode.* = .{
+        .common = .{
+            .number = self.allocInum(),
+            .size = 0,
+            .ftype = .directory,
+            .iops = dir_inode_vtable,
+            .fops = dir_file_vtable,
+        },
+        .procfs = self,
+    };
+    inode.common.ref();
+
+    dir.entries[dir.entry_count] = .{
+        .name = name_copy,
+        .inode = inode,
+    };
+    dir.entry_count += 1;
+
+    return inode;
+}
+
+/// Register a symbolic link with the given name under the directory.
+fn registerSymlink(self: *Self, dir: *InodeImpl, name: []const u8, function: ReadlinkFn) fs.Error!void {
+    rtt.expect(dir.entry_count < max_entries);
+
+    const inode = try self.allocator.create(InodeImpl);
+    errdefer self.allocator.destroy(inode);
+    const name_copy = try self.allocator.dupe(u8, name);
+    errdefer self.allocator.free(name_copy);
+
+    inode.* = .{
+        .common = .{
+            .number = self.allocInum(),
+            .size = 0,
+            .ftype = .symlink,
+            .iops = symlink_inode_vtable,
+            .fops = freg_vtable,
+        },
+        .procfs = self,
+        .readlink_fn = function,
+    };
+    inode.common.ref();
+
+    dir.entries[dir.entry_count] = .{
+        .name = name_copy,
+        .inode = inode,
+    };
+    dir.entry_count += 1;
+}
+
+/// Recursively instantiate node tree under the given directory.
+fn buildTree(self: *Self, dir: *InodeImpl, specs: []const NodeSpec) fs.Error!void {
+    for (specs) |spec| {
+        switch (spec.kind) {
+            .file => |read_fn| try self.registerFile(
+                dir,
+                spec.name,
+                read_fn,
+            ),
+            .symlink => |readlink_fn| try self.registerSymlink(
+                dir,
+                spec.name,
+                readlink_fn,
+            ),
+            .dir => |children| {
+                const child = try self.registerDir(
+                    dir,
+                    spec.name,
+                );
+                try self.buildTree(child, children);
+            },
+        }
+    }
 }
 
 // =============================================================
@@ -110,8 +225,21 @@ const fs_vtable = fs.FileSystem.Vtable{};
 // Inode interface
 // =============================================================
 
-/// Read function type for virtual file content.
+/// Maximum number of entries a single directory can hold.
+const max_entries = 32;
+
+/// A directory entry.
+const Entry = struct {
+    /// File name.
+    name: []const u8,
+    /// Inode of the file.
+    inode: *InodeImpl,
+};
+
+/// Read function type for regular file.
 const ReadFn = *const fn (buf: []u8, pos: usize) fs.Error!usize;
+/// Read function type for a symbolic link.
+const ReadlinkFn = *const fn (buf: []u8) fs.Error!usize;
 
 const InodeImpl = struct {
     /// Common part of inode.
@@ -120,27 +248,37 @@ const InodeImpl = struct {
     procfs: *Self,
     /// Read function for regular files.
     read_fn: ?ReadFn = null,
+    /// Read function for symbolic links.
+    readlink_fn: ?ReadlinkFn = null,
+    /// Child entries of directories.
+    entries: [max_entries]?Entry = [_]?Entry{null} ** max_entries,
+    /// Number of child entries currently registered.
+    entry_count: usize = 0,
 
     pub fn from(inode: *fs.Inode) *InodeImpl {
         return @fieldParentPtr("common", inode);
     }
 };
 
-const root_inode_vtable = fs.Inode.Ops{
-    .lookup = &iRootLookup,
+const dir_inode_vtable = fs.Inode.Ops{
+    .lookup = &iDirLookup,
     .deinit = &iDeinit,
 };
-
 const file_inode_vtable = fs.Inode.Ops{
     .lookup = &iFileLookup,
     .deinit = &iDeinit,
 };
+const symlink_inode_vtable = fs.Inode.Ops{
+    .lookup = &iFileLookup,
+    .deinit = &iDeinit,
+    .readlink = &iSymlinkReadlink,
+};
 
-fn iRootLookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
+/// Lookup implementation shared by all directories.
+fn iDirLookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
     const ctx = InodeImpl.from(dir);
-    const self = ctx.procfs;
 
-    for (self.entries[0..self.entry_count]) |entry| {
+    for (ctx.entries[0..ctx.entry_count]) |entry| {
         const e = entry orelse continue;
         if (std.mem.eql(u8, e.name, name)) {
             e.inode.common.ref();
@@ -149,8 +287,16 @@ fn iRootLookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
     } else return null;
 }
 
+/// Lookup implementation shared by all regular files.
 fn iFileLookup(_: *fs.Inode, _: []const u8) fs.Error!?*fs.Inode {
     return null;
+}
+
+/// Readlink implementation shared by all symbolic links.
+fn iSymlinkReadlink(inode: *fs.Inode, buf: []u8) fs.Error!usize {
+    const ctx = InodeImpl.from(inode);
+    const f = ctx.readlink_fn orelse return fs.Error.InvalidArgument;
+    return f(buf);
 }
 
 fn iDeinit(inode: *fs.Inode) void {
@@ -158,9 +304,20 @@ fn iDeinit(inode: *fs.Inode) void {
     ctx.procfs.allocator.destroy(ctx);
 }
 
+/// Allocate a new, filesystem-wide unique inode number.
+fn allocInum(self: *Self) fs.Inode.Number {
+    const n = self.next_inum;
+    self.next_inum += 1;
+    return n;
+}
+
 // =============================================================
 // Directory file vtable
 // =============================================================
+
+const DirFileImpl = struct {
+    inode: *InodeImpl,
+};
 
 const dir_file_vtable = File.Ops{
     .open = fDirOpen,
@@ -168,10 +325,6 @@ const dir_file_vtable = File.Ops{
     .read = fDirRead,
     .close = fDirClose,
     .poll = fDirPoll,
-};
-
-const DirFileImpl = struct {
-    inode: *InodeImpl,
 };
 
 fn fDirOpen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
@@ -182,19 +335,19 @@ fn fDirOpen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
 
 fn fDirIterate(iter: *File.Iterator, allocator: Allocator) fs.Error!?File.IterResult {
     const ctx: *DirFileImpl = @ptrCast(@alignCast(iter.file.ctx));
-    const self = ctx.inode.procfs;
+    const dir = ctx.inode;
 
-    if (iter.offset >= self.entry_count) {
+    if (iter.offset >= dir.entry_count) {
         return null;
     }
 
-    const e = self.entries[iter.offset] orelse return null;
+    const e = dir.entries[iter.offset] orelse return null;
     iter.offset += 1;
 
     return .{
         .name = try allocator.dupe(u8, e.name),
         .inum = e.inode.common.number,
-        .type = .regular,
+        .type = e.inode.common.ftype,
     };
 }
 
@@ -216,36 +369,39 @@ fn fDirPoll(_: *File) fs.Error!fs.PollResult {
 // =============================================================
 
 const freg_vtable = File.Ops{
-    .open = fregOpen,
-    .iterate = fregIterate,
-    .read = fregRead,
-    .close = fregClose,
-    .poll = fregPoll,
+    .open = fRegOpen,
+    .iterate = fRegIterate,
+    .read = fRegRead,
+    .close = fRegClose,
+    .poll = fRegPoll,
 };
 
-fn fregOpen(_: *fs.Inode, _: Allocator) fs.Error!*anyopaque {
+fn fRegOpen(_: *fs.Inode, _: Allocator) fs.Error!*anyopaque {
     return undefined;
 }
 
-fn fregIterate(_: *File.Iterator, _: Allocator) fs.Error!?File.IterResult {
+fn fRegIterate(_: *File.Iterator, _: Allocator) fs.Error!?File.IterResult {
     return fs.Error.NotDirectory;
 }
 
-fn fregRead(file: *File, buf: []u8, pos: usize) fs.Error!usize {
+fn fRegRead(file: *File, buf: []u8, pos: usize) fs.Error!usize {
     const inode = InodeImpl.from(file.path.dentry.inode);
     const read_fn = inode.read_fn orelse return 0;
     return read_fn(buf, pos);
 }
 
-fn fregClose(_: *anyopaque, _: Allocator) void {}
+fn fRegClose(_: *anyopaque, _: Allocator) void {}
 
-fn fregPoll(_: *File) fs.Error!fs.PollResult {
+fn fRegPoll(_: *File) fs.Error!fs.PollResult {
     return .{ .events = .{ .in = true } };
 }
 
 // =============================================================
-// /proc/meminfo
+// Node implementations
 // =============================================================
+
+// =============================================================
+// /proc/meminfo
 
 fn readMeminfo(buf: []u8, pos: usize) fs.Error!usize {
     const stats = urd.mem.getStats();
@@ -272,6 +428,13 @@ fn readMeminfo(buf: []u8, pos: usize) fs.Error!usize {
 }
 
 // =============================================================
+// /proc/self/exe
+
+fn exeReadlink(buf: []u8) fs.Error!usize {
+    return sched.getCurrent().group.getExePath(buf) orelse fs.Error.InvalidArgument;
+}
+
+// =============================================================
 // Imports
 // =============================================================
 
@@ -283,3 +446,4 @@ const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;
 const File = fs.File;
+const sched = urd.sched;
