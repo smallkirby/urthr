@@ -23,7 +23,7 @@ pub fn init() fs.Error!void {
 
     // Mount devfs at /dev.
     const devfs = try fs.DevFs.init(allocator);
-    const mntpnt = try fs.resolve("/dev", allocator);
+    const mntpnt = try fs.resolve("/dev", allocator, true);
     defer mntpnt.dentry.unref();
     try fs.mount(mntpnt, devfs.filesystem(), allocator);
 

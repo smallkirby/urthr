@@ -6,7 +6,7 @@ pub fn init(allocator: Allocator) fs.Error!void {
     procfs = try ProcFs.init(allocator);
 
     // Mount procfs to /proc.
-    const mntpnt = try fs.resolve("/proc", allocator);
+    const mntpnt = try fs.resolve("/proc", allocator, true);
     defer mntpnt.dentry.unref();
     try fs.mount(mntpnt, procfs.filesystem(), allocator);
 }

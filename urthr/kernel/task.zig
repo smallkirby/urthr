@@ -248,12 +248,12 @@ pub fn enterUser(
     const allocator = mem.bin;
 
     // Initialize stdin.
-    const tty = try urd.fs.open("/dev/tty", .read_only, allocator);
+    const tty = try urd.fs.open("/dev/tty", .read_only, allocator, true);
     defer tty.unref();
     _ = try current.fs.fdtbl.set(0, tty);
 
     // Initialize stdout and stderr.
-    const console = try urd.fs.open("/dev/console", .write_only, allocator);
+    const console = try urd.fs.open("/dev/console", .write_only, allocator, true);
     defer console.unref();
     _ = try current.fs.fdtbl.set(1, console);
     _ = try current.fs.fdtbl.set(2, console);
@@ -726,7 +726,7 @@ fn setupUserImage(
 
     // Record the absolute path of the executable.
     {
-        const path = try urd.fs.resolve(exec_filename, allocator);
+        const path = try urd.fs.resolve(exec_filename, allocator, true);
         defer path.dentry.unref();
         const abs = try urd.fs.getPath(path, allocator);
         defer allocator.free(abs);

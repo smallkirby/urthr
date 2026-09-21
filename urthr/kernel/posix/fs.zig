@@ -888,6 +888,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
         const path = urd.fs.resolve(
             s_target,
             allocator,
+            true,
         ) catch |err| return mapMountError(err);
         path.dentry.unref();
         return .success(0);
@@ -909,6 +910,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
     const path = urd.fs.resolve(
         s_target,
         allocator,
+        true,
     ) catch |err| return mapMountError(err);
     defer path.dentry.unref();
 
@@ -979,8 +981,13 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
     const file = if (flags.empty_path and s.len == 0) blk: {
         owned = false;
         break :blk getFile(dirfd) catch return .err(.badf);
-    } else openFileAt(dirfd, s, .{}, allocator) catch |err|
-        return mapOpenError(err);
+    } else openFileAt(
+        dirfd,
+        s,
+        .{},
+        allocator,
+        !flags.symlink_nofollow,
+    ) catch |err| return mapOpenError(err);
     defer if (owned) file.unref();
 
     urd.uaccess.putUser(
@@ -1019,6 +1026,7 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         s,
         .{},
         allocator,
+        !flags.symlink_nofollow,
     ) catch |err|
         return mapOpenError(err);
     defer if (owned) file.unref();
@@ -1606,6 +1614,7 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType
         s,
         .{},
         allocator,
+        true,
     ) catch |err| return mapOpenError(err);
     defer file.unref();
 
@@ -1666,8 +1675,13 @@ pub fn sysFchownAt(dirfd: usize, pathname: [*:0]const u8, uid: u32, gid: u32, fl
     const file = if (flags.empty_path and s.len == 0) blk: {
         owned = false;
         break :blk getFile(dirfd) catch return .err(.badf);
-    } else openFileAt(dirfd, s, .{}, allocator) catch |err|
-        return mapOpenError(err);
+    } else openFileAt(
+        dirfd,
+        s,
+        .{},
+        allocator,
+        !flags.symlink_nofollow,
+    ) catch |err| return mapOpenError(err);
     defer if (owned) file.unref();
 
     file.chown(
@@ -1722,6 +1736,7 @@ pub fn sysFaccessAt(dirfd: usize, pathname: [*:0]const u8, mode: AccessFlags) Re
         s,
         .{},
         urd.mem.bin,
+        true,
     ) catch |err| return mapOpenError(err);
     defer file.unref();
 
@@ -1780,6 +1795,7 @@ pub fn sysUtimensAt(
         p,
         .{},
         urd.mem.bin,
+        true,
     ) catch |err| return mapOpenError(err) else blk: {
         owned = false;
         break :blk getFile(dirfd) catch return .err(.badf);
@@ -1820,10 +1836,11 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const cur = sched.getCurrent();
-    const path = urd.fs.resolve(s, allocator) catch |err| return switch (err) {
+    const path = urd.fs.resolve(s, allocator, true) catch |err| return switch (err) {
         error.InvalidArgument => .err(.inval),
         error.NotDirectory => .err(.notdir),
         error.NotFound => .err(.noent),
+        error.Loop => .err(.loop),
         else => .err(.again),
     };
 
@@ -2077,6 +2094,7 @@ fn mapOpenError(err: anyerror) ReturnType {
         urd.fs.Error.NotDirectory => .err(.notdir),
         urd.fs.Error.NotFound => .err(.noent),
         urd.fs.Error.AlreadyExists => .err(.exist),
+        urd.fs.Error.Loop => .err(.loop),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -2092,6 +2110,7 @@ fn mapRenameError(err: anyerror) ReturnType {
         urd.fs.Error.InvalidArgument => .err(.inval),
         urd.fs.Error.CrossDevice => .err(.xdev),
         urd.fs.Error.Unsupported => .err(.perm),
+        urd.fs.Error.Loop => .err(.loop),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -2106,6 +2125,7 @@ fn mapRmdirError(err: anyerror) ReturnType {
         urd.fs.Error.InvalidArgument => .err(.inval),
         urd.fs.Error.Busy => .err(.busy),
         urd.fs.Error.Unsupported => .err(.perm),
+        urd.fs.Error.Loop => .err(.loop),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -2117,6 +2137,7 @@ fn mapMountError(err: anyerror) ReturnType {
         urd.fs.Error.AlreadyMounted => .err(.busy),
         urd.fs.Error.NotDirectory => .err(.notdir),
         urd.fs.Error.NotFound => .err(.noent),
+        urd.fs.Error.Loop => .err(.loop),
         else => .err(.again),
     };
 }
@@ -2155,10 +2176,10 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
     };
 
     if (!flags.creat) {
-        return openFileAt(dirfd, pathname, access, allocator);
+        return openFileAt(dirfd, pathname, access, allocator, true);
     }
 
-    if (openFileAt(dirfd, pathname, access, allocator)) |file| {
+    if (openFileAt(dirfd, pathname, access, allocator, true)) |file| {
         if (flags.excl) {
             file.unref();
             return urd.fs.Error.AlreadyExists;
@@ -2179,15 +2200,15 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
 }
 
 /// Open a file at the specified path relative to the given directory file descriptor.
-fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     // Check if pathname is relative or absolute.
     if (std.fs.path.isAbsolute(pathname)) {
         // Absolute path. Ignore directory.
-        return urd.fs.open(pathname, access, allocator);
+        return urd.fs.open(pathname, access, allocator, follow);
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.openAt(cur.fs.cwd, pathname, access, allocator);
+        return urd.fs.openAt(cur.fs.cwd, pathname, access, allocator, follow);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2197,7 +2218,7 @@ fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator:
             return error.BadFileDescriptor;
         };
 
-        return urd.fs.openAt(dir.path, pathname, access, allocator);
+        return urd.fs.openAt(dir.path, pathname, access, allocator, follow);
     }
 }
 
@@ -2315,7 +2336,7 @@ fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator
         const basename = std.fs.path.basenamePosix(pathname);
         if (basename.len == 0) return urd.fs.Error.InvalidArgument;
         const dirname = std.fs.path.dirnamePosix(pathname) orelse "/";
-        const dir = try urd.fs.resolve(dirname, allocator);
+        const dir = try urd.fs.resolve(dirname, allocator, true);
         return .{ .dir = dir, .name = basename, .owned = true };
     } else if (dirfd == cwd_fd) {
         return .{ .dir = cur.fs.cwd, .name = pathname, .owned = false };

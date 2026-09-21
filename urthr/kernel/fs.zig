@@ -54,6 +54,8 @@ pub const Error = error{
     NotSocket,
     /// The source and destination are on different filesystems.
     CrossDevice,
+    /// Too many symbolic links were encountered while resolving a path.
+    Loop,
 } || block.Error;
 
 pub const max_fds: usize = FdTable.max_fds;
@@ -479,9 +481,12 @@ pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator:
 
 /// Resolve a path to a Path without opening a File.
 ///
+/// If `follow` is true and the final component is a symbolic link, it is followed.
+///
 /// Caller must call `path.dentry.unref()` after use.
-pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
-    const path = try resolvePath(sched.getCurrent().fs.cwd, s, allocator);
+pub fn resolve(s: []const u8, allocator: Allocator, follow: bool) Error!Path {
+    const cur = sched.getCurrent();
+    const path = try resolvePath(cur.fs.cwd, s, allocator, follow);
     path.dentry.ref();
 
     return path;
@@ -493,11 +498,8 @@ pub fn resolve(s: []const u8, allocator: Allocator) Error!Path {
 ///
 /// Returns the number of bytes written to the buffer.
 pub fn readlink(s: []const u8, buf: []u8, allocator: Allocator) Error!usize {
-    const path = try resolvePath(
-        sched.getCurrent().fs.cwd,
-        s,
-        allocator,
-    );
+    const cur = sched.getCurrent();
+    const path = try resolvePath(cur.fs.cwd, s, allocator, false);
     return path.dentry.inode.readlink(buf);
 }
 
@@ -514,7 +516,7 @@ pub fn readlinkAt(dir: Path, s: []const u8, buf: []u8, allocator: Allocator) Err
         return Error.NotDirectory;
     }
 
-    const path = try resolvePath(dir, s, allocator);
+    const path = try resolvePath(dir, s, allocator, false);
     return path.dentry.inode.readlink(buf);
 }
 
@@ -569,13 +571,18 @@ pub fn getPath(path: Path, allocator: Allocator) Error![]u8 {
 }
 
 /// Open a file at the specified path.
-pub fn open(s: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
-    const path = try resolvePath(sched.getCurrent().fs.cwd, s, allocator);
+///
+/// If `follow` is true and the final component is a symbolic link, it is followed.
+pub fn open(s: []const u8, access: File.AccessMode, allocator: Allocator, follow: bool) Error!*File {
+    const cur = sched.getCurrent();
+    const path = try resolvePath(cur.fs.cwd, s, allocator, follow);
     return File.open(path, access, allocator);
 }
 
 /// Open a file relative to a directory.
-pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allocator) Error!*File {
+///
+/// If `follow` is true and the final component is a symbolic link, it is followed.
+pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allocator, follow: bool) Error!*File {
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
@@ -583,7 +590,7 @@ pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allo
         return Error.NotDirectory;
     }
 
-    const path = try resolvePath(dir, s, allocator);
+    const path = try resolvePath(dir, s, allocator, follow);
     return File.open(path, access, allocator);
 }
 
@@ -593,7 +600,7 @@ pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allo
 /// but the underlying storage is only reclaimed once the last open file referring to it is closed.
 pub fn unlink(s: []const u8, allocator: Allocator) Error!void {
     const cwd = sched.getCurrent().fs.cwd;
-    const path = try resolvePath(cwd, s, allocator);
+    const path = try resolvePath(cwd, s, allocator, false);
     return unlinkImpl(path, s);
 }
 
@@ -609,7 +616,7 @@ pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
         return Error.NotDirectory;
     }
 
-    const path = try resolvePath(dir, s, allocator);
+    const path = try resolvePath(dir, s, allocator, false);
     return unlinkImpl(path, s);
 }
 
@@ -630,7 +637,7 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
 /// Remove an empty directory at the specified path.
 pub fn rmdir(s: []const u8, allocator: Allocator) Error!void {
     const cwd = sched.getCurrent().fs.cwd;
-    const path = try resolvePath(cwd, s, allocator);
+    const path = try resolvePath(cwd, s, allocator, false);
     return rmdirImpl(path, s, allocator);
 }
 
@@ -643,7 +650,7 @@ pub fn rmdirAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
         return Error.NotDirectory;
     }
 
-    const path = try resolvePath(dir, s, allocator);
+    const path = try resolvePath(dir, s, allocator, false);
     return rmdirImpl(path, s, allocator);
 }
 
@@ -714,9 +721,19 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     if (old_cur.mount != new_cur.mount) return Error.CrossDevice;
 
     // The source must exist.
-    const old_path = try resolvePath(old_cur, old_name, allocator);
+    const old_path = try resolvePath(
+        old_cur,
+        old_name,
+        allocator,
+        false,
+    );
     // The destination may or may not exist.
-    const dst_path: ?Path = resolvePath(new_cur, new_name, allocator) catch |err| switch (err) {
+    const dst_path: ?Path = resolvePath(
+        new_cur,
+        new_name,
+        allocator,
+        false,
+    ) catch |err| switch (err) {
         Error.NotFound => null,
         else => return err,
     };
@@ -779,11 +796,11 @@ pub fn rename(oldpath: []const u8, newpath: []const u8, allocator: Allocator) Er
     if (new_basename.len == 0) return Error.InvalidArgument;
 
     const old_dir = if (std.fs.path.dirnamePosix(oldpath)) |dirname|
-        try resolvePath(cur.fs.cwd, dirname, allocator)
+        try resolvePath(cur.fs.cwd, dirname, allocator, true)
     else
         cur.fs.cwd;
     const new_dir = if (std.fs.path.dirnamePosix(newpath)) |dirname|
-        try resolvePath(cur.fs.cwd, dirname, allocator)
+        try resolvePath(cur.fs.cwd, dirname, allocator, true)
     else
         cur.fs.cwd;
 
@@ -804,8 +821,18 @@ fn isAncestorOrSelf(self: *Dentry, candidate: *Dentry) bool {
     } else return false;
 }
 
+/// Upper bound on the number of symlinks followed while resolving a single path.
+const max_symlink_depth = 40;
+
 /// Resolve a file path to a `Path`.
-fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
+///
+/// Symbolic links in non-final components are always followed.
+/// The final component is followed only if `follow` is true.
+fn resolvePath(base: Path, s: []const u8, allocator: Allocator, follow: bool) Error!Path {
+    return resolvePathImpl(base, s, allocator, follow, 0);
+}
+
+fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool, depth: usize) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))
         sched.getCurrent().fs.root
     else
@@ -851,28 +878,44 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
             owned = false;
         }
 
-        // Check dcache first.
+        // Resolve this component.
+        var next: Path = undefined;
         if (dcache.lookup(cur.dentry, c.name)) |d| {
+            next = .{ .dentry = d, .mount = cur.mount };
+        } else {
+            // Look up the child dentry.
+            if (cur.dentry.inode.ftype != .directory) {
+                return Error.NotDirectory;
+            }
+            const child = try cur.dentry.inode.lookup(c.name) orelse {
+                return Error.NotFound;
+            };
+
+            // Create a new dentry and insert it into the cache.
+            const dentry = try Dentry.create(c.name, child, cur.dentry, allocator);
+            try dcache.insert(dentry);
+            next = .{ .dentry = dentry, .mount = cur.mount };
+        }
+
+        // Follow a symlink.
+        const is_last = iter.peekNext() == null;
+        if (next.dentry.inode.ftype == .symlink and (!is_last or follow)) {
+            const resolved = try followSymlink(
+                cur,
+                next.dentry,
+                allocator,
+                depth,
+            );
+            next.dentry.unref();
             if (owned) cur.dentry.unref();
-            cur = .{ .dentry = d, .mount = cur.mount };
-            owned = true;
+
+            cur = resolved;
+            owned = false;
             continue;
         }
 
-        // Look up the child dentry.
-        if (cur.dentry.inode.ftype != .directory) {
-            return Error.NotDirectory;
-        }
-        const child = try cur.dentry.inode.lookup(c.name) orelse {
-            return Error.NotFound;
-        };
-
-        // Create a new dentry and insert it into the cache.
-        const dentry = try Dentry.create(c.name, child, cur.dentry, allocator);
-        try dcache.insert(dentry);
-
         if (owned) cur.dentry.unref();
-        cur = .{ .dentry = dentry, .mount = cur.mount };
+        cur = next;
         owned = true;
     }
 
@@ -893,11 +936,31 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator) Error!Path {
 fn resolveParent(base: Path, path: []const u8, allocator: Allocator) Error!struct { Path, []const u8 } {
     const basename = std.fs.path.basenamePosix(path);
     const parent = if (std.fs.path.dirnamePosix(path)) |dirname|
-        try resolvePath(base, dirname, allocator)
+        try resolvePath(base, dirname, allocator, true)
     else
         base;
 
     return .{ parent, basename };
+}
+
+/// Follow the symbolic link to its target.
+fn followSymlink(dir: Path, link: *Dentry, allocator: Allocator, depth: usize) Error!Path {
+    if (depth >= max_symlink_depth) {
+        return Error.Loop;
+    }
+
+    const symlink_max_len = 4096;
+    const buf = try allocator.alloc(u8, symlink_max_len);
+    defer allocator.free(buf);
+    const n = try link.inode.readlink(buf);
+
+    return resolvePathImpl(
+        dir,
+        buf[0..n],
+        allocator,
+        true,
+        depth + 1,
+    );
 }
 
 // =============================================================

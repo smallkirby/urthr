@@ -64,6 +64,7 @@ pub fn parseShebang(filename: []const u8, allocator: Allocator) Error!?Shebang {
         filename,
         .read_only,
         allocator,
+        true,
     );
     defer file.unref();
 
@@ -118,7 +119,7 @@ pub fn load(th: *Thread, filename: []const u8) Error!LoadInfo {
 ///
 /// The load address is chosen based on the given hint from the free virtual address space.
 fn loadImage(th: *Thread, filename: []const u8, hint: usize) Error!LoadInfo {
-    const file = try fs.open(filename, .read_only, urd.mem.bin);
+    const file = try fs.open(filename, .read_only, urd.mem.bin, true);
     defer file.unref();
     if (file.size() < @sizeOf(Elf64_Ehdr)) return Error.InvalidElf;
 

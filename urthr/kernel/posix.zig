@@ -69,6 +69,8 @@ pub const ErrorEnum = enum(i64) {
     nosys = -38,
     /// Directory not empty.
     notempty = -39,
+    /// Too many symbolic links encountered.
+    loop = -40,
     /// Protocol not available.
     noprotoopt = -92,
     /// Operation not supported.
