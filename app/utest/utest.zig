@@ -55,7 +55,10 @@ pub fn runChild(T: anytype) !void {
 
 /// Run a child process and expect it to exit with the given status.
 pub fn expectRunChild(expected_status: u32, T: anytype) !void {
-    try expectWaitChild(forkChild(0, T), expected_status);
+    try expectWaitChild(
+        forkChild(0, null, T),
+        expected_status,
+    );
 }
 
 /// Wait for the child process to exit with the expected status.
@@ -70,7 +73,10 @@ pub fn expectWaitChild(child_pid: linux.pid_t, expected_status: u32) !void {
 
 /// Run a child process and expect it to be terminated by the given signal.
 pub fn expectRunChildSignaled(sig: linux.SIG, ctx: usize, T: anytype) !void {
-    try expectWaitChildSignaled(forkChild(ctx, T), sig);
+    try expectWaitChildSignaled(
+        forkChild(ctx, sig, T),
+        sig,
+    );
 }
 
 /// Wait for the child process to be terminated by the given signal.
@@ -84,10 +90,20 @@ pub fn expectWaitChildSignaled(child_pid: linux.pid_t, sig: linux.SIG) !void {
     try testing.expectEqual(sig, linux.W.TERMSIG(status));
 }
 
-fn forkChild(ctx: usize, T: anytype) linux.pid_t {
+fn forkChild(ctx: usize, reset_sig: ?linux.SIG, T: anytype) linux.pid_t {
     const ret = linux.fork();
     if (ret == 0) {
+        // Reset the signal handler to the default if requested.
+        if (reset_sig) |sig| {
+            _ = linux.sigaction(sig, &.{
+                .handler = .{ .handler = linux.SIG.DFL },
+                .mask = linux.sigemptyset(),
+                .flags = 0,
+            }, null);
+        }
+        // Run the given function in the child.
         T.lambda(ctx);
+
         unreachable;
     }
     return @intCast(ret);
