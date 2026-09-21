@@ -101,6 +101,42 @@ test "clone without CLONE_FS does not share umask with the parent" {
 }
 
 // =============================================================
+// CLONE_FILES
+
+test "clone with CLONE_FILES shares the fd table with the parent" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+
+    // Close the fd in the child.
+    const ret = linux.syscall5(.clone, linux.CLONE.FILES, 0, 0, 0, 0);
+    if (ret == 0) {
+        const rc = linux.close(@intCast(fd));
+        linux.exit_group(if (linux.errno(rc) == .SUCCESS) 0 else 1);
+    }
+    try utest.expectWaitChild(@intCast(ret), 0);
+
+    // The fd is also closed in the parent.
+    try testing.expectEqual(.BADF, linux.errno(linux.close(@intCast(fd))));
+}
+
+test "clone without CLONE_FILES does not share the fd table with the parent" {
+    const fd = linux.open(utest.myname, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    // Close the fd in the child.
+    const ret = linux.syscall5(.clone, 0, 0, 0, 0, 0);
+    if (ret == 0) {
+        const rc = linux.close(@intCast(fd));
+        linux.exit_group(if (linux.errno(rc) == .SUCCESS) 0 else 1);
+    }
+    try utest.expectWaitChild(@intCast(ret), 0);
+
+    // The fd remains open in the parent.
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.close(@intCast(fd))));
+}
+
+// =============================================================
 // Helpers
 // =============================================================
 

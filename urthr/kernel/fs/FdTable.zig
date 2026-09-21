@@ -31,6 +31,25 @@ pub const FdFlags = packed struct(u32) {
 entries: [max_fds]?*File = .{null} ** max_fds,
 /// Per-descriptor flags parallel to entries.
 fd_flags: [max_fds]FdFlags = .{FdFlags.none} ** max_fds,
+/// Number of threads sharing this instance.
+refcnt: usize = 1,
+/// Protects access to the reference count.
+_lock: SpinLock = .{},
+
+/// Create a new empty table.
+pub fn new(allocator: Allocator) Allocator.Error!*Self {
+    const self = try allocator.create(Self);
+    self.* = .{};
+    return self;
+}
+
+/// Increment the reference count to share this instance.
+pub fn ref(self: *Self) *Self {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    self.refcnt += 1;
+    return self;
+}
 
 /// Get the file associated with the given file descriptor.
 ///
@@ -84,33 +103,43 @@ pub fn close(self: *Self, fd: usize) Error!void {
     self.fd_flags[fd] = .{};
 }
 
-/// Clone this table, taking a reference on each open file.
-pub fn clone(self: *const Self) Self {
-    var new = Self{};
+/// Create an independent copy of this table, taking a reference on each open file.
+pub fn clone(self: *Self, allocator: Allocator) Allocator.Error!*Self {
+    const cloned = try allocator.create(Self);
+    cloned.* = .{};
     for (self.entries, 0..) |slot, fd| {
         if (slot) |file| {
             file.ref();
-            new.entries[fd] = file;
-            new.fd_flags[fd] = self.fd_flags[fd];
+            cloned.entries[fd] = file;
+            cloned.fd_flags[fd] = self.fd_flags[fd];
         }
     }
-    return new;
+    return cloned;
 }
 
-/// Close all open file descriptors.
-pub fn deinit(self: *Self) void {
+/// Drop a reference to this instance, closing all open files and freeing it once unreferenced.
+pub fn deinit(self: *Self, allocator: Allocator) void {
+    const ie = self._lock.lockDisableIrq();
+    const last = self.refcnt == 1;
+    self.refcnt -= 1;
+    self._lock.unlockRestoreIrq(ie);
+    if (!last) return;
+
     for (&self.entries) |*slot| {
         if (slot.*) |file| {
             file.unref();
             slot.* = null;
         }
     }
+    allocator.destroy(self);
 }
 
 // =============================================================
 // Imports
 // =============================================================
 
+const Allocator = @import("std").mem.Allocator;
 const urd = @import("urthr");
 const fs = urd.fs;
 const File = fs.File;
+const SpinLock = urd.sync.SpinLock;

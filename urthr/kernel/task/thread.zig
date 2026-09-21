@@ -144,7 +144,7 @@ pub const ThreadFs = struct {
     /// FS information.
     info: *FsInfo,
     /// File descriptor table.
-    fdtbl: urd.fs.FdTable = .{},
+    fdtbl: *FdTable,
 };
 
 /// FS information possibly shared among threads.
@@ -229,6 +229,7 @@ const urd = @import("urthr");
 const task = urd.task;
 const sync = urd.sync;
 const CondVar = urd.sync.CondVar;
+const FdTable = urd.fs.FdTable;
 const SpinLock = sync.SpinLock;
 const signal = @import("signal.zig");
 const Signal = signal.Signal;

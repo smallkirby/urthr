@@ -46,7 +46,6 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
     _ = parent_tidp;
     _ = tls;
 
-    if (flags.files) urd.unimplemented("clone: share open files");
     if (flags.pidfd) urd.unimplemented("clone: pidfd");
     if (flags.ptrace) urd.unimplemented("clone: ptrace");
     if (flags.parent) urd.unimplemented("clone: share parent");
@@ -60,6 +59,7 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
         .thread = flags.thread,
         .sighand = flags.sighand,
         .fs = flags.fs,
+        .files = flags.files,
         .child_tidp = if (flags.child_clear_tid and child_tidp != 0)
             @as(*u32, @ptrFromInt(child_tidp))
         else
@@ -81,6 +81,7 @@ pub fn sysFork() ReturnType {
         .thread = false,
         .sighand = false,
         .fs = false,
+        .files = false,
     }, 0) catch return .err(.nomem);
 
     return .success(@bitCast(@as(u64, child.group.getTgid())));
@@ -94,6 +95,7 @@ pub fn sysVfork() ReturnType {
         .thread = false,
         .sighand = false,
         .fs = false,
+        .files = false,
     }, 0) catch return .err(.nomem);
 
     return .success(@bitCast(@as(u64, child.group.getTgid())));

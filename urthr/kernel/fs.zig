@@ -268,6 +268,7 @@ pub fn init(allocator: Allocator) Error!void {
             .{ .dentry = dentry, .mount = null },
             .{ .dentry = dentry, .mount = null },
         ),
+        .fdtbl = try .new(allocator),
     };
 
     // Initialize the dentry cache.

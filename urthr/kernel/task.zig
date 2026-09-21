@@ -110,8 +110,10 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
     // Initialize FS.
     const fs = ThreadFs{
         .info = try cur.fs.info.clone(mem.bin),
+        .fdtbl = try .new(mem.bin),
     };
     errdefer fs.info.deinit(mem.bin);
+    errdefer fs.fdtbl.deinit(mem.bin);
 
     // =============================================================
     // No error can be returned after this point.
@@ -296,6 +298,8 @@ pub const CloneFlags = struct {
     sighand: bool,
     /// Shares FS information with the caller.
     fs: bool,
+    /// Shares the file descriptor table with the caller.
+    files: bool,
     /// User address to be cleared and futex-woken when the child exits.
     child_tidp: ?*u32 = null,
 };
@@ -370,12 +374,19 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         cur.fs.info.clone(mem.bin) catch return Error.OutOfMemory;
     errdefer fs_info.deinit(mem.bin);
 
+    // Share or copy the file descriptor table.
+    const fdtbl = if (flags.files)
+        cur.fs.fdtbl.ref()
+    else
+        cur.fs.fdtbl.clone(mem.bin) catch return Error.OutOfMemory;
+    errdefer fdtbl.deinit(mem.bin);
+
     // =============================================================
     // No error can be returned after this point.
 
     const fs = ThreadFs{
         .info = fs_info,
-        .fdtbl = cur.fs.fdtbl.clone(),
+        .fdtbl = fdtbl,
     };
 
     // Completion the child signals on exit or execve.
@@ -514,7 +525,7 @@ fn releaseThread(th: *thread.Thread) void {
     urd.time.cancelItimer(th);
 
     // Release the fd table.
-    th.fs.fdtbl.deinit();
+    th.fs.fdtbl.deinit(mem.bin);
 
     // Release fs information.
     th.fs.info.deinit(mem.bin);
