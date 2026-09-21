@@ -615,6 +615,17 @@ pub fn findProcess(tgid: thread.Tgid) ?*ThreadGroup {
     return node.container();
 }
 
+/// Find a live thread with the given TID.
+pub fn findThread(tid: thread.Id) ?*Thread {
+    const ie = ptable_lock.lockDisableIrq();
+    defer ptable_lock.unlockRestoreIrq(ie);
+
+    var it = ptable.iterator();
+    while (it.next()) |node| {
+        if (node.container().findMember(tid)) |th| return th;
+    } else return null;
+}
+
 /// Invoke `action` for every live process with the given PGID.
 ///
 /// Returns whether the action is invoked for at least one group.

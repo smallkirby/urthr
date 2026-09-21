@@ -173,6 +173,17 @@ pub fn leave(self: *Self, th: *Thread) bool {
     return self._members.isEmpty();
 }
 
+/// Find a live member of this group with the given TID.
+pub fn findMember(self: *Self, tid: thread.Id) ?*Thread {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    var it = self._members.iter();
+    while (it.next()) |th| {
+        if (th.id == tid) return th;
+    } else return null;
+}
+
 /// Mark every member of this group for termination with the given status.
 pub fn markDying(self: *Self, status: thread.ExitStatus) void {
     const ie = self._lock.lockDisableIrq();

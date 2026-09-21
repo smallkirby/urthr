@@ -155,6 +155,59 @@ pub fn sysKill(pid: i32, signum: Signal) ReturnType {
     return .success(0);
 }
 
+/// syscall: tkill
+pub fn sysTKill(tid: i32, signum: Signal) ReturnType {
+    if (tid <= 0) {
+        return .err(.inval);
+    }
+    if (@intFromEnum(signum) < 0 or @intFromEnum(signum) > signal.num_signals) {
+        return .err(.inval);
+    }
+
+    // Check permission.
+    const target = urd.task.findThread(@intCast(tid)) orelse return .err(.srch);
+    const sender = sched.getCurrent().group.getCredential();
+    if (!hasKillPermission(sender, target.group.getCredential())) {
+        return .err(.perm);
+    }
+
+    // Send the signal to the target.
+    if (signum != .check) {
+        signal.pushTo(target, @enumFromInt(@intFromEnum(signum)));
+    }
+
+    return .success(0);
+}
+
+/// syscall: tgkill
+pub fn sysTgKill(tgid: i32, tid: i32, signum: Signal) ReturnType {
+    if (tgid <= 0 or tid <= 0) {
+        return .err(.inval);
+    }
+    if (@intFromEnum(signum) < 0 or @intFromEnum(signum) > signal.num_signals) {
+        return .err(.inval);
+    }
+
+    // Check if thread is in the specified thread group.
+    const target = urd.task.findThread(@intCast(tid)) orelse return .err(.srch);
+    if (target.group.getTgid() != @as(u32, @bitCast(tgid))) {
+        return .err(.srch);
+    }
+
+    // Check permission.
+    const sender = sched.getCurrent().group.getCredential();
+    if (!hasKillPermission(sender, target.group.getCredential())) {
+        return .err(.perm);
+    }
+
+    // Send the signal to the target.
+    if (signum != .check) {
+        signal.pushTo(target, @enumFromInt(@intFromEnum(signum)));
+    }
+
+    return .success(0);
+}
+
 const KillPgCtx = struct {
     /// Credential of the sending process.
     sender: Credential,
