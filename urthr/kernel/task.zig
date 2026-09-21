@@ -107,17 +107,14 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
     const handlers = try signal.Handlers.new(mem.bin);
     errdefer handlers.deinit(mem.bin);
 
+    // Initialize FS.
+    const fs = ThreadFs{
+        .info = try cur.fs.info.clone(mem.bin),
+    };
+    errdefer fs.info.deinit(mem.bin);
+
     // =============================================================
     // No error can be returned after this point.
-
-    // Initialize FS.
-    const fs = blk: {
-        var fs = cur.fs;
-        fs.root.dentry.ref();
-        fs.cwd.dentry.ref();
-        fs.fdtbl = .{};
-        break :blk fs;
-    };
 
     // Initialize thread.
     th.* = .{
@@ -297,6 +294,8 @@ pub const CloneFlags = struct {
     thread: bool,
     /// Shares the signal handler table with the caller.
     sighand: bool,
+    /// Shares FS information with the caller.
+    fs: bool,
     /// User address to be cleared and futex-woken when the child exits.
     child_tidp: ?*u32 = null,
 };
@@ -364,16 +363,19 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         cur.sigstate.handlers.clone(mem.bin) catch return Error.OutOfMemory;
     errdefer handlers.deinit(mem.bin);
 
+    // Share or copy fs information.
+    const fs_info = if (flags.fs)
+        cur.fs.info.ref()
+    else
+        cur.fs.info.clone(mem.bin) catch return Error.OutOfMemory;
+    errdefer fs_info.deinit(mem.bin);
+
     // =============================================================
     // No error can be returned after this point.
 
-    // Copy fs information and fd table.
-    const fs = blk: {
-        var fs = cur.fs;
-        fs.root.dentry.ref();
-        fs.cwd.dentry.ref();
-        fs.fdtbl = cur.fs.fdtbl.clone();
-        break :blk fs;
+    const fs = ThreadFs{
+        .info = fs_info,
+        .fdtbl = cur.fs.fdtbl.clone(),
     };
 
     // Completion the child signals on exit or execve.
@@ -515,8 +517,7 @@ fn releaseThread(th: *thread.Thread) void {
     th.fs.fdtbl.deinit();
 
     // Release fs information.
-    th.fs.root.dentry.unref();
-    th.fs.cwd.dentry.unref();
+    th.fs.info.deinit(mem.bin);
 
     // Free the address space.
     th.vmm.deinit(mem.bin);

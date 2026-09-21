@@ -697,7 +697,7 @@ pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType 
     var pbuf: [path_max]u8 = undefined;
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
-    const umask = sched.getCurrent().fs.umask;
+    const umask = sched.getCurrent().fs.info.umask;
     const effective_mode = umask.apply(mode.to());
     _ = mkdirFileAt(
         dirfd,
@@ -1847,8 +1847,8 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     if (path.dentry.inode.ftype != .directory) {
         return .err(.notdir);
     }
-    cur.fs.cwd.dentry.unref();
-    cur.fs.cwd = path;
+    cur.fs.info.cwd.dentry.unref();
+    cur.fs.info.cwd = path;
 
     return .success(0);
 }
@@ -1863,8 +1863,8 @@ pub fn sysFchdir(fd: usize) ReturnType {
     }
 
     file.path.dentry.ref();
-    cur.fs.cwd.dentry.unref();
-    cur.fs.cwd = file.path;
+    cur.fs.info.cwd.dentry.unref();
+    cur.fs.info.cwd = file.path;
 
     return .success(0);
 }
@@ -1873,7 +1873,7 @@ pub fn sysFchdir(fd: usize) ReturnType {
 pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
     const allocator = urd.mem.bin;
     const cur = sched.getCurrent();
-    const path = urd.fs.getPath(cur.fs.cwd, allocator) catch
+    const path = urd.fs.getPath(cur.fs.info.cwd, allocator) catch
         return .err(.again);
     defer allocator.free(path);
 
@@ -1897,10 +1897,10 @@ pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
 /// syscall: umask
 pub fn sysUmask(mask: Mode) ReturnType {
     const cur = sched.getCurrent();
-    const old = cur.fs.umask;
+    const old = cur.fs.info.umask;
     var value = mask;
     value.flags = .none; // keep flags unchanged
-    cur.fs.umask = value.to();
+    cur.fs.info.umask = value.to();
 
     return .success(@bitCast(@as(u64, @as(u32, @bitCast(Mode.fromFileMode(old))))));
 }
@@ -2187,7 +2187,7 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
         return file;
     } else |err| {
         if (err != urd.fs.Error.NotFound) return err;
-        const umask = sched.getCurrent().fs.umask;
+        const umask = sched.getCurrent().fs.info.umask;
         const effective_mode = umask.apply(mode.to());
         return createFileAt(
             dirfd,
@@ -2208,7 +2208,7 @@ fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator:
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.openAt(cur.fs.cwd, pathname, access, allocator, follow);
+        return urd.fs.openAt(cur.fs.info.cwd, pathname, access, allocator, follow);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2231,7 +2231,7 @@ fn createFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, acces
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.createAt(cur.fs.cwd, pathname, mode, access, allocator);
+        return urd.fs.createAt(cur.fs.info.cwd, pathname, mode, access, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2254,7 +2254,7 @@ fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, alloca
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.mkdirAt(cur.fs.cwd, pathname, mode, allocator);
+        return urd.fs.mkdirAt(cur.fs.info.cwd, pathname, mode, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2277,7 +2277,7 @@ fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocat
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.symlinkAt(cur.fs.cwd, pathname, target, allocator);
+        return urd.fs.symlinkAt(cur.fs.info.cwd, pathname, target, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2300,7 +2300,7 @@ fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allo
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.readlinkAt(cur.fs.cwd, pathname, buf, allocator);
+        return urd.fs.readlinkAt(cur.fs.info.cwd, pathname, buf, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2339,7 +2339,7 @@ fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator
         const dir = try urd.fs.resolve(dirname, allocator, true);
         return .{ .dir = dir, .name = basename, .owned = true };
     } else if (dirfd == cwd_fd) {
-        return .{ .dir = cur.fs.cwd, .name = pathname, .owned = false };
+        return .{ .dir = cur.fs.info.cwd, .name = pathname, .owned = false };
     } else {
         const dir = cur.fs.fdtbl.get(dirfd) catch {
             return error.BadFileDescriptor;
@@ -2390,7 +2390,7 @@ fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.unlinkAt(cur.fs.cwd, pathname, allocator);
+        return urd.fs.unlinkAt(cur.fs.info.cwd, pathname, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();
@@ -2413,7 +2413,7 @@ fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{
     } else if (dirfd == cwd_fd) {
         // Relative to CWD.
         const cur = sched.getCurrent();
-        return urd.fs.rmdirAt(cur.fs.cwd, pathname, allocator);
+        return urd.fs.rmdirAt(cur.fs.info.cwd, pathname, allocator);
     } else {
         // Relative to dirfd.
         const cur = sched.getCurrent();

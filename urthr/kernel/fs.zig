@@ -262,9 +262,13 @@ pub fn init(allocator: Allocator) Error!void {
     dentry.ref();
 
     const current = sched.getCurrent();
-    current.fs.root = .{ .dentry = dentry, .mount = null };
-    current.fs.cwd = .{ .dentry = dentry, .mount = null };
-    current.fs.umask = .default;
+    current.fs = .{
+        .info = try .new(
+            allocator,
+            .{ .dentry = dentry, .mount = null },
+            .{ .dentry = dentry, .mount = null },
+        ),
+    };
 
     // Initialize the dentry cache.
     dcache = Dentry.Cache.new(allocator);
@@ -363,7 +367,7 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
 /// Create a directory at the specified path.
 pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
     return mkdirAt(
-        sched.getCurrent().fs.cwd,
+        sched.getCurrent().fs.info.cwd,
         s,
         mode,
         allocator,
@@ -411,7 +415,7 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
 /// Create a symbolic link pointing to `target` at the specified path.
 pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) Error!*Inode {
     return symlinkAt(
-        sched.getCurrent().fs.cwd,
+        sched.getCurrent().fs.info.cwd,
         linkpath,
         target,
         allocator,
@@ -471,7 +475,7 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
 /// Create a new regular file at the specified path and open it.
 pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
     return createAt(
-        sched.getCurrent().fs.cwd,
+        sched.getCurrent().fs.info.cwd,
         s,
         mode,
         access,
@@ -486,7 +490,7 @@ pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator:
 /// Caller must call `path.dentry.unref()` after use.
 pub fn resolve(s: []const u8, allocator: Allocator, follow: bool) Error!Path {
     const cur = sched.getCurrent();
-    const path = try resolvePath(cur.fs.cwd, s, allocator, follow);
+    const path = try resolvePath(cur.fs.info.cwd, s, allocator, follow);
     path.dentry.ref();
 
     return path;
@@ -499,7 +503,7 @@ pub fn resolve(s: []const u8, allocator: Allocator, follow: bool) Error!Path {
 /// Returns the number of bytes written to the buffer.
 pub fn readlink(s: []const u8, buf: []u8, allocator: Allocator) Error!usize {
     const cur = sched.getCurrent();
-    const path = try resolvePath(cur.fs.cwd, s, allocator, false);
+    const path = try resolvePath(cur.fs.info.cwd, s, allocator, false);
     return path.dentry.inode.readlink(buf);
 }
 
@@ -575,7 +579,7 @@ pub fn getPath(path: Path, allocator: Allocator) Error![]u8 {
 /// If `follow` is true and the final component is a symbolic link, it is followed.
 pub fn open(s: []const u8, access: File.AccessMode, allocator: Allocator, follow: bool) Error!*File {
     const cur = sched.getCurrent();
-    const path = try resolvePath(cur.fs.cwd, s, allocator, follow);
+    const path = try resolvePath(cur.fs.info.cwd, s, allocator, follow);
     return File.open(path, access, allocator);
 }
 
@@ -599,7 +603,7 @@ pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allo
 /// The directory entry is removed immediately,
 /// but the underlying storage is only reclaimed once the last open file referring to it is closed.
 pub fn unlink(s: []const u8, allocator: Allocator) Error!void {
-    const cwd = sched.getCurrent().fs.cwd;
+    const cwd = sched.getCurrent().fs.info.cwd;
     const path = try resolvePath(cwd, s, allocator, false);
     return unlinkImpl(path, s);
 }
@@ -636,7 +640,7 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
 
 /// Remove an empty directory at the specified path.
 pub fn rmdir(s: []const u8, allocator: Allocator) Error!void {
-    const cwd = sched.getCurrent().fs.cwd;
+    const cwd = sched.getCurrent().fs.info.cwd;
     const path = try resolvePath(cwd, s, allocator, false);
     return rmdirImpl(path, s, allocator);
 }
@@ -796,13 +800,13 @@ pub fn rename(oldpath: []const u8, newpath: []const u8, allocator: Allocator) Er
     if (new_basename.len == 0) return Error.InvalidArgument;
 
     const old_dir = if (std.fs.path.dirnamePosix(oldpath)) |dirname|
-        try resolvePath(cur.fs.cwd, dirname, allocator, true)
+        try resolvePath(cur.fs.info.cwd, dirname, allocator, true)
     else
-        cur.fs.cwd;
+        cur.fs.info.cwd;
     const new_dir = if (std.fs.path.dirnamePosix(newpath)) |dirname|
-        try resolvePath(cur.fs.cwd, dirname, allocator, true)
+        try resolvePath(cur.fs.info.cwd, dirname, allocator, true)
     else
-        cur.fs.cwd;
+        cur.fs.info.cwd;
 
     return renameAt(
         old_dir,
@@ -834,7 +838,7 @@ fn resolvePath(base: Path, s: []const u8, allocator: Allocator, follow: bool) Er
 
 fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool, depth: usize) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))
-        sched.getCurrent().fs.root
+        sched.getCurrent().fs.info.root
     else
         base;
     // Whether `cur.dentry` holds a reference acquired by this function.

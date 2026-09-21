@@ -121,7 +121,7 @@ fn zmain() !void {
     log.info("Mounting root filesystem.", .{});
     {
         const allocator = urd.mem.bin;
-        const croot = urd.sched.getCurrent().fs.root;
+        const croot = urd.sched.getCurrent().fs.info.root;
 
         const diskfs: ?urd.fs.FileSystem = if (board.getBlockDevice()) |dev| blk: {
             // List partitions on the block device.

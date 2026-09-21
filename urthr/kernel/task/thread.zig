@@ -141,14 +141,69 @@ pub const VforkWaiter = struct {
 
 /// Thread FS information.
 pub const ThreadFs = struct {
+    /// FS information.
+    info: *FsInfo,
+    /// File descriptor table.
+    fdtbl: urd.fs.FdTable = .{},
+};
+
+/// FS information possibly shared among threads.
+pub const FsInfo = struct {
     /// Root directory of this thread.
     root: urd.fs.Path,
     /// Current working directory of this thread.
     cwd: urd.fs.Path,
-    /// File descriptor table.
-    fdtbl: urd.fs.FdTable = .{},
     /// File mode creation mask.
     umask: urd.fs.FileMode = .default,
+    /// Number of threads sharing this instance.
+    refcnt: usize = 1,
+    /// Protects access to this instance.
+    _lock: SpinLock = .{},
+
+    /// Create a new instance.
+    pub fn new(allocator: Allocator, root: urd.fs.Path, cwd: urd.fs.Path) Allocator.Error!*FsInfo {
+        const self = try allocator.create(FsInfo);
+        self.* = .{ .root = root, .cwd = cwd };
+        return self;
+    }
+
+    /// Increment the reference count to share this instance.
+    pub fn ref(self: *FsInfo) *FsInfo {
+        const ie = self._lock.lockDisableIrq();
+        defer self._lock.unlockRestoreIrq(ie);
+        self.refcnt += 1;
+        return self;
+    }
+
+    /// Create an independent copy of this instance.
+    pub fn clone(self: *FsInfo, allocator: Allocator) Allocator.Error!*FsInfo {
+        self.root.dentry.ref();
+        self.cwd.dentry.ref();
+        const copy = allocator.create(FsInfo) catch |err| {
+            self.root.dentry.unref();
+            self.cwd.dentry.unref();
+            return err;
+        };
+        copy.* = .{
+            .root = self.root,
+            .cwd = self.cwd,
+            .umask = self.umask,
+        };
+        return copy;
+    }
+
+    /// Drop a reference to this instance, releasing its resources once unreferenced.
+    pub fn deinit(self: *FsInfo, allocator: Allocator) void {
+        const ie = self._lock.lockDisableIrq();
+        const last = self.refcnt == 1;
+        self.refcnt -= 1;
+        self._lock.unlockRestoreIrq(ie);
+        if (!last) return;
+
+        self.root.dentry.unref();
+        self.cwd.dentry.unref();
+        allocator.destroy(self);
+    }
 };
 
 /// Thread function type.
@@ -164,6 +219,8 @@ pub const ChildrenList = typing.InlineDoublyLinkedList(Thread, "sibling");
 // Imports
 // =============================================================
 
+const std = @import("std");
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const typing = common.typing;
 const arch = @import("arch").impl;
