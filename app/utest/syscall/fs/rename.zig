@@ -4,6 +4,9 @@ const name_dir1 = "dir1";
 const name_dir2 = "dir2";
 const name_subdir1 = "subdir1";
 const name_noexist = "does-not-exist";
+const name_race_src = "racesrc";
+const name_race_dst1 = "racedsta";
+const name_race_dst2 = "racedstb";
 
 const content_a = "content-a";
 const content_b = "content-b";
@@ -323,6 +326,64 @@ test "rename moves a file" {
     var buf: [32]u8 = undefined;
     const content = try readAll(init, name_file2, &buf);
     try testing.expectEqualSlices(u8, content_a, content);
+}
+
+const Race = struct {
+    var done_count = std.atomic.Value(usize).init(0);
+    var success_count = std.atomic.Value(usize).init(0);
+
+    fn RenameToFn(comptime dst: []const u8) fn (usize) callconv(.c) u8 {
+        return struct {
+            fn racer(_: usize) callconv(.c) u8 {
+                const ret = linux.renameat(
+                    linux.AT.FDCWD,
+                    Test.base_dir ++ name_race_src,
+                    linux.AT.FDCWD,
+                    Test.base_dir ++ dst,
+                );
+                if (linux.errno(ret) == .SUCCESS) {
+                    _ = success_count.fetchAdd(1, .acq_rel);
+                }
+                _ = done_count.fetchAdd(1, .acq_rel);
+                return 0;
+            }
+        }.racer;
+    }
+
+    /// Spins until both racers have finished.
+    fn waitDone() void {
+        var spins: usize = 0;
+        while (done_count.load(.acquire) < 2) : (spins += 1) {
+            if (spins > 1_000_000) return;
+            _ = linux.sched_yield();
+        }
+    }
+};
+
+test "concurrent renameat on the same source does not corrupt the dentry cache" {
+    const init = utest.getInit();
+
+    const iterations = 16;
+    var iter: usize = 0;
+    while (iter < iterations) : (iter += 1) {
+        try createWith(init, name_race_src, content_a);
+
+        Race.done_count.store(0, .release);
+        Race.success_count.store(0, .release);
+
+        // Rename by two different threads.
+        _ = try utest.task.spawnThread(Race.RenameToFn(name_race_dst1), 0);
+        _ = try utest.task.spawnThread(Race.RenameToFn(name_race_dst2), 0);
+        Race.waitDone();
+
+        try testing.expectEqual(2, Race.done_count.load(.acquire));
+        try testing.expectEqual(1, Race.success_count.load(.acquire));
+
+        // Clean up.
+        _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_race_dst1, 0);
+        _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_race_dst2, 0);
+        _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_race_src, 0);
+    }
 }
 
 // =============================================================

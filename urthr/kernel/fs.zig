@@ -329,6 +329,9 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
 
 /// Create a directory under the given directory with the given name.
 pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
+    glock.lock();
+    defer glock.unlock();
+
     const parent, const basename = try resolveParent(
         dir,
         path,
@@ -377,6 +380,9 @@ pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
 
 /// Create a symbolic link under the given directory with the given name pointing to `target`.
 pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
+    glock.lock();
+    defer glock.unlock();
+
     const parent, const basename = try resolveParent(
         dir,
         linkpath,
@@ -425,6 +431,9 @@ pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) E
 
 /// Create a new regular file under the specified directory and open it.
 pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
+    glock.lock();
+    defer glock.unlock();
+
     const parent, const basename = try resolveParent(
         dir,
         path,
@@ -604,6 +613,9 @@ pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allo
 /// The directory entry is removed immediately,
 /// but the underlying storage is only reclaimed once the last open file referring to it is closed.
 pub fn unlink(s: []const u8, allocator: Allocator) Error!void {
+    glock.lock();
+    defer glock.unlock();
+
     const cwd = sched.getCurrent().fs.info.cwd;
     const path = try resolvePath(cwd, s, allocator, false);
     return unlinkImpl(path, s);
@@ -620,6 +632,9 @@ pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
     if (dir.dentry.inode.ftype != .directory) {
         return Error.NotDirectory;
     }
+
+    glock.lock();
+    defer glock.unlock();
 
     const path = try resolvePath(dir, s, allocator, false);
     return unlinkImpl(path, s);
@@ -641,6 +656,9 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
 
 /// Remove an empty directory at the specified path.
 pub fn rmdir(s: []const u8, allocator: Allocator) Error!void {
+    glock.lock();
+    defer glock.unlock();
+
     const cwd = sched.getCurrent().fs.info.cwd;
     const path = try resolvePath(cwd, s, allocator, false);
     return rmdirImpl(path, s, allocator);
@@ -654,6 +672,9 @@ pub fn rmdirAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
     if (dir.dentry.inode.ftype != .directory) {
         return Error.NotDirectory;
     }
+
+    glock.lock();
+    defer glock.unlock();
 
     const path = try resolvePath(dir, s, allocator, false);
     return rmdirImpl(path, s, allocator);
@@ -710,6 +731,9 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     {
         return Error.InvalidArgument;
     }
+
+    glock.lock();
+    defer glock.unlock();
 
     var old_cur = old_dir;
     var new_cur = new_dir;
@@ -976,6 +1000,8 @@ const ComponentIterator = std.fs.path.ComponentIterator(.posix, u8);
 
 /// dentry cache instance.
 var dcache: Dentry.Cache = undefined;
+/// Serializes directory-namespace operations.
+var glock: Mutex = .{};
 
 // =============================================================
 // Anonymous filesystems
@@ -999,3 +1025,4 @@ const block = common.block;
 const urd = @import("urthr");
 const sched = urd.sched;
 const Event = urd.sync.Event;
+const Mutex = urd.sync.Mutex;
