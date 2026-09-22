@@ -726,17 +726,28 @@ fn isEmptyDir(path: Path, allocator: Allocator) Error!bool {
 ///
 /// If the new name already exists, it is replaced atomically.
 pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []const u8, allocator: Allocator) Error!void {
-    if (std.mem.eql(u8, ".", old_name) or std.mem.eql(u8, "..", old_name) or
-        std.mem.eql(u8, ".", new_name) or std.mem.eql(u8, "..", new_name))
+    glock.lock();
+    defer glock.unlock();
+
+    const old_parent, const old_basename = try resolveParent(
+        old_dir,
+        old_name,
+        allocator,
+    );
+    const new_parent, const new_basename = try resolveParent(
+        new_dir,
+        new_name,
+        allocator,
+    );
+    if (old_basename.len == 0 or new_basename.len == 0 or
+        std.mem.eql(u8, ".", old_basename) or std.mem.eql(u8, "..", old_basename) or
+        std.mem.eql(u8, ".", new_basename) or std.mem.eql(u8, "..", new_basename))
     {
         return Error.InvalidArgument;
     }
 
-    glock.lock();
-    defer glock.unlock();
-
-    var old_cur = old_dir;
-    var new_cur = new_dir;
+    var old_cur = old_parent;
+    var new_cur = new_parent;
     if (old_cur.dentry.mount) |mnt| old_cur = .{
         .dentry = mnt.root,
         .mount = mnt,
@@ -752,14 +763,14 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     // The source must exist.
     const old_path = try resolvePath(
         old_cur,
-        old_name,
+        old_basename,
         allocator,
         false,
     );
     // The destination may or may not exist.
     const dst_path: ?Path = resolvePath(
         new_cur,
-        new_name,
+        new_basename,
         allocator,
         false,
     ) catch |err| switch (err) {
@@ -789,10 +800,10 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
 
     // Do the actual rename operation on the filesystem.
     try old_cur.dentry.inode.rename(
-        old_name,
+        old_basename,
         old_path.dentry.inode,
         new_cur.dentry.inode,
-        new_name,
+        new_basename,
         if (dst_path) |d| d.dentry.inode else null,
     );
 
@@ -800,13 +811,13 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     // Keep the old dentry alive while it's inserted again to reuse it.
     old_path.dentry.ref();
     defer old_path.dentry.unref();
-    dcache.remove(old_cur.dentry, old_name);
+    dcache.remove(old_cur.dentry, old_basename);
 
     if (dst_path != null) {
-        dcache.remove(new_cur.dentry, new_name);
+        dcache.remove(new_cur.dentry, new_basename);
     }
 
-    const name_copy = try old_path.dentry.allocator.dupe(u8, new_name);
+    const name_copy = try old_path.dentry.allocator.dupe(u8, new_basename);
     old_path.dentry.allocator.free(old_path.dentry.name);
     old_path.dentry.name = name_copy;
     old_path.dentry.parent = new_cur.dentry;

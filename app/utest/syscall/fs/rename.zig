@@ -7,6 +7,9 @@ const name_noexist = "does-not-exist";
 const name_race_src = "racesrc";
 const name_race_dst1 = "racedsta";
 const name_race_dst2 = "racedstb";
+const name_nested_dir = "racesub";
+const name_nested_file1 = "rfilea";
+const name_nested_file2 = "rfileb";
 
 const content_a = "content-a";
 const content_b = "content-b";
@@ -325,6 +328,32 @@ test "rename moves a file" {
 
     var buf: [32]u8 = undefined;
     const content = try readAll(init, name_file2, &buf);
+    try testing.expectEqualSlices(u8, content_a, content);
+}
+
+test "renameat resolves a multi-component relative path" {
+    const init = utest.getInit();
+
+    var ret = linux.mkdirat(linux.AT.FDCWD, Test.base_dir ++ name_nested_dir, 0o755);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.rmdir(Test.base_dir ++ name_nested_dir);
+    try createWith(init, name_nested_dir ++ "/" ++ name_nested_file1, content_a);
+
+    const root_fd = linux.open(Test.base_dir, .{ .DIRECTORY = true }, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(root_fd));
+    defer _ = linux.close(@intCast(root_fd));
+
+    ret = linux.renameat(
+        @intCast(root_fd),
+        name_nested_dir ++ "/" ++ name_nested_file1,
+        @intCast(root_fd),
+        name_nested_dir ++ "/" ++ name_nested_file2,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_nested_dir ++ "/" ++ name_nested_file2, 0);
+
+    var buf: [32]u8 = undefined;
+    const content = try readAll(init, name_nested_dir ++ "/" ++ name_nested_file2, &buf);
     try testing.expectEqualSlices(u8, content_a, content);
 }
 
