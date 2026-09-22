@@ -67,10 +67,12 @@ pub fn sysOpen(pathname: [*:0]const u8, flags: OpenFlags, mode: Mode) ReturnType
 
 /// syscall: dup
 pub fn sysDup(oldfd: usize) ReturnType {
-    const file = getFile(oldfd) catch return .err(.badf);
-
-    const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
+    const file = getFile(oldfd) catch {
+        return .err(.badf);
+    };
+    const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch {
         return .err(.mfile);
+    };
 
     return .success(@intCast(fd));
 }
@@ -81,24 +83,8 @@ pub fn sysDup2(oldfd: usize, newfd: usize) ReturnType {
         _ = getFile(oldfd) catch return .err(.badf);
         return .success(@intCast(newfd));
     }
-    if (newfd >= urd.fs.max_fds) {
-        return .err(.badf);
-    }
 
-    const file = getFile(oldfd) catch return .err(.badf);
-    const cur = sched.getCurrent();
-
-    // Close newfd if already open.
-    cur.fs.fdtbl.close(newfd) catch {};
-
-    // Allocate a nearest available fd.
-    _ = cur.fs.fdtbl.allocAt(
-        newfd,
-        file,
-        .{},
-    ) catch return .err(.mfile);
-
-    return .success(@intCast(newfd));
+    return dupOnto(oldfd, newfd, .{});
 }
 
 /// syscall: dup3
@@ -106,6 +92,14 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
     if (oldfd == newfd) {
         return .err(.inval);
     }
+
+    return dupOnto(oldfd, newfd, .{
+        .cloexec = flags.cloexec,
+    });
+}
+
+/// Duplicate old fd onto new fd, closing already opened new fd if necessary.
+fn dupOnto(oldfd: usize, newfd: usize, flags: FdFlags) ReturnType {
     if (newfd >= urd.fs.max_fds) {
         return .err(.badf);
     }
@@ -117,11 +111,10 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
     cur.fs.fdtbl.close(newfd) catch {};
 
     // Allocate a nearest available fd.
-    const fd_flags = FdFlags{ .cloexec = flags.cloexec };
     _ = cur.fs.fdtbl.allocAt(
         newfd,
         file,
-        fd_flags,
+        flags,
     ) catch return .err(.mfile);
 
     return .success(@intCast(newfd));
@@ -307,70 +300,15 @@ pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
 
 /// syscall: writev
 pub fn sysWritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
-    if (iovcnt == 0) return .success(0);
-    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
-
-    var total: usize = 0;
-    for (0..iovcnt) |i| {
-        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
-            return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault);
-        };
-        switch (writeFrom(file, @intFromPtr(v.base), v.len, null)) {
-            .full => |n| total += n,
-            .partial => |n| return .success(@bitCast(total + n)),
-
-            .fault => return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault),
-
-            .io => |e| return if (total != 0)
-                .success(@bitCast(total))
-            else
-                writeError(e),
-        }
-    }
-    return .success(@bitCast(total));
+    return vectoredXfer(writeFrom, writeError, file, iov, iovcnt, null);
 }
 
 /// syscall: pwritev
 pub fn sysPwritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
-    if (iovcnt == 0) return .success(0);
-    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
-
-    var pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
-    var total: usize = 0;
-    for (0..iovcnt) |i| {
-        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
-            return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault);
-        };
-        switch (writeFrom(file, @intFromPtr(v.base), v.len, pos)) {
-            .full => |n| {
-                total += n;
-                pos += n;
-            },
-            .partial => |n| return .success(@bitCast(total + n)),
-
-            .fault => return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault),
-
-            .io => |e| return if (total != 0)
-                .success(@bitCast(total))
-            else
-                writeError(e),
-        }
-    }
-    return .success(@bitCast(total));
+    const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
+    return vectoredXfer(writeFrom, writeError, file, iov, iovcnt, pos);
 }
 
 /// syscall: ftruncate
@@ -401,70 +339,15 @@ pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
 
 // syscall: readv
 pub fn sysReadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
-    if (iovcnt == 0) return .success(0);
-    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
-
-    var total: usize = 0;
-    for (0..iovcnt) |i| {
-        const vec = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
-            return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault);
-        };
-        switch (readInto(file, @intFromPtr(vec.base), vec.len, null)) {
-            .full => |n| total += n,
-            .partial => |n| return .success(@bitCast(total + n)),
-
-            .fault => return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault),
-
-            .io => |e| return if (total != 0)
-                .success(@bitCast(total))
-            else
-                mapReadError(e),
-        }
-    }
-    return .success(@bitCast(total));
+    return vectoredXfer(readInto, mapReadError, file, iov, iovcnt, null);
 }
 
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
-    if (iovcnt == 0) return .success(0);
-    const iovup = @intFromPtr(iov orelse return .err(.fault));
     const file = getFile(fd) catch return .err(.badf);
-
-    var pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
-    var total: usize = 0;
-    for (0..iovcnt) |i| {
-        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
-            return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault);
-        };
-        switch (readInto(file, @intFromPtr(v.base), v.len, pos)) {
-            .full => |n| {
-                total += n;
-                pos += n;
-            },
-            .partial => |n| return .success(@bitCast(total + n)),
-
-            .fault => return if (total != 0)
-                .success(@bitCast(total))
-            else
-                .err(.fault),
-
-            .io => |e| return if (total != 0)
-                .success(@bitCast(total))
-            else
-                mapReadError(e),
-        }
-    }
-    return .success(@bitCast(total));
+    const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
+    return vectoredXfer(readInto, mapReadError, file, iov, iovcnt, pos);
 }
 
 // =============================================================
@@ -585,6 +468,59 @@ fn writeFrom(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferRe
         }
     }
     return .{ .full = done };
+}
+
+/// Vectored transfer helper.
+///
+/// `xfer` is a function that performs a single transfer operation.
+/// When `pos` is not null, transfers starts at that offset without changing file offset.
+fn vectoredXfer(
+    comptime xfer: fn (*urd.fs.File, usize, usize, ?usize) XferResult,
+    comptime errmap: fn (urd.fs.Error) ReturnType,
+    file: *urd.fs.File,
+    iov: ?[*]const Iovec,
+    iovcnt: usize,
+    pos: ?usize,
+) ReturnType {
+    if (iovcnt == 0) {
+        return .success(0);
+    }
+    if (iov == null) {
+        return .err(.fault);
+    }
+    const iovup = @intFromPtr(iov.?);
+
+    var cur_pos = pos;
+    var total: usize = 0;
+    for (0..iovcnt) |i| {
+        // Get I/O vector from user.
+        const v = urd.uaccess.getUser(Iovec, iovup + i * @sizeOf(Iovec)) catch {
+            return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault);
+        };
+        // Perform the transfer operation.
+        switch (xfer(file, @intFromPtr(v.base), v.len, cur_pos)) {
+            .full => |n| {
+                total += n;
+                if (cur_pos) |*p| p.* += n;
+            },
+
+            .partial => |n| return .success(@bitCast(total + n)),
+
+            .fault => return if (total != 0)
+                .success(@bitCast(total))
+            else
+                .err(.fault),
+
+            .io => |e| return if (total != 0)
+                .success(@bitCast(total))
+            else
+                errmap(e),
+        }
+    }
+    return .success(@bitCast(total));
 }
 
 // =============================================================
@@ -977,23 +913,20 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
     var pbuf: [path_max]u8 = undefined;
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
-    var owned = true;
-    const file = if (flags.empty_path and s.len == 0) blk: {
-        owned = false;
-        break :blk getFile(dirfd) catch return .err(.badf);
-    } else openFileAt(
+    const resolved = ResolveFile.at(
         dirfd,
         s,
-        .{},
+        flags,
         allocator,
-        !flags.symlink_nofollow,
-    ) catch |err| return mapOpenError(err);
-    defer if (owned) file.unref();
+    ) catch |err| {
+        return mapOpenError(err);
+    };
+    defer resolved.deinit();
 
     urd.uaccess.putUser(
         Stat,
         statbuf,
-        statFromFile(file),
+        statFromFile(resolved.file),
     ) catch return .err(.fault);
 
     return .success(0);
@@ -1017,19 +950,16 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
     var pbuf: [path_max]u8 = undefined;
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
-    var owned = true;
-    const file = if (flags.empty_path and s.len == 0) blk: {
-        owned = false;
-        break :blk getFile(dirfd) catch return .err(.badf);
-    } else openFileAt(
+    const resolved = ResolveFile.at(
         dirfd,
         s,
-        .{},
+        flags,
         allocator,
-        !flags.symlink_nofollow,
-    ) catch |err|
+    ) catch |err| {
         return mapOpenError(err);
-    defer if (owned) file.unref();
+    };
+    defer resolved.deinit();
+    const file = resolved.file;
 
     const times = file.getTimes();
     const stx: Statx = .{
@@ -1671,20 +1601,17 @@ pub fn sysFchownAt(dirfd: usize, pathname: [*:0]const u8, uid: u32, gid: u32, fl
     var pbuf: [path_max]u8 = undefined;
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
-    var owned = true;
-    const file = if (flags.empty_path and s.len == 0) blk: {
-        owned = false;
-        break :blk getFile(dirfd) catch return .err(.badf);
-    } else openFileAt(
+    const resolved = ResolveFile.at(
         dirfd,
         s,
-        .{},
+        flags,
         allocator,
-        !flags.symlink_nofollow,
-    ) catch |err| return mapOpenError(err);
-    defer if (owned) file.unref();
+    ) catch |err| {
+        return mapOpenError(err);
+    };
+    defer resolved.deinit();
 
-    file.chown(
+    resolved.file.chown(
         if (uid == keep_id) null else uid,
         if (gid == keep_id) null else gid,
     ) catch |err| return switch (err) {
@@ -2168,6 +2095,36 @@ fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
     return file orelse error.BadFileDescriptor;
 }
 
+/// Describes a file resolved via `at`-style path.
+const ResolveFile = struct {
+    /// Resolved file.
+    file: *urd.fs.File,
+    /// Whether the file holds an extra reference.
+    owned: bool,
+
+    // De-initialize the file reference.
+    fn deinit(self: ResolveFile) void {
+        if (self.owned) self.file.unref();
+    }
+
+    /// Resolve the target file for `at`-style syscall.
+    fn at(dirfd: usize, pathname: []const u8, flags: AtFlags, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!ResolveFile {
+        if (flags.empty_path and pathname.len == 0) return .{
+            .file = try getFile(dirfd),
+            .owned = false,
+        };
+
+        const file = try openFileAt(
+            dirfd,
+            pathname,
+            .{},
+            allocator,
+            !flags.symlink_nofollow,
+        );
+        return .{ .file = file, .owned = true };
+    }
+};
+
 /// Resolve the file to open honoring O_CREAT/O_EXCL semantics.
 fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: Mode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
     const access: AccessMode = .{
@@ -2199,119 +2156,66 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
     }
 }
 
+/// Resolve the base directory under which a relative `pathname` should be looked up.
+///
+/// Returns null when `pathname` is absolute.
+/// In that case callers should use the root-relative FS function instead of the -at family.
+fn resolveBaseDir(dirfd: usize, pathname: []const u8) error{BadFileDescriptor}!?urd.fs.Path {
+    if (std.fs.path.isAbsolute(pathname)) {
+        return null;
+    }
+
+    const cur = sched.getCurrent();
+    if (dirfd == cwd_fd) {
+        return cur.fs.info.cwd;
+    }
+
+    const dir = cur.fs.fdtbl.get(dirfd) catch {
+        return error.BadFileDescriptor;
+    } orelse {
+        return error.BadFileDescriptor;
+    };
+    return dir.path;
+}
+
 /// Open a file at the specified path relative to the given directory file descriptor.
 fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.open(pathname, access, allocator, follow);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.openAt(cur.fs.info.cwd, pathname, access, allocator, follow);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.openAt(dir.path, pathname, access, allocator, follow);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.openAt(base, pathname, access, allocator, follow)
+    else
+        urd.fs.open(pathname, access, allocator, follow);
 }
 
 /// Create a file at the specified path relative to the given directory file descriptor.
 fn createFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.create(pathname, mode, access, allocator);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.createAt(cur.fs.info.cwd, pathname, mode, access, allocator);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.createAt(dir.path, pathname, mode, access, allocator);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.createAt(base, pathname, mode, access, allocator)
+    else
+        urd.fs.create(pathname, mode, access, allocator);
 }
 
 /// Create a directory at the specified path relative to the given directory file descriptor.
 fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.mkdir(pathname, mode, allocator);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.mkdirAt(cur.fs.info.cwd, pathname, mode, allocator);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.mkdirAt(dir.path, pathname, mode, allocator);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.mkdirAt(base, pathname, mode, allocator)
+    else
+        urd.fs.mkdir(pathname, mode, allocator);
 }
 
 /// Create a symbolic link pointing to `target` at the specified path relative to the given directory file descriptor.
 fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.symlink(target, pathname, allocator);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.symlinkAt(cur.fs.info.cwd, pathname, target, allocator);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.symlinkAt(dir.path, pathname, target, allocator);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.symlinkAt(base, pathname, target, allocator)
+    else
+        urd.fs.symlink(target, pathname, allocator);
 }
 
 /// Read the target of a symbolic link at the specified path, relative to the given directory file descriptor, into `buf`.
 fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!usize {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.readlink(pathname, buf, allocator);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.readlinkAt(cur.fs.info.cwd, pathname, buf, allocator);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.readlinkAt(dir.path, pathname, buf, allocator);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.readlinkAt(base, pathname, buf, allocator)
+    else
+        urd.fs.readlink(pathname, buf, allocator);
 }
 
 /// File information for a rename operation.
@@ -2330,23 +2234,14 @@ const RenameOperand = struct {
 
 /// Get a operand for a rename operation.
 fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!RenameOperand {
-    const cur = sched.getCurrent();
-
-    if (std.fs.path.isAbsolute(pathname)) {
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        return .{ .dir = base, .name = pathname, .owned = false };
+    } else {
         const basename = std.fs.path.basenamePosix(pathname);
         if (basename.len == 0) return urd.fs.Error.InvalidArgument;
         const dirname = std.fs.path.dirnamePosix(pathname) orelse "/";
         const dir = try urd.fs.resolve(dirname, allocator, true);
         return .{ .dir = dir, .name = basename, .owned = true };
-    } else if (dirfd == cwd_fd) {
-        return .{ .dir = cur.fs.info.cwd, .name = pathname, .owned = false };
-    } else {
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-        return .{ .dir = dir.path, .name = pathname, .owned = false };
     }
 }
 
@@ -2383,48 +2278,18 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
 
 /// Remove a file at the specified path relative to the given directory file descriptor.
 fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.unlink(pathname, allocator);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.unlinkAt(cur.fs.info.cwd, pathname, allocator);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.unlinkAt(dir.path, pathname, allocator);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.unlinkAt(base, pathname, allocator)
+    else
+        urd.fs.unlink(pathname, allocator);
 }
 
 /// Remove an empty directory at the specified path relative to the given directory file descriptor.
 fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
-    // Check if pathname is relative or absolute.
-    if (std.fs.path.isAbsolute(pathname)) {
-        // Absolute path. Ignore directory.
-        return urd.fs.rmdir(pathname, allocator);
-    } else if (dirfd == cwd_fd) {
-        // Relative to CWD.
-        const cur = sched.getCurrent();
-        return urd.fs.rmdirAt(cur.fs.info.cwd, pathname, allocator);
-    } else {
-        // Relative to dirfd.
-        const cur = sched.getCurrent();
-        const dir = cur.fs.fdtbl.get(dirfd) catch {
-            return error.BadFileDescriptor;
-        } orelse {
-            return error.BadFileDescriptor;
-        };
-
-        return urd.fs.rmdirAt(dir.path, pathname, allocator);
-    }
+    return if (try resolveBaseDir(dirfd, pathname)) |base|
+        urd.fs.rmdirAt(base, pathname, allocator)
+    else
+        urd.fs.rmdir(pathname, allocator);
 }
 
 // =============================================================
