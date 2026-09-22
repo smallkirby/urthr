@@ -143,6 +143,10 @@ export fn syscallEntry() callconv(.naked) noreturn {
         \\pushq -16(%%r13) // Spilled R14
         \\pushq -24(%%r13) // Spilled R15
         \\
+        // SS is set to NULL if there's privilege change. Reload kernel DS.
+        \\mov %[kernel_ds], %%ax
+        \\mov %%ax, %%ss
+        \\
         \\clac
         \\
         \\movq %%rsp, %%rdi
@@ -205,6 +209,7 @@ export fn syscallEntry() callconv(.naked) noreturn {
         :
         : [user_ss] "n" (@as(u16, @bitCast(gdt.SegSel{ .rpl = 3, .index = .user_ds }))),
           [user_cs] "n" (@as(u16, @bitCast(gdt.SegSel{ .rpl = 3, .index = .user_cs }))),
+          [kernel_ds] "n" (@as(u16, @bitCast(gdt.SegSel{ .rpl = 0, .index = .kernel_ds }))),
     );
 }
 

@@ -64,6 +64,17 @@ export fn isrCommon() callconv(.naked) void {
         \\pushq %%r15
     );
 
+    // SS is set to NULL if there's privilege change. Reload kernel DS.
+    asm volatile (
+        \\mov %[kernel_ds], %%ax
+        \\mov %%ax, %%ss
+        :
+        : [kernel_ds] "n" (@as(u16, @bitCast(gdt.SegSel{
+            .rpl = 0,
+            .index = .kernel_ds,
+          }))),
+        : .{ .ax = true });
+
     // Push the context and call the handler.
     asm volatile (
         \\pushq %%rsp
@@ -138,3 +149,4 @@ export fn isrReturn() callconv(.naked) noreturn {
 
 const std = @import("std");
 const intr = @import("exception.zig");
+const gdt = @import("gdt.zig");
