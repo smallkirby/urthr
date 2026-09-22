@@ -476,7 +476,7 @@ fn writeFrom(file: *fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult
 /// When `pos` is not null, transfers starts at that offset without changing file offset.
 fn vectoredXfer(
     comptime xfer: fn (*fs.File, usize, usize, ?usize) XferResult,
-    comptime errmap: fn (fs.Error) ReturnType,
+    comptime errmap: fn (Error) ReturnType,
     file: *fs.File,
     iov: ?[*]const Iovec,
     iovcnt: usize,
@@ -598,11 +598,11 @@ pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags) Return
     }
 
     unlinkFileAt(dirfd, s, allocator) catch |err| return switch (err) {
-        fs.Error.NotFound => .err(.noent),
-        fs.Error.NotDirectory => .err(.notdir),
-        fs.Error.NotFile => .err(.isdir),
-        fs.Error.Unsupported => .err(.perm),
-        error.BadFileDescriptor => .err(.badf),
+        Error.NotFound => .err(.noent),
+        Error.NotDirectory => .err(.notdir),
+        Error.NotFile => .err(.isdir),
+        Error.Unsupported => .err(.perm),
+        Error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
 
@@ -668,11 +668,11 @@ pub fn sysSymlinkAt(target: [*:0]const u8, newdirfd: usize, linkpath: [*:0]const
         target_s,
         allocator,
     ) catch |err| return switch (err) {
-        fs.Error.NotFound => .err(.noent),
-        fs.Error.NotDirectory => .err(.notdir),
-        fs.Error.AlreadyExists => .err(.exist),
-        fs.Error.Unsupported => .err(.perm),
-        error.BadFileDescriptor => .err(.badf),
+        Error.NotFound => .err(.noent),
+        Error.NotDirectory => .err(.notdir),
+        Error.AlreadyExists => .err(.exist),
+        Error.Unsupported => .err(.perm),
+        Error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
 
@@ -701,7 +701,7 @@ pub fn sysReadLinkAt(dirfd: usize, pathname: [*:0]const u8, buf: usize, bufsize:
         &tbuf,
         allocator,
     ) catch |err| return switch (err) {
-        fs.Error.Unsupported => .err(.perm),
+        Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -2009,6 +2009,8 @@ const PollEvents = packed struct(u16) {
 // Internal
 // =============================================================
 
+const Error = error{BadFileDescriptor} || fs.Error;
+
 /// Copies a NULL-terminated path from user space.
 fn copyPath(buf: *[path_max]u8, user: [*:0]const u8) urd.uaccess.Error![]const u8 {
     return urd.uaccess.copyString(buf, @intFromPtr(user));
@@ -2017,12 +2019,12 @@ fn copyPath(buf: *[path_max]u8, user: [*:0]const u8) urd.uaccess.Error![]const u
 /// Convert open-related error to syscall return type.
 fn mapOpenError(err: anyerror) ReturnType {
     return switch (err) {
-        fs.Error.InvalidArgument => .err(.inval),
-        fs.Error.NotDirectory => .err(.notdir),
-        fs.Error.NotFound => .err(.noent),
-        fs.Error.AlreadyExists => .err(.exist),
-        fs.Error.Loop => .err(.loop),
-        error.BadFileDescriptor => .err(.badf),
+        Error.InvalidArgument => .err(.inval),
+        Error.NotDirectory => .err(.notdir),
+        Error.NotFound => .err(.noent),
+        Error.AlreadyExists => .err(.exist),
+        Error.Loop => .err(.loop),
+        Error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
 }
@@ -2030,15 +2032,15 @@ fn mapOpenError(err: anyerror) ReturnType {
 /// Convert rename-related error to syscall return type.
 fn mapRenameError(err: anyerror) ReturnType {
     return switch (err) {
-        fs.Error.NotFound => .err(.noent),
-        fs.Error.NotDirectory => .err(.notdir),
-        fs.Error.NotFile => .err(.isdir),
-        fs.Error.AlreadyExists => .err(.exist),
-        fs.Error.InvalidArgument => .err(.inval),
-        fs.Error.CrossDevice => .err(.xdev),
-        fs.Error.Unsupported => .err(.perm),
-        fs.Error.Loop => .err(.loop),
-        error.BadFileDescriptor => .err(.badf),
+        Error.NotFound => .err(.noent),
+        Error.NotDirectory => .err(.notdir),
+        Error.NotFile => .err(.isdir),
+        Error.AlreadyExists => .err(.exist),
+        Error.InvalidArgument => .err(.inval),
+        Error.CrossDevice => .err(.xdev),
+        Error.Unsupported => .err(.perm),
+        Error.Loop => .err(.loop),
+        Error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
 }
@@ -2046,14 +2048,14 @@ fn mapRenameError(err: anyerror) ReturnType {
 /// Convert rmdir-related error to syscall return type.
 fn mapRmdirError(err: anyerror) ReturnType {
     return switch (err) {
-        fs.Error.NotFound => .err(.noent),
-        fs.Error.NotDirectory => .err(.notdir),
-        fs.Error.NotEmpty => .err(.notempty),
-        fs.Error.InvalidArgument => .err(.inval),
-        fs.Error.Busy => .err(.busy),
-        fs.Error.Unsupported => .err(.perm),
-        fs.Error.Loop => .err(.loop),
-        error.BadFileDescriptor => .err(.badf),
+        Error.NotFound => .err(.noent),
+        Error.NotDirectory => .err(.notdir),
+        Error.NotEmpty => .err(.notempty),
+        Error.InvalidArgument => .err(.inval),
+        Error.Busy => .err(.busy),
+        Error.Unsupported => .err(.perm),
+        Error.Loop => .err(.loop),
+        Error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
 }
@@ -2061,38 +2063,38 @@ fn mapRmdirError(err: anyerror) ReturnType {
 /// Convert mount-related error to syscall return type.
 fn mapMountError(err: anyerror) ReturnType {
     return switch (err) {
-        fs.Error.AlreadyMounted => .err(.busy),
-        fs.Error.NotDirectory => .err(.notdir),
-        fs.Error.NotFound => .err(.noent),
-        fs.Error.Loop => .err(.loop),
+        Error.AlreadyMounted => .err(.busy),
+        Error.NotDirectory => .err(.notdir),
+        Error.NotFound => .err(.noent),
+        Error.Loop => .err(.loop),
         else => .err(.again),
     };
 }
 
 /// Convert read-related error to syscall return type.
-fn mapReadError(e: fs.Error) ReturnType {
+fn mapReadError(e: Error) ReturnType {
     return switch (e) {
-        fs.Error.NotFile => .err(.isdir),
-        fs.Error.BadAccess => .err(.badf),
+        Error.NotFile => .err(.isdir),
+        Error.BadAccess => .err(.badf),
         else => .err(.again),
     };
 }
 
 /// Convert write-related error to syscall return type.
-fn writeError(e: fs.Error) ReturnType {
+fn writeError(e: Error) ReturnType {
     return switch (e) {
-        fs.Error.NotFile => .err(.badf),
-        fs.Error.BadAccess => .err(.badf),
-        error.BrokenPipe => .err(.pipe),
+        Error.NotFile => .err(.badf),
+        Error.BadAccess => .err(.badf),
+        Error.BrokenPipe => .err(.pipe),
         else => .err(.again),
     };
 }
 
 /// Get a file from the given file descriptor.
-fn getFile(fd: usize) error{BadFileDescriptor}!*fs.File {
+fn getFile(fd: usize) Error!*fs.File {
     const cur = sched.getCurrent();
-    const file = cur.fs.fdtbl.get(fd) catch return error.BadFileDescriptor;
-    return file orelse error.BadFileDescriptor;
+    const file = cur.fs.fdtbl.get(fd) catch return Error.BadFileDescriptor;
+    return file orelse Error.BadFileDescriptor;
 }
 
 /// Describes a file resolved via `at`-style path.
@@ -2108,7 +2110,7 @@ const ResolveFile = struct {
     }
 
     /// Resolve the target file for `at`-style syscall.
-    fn at(dirfd: usize, pathname: []const u8, flags: AtFlags, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!ResolveFile {
+    fn at(dirfd: usize, pathname: []const u8, flags: AtFlags, allocator: Allocator) Error!ResolveFile {
         if (flags.empty_path and pathname.len == 0) return .{
             .file = try getFile(dirfd),
             .owned = false,
@@ -2126,7 +2128,7 @@ const ResolveFile = struct {
 };
 
 /// Resolve the file to open honoring O_CREAT/O_EXCL semantics.
-fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: Mode, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.File {
+fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: Mode, allocator: Allocator) Error!*fs.File {
     const access: AccessMode = .{
         .readable = !flags.wo,
         .writable = flags.wo or flags.rdwr,
@@ -2139,7 +2141,7 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
     if (openFileAt(dirfd, pathname, access, allocator, true)) |file| {
         if (flags.excl) {
             file.unref();
-            return fs.Error.AlreadyExists;
+            return Error.AlreadyExists;
         }
         return file;
     } else |err| {
@@ -2179,7 +2181,7 @@ fn resolveBaseDir(dirfd: usize, pathname: []const u8) error{BadFileDescriptor}!?
 }
 
 /// Open a file at the specified path relative to the given directory file descriptor.
-fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) (error{BadFileDescriptor} || fs.Error)!*fs.File {
+fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) Error!*fs.File {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.openAt(base, pathname, access, allocator, follow)
     else
@@ -2187,7 +2189,7 @@ fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator:
 }
 
 /// Create a file at the specified path relative to the given directory file descriptor.
-fn createFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.File {
+fn createFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, access: AccessMode, allocator: Allocator) Error!*fs.File {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.createAt(base, pathname, mode, access, allocator)
     else
@@ -2195,7 +2197,7 @@ fn createFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, access: A
 }
 
 /// Create a directory at the specified path relative to the given directory file descriptor.
-fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.Inode {
+fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*fs.Inode {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.mkdirAt(base, pathname, mode, allocator)
     else
@@ -2203,7 +2205,7 @@ fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator:
 }
 
 /// Create a symbolic link pointing to `target` at the specified path relative to the given directory file descriptor.
-fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.Inode {
+fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) Error!*fs.Inode {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.symlinkAt(base, pathname, target, allocator)
     else
@@ -2211,7 +2213,7 @@ fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocat
 }
 
 /// Read the target of a symbolic link at the specified path, relative to the given directory file descriptor, into `buf`.
-fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!usize {
+fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) Error!usize {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.readlinkAt(base, pathname, buf, allocator)
     else
@@ -2233,7 +2235,7 @@ const RenameOperand = struct {
 };
 
 /// Get a operand for a rename operation.
-fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!RenameOperand {
+fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) Error!RenameOperand {
     if (try resolveBaseDir(dirfd, pathname)) |base| {
         return .{ .dir = base, .name = pathname, .owned = false };
     } else {
@@ -2246,7 +2248,7 @@ fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator
 }
 
 /// Rename or move a file relative to the given directory file descriptors.
-fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: []const u8, noreplace: bool, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!void {
+fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: []const u8, noreplace: bool, allocator: Allocator) Error!void {
     const old_op = try resolveRenameOperand(
         olddirfd,
         oldpath,
@@ -2263,7 +2265,7 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
     if (noreplace) {
         if (try new_op.dir.dentry.inode.lookup(new_op.name)) |existing| {
             existing.unref();
-            return fs.Error.AlreadyExists;
+            return Error.AlreadyExists;
         }
     }
 
@@ -2277,7 +2279,7 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
 }
 
 /// Remove a file at the specified path relative to the given directory file descriptor.
-fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!void {
+fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) Error!void {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.unlinkAt(base, pathname, allocator)
     else
@@ -2285,7 +2287,7 @@ fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error
 }
 
 /// Remove an empty directory at the specified path relative to the given directory file descriptor.
-fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!void {
+fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) Error!void {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
         fs.rmdirAt(base, pathname, allocator)
     else
