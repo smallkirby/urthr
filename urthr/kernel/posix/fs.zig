@@ -46,7 +46,7 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: 
     }
     if (flags.trunc and file.getType() == .regular and (flags.wo or flags.rdwr)) {
         file.truncate(0) catch |err| switch (err) {
-            urd.fs.Error.Unsupported => {},
+            fs.Error.Unsupported => {},
             else => {
                 file.unref();
                 return mapOpenError(err);
@@ -100,7 +100,7 @@ pub fn sysDup3(oldfd: usize, newfd: usize, flags: OpenFlags) ReturnType {
 
 /// Duplicate old fd onto new fd, closing already opened new fd if necessary.
 fn dupOnto(oldfd: usize, newfd: usize, flags: FdFlags) ReturnType {
-    if (newfd >= urd.fs.max_fds) {
+    if (newfd >= fs.max_fds) {
         return .err(.badf);
     }
 
@@ -139,7 +139,7 @@ pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
     const fd_flags = FdFlags{ .cloexec = flags.cloexec };
 
     // Create a pipe file pair.
-    const pair = urd.fs.createPipe() catch return .err(.nomem);
+    const pair = fs.createPipe() catch return .err(.nomem);
     defer {
         // Release the initial refs.
         pair.read.unref();
@@ -257,7 +257,7 @@ const OpenFlags = switch (builtin.cpu.arch) {
 pub fn sysLseek(fd: usize, offset: i64, whence: Whence) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
 
-    const w: urd.fs.File.Whence = switch (whence) {
+    const w: fs.File.Whence = switch (whence) {
         .set => .set,
         .cur => .cur,
         .end => .end,
@@ -265,8 +265,8 @@ pub fn sysLseek(fd: usize, offset: i64, whence: Whence) ReturnType {
     };
 
     const new_offset = file.seek(offset, w) catch |e| return switch (e) {
-        urd.fs.Error.IllegalSeek => .err(.spipe),
-        urd.fs.Error.InvalidArgument => .err(.inval),
+        fs.Error.IllegalSeek => .err(.spipe),
+        fs.Error.InvalidArgument => .err(.inval),
         else => .err(.inval),
     };
 
@@ -317,7 +317,7 @@ pub fn sysFtruncate(fd: usize, length: i64) ReturnType {
 
     const file = getFile(fd) catch return .err(.badf);
     file.truncate(@intCast(length)) catch |e| return switch (e) {
-        urd.fs.Error.Unsupported => .err(.inval),
+        fs.Error.Unsupported => .err(.inval),
         else => writeError(e),
     };
     return .success(0);
@@ -363,7 +363,7 @@ const XferResult = union(enum) {
     /// Invalid user address.
     fault,
     /// I/O error occurred.
-    io: urd.fs.Error,
+    io: fs.Error,
 };
 
 /// Size in bytes of the bounce buffer.
@@ -374,7 +374,7 @@ const bounce_size = 4096;
 /// When the file position is provided, the file's own position is not advanced.
 ///
 /// TODO: should not use bounce buffer to avoid extra memory copy overhead.
-fn readInto(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult {
+fn readInto(file: *fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult {
     if (count == 0) {
         return .{ .full = 0 };
     }
@@ -426,7 +426,7 @@ fn readInto(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferRes
 /// When the file position is provided, the file's own position is not advanced.
 ///
 /// TODO: should not use bounce buffer to avoid extra memory copy overhead.
-fn writeFrom(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult {
+fn writeFrom(file: *fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult {
     if (count == 0) {
         return .{ .full = 0 };
     }
@@ -475,9 +475,9 @@ fn writeFrom(file: *urd.fs.File, uaddr: usize, count: usize, pos: ?usize) XferRe
 /// `xfer` is a function that performs a single transfer operation.
 /// When `pos` is not null, transfers starts at that offset without changing file offset.
 fn vectoredXfer(
-    comptime xfer: fn (*urd.fs.File, usize, usize, ?usize) XferResult,
-    comptime errmap: fn (urd.fs.Error) ReturnType,
-    file: *urd.fs.File,
+    comptime xfer: fn (*fs.File, usize, usize, ?usize) XferResult,
+    comptime errmap: fn (fs.Error) ReturnType,
+    file: *fs.File,
     iov: ?[*]const Iovec,
     iovcnt: usize,
     pos: ?usize,
@@ -598,10 +598,10 @@ pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags) Return
     }
 
     unlinkFileAt(dirfd, s, allocator) catch |err| return switch (err) {
-        urd.fs.Error.NotFound => .err(.noent),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotFile => .err(.isdir),
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.NotFound => .err(.noent),
+        fs.Error.NotDirectory => .err(.notdir),
+        fs.Error.NotFile => .err(.isdir),
+        fs.Error.Unsupported => .err(.perm),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -668,10 +668,10 @@ pub fn sysSymlinkAt(target: [*:0]const u8, newdirfd: usize, linkpath: [*:0]const
         target_s,
         allocator,
     ) catch |err| return switch (err) {
-        urd.fs.Error.NotFound => .err(.noent),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.AlreadyExists => .err(.exist),
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.NotFound => .err(.noent),
+        fs.Error.NotDirectory => .err(.notdir),
+        fs.Error.AlreadyExists => .err(.exist),
+        fs.Error.Unsupported => .err(.perm),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -701,7 +701,7 @@ pub fn sysReadLinkAt(dirfd: usize, pathname: [*:0]const u8, buf: usize, bufsize:
         &tbuf,
         allocator,
     ) catch |err| return switch (err) {
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -821,7 +821,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
 
     // For remount, just check if the target path exists and is a mount point.
     if (flags.remount) {
-        const path = urd.fs.resolve(
+        const path = fs.resolve(
             s_target,
             allocator,
             true,
@@ -838,19 +838,19 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
         fstype,
     ) catch return .err(.fault);
     const new_fs = if (std.mem.eql(u8, fstype_s, "proc")) blk: {
-        const procfs = urd.fs.ProcFs.init(allocator) catch return .err(.nomem);
+        const procfs = fs.ProcFs.init(allocator) catch return .err(.nomem);
         break :blk procfs.filesystem();
     } else return .err(.nodev);
 
     // Mount the new filesystem at the specified target path.
-    const path = urd.fs.resolve(
+    const path = fs.resolve(
         s_target,
         allocator,
         true,
     ) catch |err| return mapMountError(err);
     defer path.dentry.unref();
 
-    urd.fs.mount(
+    fs.mount(
         path,
         new_fs,
         allocator,
@@ -875,7 +875,7 @@ pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
 }
 
 /// Build a stat structure from an open file.
-fn statFromFile(file: *urd.fs.File) Stat {
+fn statFromFile(file: *fs.File) Stat {
     const times = file.getTimes();
     const atime = times.atime.to();
     const mtime = times.mtime.to();
@@ -902,7 +902,7 @@ fn statFromFile(file: *urd.fs.File) Stat {
 }
 
 /// Convert FS timestamp to a `statx` timestamp.
-fn statxTimestamp(ts: urd.fs.Timestamp) Statx.Timestamp {
+fn statxTimestamp(ts: fs.Timestamp) Statx.Timestamp {
     const parts = ts.to();
     return .{ .sec = parts.sec, .nsec = @intCast(parts.nsec) };
 }
@@ -1220,7 +1220,7 @@ const Mode = packed struct(u32) {
 
         pub const none = Flags{ .sticky = false, .sgid = false, .suid = false };
 
-        fn from(f: urd.fs.FileMode.Flags) Flags {
+        fn from(f: fs.FileMode.Flags) Flags {
             return .{
                 .sticky = f.sticky,
                 .sgid = f.sgid,
@@ -1228,7 +1228,7 @@ const Mode = packed struct(u32) {
             };
         }
 
-        fn to(self: Flags) urd.fs.FileMode.Flags {
+        fn to(self: Flags) fs.FileMode.Flags {
             return .{
                 .sticky = self.sticky,
                 .sgid = self.sgid,
@@ -1237,7 +1237,7 @@ const Mode = packed struct(u32) {
         }
     };
 
-    pub fn from(file: *const urd.fs.File) Mode {
+    pub fn from(file: *const fs.File) Mode {
         const mode = file.getMode();
         return .{
             .type = .from(file.getType()),
@@ -1249,7 +1249,7 @@ const Mode = packed struct(u32) {
     }
 
     /// Convert to fs file mode.
-    fn to(self: Mode) urd.fs.FileMode {
+    fn to(self: Mode) fs.FileMode {
         return .{
             .other = self.other.to(),
             .group = self.group.to(),
@@ -1259,7 +1259,7 @@ const Mode = packed struct(u32) {
     }
 
     /// Convert from fs file mode.
-    fn fromFileMode(mode: urd.fs.FileMode) Mode {
+    fn fromFileMode(mode: fs.FileMode) Mode {
         return .{
             .other = .from(mode.other),
             .group = .from(mode.group),
@@ -1282,7 +1282,7 @@ const Permission = packed struct(u3) {
     pub const rwx = Permission{ .read = true, .write = true, .exec = true };
     pub const none = Permission{ .read = false, .write = false, .exec = false };
 
-    fn from(p: urd.fs.Permission) Permission {
+    fn from(p: fs.Permission) Permission {
         return .{
             .read = p.read,
             .write = p.write,
@@ -1290,7 +1290,7 @@ const Permission = packed struct(u3) {
         };
     }
 
-    fn to(self: Permission) urd.fs.Permission {
+    fn to(self: Permission) fs.Permission {
         return .{
             .read = self.read,
             .write = self.write,
@@ -1319,7 +1319,7 @@ const FileType = enum(u4) {
     _,
 
     /// Convert from Urthr FileType.
-    pub fn from(ftype: urd.fs.FileType) FileType {
+    pub fn from(ftype: fs.FileType) FileType {
         return switch (ftype) {
             .regular => .regular,
             .directory => .dir,
@@ -1411,7 +1411,7 @@ const DirEnt64 = extern struct {
     }
 
     /// Create a new DirEnt64 instance with the given name in the buffer.
-    pub fn createCopy(inum: urd.fs.Inode.Number, ftype: FileType, name: []const u8, buf: []u8) void {
+    pub fn createCopy(inum: fs.Inode.Number, ftype: FileType, name: []const u8, buf: []u8) void {
         const size = calcSize(name);
         rtt.expectEqual(size, buf.len);
 
@@ -1549,7 +1549,7 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType
     defer file.unref();
 
     file.chmod(mode.to()) catch |err| return switch (err) {
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -1566,7 +1566,7 @@ pub fn sysFchmod(fd: usize, mode: Mode) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
 
     file.chmod(mode.to()) catch |err| return switch (err) {
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -1588,7 +1588,7 @@ pub fn sysFchown(fd: usize, uid: u32, gid: u32) ReturnType {
         if (uid == keep_id) null else uid,
         if (gid == keep_id) null else gid,
     ) catch |err| return switch (err) {
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -1615,7 +1615,7 @@ pub fn sysFchownAt(dirfd: usize, pathname: [*:0]const u8, uid: u32, gid: u32, fl
         if (uid == keep_id) null else uid,
         if (gid == keep_id) null else gid,
     ) catch |err| return switch (err) {
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -1698,9 +1698,9 @@ pub fn sysUtimensAt(
     }
 
     // Resolve the requested times.
-    const now = urd.fs.Timestamp.now();
-    var atime: ?urd.fs.Timestamp = now;
-    var mtime: ?urd.fs.Timestamp = now;
+    const now = fs.Timestamp.now();
+    var atime: ?fs.Timestamp = now;
+    var mtime: ?fs.Timestamp = now;
     if (times) |t| {
         const tv = urd.uaccess.getUser(
             [2]posix.Timespec,
@@ -1734,7 +1734,7 @@ pub fn sysUtimensAt(
 
     // Update the timestamps.
     file.path.dentry.inode.utimes(atime, mtime) catch |err| return switch (err) {
-        urd.fs.Error.Unsupported => .err(.perm),
+        fs.Error.Unsupported => .err(.perm),
         else => mapOpenError(err),
     };
 
@@ -1744,7 +1744,7 @@ pub fn sysUtimensAt(
 /// Resolve timespec into a target timestamp.
 ///
 /// Returns null when the field must be left unchanged.
-fn resolveUtime(ts: posix.Timespec, now: urd.fs.Timestamp) !?urd.fs.Timestamp {
+fn resolveUtime(ts: posix.Timespec, now: fs.Timestamp) !?fs.Timestamp {
     return switch (ts.nsec) {
         utime_omit => null,
         utime_now => now,
@@ -1763,7 +1763,7 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const cur = sched.getCurrent();
-    const path = urd.fs.resolve(s, allocator, true) catch |err| return switch (err) {
+    const path = fs.resolve(s, allocator, true) catch |err| return switch (err) {
         error.InvalidArgument => .err(.inval),
         error.NotDirectory => .err(.notdir),
         error.NotFound => .err(.noent),
@@ -1800,7 +1800,7 @@ pub fn sysFchdir(fd: usize) ReturnType {
 pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
     const allocator = urd.mem.bin;
     const cur = sched.getCurrent();
-    const path = urd.fs.getPath(cur.fs.info.cwd, allocator) catch
+    const path = fs.getPath(cur.fs.info.cwd, allocator) catch
         return .err(.again);
     defer allocator.free(path);
 
@@ -2017,11 +2017,11 @@ fn copyPath(buf: *[path_max]u8, user: [*:0]const u8) urd.uaccess.Error![]const u
 /// Convert open-related error to syscall return type.
 fn mapOpenError(err: anyerror) ReturnType {
     return switch (err) {
-        urd.fs.Error.InvalidArgument => .err(.inval),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotFound => .err(.noent),
-        urd.fs.Error.AlreadyExists => .err(.exist),
-        urd.fs.Error.Loop => .err(.loop),
+        fs.Error.InvalidArgument => .err(.inval),
+        fs.Error.NotDirectory => .err(.notdir),
+        fs.Error.NotFound => .err(.noent),
+        fs.Error.AlreadyExists => .err(.exist),
+        fs.Error.Loop => .err(.loop),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -2030,14 +2030,14 @@ fn mapOpenError(err: anyerror) ReturnType {
 /// Convert rename-related error to syscall return type.
 fn mapRenameError(err: anyerror) ReturnType {
     return switch (err) {
-        urd.fs.Error.NotFound => .err(.noent),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotFile => .err(.isdir),
-        urd.fs.Error.AlreadyExists => .err(.exist),
-        urd.fs.Error.InvalidArgument => .err(.inval),
-        urd.fs.Error.CrossDevice => .err(.xdev),
-        urd.fs.Error.Unsupported => .err(.perm),
-        urd.fs.Error.Loop => .err(.loop),
+        fs.Error.NotFound => .err(.noent),
+        fs.Error.NotDirectory => .err(.notdir),
+        fs.Error.NotFile => .err(.isdir),
+        fs.Error.AlreadyExists => .err(.exist),
+        fs.Error.InvalidArgument => .err(.inval),
+        fs.Error.CrossDevice => .err(.xdev),
+        fs.Error.Unsupported => .err(.perm),
+        fs.Error.Loop => .err(.loop),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -2046,13 +2046,13 @@ fn mapRenameError(err: anyerror) ReturnType {
 /// Convert rmdir-related error to syscall return type.
 fn mapRmdirError(err: anyerror) ReturnType {
     return switch (err) {
-        urd.fs.Error.NotFound => .err(.noent),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotEmpty => .err(.notempty),
-        urd.fs.Error.InvalidArgument => .err(.inval),
-        urd.fs.Error.Busy => .err(.busy),
-        urd.fs.Error.Unsupported => .err(.perm),
-        urd.fs.Error.Loop => .err(.loop),
+        fs.Error.NotFound => .err(.noent),
+        fs.Error.NotDirectory => .err(.notdir),
+        fs.Error.NotEmpty => .err(.notempty),
+        fs.Error.InvalidArgument => .err(.inval),
+        fs.Error.Busy => .err(.busy),
+        fs.Error.Unsupported => .err(.perm),
+        fs.Error.Loop => .err(.loop),
         error.BadFileDescriptor => .err(.badf),
         else => .err(.again),
     };
@@ -2061,35 +2061,35 @@ fn mapRmdirError(err: anyerror) ReturnType {
 /// Convert mount-related error to syscall return type.
 fn mapMountError(err: anyerror) ReturnType {
     return switch (err) {
-        urd.fs.Error.AlreadyMounted => .err(.busy),
-        urd.fs.Error.NotDirectory => .err(.notdir),
-        urd.fs.Error.NotFound => .err(.noent),
-        urd.fs.Error.Loop => .err(.loop),
+        fs.Error.AlreadyMounted => .err(.busy),
+        fs.Error.NotDirectory => .err(.notdir),
+        fs.Error.NotFound => .err(.noent),
+        fs.Error.Loop => .err(.loop),
         else => .err(.again),
     };
 }
 
 /// Convert read-related error to syscall return type.
-fn mapReadError(e: urd.fs.Error) ReturnType {
+fn mapReadError(e: fs.Error) ReturnType {
     return switch (e) {
-        urd.fs.Error.NotFile => .err(.isdir),
-        urd.fs.Error.BadAccess => .err(.badf),
+        fs.Error.NotFile => .err(.isdir),
+        fs.Error.BadAccess => .err(.badf),
         else => .err(.again),
     };
 }
 
 /// Convert write-related error to syscall return type.
-fn writeError(e: urd.fs.Error) ReturnType {
+fn writeError(e: fs.Error) ReturnType {
     return switch (e) {
-        urd.fs.Error.NotFile => .err(.badf),
-        urd.fs.Error.BadAccess => .err(.badf),
+        fs.Error.NotFile => .err(.badf),
+        fs.Error.BadAccess => .err(.badf),
         error.BrokenPipe => .err(.pipe),
         else => .err(.again),
     };
 }
 
 /// Get a file from the given file descriptor.
-fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
+fn getFile(fd: usize) error{BadFileDescriptor}!*fs.File {
     const cur = sched.getCurrent();
     const file = cur.fs.fdtbl.get(fd) catch return error.BadFileDescriptor;
     return file orelse error.BadFileDescriptor;
@@ -2098,7 +2098,7 @@ fn getFile(fd: usize) error{BadFileDescriptor}!*urd.fs.File {
 /// Describes a file resolved via `at`-style path.
 const ResolveFile = struct {
     /// Resolved file.
-    file: *urd.fs.File,
+    file: *fs.File,
     /// Whether the file holds an extra reference.
     owned: bool,
 
@@ -2108,7 +2108,7 @@ const ResolveFile = struct {
     }
 
     /// Resolve the target file for `at`-style syscall.
-    fn at(dirfd: usize, pathname: []const u8, flags: AtFlags, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!ResolveFile {
+    fn at(dirfd: usize, pathname: []const u8, flags: AtFlags, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!ResolveFile {
         if (flags.empty_path and pathname.len == 0) return .{
             .file = try getFile(dirfd),
             .owned = false,
@@ -2126,7 +2126,7 @@ const ResolveFile = struct {
 };
 
 /// Resolve the file to open honoring O_CREAT/O_EXCL semantics.
-fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: Mode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: Mode, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.File {
     const access: AccessMode = .{
         .readable = !flags.wo,
         .writable = flags.wo or flags.rdwr,
@@ -2139,11 +2139,11 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
     if (openFileAt(dirfd, pathname, access, allocator, true)) |file| {
         if (flags.excl) {
             file.unref();
-            return urd.fs.Error.AlreadyExists;
+            return fs.Error.AlreadyExists;
         }
         return file;
     } else |err| {
-        if (err != urd.fs.Error.NotFound) return err;
+        if (err != fs.Error.NotFound) return err;
         const umask = sched.getCurrent().fs.info.umask;
         const effective_mode = umask.apply(mode.to());
         return createFileAt(
@@ -2160,7 +2160,7 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
 ///
 /// Returns null when `pathname` is absolute.
 /// In that case callers should use the root-relative FS function instead of the -at family.
-fn resolveBaseDir(dirfd: usize, pathname: []const u8) error{BadFileDescriptor}!?urd.fs.Path {
+fn resolveBaseDir(dirfd: usize, pathname: []const u8) error{BadFileDescriptor}!?fs.Path {
     if (std.fs.path.isAbsolute(pathname)) {
         return null;
     }
@@ -2179,49 +2179,49 @@ fn resolveBaseDir(dirfd: usize, pathname: []const u8) error{BadFileDescriptor}!?
 }
 
 /// Open a file at the specified path relative to the given directory file descriptor.
-fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) (error{BadFileDescriptor} || fs.Error)!*fs.File {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.openAt(base, pathname, access, allocator, follow)
+        fs.openAt(base, pathname, access, allocator, follow)
     else
-        urd.fs.open(pathname, access, allocator, follow);
+        fs.open(pathname, access, allocator, follow);
 }
 
 /// Create a file at the specified path relative to the given directory file descriptor.
-fn createFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.File {
+fn createFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, access: AccessMode, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.File {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.createAt(base, pathname, mode, access, allocator)
+        fs.createAt(base, pathname, mode, access, allocator)
     else
-        urd.fs.create(pathname, mode, access, allocator);
+        fs.create(pathname, mode, access, allocator);
 }
 
 /// Create a directory at the specified path relative to the given directory file descriptor.
-fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: urd.fs.FileMode, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
+fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.Inode {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.mkdirAt(base, pathname, mode, allocator)
+        fs.mkdirAt(base, pathname, mode, allocator)
     else
-        urd.fs.mkdir(pathname, mode, allocator);
+        fs.mkdir(pathname, mode, allocator);
 }
 
 /// Create a symbolic link pointing to `target` at the specified path relative to the given directory file descriptor.
-fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!*urd.fs.Inode {
+fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!*fs.Inode {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.symlinkAt(base, pathname, target, allocator)
+        fs.symlinkAt(base, pathname, target, allocator)
     else
-        urd.fs.symlink(target, pathname, allocator);
+        fs.symlink(target, pathname, allocator);
 }
 
 /// Read the target of a symbolic link at the specified path, relative to the given directory file descriptor, into `buf`.
-fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!usize {
+fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!usize {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.readlinkAt(base, pathname, buf, allocator)
+        fs.readlinkAt(base, pathname, buf, allocator)
     else
-        urd.fs.readlink(pathname, buf, allocator);
+        fs.readlink(pathname, buf, allocator);
 }
 
 /// File information for a rename operation.
 const RenameOperand = struct {
     /// Directory containing the file to rename.
-    dir: urd.fs.Path,
+    dir: fs.Path,
     /// Basename of the file to rename.
     name: []const u8,
     /// Whether the dentry holds a reference that must be released.
@@ -2233,20 +2233,20 @@ const RenameOperand = struct {
 };
 
 /// Get a operand for a rename operation.
-fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!RenameOperand {
+fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!RenameOperand {
     if (try resolveBaseDir(dirfd, pathname)) |base| {
         return .{ .dir = base, .name = pathname, .owned = false };
     } else {
         const basename = std.fs.path.basenamePosix(pathname);
-        if (basename.len == 0) return urd.fs.Error.InvalidArgument;
+        if (basename.len == 0) return fs.Error.InvalidArgument;
         const dirname = std.fs.path.dirnamePosix(pathname) orelse "/";
-        const dir = try urd.fs.resolve(dirname, allocator, true);
+        const dir = try fs.resolve(dirname, allocator, true);
         return .{ .dir = dir, .name = basename, .owned = true };
     }
 }
 
 /// Rename or move a file relative to the given directory file descriptors.
-fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: []const u8, noreplace: bool, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
+fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: []const u8, noreplace: bool, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!void {
     const old_op = try resolveRenameOperand(
         olddirfd,
         oldpath,
@@ -2263,11 +2263,11 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
     if (noreplace) {
         if (try new_op.dir.dentry.inode.lookup(new_op.name)) |existing| {
             existing.unref();
-            return urd.fs.Error.AlreadyExists;
+            return fs.Error.AlreadyExists;
         }
     }
 
-    return urd.fs.renameAt(
+    return fs.renameAt(
         old_op.dir,
         old_op.name,
         new_op.dir,
@@ -2277,19 +2277,19 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
 }
 
 /// Remove a file at the specified path relative to the given directory file descriptor.
-fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
+fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!void {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.unlinkAt(base, pathname, allocator)
+        fs.unlinkAt(base, pathname, allocator)
     else
-        urd.fs.unlink(pathname, allocator);
+        fs.unlink(pathname, allocator);
 }
 
 /// Remove an empty directory at the specified path relative to the given directory file descriptor.
-fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || urd.fs.Error)!void {
+fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) (error{BadFileDescriptor} || fs.Error)!void {
     return if (try resolveBaseDir(dirfd, pathname)) |base|
-        urd.fs.rmdirAt(base, pathname, allocator)
+        fs.rmdirAt(base, pathname, allocator)
     else
-        urd.fs.rmdir(pathname, allocator);
+        fs.rmdir(pathname, allocator);
 }
 
 // =============================================================
@@ -2304,10 +2304,11 @@ const common = @import("common");
 const bits = common.bits;
 const rtt = common.rtt;
 const urd = @import("urthr");
+const fs = urd.fs;
 const mem = urd.mem;
 const posix = urd.posix;
 const sched = urd.sched;
 const Event = urd.sync.Event;
-const FdFlags = urd.fs.FdTable.FdFlags;
-const AccessMode = urd.fs.File.AccessMode;
+const FdFlags = fs.FdTable.FdFlags;
+const AccessMode = fs.File.AccessMode;
 const ReturnType = urd.syscall.ReturnType;
