@@ -309,9 +309,28 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
             }),
         });
-        exe.root_module.addImport("urthr", urthr_module);
-        exe.root_module.addImport("board", board_module);
         exe.root_module.addImport("common", common_module);
+        exe.root_module.addImport("vmemmap", b.createModule(.{
+            .root_source_file = b.path("urthr/kernel/mem/vmemmap.zig"),
+            .imports = &.{.{ .name = "common", .module = common_module }},
+        }));
+        exe.root_module.addImport("memmap", b.createModule(.{
+            .root_source_file = switch (board_type) {
+                .rpi4b => b.path("urthr/board/rpi4b/memmap.zig"),
+                .rpi5 => b.path("urthr/board/rpi5/memmap.zig"),
+                .virt => b.path("urthr/board/virt/memmap.zig"),
+                .q35 => b.path("urthr/board/q35/memmap.zig"),
+            },
+            .imports = &.{.{ .name = "common", .module = common_module }},
+        }));
+        exe.root_module.addImport("arch", b.createModule(.{
+            .root_source_file = switch (board_type.arch()) {
+                .x86_64 => b.path("urthr/arch/x64/constants.zig"),
+                .aarch64 => b.path("urthr/arch/aarch64/constants.zig"),
+                else => unreachable,
+            },
+            .imports = &.{.{ .name = "common", .module = common_module }},
+        }));
 
         break :blk exe;
     };
@@ -433,24 +452,24 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addImport("dd", dd_module);
         exe.root_module.addImport("urthr", urthr_module);
         exe.root_module.addImport("options", options_module);
-        switch (board_type.arch()) {
-            .aarch64 => {
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/head.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/isr.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/switch.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/thread.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/smp.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/aarch64/uaccess.S"));
+        addAsmPreProcessed(&iu, exe.root_module, switch (board_type.arch()) {
+            .aarch64 => &[_]LazyPath{
+                b.path("urthr/arch/aarch64/head.S"),
+                b.path("urthr/arch/aarch64/isr.S"),
+                b.path("urthr/arch/aarch64/switch.S"),
+                b.path("urthr/arch/aarch64/thread.S"),
+                b.path("urthr/arch/aarch64/smp.S"),
+                b.path("urthr/arch/aarch64/uaccess.S"),
             },
-            .x86_64 => {
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/head.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/switch.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/thread.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/smp.S"));
-                exe.root_module.addAssemblyFile(b.path("urthr/arch/x64/uaccess.S"));
+            .x86_64 => &[_]LazyPath{
+                b.path("urthr/arch/x64/head.S"),
+                b.path("urthr/arch/x64/switch.S"),
+                b.path("urthr/arch/x64/thread.S"),
+                b.path("urthr/arch/x64/smp.S"),
+                b.path("urthr/arch/x64/uaccess.S"),
             },
             else => unreachable,
-        }
+        }, &.{const_header});
 
         exe.step.dependOn(&pp_urthr.step);
         break :blk exe;
@@ -1019,6 +1038,28 @@ fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const 
     const ld = b.addInstallFile(out, output);
 
     return .{ out, ld };
+}
+
+/// Add an preprocessed assembly file to the given module.
+fn addAsmPreProcessed(iu: *InstallUtil, module: *std.Build.Module, inputs: []const LazyPath, deps: []const LazyPath) void {
+    const b = iu.b;
+    for (inputs) |input| {
+        const run = b.addSystemCommand(&.{"cpp"});
+        run.addArg("-P");
+        run.addArg(b.fmt("-I{s}/include", .{b.install_path}));
+        for (deps) |dep| {
+            run.addPrefixedDirectoryArg("-I", dep.dirname());
+            run.addFileInput(dep);
+        }
+        run.addFileArg(input);
+
+        const basename = input.basename(b, null);
+        const out = run.addPrefixedOutputFileArg("-o", basename);
+        module.addAssemblyFile(out);
+
+        // Install preprocessed assembly file for debug.
+        iu.installFile(out, basename, .target, .include);
+    }
 }
 
 /// Generate list of domains to enable trace outputs.
