@@ -10,28 +10,42 @@ pub fn getFreq() u32 {
 
     // TODO: check if invariant TSC is supported.
 
+    const ret = queryFreq() orelse pit.calibrateTsc(50);
+    tsc_freq = ret;
+    return @intCast(ret);
+}
+
+/// Get the TSC frequency in Hz from CPUID.
+///
+/// Returns null if the frequency is not enumerated.
+fn queryFreq() ?u64 {
+    // CPUID returns the data of the highest basic leaf for out-of-range leaves.
+    const max_leaf = cpuid.Leaf.query(.maximum_input, null).eax;
+    if (max_leaf < @intFromEnum(cpuid.Leaf.tsc)) {
+        return null;
+    }
+
+    // Request frequency information.
     const ret1 = cpuid.Leaf.query(.tsc, null);
     const denom: u64 = ret1.eax;
     const numerator: u64 = ret1.ebx;
-    var crystal: u64 = ret1.ecx;
-
-    if (denom == 0 and crystal == 0) {
-        // No frequency information available. Calibrate using PIT timer.
-        const cal = pit.calibrateTsc(50);
-        tsc_freq = cal;
-        return @intCast(cal);
+    const crystal: u64 = ret1.ecx;
+    if (denom == 0 or numerator == 0) {
+        return null;
+    }
+    if (crystal != 0) {
+        return crystal * numerator / denom;
     }
 
-    if (crystal == 0) {
-        // Request crystal frequency from CPUID.
-        const ret2 = cpuid.Leaf.query(.freq, null);
-        const freq = ret2.eax;
-        crystal = @as(u64, freq) * 1_000_000;
+    // Request processor base frequency instead.
+    if (max_leaf < @intFromEnum(cpuid.Leaf.freq)) {
+        return null;
     }
-
-    const ret: u64 = @intCast(crystal * numerator / denom);
-    tsc_freq = ret;
-    return @intCast(ret);
+    const base: u64 = cpuid.Leaf.query(.freq, null).eax;
+    if (base == 0) {
+        return null;
+    }
+    return base * 1_000_000;
 }
 
 /// Get the current value of the system counter.

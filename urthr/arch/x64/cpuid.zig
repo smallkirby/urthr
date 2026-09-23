@@ -1,6 +1,8 @@
 /// CPUID Leaf.
 ///
 /// cf. SDM Vol2A Chapter 3.3 Table 3-8.
+///
+/// Be aware that CPU returns the highest available leaf for out-of-range leaves.
 pub const Leaf = enum(u32) {
     /// Maximum input value for basic CPUID.
     maximum_input = 0x0,
