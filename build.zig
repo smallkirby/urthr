@@ -202,6 +202,16 @@ pub fn build(b: *std.Build) !void {
             .abi = .none,
             .os_tag = .freestanding,
             .ofmt = .elf,
+            .cpu_features_add = std.Target.x86.featureSet(&[_]std.Target.x86.Feature{
+                .soft_float,
+            }),
+            .cpu_features_sub = std.Target.x86.featureSet(&[_]std.Target.x86.Feature{
+                .x87,
+                .sse,
+                .sse2,
+                .avx,
+                .avx2,
+            }),
         }),
         else => unreachable,
     };
