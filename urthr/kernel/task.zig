@@ -96,6 +96,10 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         argv,
     );
 
+    // Initialize FPU.
+    const fpu = try arch.thread.initFpu(mem.bin);
+    errdefer arch.thread.deinitFpu(fpu, mem.bin);
+
     // Create user-space page table.
     const vmm = try Vmm.new(mem.bin, mem.getKernelPageTable());
     errdefer vmm.deinit(mem.bin);
@@ -126,6 +130,7 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
         .state = .running,
         .sp = @intFromPtr(sp.ptr) + sp.len,
         .stack = stack,
+        .fpu = fpu,
         .vmm = vmm,
         .fs = fs,
         .sigstate = .{ .handlers = handlers },
@@ -326,6 +331,10 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         usp,
     );
 
+    // Initialize FPU.
+    const fpu = try arch.thread.initFpu(mem.bin);
+    errdefer arch.thread.deinitFpu(fpu, mem.bin);
+
     const id = blk: {
         const ie = lock.lockDisableIrq();
         defer lock.unlockRestoreIrq(ie);
@@ -404,6 +413,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .state = .running,
             .sp = @intFromPtr(sp.ptr) + sp.len,
             .stack = kstack,
+            .fpu = fpu,
             .vmm = vmm,
             .fs = fs,
             .sigstate = .{ .handlers = handlers, .blocked = cur.sigstate.blocked },
@@ -542,6 +552,7 @@ fn releaseThread(th: *thread.Thread) void {
 /// After this function, the thread struct and related resources are no longer accessible.
 pub fn shutdownThread(th: *thread.Thread) void {
     if (th.stack) |kstack| mem.page.freeBytesV(kstack);
+    if (th.fpu) |fpu| arch.thread.deinitFpu(fpu, mem.bin);
     if (th.parent) |p| p.deref(mem.bin);
     mem.bin.free(th.name);
     th.group.deref(mem.bin);

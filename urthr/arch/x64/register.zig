@@ -120,6 +120,28 @@ pub const Cr4 = packed struct(u64) {
     _24: u39 = 0,
 };
 
+/// Extended control register 0.
+pub const Xcr0 = packed struct(u64) {
+    /// x87 FPU. Always 1.
+    x87: bool,
+    /// If set, XSAVE feature set can be used to manage MXCSR and XMM registers.
+    sse: bool,
+    /// If set, XSAVE feature set can be used to manager the upper halves of YMM registers.
+    avx: bool,
+    /// If set, XSAVE feature set can be used to manage BND0-BND3 registers.
+    bndreg: bool,
+    /// If set, XSAVE feature set can be used to manage BNDCFGU and BNDSTATUS registers.
+    bndcsr: bool,
+    /// If set, XSAVE feature set can be used to manage k0-k7 opmask registers.
+    opmask: bool,
+    /// If set, XSAVE feature set can be used to manage the upper halves of the lower ZMM registers.
+    zmm_hi256: bool,
+    /// If set, XSAVE feature set can be used to manage the upper ZMM registers.
+    zmm_hi16: bool,
+    /// Reserved.
+    _8: u56 = 0,
+};
+
 // =============================================================
 // Register definitions
 // =============================================================

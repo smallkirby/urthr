@@ -13,6 +13,8 @@ pub const Thread = struct {
     sp: usize,
     /// Stack memory region.
     stack: ?[]u8 = null,
+    /// Arch-specific FPU state.
+    fpu: ?*anyopaque = null,
 
     /// Exit status of this thread. Valid only when the state is `dead`.
     exit_status: ExitStatus = .{ .code = 0 },

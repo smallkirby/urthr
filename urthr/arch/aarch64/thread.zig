@@ -111,6 +111,21 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize)
     return stack[0..(addr - @intFromPtr(stack.ptr))];
 }
 
+/// Initialize FPU state.
+pub fn initFpu(_: Allocator) Allocator.Error!?*anyopaque {
+    return null; // TODO
+}
+
+/// Release the FPU state.
+pub fn deinitFpu(_: ?*anyopaque, _: Allocator) void {
+    return; // TODO
+}
+
+/// Restore the FPU state of the newly switched-in thread.
+pub fn restoreFpu(_: *anyopaque) void {
+    return; // TODO
+}
+
 /// Get the user stack pointer recorded in the given ISR context.
 ///
 /// Valid only when called from a syscall handler.
@@ -127,8 +142,11 @@ pub fn isrContextOf(kstack: []u8) *IsrContext {
 
 /// Switch context from the calling thread to the new thread.
 ///
+/// Must be called while IRQ disabled.
+///
 /// Returns the pointer to the previous thread's context.
-pub fn switchContext(oldsp: *usize, newsp: *const usize, _: usize, th: *anyopaque) *anyopaque {
+pub fn switchContext(oldsp: *usize, newsp: *const usize, _: usize, th: *anyopaque, oldfpu: ?*anyopaque) *anyopaque {
+    if (oldfpu) |f| restoreFpu(f);
     return switchContextAsm(oldsp, newsp, th);
 }
 extern fn switchContextAsm(oldsp: *usize, newsp: *const usize, th: *anyopaque) callconv(.c) *anyopaque;
@@ -164,6 +182,7 @@ fn trampoline() callconv(.naked) noreturn {
 // =============================================================
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const am = @import("asm.zig");
 const regs = @import("register.zig");
 const IsrContext = @import("isr.zig").Context;

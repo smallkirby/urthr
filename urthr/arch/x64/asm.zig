@@ -89,6 +89,46 @@ pub inline fn readCr3() u64 {
     );
 }
 
+pub inline fn readCr4() regs.Cr4 {
+    return asm volatile (
+        \\mov %%cr4, %[out]
+        : [out] "=r" (-> regs.Cr4),
+        :
+        : .{ .memory = true });
+}
+
+pub inline fn writeCr4(cr4: regs.Cr4) void {
+    asm volatile (
+        \\mov %[in], %%cr4
+        :
+        : [in] "r" (cr4),
+        : .{ .memory = true });
+}
+
+pub inline fn readXcr0() regs.Xcr0 {
+    var eax: u32 = undefined;
+    var edx: u32 = undefined;
+    asm volatile (
+        \\xor %%ecx, %%ecx
+        \\xgetbv
+        : [eax] "={eax}" (eax),
+          [edx] "={edx}" (edx),
+        :
+        : .{ .ecx = true });
+    return @bitCast(@as(u64, edx) << 32 | @as(u64, eax));
+}
+
+pub inline fn writeXcr0(xcr0: regs.Xcr0) void {
+    const val: u64 = @bitCast(xcr0);
+    asm volatile (
+        \\xor %%ecx, %%ecx
+        \\xsetbv
+        :
+        : [eax] "{eax}" (@as(u32, @truncate(val))),
+          [edx] "{edx}" (@as(u32, @truncate(val >> 32))),
+        : .{ .ecx = true });
+}
+
 pub inline fn rdtsc() u64 {
     var low: u32 = undefined;
     var high: u32 = undefined;

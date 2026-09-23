@@ -47,6 +47,7 @@ pub fn initLocal() Allocator.Error!void {
         .name = "idle", // TODO: should be unique per core.
         .state = .running,
         .sp = undefined,
+        .fpu = try arch.thread.initFpu(allocator),
         .vmm = vmm,
         .fs = undefined, // filled later on fs subsystem initialization.
         .sigstate = .{ .handlers = handlers },
@@ -217,6 +218,7 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
             &next.sp,
             kstackTopOf(next),
             cur,
+            cur.fpu,
         );
     };
 
@@ -247,8 +249,13 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
     // Do deferred work for the previous thread.
     urd.task.onSwitchedOut(prev);
 
-    // Perf recording.
+    // Restore FPU state.
     const cur = getCurrent();
+    if (cur.fpu) |f| {
+        arch.thread.restoreFpu(f);
+    }
+
+    // Perf recording.
     if (cur.last_exec_start == 0) {
         urd.perf.recordThreadName(cur.name);
     }
