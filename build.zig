@@ -460,6 +460,7 @@ pub fn build(b: *std.Build) !void {
                 b.path("urthr/arch/aarch64/thread.S"),
                 b.path("urthr/arch/aarch64/smp.S"),
                 b.path("urthr/arch/aarch64/uaccess.S"),
+                b.path("urthr/arch/aarch64/fpu.S"),
             },
             .x86_64 => &[_]LazyPath{
                 b.path("urthr/arch/x64/head.S"),
@@ -648,7 +649,6 @@ pub fn build(b: *std.Build) !void {
                 .ofmt = .elf,
                 .cpu_features_sub = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
                     .neon,
-                    .fp_armv8,
                 }),
             }),
             .x86_64 => b.resolveTargetQuery(.{

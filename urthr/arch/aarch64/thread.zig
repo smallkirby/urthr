@@ -112,18 +112,20 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize)
 }
 
 /// Initialize FPU state.
-pub fn initFpu(_: Allocator) Allocator.Error!?*anyopaque {
-    return null; // TODO
+///
+/// Returns the pointer to the initialized FPU state.
+pub fn initFpu(allocator: Allocator) Allocator.Error!*anyopaque {
+    return fpu.initState(allocator);
 }
 
 /// Release the FPU state.
-pub fn deinitFpu(_: ?*anyopaque, _: Allocator) void {
-    return; // TODO
+pub fn deinitFpu(state: *anyopaque, allocator: Allocator) void {
+    fpu.deinitState(state, allocator);
 }
 
-/// Restore the FPU state of the newly switched-in thread.
-pub fn restoreFpu(_: *anyopaque) void {
-    return; // TODO
+/// Restore the FPU state of the current thread using the given saved state.
+pub fn restoreFpu(state: *anyopaque) void {
+    fpu.restoreState(state);
 }
 
 /// Get the user stack pointer recorded in the given ISR context.
@@ -146,7 +148,7 @@ pub fn isrContextOf(kstack: []u8) *IsrContext {
 ///
 /// Returns the pointer to the previous thread's context.
 pub fn switchContext(oldsp: *usize, newsp: *const usize, _: usize, th: *anyopaque, oldfpu: ?*anyopaque) *anyopaque {
-    if (oldfpu) |f| restoreFpu(f);
+    if (oldfpu) |f| fpu.saveState(f);
     return switchContextAsm(oldsp, newsp, th);
 }
 extern fn switchContextAsm(oldsp: *usize, newsp: *const usize, th: *anyopaque) callconv(.c) *anyopaque;
@@ -184,5 +186,6 @@ fn trampoline() callconv(.naked) noreturn {
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const am = @import("asm.zig");
+const fpu = @import("fpu.zig");
 const regs = @import("register.zig");
 const IsrContext = @import("isr.zig").Context;
