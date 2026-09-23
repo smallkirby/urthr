@@ -694,6 +694,7 @@ pub fn build(b: *std.Build) !void {
                     .path = b.path("app/utest/test_runner.zig"),
                     .mode = .simple,
                 },
+                .use_llvm = true,
             });
             exe.root_module.addImport("utest", module);
             exe.root_module.addImport("common", common_module);
