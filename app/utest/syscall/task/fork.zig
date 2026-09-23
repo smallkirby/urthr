@@ -35,11 +35,24 @@ test "vfork" {
     if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 
     const expected_exit = 44;
-    const ret = linux.syscall0(.vfork);
-    if (ret == 0) {
-        // Child: exit immediately.
-        linux.exit_group(expected_exit);
-    }
+    // To ensure child does not touch parent's stack, keep it in asm.
+    const ret = asm volatile (
+        \\
+        // vfork syscall
+        \\syscall
+        \\testq %%rax, %%rax
+        // child entry
+        \\jnz 1f
+        \\movq %[exit_nr], %%rax
+        \\movq %[code], %%rdi
+        \\syscall
+        // parent entry
+        \\1:
+        : [ret] "={rax}" (-> u64),
+        : [nr] "{rax}" (@intFromEnum(linux.SYS.vfork)),
+          [exit_nr] "r" (@intFromEnum(linux.SYS.exit_group)),
+          [code] "r" (@as(u64, expected_exit)),
+        : .{ .rdi = true, .rcx = true, .r11 = true, .memory = true });
 
     try utest.expectWaitChild(@intCast(ret), expected_exit << 8);
 }
