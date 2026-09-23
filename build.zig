@@ -1190,9 +1190,9 @@ const Qemu = struct {
                 try args.appendSlice(allocator, &.{
                     "-cpu",
                     if (self.kvm)
-                        "host,+fsgsbase,+smap,+smep,+invtsc,+rdrand,+tsc-deadline,+avx"
+                        "host,+fsgsbase,+smap,+smep,+rdrand,+avx,+sse4.2,+xsave,+xsaveopt"
                     else
-                        "qemu64,+fsgsbase,+smap,+smep,+invtsc,+rdrand,+tsc-deadline,+avx",
+                        "qemu64,+fsgsbase,+smap,+smep,rdrand,+avx,+sse4.2,+xsave,+xsaveopt",
                 });
                 if (self.kvm) {
                     try args.appendSlice(allocator, &.{"-enable-kvm"});
