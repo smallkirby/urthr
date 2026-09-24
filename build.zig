@@ -440,6 +440,7 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
                 .code_model = if (board_type.arch() == .x86_64) .large else .default,
                 .pic = if (board_type.arch() == .x86_64) true else null,
+                .red_zone = false,
             }),
             .linkage = .static,
             .use_llvm = true,
