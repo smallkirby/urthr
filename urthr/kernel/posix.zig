@@ -25,14 +25,14 @@ pub const ErrorEnum = enum(i64) {
     srch = -3,
     /// Interrupted.
     intr = -4,
-    /// No child processes.
-    child = -10,
     /// Too large.
     toobig = -7,
     /// Exec format error.
     noexec = -8,
     /// Bad file descriptor.
     badf = -9,
+    /// No child processes.
+    child = -10,
     /// Resource temporarily unavailable.
     again = -11,
     /// Cannot allocate memory.
