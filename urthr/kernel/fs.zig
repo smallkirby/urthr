@@ -362,7 +362,7 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
         inode.unref();
         return err;
     };
-    errdefer dentry.unref();
+    defer dentry.unref();
     try dcache.insert(dentry);
 
     return inode;
@@ -413,7 +413,7 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
         inode.unref();
         return err;
     };
-    errdefer dentry.unref();
+    defer dentry.unref();
     try dcache.insert(dentry);
 
     return inode;
@@ -469,7 +469,7 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
         inode.unref();
         return err;
     };
-    errdefer dentry.unref();
+    defer dentry.unref();
     try dcache.insert(dentry);
 
     return File.open(
@@ -879,6 +879,7 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
         base;
     // Whether `cur.dentry` holds a reference acquired by this function.
     var owned = false;
+    errdefer if (owned) cur.dentry.unref();
 
     if (cur.dentry.mount) |mnt| {
         cur = .{ .dentry = mnt.root, .mount = mnt };
@@ -940,12 +941,15 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
         // Follow a symlink.
         const is_last = iter.peekNext() == null;
         if (next.dentry.inode.ftype == .symlink and (!is_last or follow)) {
-            const resolved = try followSymlink(
+            const resolved = followSymlink(
                 cur,
                 next.dentry,
                 allocator,
                 depth,
-            );
+            ) catch |err| {
+                next.dentry.unref();
+                return err;
+            };
             next.dentry.unref();
             if (owned) cur.dentry.unref();
 

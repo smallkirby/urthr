@@ -35,22 +35,18 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: 
         mode,
         allocator,
     ) catch |err| return mapOpenError(err);
+    defer file.unref();
 
     if (flags.directory and file.getType() != .directory) {
-        file.unref();
         return .err(.notdir);
     }
     if (file.getType() == .directory and (flags.wo or flags.rdwr)) {
-        file.unref();
         return .err(.isdir);
     }
     if (flags.trunc and file.getType() == .regular and (flags.wo or flags.rdwr)) {
         file.truncate(0) catch |err| switch (err) {
             fs.Error.Unsupported => {},
-            else => {
-                file.unref();
-                return mapOpenError(err);
-            },
+            else => return mapOpenError(err),
         };
     }
 
@@ -1772,6 +1768,7 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     };
 
     if (path.dentry.inode.ftype != .directory) {
+        path.dentry.unref();
         return .err(.notdir);
     }
     cur.fs.info.cwd.dentry.unref();
