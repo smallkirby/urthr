@@ -263,7 +263,12 @@ fn frRead(file: *fs.File, buf: []u8, _: usize) fs.Error!usize {
     defer pipe.lock.unlock();
 
     while (pipe.isEmpty()) {
-        if (pipe.writers == 0) return 0; // EOF
+        if (pipe.writers == 0) {
+            return 0; // EOF
+        }
+        if (file.status_flags.nonblock) {
+            return fs.Error.WouldBlock;
+        }
         pipe.rcv.wait(&pipe.lock);
     }
 
@@ -284,6 +289,9 @@ fn frWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
         if (pipe.readers == 0) {
             signal.push(.pipe);
             return fs.Error.BrokenPipe;
+        }
+        if (file.status_flags.nonblock) {
+            return fs.Error.WouldBlock;
         }
         pipe.wcv.wait(&pipe.lock);
     }

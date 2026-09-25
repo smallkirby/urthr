@@ -141,6 +141,8 @@ pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
         pair.read.unref();
         pair.write.unref();
     }
+    pair.read.status_flags.nonblock = flags.nonblock;
+    pair.write.status_flags.nonblock = flags.nonblock;
 
     // Put the read- and write-end into the fd table.
     const rfd = cur.fs.fdtbl.allocAt(
