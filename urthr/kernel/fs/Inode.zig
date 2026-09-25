@@ -107,6 +107,10 @@ iops: Ops,
 fops: File.Ops,
 /// Reference count.
 refcnt: std.atomic.Value(usize) = .init(0),
+/// Advisory lock for user-level synchronization shared by all open files of this inode.
+///
+/// This lock is completely for advisory purposes for users.
+user_lock: SharedLock = .{},
 
 /// Lookup an inode by its name.
 pub fn lookup(self: *Self, name: []const u8) Error!?*Inode {
@@ -318,3 +322,4 @@ const Allocator = std.mem.Allocator;
 const urd = @import("urthr");
 const fs = urd.fs;
 const File = @import("File.zig");
+const SharedLock = urd.sync.SharedLock;

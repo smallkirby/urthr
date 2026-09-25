@@ -2005,6 +2005,72 @@ const PollEvents = packed struct(u16) {
 };
 
 // =============================================================
+// flock
+// =============================================================
+
+/// syscall: flock
+pub fn sysFlock(fd: usize, op: FlockOp) ReturnType {
+    const file = sched.getCurrent().fs.fdtbl.get(fd) catch {
+        return .err(.badf);
+    } orelse {
+        return .err(.badf);
+    };
+
+    const user_lock = &file.path.dentry.inode.user_lock;
+    switch (op.value()) {
+        .lock_shared,
+        .lock_exclusive,
+        => |o| {
+            const ltype: SharedLock.LockType = switch (o) {
+                .lock_shared => .shared,
+                .lock_exclusive => .exclusive,
+                else => unreachable,
+            };
+            if (op.isNonBlock()) {
+                if (file.flock.tryLock(user_lock, ltype)) {
+                    return .success(0);
+                } else {
+                    return .err(.again);
+                }
+            } else {
+                file.flock.lock(user_lock, ltype);
+                return .success(0);
+            }
+        },
+
+        .unlock => {
+            file.flock.unlock(user_lock);
+            return .success(0);
+        },
+
+        // Invalid operation
+        _ => return .err(.inval),
+    }
+}
+
+const FlockOp = enum(i32) {
+    /// Acquire shared lock.
+    lock_shared = 1,
+    /// Acquire exclusive lock.
+    lock_exclusive = 2,
+    /// Release the lock.
+    unlock = 8,
+
+    _,
+
+    /// Don't block when acquiring the lock.
+    const non_block: i32 = 4;
+
+    pub fn value(self: FlockOp) FlockOp {
+        return @enumFromInt(@intFromEnum(self) & ~non_block);
+    }
+
+    pub fn isNonBlock(self: FlockOp) bool {
+        return (@intFromEnum(self) & non_block) != 0;
+    }
+};
+
+// =============================================================
 // Internal
 // =============================================================
 
@@ -2161,7 +2227,7 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
 ///
 /// Returns null when `pathname` is absolute.
 /// In that case callers should use the root-relative FS function instead of the -at family.
-fn resolveBaseDir(dirfd: usize, pathname: []const u8) error{BadFileDescriptor}!?fs.Path {
+fn resolveBaseDir(dirfd: usize, pathname: []const u8) Error!?fs.Path {
     if (std.fs.path.isAbsolute(pathname)) {
         return null;
     }
@@ -2310,6 +2376,7 @@ const mem = urd.mem;
 const posix = urd.posix;
 const sched = urd.sched;
 const Event = urd.sync.Event;
+const SharedLock = urd.sync.SharedLock;
 const FdFlags = fs.FdTable.FdFlags;
 const AccessMode = fs.File.AccessMode;
 const ReturnType = urd.syscall.ReturnType;

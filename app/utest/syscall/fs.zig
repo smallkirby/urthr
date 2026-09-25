@@ -6,6 +6,7 @@ comptime {
     _ = @import("fs/cwd.zig");
     _ = @import("fs/dup.zig");
     _ = @import("fs/fcntl.zig");
+    _ = @import("fs/flock.zig");
     _ = @import("fs/ioctl.zig");
     _ = @import("fs/lseek.zig");
     _ = @import("fs/mkdir.zig");

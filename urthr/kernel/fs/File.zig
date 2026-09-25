@@ -123,6 +123,8 @@ refcnt: std.atomic.Value(usize) = .init(0),
 ctx: *anyopaque,
 /// Memory allocator.
 allocator: Allocator,
+/// Holder of inode's advisory lock for this open file.
+flock: SharedLock.Holder = .{},
 
 /// Open a file at the specified path.
 pub fn open(path: fs.Path, access: AccessMode, allocator: Allocator) Error!*File {
@@ -279,6 +281,7 @@ pub fn ref(self: *Self) void {
 /// If the count reaches zero, the file is deallocated and its resources are released.
 pub fn unref(self: *Self) void {
     if (self.refcnt.fetchSub(1, .acq_rel) == 1) {
+        self.flock.unlock(&self.inode().user_lock);
         self.ops.close(self.ctx, self.allocator);
         self.path.dentry.unref();
         self.allocator.destroy(self);
@@ -354,3 +357,4 @@ const Inode = @import("Inode.zig");
 const Path = fs.Path;
 const PollEvents = fs.PollEvents;
 const PollResult = fs.PollResult;
+const SharedLock = urd.sync.SharedLock;
