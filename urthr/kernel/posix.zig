@@ -25,6 +25,8 @@ pub const ErrorEnum = enum(i64) {
     srch = -3,
     /// Interrupted.
     intr = -4,
+    /// I/O error.
+    io = -5,
     /// Too large.
     toobig = -7,
     /// Exec format error.
@@ -59,6 +61,8 @@ pub const ErrorEnum = enum(i64) {
     mfile = -24,
     /// Not a TTY.
     notty = -25,
+    /// No space left on device.
+    nospace = -28,
     /// Is socket or pipe.
     spipe = -29,
     /// Broken pipe.

@@ -34,7 +34,7 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: 
         flags,
         mode,
         allocator,
-    ) catch |err| return mapOpenError(err);
+    ) catch |err| return mapError(err);
     defer file.unref();
 
     if (flags.directory and file.getType() != .directory) {
@@ -46,7 +46,7 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: 
     if (flags.trunc and file.getType() == .regular and (flags.wo or flags.rdwr)) {
         file.truncate(0) catch |err| switch (err) {
             fs.Error.Unsupported => {},
-            else => return mapOpenError(err),
+            else => return mapError(err),
         };
     }
 
@@ -331,21 +331,21 @@ pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
     return switch (readInto(file, buf, count, null)) {
         .full, .partial => |n| .success(@bitCast(n)),
         .fault => .err(.fault),
-        .io => |e| mapReadError(e),
+        .io => |e| mapError(e),
     };
 }
 
 // syscall: readv
 pub fn sysReadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
-    return vectoredXfer(readInto, mapReadError, file, iov, iovcnt, null);
+    return vectoredXfer(readInto, mapError, file, iov, iovcnt, null);
 }
 
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
-    return vectoredXfer(readInto, mapReadError, file, iov, iovcnt, pos);
+    return vectoredXfer(readInto, mapError, file, iov, iovcnt, pos);
 }
 
 // =============================================================
@@ -550,7 +550,7 @@ pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: u
     while (total < count) {
         const chunk = @min(count - total, buf.len);
         const nread = in_file.pread(buf[0..chunk], pos) catch |e| {
-            pending_err = mapReadError(e);
+            pending_err = mapError(e);
             break;
         };
         if (nread.len == 0) break;
@@ -588,20 +588,20 @@ pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: u
 pub fn sysUnlinkAt(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags) ReturnType {
     const allocator = urd.mem.bin;
     var pbuf: [path_max]u8 = undefined;
-    const s = copyPath(&pbuf, pathname) catch return .err(.fault);
+    const s = copyPath(&pbuf, pathname) catch {
+        return .err(.fault);
+    };
 
     if (flags.removedir) {
-        rmdirFileAt(dirfd, s, allocator) catch |err| return mapRmdirError(err);
-        return .success(0);
+        if (rmdirFileAt(dirfd, s, allocator)) {
+            return .success(0);
+        } else |err| {
+            return mapError(err);
+        }
     }
 
-    unlinkFileAt(dirfd, s, allocator) catch |err| return switch (err) {
-        Error.NotFound => .err(.noent),
-        Error.NotDirectory => .err(.notdir),
-        Error.NotFile => .err(.isdir),
-        Error.Unsupported => .err(.perm),
-        Error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
+    unlinkFileAt(dirfd, s, allocator) catch |err| {
+        return mapError(err);
     };
 
     return .success(0);
@@ -638,7 +638,7 @@ pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType 
         s,
         effective_mode,
         allocator,
-    ) catch |err| return mapOpenError(err);
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -665,14 +665,7 @@ pub fn sysSymlinkAt(target: [*:0]const u8, newdirfd: usize, linkpath: [*:0]const
         linkpath_s,
         target_s,
         allocator,
-    ) catch |err| return switch (err) {
-        Error.NotFound => .err(.noent),
-        Error.NotDirectory => .err(.notdir),
-        Error.AlreadyExists => .err(.exist),
-        Error.Unsupported => .err(.perm),
-        Error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -698,10 +691,7 @@ pub fn sysReadLinkAt(dirfd: usize, pathname: [*:0]const u8, buf: usize, bufsize:
         s,
         &tbuf,
         allocator,
-    ) catch |err| return switch (err) {
-        Error.Unsupported => .err(.perm),
-        else => mapOpenError(err),
-    };
+    ) catch |err| return mapError(err);
 
     const copy_len = @min(n, bufsize);
     urd.uaccess.copyToUser(buf, tbuf[0..copy_len]) catch return .err(.fault);
@@ -731,7 +721,7 @@ pub fn sysRenameAt(olddirfd: usize, oldpath: [*:0]const u8, newdirfd: usize, new
         news,
         false,
         urd.mem.bin,
-    ) catch |err| return mapRenameError(err);
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -763,7 +753,7 @@ pub fn sysRenameAt2(olddirfd: usize, oldpath: [*:0]const u8, newdirfd: usize, ne
         news,
         flags.noreplace,
         urd.mem.bin,
-    ) catch |err| return mapRenameError(err);
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -823,7 +813,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
             s_target,
             allocator,
             true,
-        ) catch |err| return mapMountError(err);
+        ) catch |err| return mapError(err);
         path.dentry.unref();
         return .success(0);
     }
@@ -845,14 +835,14 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
         s_target,
         allocator,
         true,
-    ) catch |err| return mapMountError(err);
+    ) catch |err| return mapError(err);
     defer path.dentry.unref();
 
     fs.mount(
         path,
         new_fs,
         allocator,
-    ) catch |err| return mapMountError(err);
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -917,7 +907,7 @@ pub fn sysNewFstatAt(dirfd: usize, pathname: [*:0]const u8, statbuf: *align(1) S
         flags,
         allocator,
     ) catch |err| {
-        return mapOpenError(err);
+        return mapError(err);
     };
     defer resolved.deinit();
 
@@ -954,7 +944,7 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         flags,
         allocator,
     ) catch |err| {
-        return mapOpenError(err);
+        return mapError(err);
     };
     defer resolved.deinit();
     const file = resolved.file;
@@ -1543,12 +1533,11 @@ pub fn sysFchmodAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType
         .{},
         allocator,
         true,
-    ) catch |err| return mapOpenError(err);
+    ) catch |err| return mapError(err);
     defer file.unref();
 
-    file.chmod(mode.to()) catch |err| return switch (err) {
-        fs.Error.Unsupported => .err(.perm),
-        else => mapOpenError(err),
+    file.chmod(mode.to()) catch |err| {
+        return mapError(err);
     };
 
     return .success(0);
@@ -1561,11 +1550,12 @@ pub fn sysChmod(pathname: [*:0]const u8, mode: Mode) ReturnType {
 
 /// syscall: fchmod
 pub fn sysFchmod(fd: usize, mode: Mode) ReturnType {
-    const file = getFile(fd) catch return .err(.badf);
+    const file = getFile(fd) catch {
+        return .err(.badf);
+    };
 
-    file.chmod(mode.to()) catch |err| return switch (err) {
-        fs.Error.Unsupported => .err(.perm),
-        else => mapOpenError(err),
+    file.chmod(mode.to()) catch |err| {
+        return mapError(err);
     };
 
     return .success(0);
@@ -1585,10 +1575,7 @@ pub fn sysFchown(fd: usize, uid: u32, gid: u32) ReturnType {
     file.chown(
         if (uid == keep_id) null else uid,
         if (gid == keep_id) null else gid,
-    ) catch |err| return switch (err) {
-        fs.Error.Unsupported => .err(.perm),
-        else => mapOpenError(err),
-    };
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -1605,17 +1592,14 @@ pub fn sysFchownAt(dirfd: usize, pathname: [*:0]const u8, uid: u32, gid: u32, fl
         flags,
         allocator,
     ) catch |err| {
-        return mapOpenError(err);
+        return mapError(err);
     };
     defer resolved.deinit();
 
     resolved.file.chown(
         if (uid == keep_id) null else uid,
         if (gid == keep_id) null else gid,
-    ) catch |err| return switch (err) {
-        fs.Error.Unsupported => .err(.perm),
-        else => mapOpenError(err),
-    };
+    ) catch |err| return mapError(err);
 
     return .success(0);
 }
@@ -1662,7 +1646,7 @@ pub fn sysFaccessAt(dirfd: usize, pathname: [*:0]const u8, mode: AccessFlags) Re
         .{},
         urd.mem.bin,
         true,
-    ) catch |err| return mapOpenError(err);
+    ) catch |err| return mapError(err);
     defer file.unref();
 
     return .success(0);
@@ -1721,7 +1705,7 @@ pub fn sysUtimensAt(
         .{},
         urd.mem.bin,
         true,
-    ) catch |err| return mapOpenError(err) else blk: {
+    ) catch |err| return mapError(err) else blk: {
         owned = false;
         break :blk getFile(dirfd) catch return .err(.badf);
     };
@@ -1731,9 +1715,8 @@ pub fn sysUtimensAt(
     if (atime == null and mtime == null) return .success(0);
 
     // Update the timestamps.
-    file.path.dentry.inode.utimes(atime, mtime) catch |err| return switch (err) {
-        fs.Error.Unsupported => .err(.perm),
-        else => mapOpenError(err),
+    file.path.dentry.inode.utimes(atime, mtime) catch |err| {
+        return mapError(err);
     };
 
     return .success(0);
@@ -1761,12 +1744,8 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     const s = copyPath(&pbuf, pathname) catch return .err(.fault);
 
     const cur = sched.getCurrent();
-    const path = fs.resolve(s, allocator, true) catch |err| return switch (err) {
-        error.InvalidArgument => .err(.inval),
-        error.NotDirectory => .err(.notdir),
-        error.NotFound => .err(.noent),
-        error.Loop => .err(.loop),
-        else => .err(.again),
+    const path = fs.resolve(s, allocator, true) catch |err| {
+        return mapError(err);
     };
 
     if (path.dentry.inode.ftype != .directory) {
@@ -2081,77 +2060,33 @@ fn copyPath(buf: *[path_max]u8, user: [*:0]const u8) urd.uaccess.Error![]const u
     return urd.uaccess.copyString(buf, @intFromPtr(user));
 }
 
-/// Convert open-related error to syscall return type.
-fn mapOpenError(err: anyerror) ReturnType {
-    return switch (err) {
-        Error.InvalidArgument => .err(.inval),
-        Error.NotDirectory => .err(.notdir),
-        Error.NotFound => .err(.noent),
-        Error.AlreadyExists => .err(.exist),
-        Error.Loop => .err(.loop),
-        Error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
-}
-
-/// Convert rename-related error to syscall return type.
-fn mapRenameError(err: anyerror) ReturnType {
-    return switch (err) {
-        Error.NotFound => .err(.noent),
-        Error.NotDirectory => .err(.notdir),
-        Error.NotFile => .err(.isdir),
-        Error.AlreadyExists => .err(.exist),
-        Error.InvalidArgument => .err(.inval),
-        Error.CrossDevice => .err(.xdev),
-        Error.Unsupported => .err(.perm),
-        Error.Loop => .err(.loop),
-        Error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
-}
-
-/// Convert rmdir-related error to syscall return type.
-fn mapRmdirError(err: anyerror) ReturnType {
-    return switch (err) {
-        Error.NotFound => .err(.noent),
-        Error.NotDirectory => .err(.notdir),
-        Error.NotEmpty => .err(.notempty),
-        Error.InvalidArgument => .err(.inval),
-        Error.Busy => .err(.busy),
-        Error.Unsupported => .err(.perm),
-        Error.Loop => .err(.loop),
-        Error.BadFileDescriptor => .err(.badf),
-        else => .err(.again),
-    };
-}
-
-/// Convert mount-related error to syscall return type.
-fn mapMountError(err: anyerror) ReturnType {
-    return switch (err) {
-        Error.AlreadyMounted => .err(.busy),
-        Error.NotDirectory => .err(.notdir),
-        Error.NotFound => .err(.noent),
-        Error.Loop => .err(.loop),
-        else => .err(.again),
-    };
-}
-
-/// Convert read-related error to syscall return type.
-fn mapReadError(e: Error) ReturnType {
-    return switch (e) {
-        Error.NotFile => .err(.isdir),
-        Error.BadAccess => .err(.badf),
-        else => .err(.again),
-    };
+/// Convert a filesystem error to syscall return type.
+fn mapError(err: anyerror) ReturnType {
+    return .err(switch (err) {
+        Error.WouldBlock => .again,
+        Error.BrokenPipe => .pipe,
+        Error.NotDirectory => .notdir,
+        Error.NotFile => .isdir,
+        Error.NotFound => .noent,
+        Error.NotEmpty => .notempty,
+        Error.AlreadyExists => .exist,
+        Error.AlreadyMounted, Error.Busy => .busy,
+        Error.NoSpace => .nospace,
+        Error.BadAccess, Error.BadFileDescriptor => .badf,
+        Error.IllegalSeek => .spipe,
+        Error.InvalidArgument => .inval,
+        Error.CrossDevice => .xdev,
+        Error.Unsupported => .perm,
+        Error.Loop => .loop,
+        else => .io,
+    });
 }
 
 /// Convert write-related error to syscall return type.
 fn writeError(e: Error) ReturnType {
     return switch (e) {
         Error.NotFile => .err(.badf),
-        Error.BadAccess => .err(.badf),
-        Error.BrokenPipe => .err(.pipe),
-        else => .err(.again),
+        else => mapError(e),
     };
 }
 
