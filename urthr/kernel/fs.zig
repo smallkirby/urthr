@@ -363,7 +363,7 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
         return err;
     };
     defer dentry.unref();
-    try dcache.insert(dentry);
+    dcache.insert(dentry).unref();
 
     return inode;
 }
@@ -414,7 +414,7 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
         return err;
     };
     defer dentry.unref();
-    try dcache.insert(dentry);
+    dcache.insert(dentry).unref();
 
     return inode;
 }
@@ -470,11 +470,12 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
         return err;
     };
     defer dentry.unref();
-    try dcache.insert(dentry);
+    const cached = dcache.insert(dentry);
+    defer cached.unref();
 
     return File.open(
         .{
-            .dentry = dentry,
+            .dentry = cached,
             .mount = cur.mount,
         },
         access,
@@ -822,7 +823,7 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     old_path.dentry.name = name_copy;
     old_path.dentry.parent = new_cur.dentry;
 
-    try dcache.insert(old_path.dentry);
+    dcache.insert(old_path.dentry).unref();
 }
 
 /// Move a directory entry to the specified directory with a new name.
@@ -933,9 +934,18 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
             };
 
             // Create a new dentry and insert it into the cache.
-            const dentry = try Dentry.create(c.name, child, cur.dentry, allocator);
-            try dcache.insert(dentry);
-            next = .{ .dentry = dentry, .mount = cur.mount };
+            // If another thread has cached the same entry, use new one.
+            const created = try Dentry.create(
+                c.name,
+                child,
+                cur.dentry,
+                allocator,
+            );
+            defer created.unref();
+            next = .{
+                .dentry = dcache.insert(created),
+                .mount = cur.mount,
+            };
         }
 
         // Follow a symlink.

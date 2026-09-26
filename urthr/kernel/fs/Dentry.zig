@@ -122,20 +122,27 @@ pub const Cache = struct {
     }
 
     /// Insert the dentry to the cache.
-    pub fn insert(self: *Cache, entry: *Dentry) Error!void {
-        entry.ref();
-        errdefer entry.unref();
-
+    ///
+    /// Returns the cached dentry.
+    /// If a dentry with the same key is already cached, it is kept and `entry` is not inserted.
+    /// Caller must call `unref()` for the returned dentry after use.
+    pub fn insert(self: *Cache, entry: *Dentry) *Dentry {
         self._lock.lock();
         defer self._lock.unlock();
 
-        try self._map.put(
-            .{
-                .parent = entry.parent,
-                .name = entry.name,
-            },
-            entry,
-        );
+        const result = self._map.getOrPut(.{
+            .parent = entry.parent,
+            .name = entry.name,
+        }) catch unreachable;
+        if (!result.found_existing) {
+            entry.ref();
+            result.value_ptr.* = entry;
+        }
+
+        const cached = result.value_ptr.*;
+        cached.ref();
+
+        return cached;
     }
 };
 
