@@ -24,8 +24,10 @@ pub const Error = error{
     NoChild,
 } || loader.Error;
 
-/// The number of pages allocated for user stack.
-const num_stack_pages = 32;
+/// The number of pages initially populated for user stack.
+const num_initial_stack_pages = 32;
+/// The number of pages reserved for user stack.
+const num_total_stack_pages = 2048;
 /// Base address of the user stack.
 const stack_base = 0x7FFF_FF00_0000;
 /// Maximum length of a path.
@@ -782,12 +784,25 @@ fn setupUserImage(
     }
 
     // Prepare user stack.
-    const stack = try th.vmm.map(
-        stack_base,
-        num_stack_pages * mem.page_size,
-        .rw,
-    );
-    @memset(stack, 0);
+    const stack = blk: {
+        const populated = try th.vmm.map(
+            stack_base,
+            num_initial_stack_pages * mem.page_size,
+            .rw,
+        );
+        @memset(populated, 0);
+
+        const nstack_pages = num_total_stack_pages - num_initial_stack_pages;
+        _ = try th.vmm.reserve(
+            stack_base - nstack_pages * mem.page_size,
+            nstack_pages * mem.page_size,
+            .rw,
+            .anon,
+            false,
+        );
+
+        break :blk populated;
+    };
 
     // Construct stack content.
     var scon = StackCreator.init(
