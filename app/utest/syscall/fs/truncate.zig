@@ -52,6 +52,39 @@ test "syscall: ftruncate extends the file and zero-fills the new region" {
     try testing.expectEqualSlices(u8, "hello" ++ [_]u8{0} ** 5, buf[0..n]);
 }
 
+test "ftruncate extends an empty file beyond a cluster" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const wfile = try t.createFile();
+    wfile.close(init.io);
+    defer t.deleteFile();
+
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ "/" ++ Test.file_name,
+        .{ .ACCMODE = .RDWR },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const size = 1 << 20;
+    const ret = linux.ftruncate(@intCast(fd), size);
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+
+    const end = linux.lseek(@intCast(fd), 0, linux.SEEK.END);
+    try testing.expectEqual(.SUCCESS, linux.errno(end));
+    try testing.expectEqual(size, end);
+
+    _ = linux.lseek(@intCast(fd), size - 4, linux.SEEK.SET);
+    var buf: [8]u8 = undefined;
+    const n = linux.read(@intCast(fd), &buf, buf.len);
+    try testing.expectEqual(.SUCCESS, linux.errno(n));
+    try testing.expectEqual(4, n);
+    try testing.expectEqualSlices(u8, &[_]u8{0} ** 4, buf[0..n]);
+}
+
 test "ftruncate with an unopened fd fails with EBADF" {
     const ret = linux.ftruncate(999, 0);
     try testing.expectEqual(.BADF, linux.errno(ret));

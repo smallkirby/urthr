@@ -987,7 +987,18 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     const total_len = zero_len + buf.len;
 
     // Seek to the cluster that contains `dst_start`.
-    const clsoff = try ctx.seekCluster(offset);
+    const clsoff = if (dst_start != 0 and dst_start % bytes_per_cluster == 0) blk: {
+        // Cluster boundary. Get next cluster or allocate a new one.
+        const prev = try ctx.seekCluster(dst_start - 1);
+        const next =
+            try fat32.getNextCluster(prev.cluster) orelse
+            try fat32.allocateCluster(prev.cluster);
+        break :blk ClsOff{
+            .cluster = next,
+            .file_offset = prev.file_offset + bytes_per_cluster,
+        };
+    } else try ctx.seekCluster(dst_start);
+
     const clus = clsoff.cluster;
     const clus_file_offset = clsoff.file_offset;
 
