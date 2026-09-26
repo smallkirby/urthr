@@ -259,7 +259,8 @@ pub fn init(allocator: Allocator) Error!void {
         .parent = null,
         .allocator = allocator,
     };
-    dentry.ref();
+    dentry.ref(); // + for the root
+    dentry.ref(); // + for the cwd
 
     const current = sched.getCurrent();
     current.fs = .{
@@ -324,6 +325,7 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
         .parent = path.mount,
         .mntpoint = path.dentry,
     };
+    path.dentry.ref(); // + for the mount point
     path.dentry.mount = mnt;
 }
 
@@ -821,7 +823,10 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     const name_copy = try old_path.dentry.allocator.dupe(u8, new_basename);
     old_path.dentry.allocator.free(old_path.dentry.name);
     old_path.dentry.name = name_copy;
+    new_cur.dentry.ref();
+    const prev_parent = old_path.dentry.parent;
     old_path.dentry.parent = new_cur.dentry;
+    if (prev_parent) |p| p.unref();
 
     dcache.insert(old_path.dentry).unref();
 }

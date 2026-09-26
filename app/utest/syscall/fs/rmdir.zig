@@ -74,6 +74,47 @@ test "rmdir fails with EBUSY when removing the filesystem root" {
     try testing.expectEqual(.BUSY, linux.errno(ret));
 }
 
+test "cwd inside a removed directory tree keeps working" {
+    const parent = Test.base_dir ++ "pdir1";
+    const child = parent ++ "/cdir1";
+    const tmp = Test.base_dir ++ "tmp1";
+
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.mkdirat(linux.AT.FDCWD, parent, 0o755),
+    ));
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.mkdirat(linux.AT.FDCWD, child, 0o755),
+    ));
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.chdir(child),
+    ));
+    defer _ = linux.chdir(Test.base_dir);
+
+    // Remove the child and parent while CWD is inside the child.
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.rmdir(child),
+    ));
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.rmdir(parent),
+    ));
+
+    // Churn directory entries so that a freed ancestor is likely be reused.
+    for (0..4) |_| {
+        try testing.expectEqual(.SUCCESS, linux.errno(
+            linux.mkdirat(linux.AT.FDCWD, tmp, 0o755),
+        ));
+        try testing.expectEqual(.SUCCESS, linux.errno(
+            linux.rmdir(tmp),
+        ));
+    }
+
+    // Behavior of ".." and getcwd() here is unspecified.
+    const rc = linux.chdir("..");
+    try testing.expect(linux.errno(rc) == .SUCCESS or linux.errno(rc) == .NOENT);
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    _ = linux.getcwd(&buf, buf.len);
+}
+
 test "unlinkat with AT_REMOVEDIR removes an empty directory relative to a directory fd" {
     const init = utest.getInit();
     const dir = try std.Io.Dir.openDirAbsolute(init.io, Test.base_dir, .{});

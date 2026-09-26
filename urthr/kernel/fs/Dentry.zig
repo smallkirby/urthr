@@ -22,6 +22,8 @@ allocator: Allocator,
 /// Create a new dentry with the given name and inode.
 pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allocator) Error!*Dentry {
     const dentry = try allocator.create(Dentry);
+    errdefer allocator.destroy(dentry);
+
     dentry.* = .{
         .name = try allocator.dupe(u8, name),
         .inode = inode,
@@ -29,6 +31,7 @@ pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allo
         .allocator = allocator,
     };
 
+    if (parent) |p| p.ref();
     dentry.ref();
     return dentry;
 }
@@ -45,9 +48,11 @@ pub fn unref(self: *Self) void {
     const prev = self.refcnt.fetchSub(1, .acq_rel);
     rtt.expect(prev != 0);
     if (prev == 1) {
+        const parent = self.parent;
         self.inode.unref();
         self.allocator.free(self.name);
         self.allocator.destroy(self);
+        if (parent) |p| p.unref();
     }
 }
 
