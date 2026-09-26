@@ -2,6 +2,7 @@ comptime {
     _ = @import("mem/brk.zig");
     _ = @import("mem/mmap.zig");
     _ = @import("mem/mprotect.zig");
+    _ = @import("mem/mremap.zig");
     _ = @import("mem/munmap.zig");
 }
 

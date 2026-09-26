@@ -191,6 +191,60 @@ pub fn sysMunmap(addr: usize, len: usize) ReturnType {
     return .success(0);
 }
 
+/// syscall: mremap
+pub fn sysMremap(old_addr: usize, old_size: usize, new_size: usize, flags: MremapFlags, new_addr: usize) ReturnType {
+    const cur = sched.getCurrent();
+    const aligned_old = std.mem.alignForward(usize, old_size, urd.mem.page_size);
+    const aligned_new = std.mem.alignForward(usize, new_size, urd.mem.page_size);
+
+    if (old_addr % urd.mem.page_size != 0 or new_size == 0) {
+        return .err(.inval);
+    }
+    if ((flags.fixed or flags.dontunmap) and !flags.maymove) {
+        return .err(.inval);
+    }
+    if (flags.dontunmap and aligned_old != aligned_new) {
+        return .err(.inval);
+    }
+    if (flags.fixed) {
+        if (new_addr % urd.mem.page_size != 0) {
+            return .err(.inval);
+        }
+        if (new_addr < old_addr + aligned_old and old_addr < new_addr + aligned_new) {
+            return .err(.inval); // Ranges must not overlap.
+        }
+    }
+
+    const addr = cur.vmm.resize(
+        old_addr,
+        aligned_old,
+        aligned_new,
+        .{
+            .may_move = flags.maymove,
+            .dest = if (flags.fixed) new_addr else null,
+            .keep_old = flags.dontunmap,
+        },
+    ) catch |e| switch (e) {
+        error.OutOfMemory, error.AlreadyMapped => return .err(.nomem),
+        error.InvalidArgument => return .err(.inval),
+        else => return .err(.fault),
+    };
+
+    return .success(@bitCast(addr));
+}
+
+/// Memory remapping flags.
+const MremapFlags = packed struct(u32) {
+    /// Allow the old mapping to be moved to a new location if necessary.
+    maymove: bool,
+    /// New address must be interpreted exactly.
+    fixed: bool,
+    /// Keep the old mapping.
+    dontunmap: bool,
+    /// Not used.
+    _3: u29 = 0,
+};
+
 /// Memory mapping flags.
 const MmapFlags = packed struct(u32) {
     /// Share changes.

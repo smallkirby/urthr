@@ -15,6 +15,8 @@ pub const Error = error{
     NoSuchMapping,
     /// The access type is not permitted by the virtual memory area's permission.
     PermissionDenied,
+    /// The given arguments are invalid.
+    InvalidArgument,
 } || common.mem.PageAllocator.Error || arch.mmu.Error || urd.fs.Error;
 
 /// Address space.
@@ -235,6 +237,21 @@ pub fn mapAnon(self: *Self, size: usize, perm: Permission) Error!usize {
 ///
 /// The given address and size must be page-aligned.
 pub fn reserve(
+    self: *Self,
+    vaddr: ?usize,
+    size: usize,
+    perm: Permission,
+    backing: Backing,
+    shared: bool,
+) Error![]u8 {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
+    return self.reserveLocked(vaddr, size, perm, backing, shared);
+}
+
+/// Implementation of `reserve()` while holding the lock.
+fn reserveLocked(
     self: *Self,
     vaddr: ?usize,
     size: usize,
@@ -580,6 +597,152 @@ pub fn remap(self: *Self, vaddr: usize, size: usize, perm: Permission) Error!voi
         };
         need_flush = true;
     }
+}
+
+pub const ResizeOptions = struct {
+    /// Allow the range to be moved to another address.
+    may_move: bool = false,
+    /// Move the range to exactly this address.
+    /// Existing mappings there are unmapped.
+    dest: ?usize = null,
+    /// Keep the old range mapped as an empty area after moving.
+    /// Only for private anonymous mappings.
+    keep_old: bool = false,
+};
+
+/// Resizes an existing virtual memory range.
+///
+/// The old range must be covered by a single VMA.
+/// If the range can't grow in place and `may_move` is true, the range is moved to another address.
+/// If `dest` is specified, the destination must not overlap the old range.
+///
+/// Returns the address of the resized range.
+pub fn resize(self: *Self, vaddr: usize, old_size: usize, new_size: usize, opts: ResizeOptions) Error!usize {
+    rtt.expectEqual(0, vaddr % urd.mem.page_size);
+    rtt.expectEqual(0, old_size % urd.mem.page_size);
+    rtt.expectEqual(0, new_size % urd.mem.page_size);
+    rtt.expect(opts.dest == null or opts.may_move);
+    rtt.expect(!opts.keep_old or (opts.may_move and old_size == new_size));
+
+    // Validate arguments.
+    {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        // VA must be mapped..
+        const vma = if (self.tree.find(vaddr)) |node|
+            node.container()
+        else
+            return Error.NoSuchMapping;
+
+        // Must be covered by a single VMA.
+        if (vma.start + vma.size < vaddr + old_size) {
+            return Error.NoSuchMapping;
+        }
+        // VMA must be private and backed by an anonymous mapping to keep the old range.
+        if (opts.keep_old and (vma.shared or vma.backing != .anon)) {
+            return Error.InvalidArgument;
+        }
+    }
+
+    // Shrink the mapping first.
+    if (new_size < old_size) {
+        try self.unmap(vaddr + new_size, old_size - new_size);
+    }
+    const size = @min(old_size, new_size);
+    if (opts.dest == null and !opts.keep_old and new_size <= old_size) {
+        return vaddr;
+    }
+
+    // Unmap the existing mapping at the destination if specified.
+    if (opts.dest) |dest| {
+        try self.unmap(dest, new_size);
+    }
+
+    // Request TLB shootdown after the lock is released.
+    var need_flush = false;
+    defer if (need_flush) self.flushTlb(.global, .{
+        .addr = vaddr,
+        .len = size,
+    });
+
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
+    const vma = if (self.tree.find(vaddr)) |node|
+        node.container()
+    else
+        return Error.NoSuchMapping;
+
+    // Grow in place if the adjacent range is free.
+    const old_end = vaddr + old_size;
+    if (opts.dest == null and !opts.keep_old and vma.start + vma.size == old_end) {
+        const occupied = if (self.tree.lowerBound(old_end)) |node|
+            node.container().start < vaddr + new_size
+        else
+            false;
+
+        if (!occupied) {
+            vma.size += new_size - size;
+            return vaddr;
+        }
+    }
+    if (!opts.may_move) return Error.AlreadyMapped;
+
+    // Allocate new VMA.
+    const perm = vma.perm;
+    const new_va = @intFromPtr((try self.reserveLocked(
+        opts.dest,
+        new_size,
+        perm,
+        vma.getBackingAt(vaddr),
+        vma.shared,
+    )).ptr);
+
+    // Move already-backed pages to the new range.
+    var off: usize = 0;
+    while (off < size) : (off += urd.mem.page_size) {
+        const pa = arch.mmu.translateWalk(
+            self.as,
+            vaddr + off,
+            urd.mem.page,
+        ) orelse continue;
+
+        // If this page is shared by COW, keep it write-protected.
+        const mperm = if (urd.mem.pageref.count(pa) > 1) Permission{
+            .ur = perm.ur,
+            .uw = false, // write-protect for COW
+            .ux = perm.ux,
+            .kr = perm.kr,
+            .kw = false, // write-protect for COW
+            .kx = perm.kx,
+        } else perm;
+
+        try arch.mmu.map4kb(self.as, .{
+            .va = new_va + off,
+            .pa = pa,
+            .size = urd.mem.page_size,
+            .perm = mperm,
+            .attr = .normal,
+        }, .{
+            .exact = true,
+            .flush = false,
+        }, urd.mem.page);
+        try arch.mmu.unmap4kb(
+            self.as,
+            vaddr + off,
+            urd.mem.page_size,
+            .{ .flush = false },
+            urd.mem.page,
+        );
+    }
+    if (!opts.keep_old) {
+        try self.deleteFromVmTree(vaddr, size);
+    }
+
+    need_flush = true;
+
+    return new_va;
 }
 
 /// Find the first free virtual address region of the given size starting from the given address.
