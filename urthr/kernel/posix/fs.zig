@@ -2154,7 +2154,16 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
             effective_mode,
             access,
             allocator,
-        );
+        ) catch |e| {
+            // File has been concurrently created by another thread.
+            if (e == Error.AlreadyExists and !flags.excl) return openFileAt(
+                dirfd,
+                pathname,
+                access,
+                allocator,
+                true,
+            ) else return e;
+        };
     }
 }
 
