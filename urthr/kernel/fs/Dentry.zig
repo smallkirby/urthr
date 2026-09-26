@@ -115,13 +115,18 @@ pub const Cache = struct {
     ///
     /// Caller must ensure that the dentry is cached.
     pub fn remove(self: *Cache, parent: ?*Dentry, name: []const u8) void {
-        self._lock.lock();
-        defer self._lock.unlock();
+        // Release the reference outside the lock.
+        const removed = blk: {
+            self._lock.lock();
+            defer self._lock.unlock();
 
-        if (self._map.fetchRemove(.{
-            .parent = parent,
-            .name = name,
-        })) |kv| {
+            break :blk self._map.fetchRemove(.{
+                .parent = parent,
+                .name = name,
+            });
+        };
+
+        if (removed) |kv| {
             kv.value.unref();
         } else {
             rtt.expect(false);
