@@ -128,7 +128,9 @@ pub fn ref(self: *Self) void {
 ///
 /// If the count reaches zero, the inode is deallocated and its resources are released.
 pub fn unref(self: *Self) void {
-    if (self.refcnt.fetchSub(1, .acq_rel) == 1) {
+    const prev = self.refcnt.fetchSub(1, .acq_rel);
+    rtt.expect(prev != 0);
+    if (prev == 1) {
         self.iops.deinit(self);
     }
 }
@@ -318,6 +320,8 @@ fn persistTimes(self: *Self) Error!void {
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const common = @import("common");
+const rtt = common.rtt;
 
 const urd = @import("urthr");
 const fs = urd.fs;

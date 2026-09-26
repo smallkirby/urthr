@@ -280,7 +280,9 @@ pub fn ref(self: *Self) void {
 ///
 /// If the count reaches zero, the file is deallocated and its resources are released.
 pub fn unref(self: *Self) void {
-    if (self.refcnt.fetchSub(1, .acq_rel) == 1) {
+    const prev = self.refcnt.fetchSub(1, .acq_rel);
+    rtt.expect(prev != 0);
+    if (prev == 1) {
         self.flock.unlock(&self.inode().user_lock);
         self.ops.close(self.ctx, self.allocator);
         self.path.dentry.unref();

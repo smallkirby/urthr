@@ -42,7 +42,9 @@ pub fn ref(self: *Self) void {
 ///
 /// If the count reaches zero, the dentry is deallocated and its resources are released.
 pub fn unref(self: *Self) void {
-    if (self.refcnt.fetchSub(1, .acq_rel) == 1) {
+    const prev = self.refcnt.fetchSub(1, .acq_rel);
+    rtt.expect(prev != 0);
+    if (prev == 1) {
         self.inode.unref();
         self.allocator.free(self.name);
         self.allocator.destroy(self);
