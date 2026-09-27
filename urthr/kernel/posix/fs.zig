@@ -2291,18 +2291,12 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
     );
     defer new_op.deinit();
 
-    if (noreplace) {
-        if (try new_op.dir.dentry.inode.lookup(new_op.name)) |existing| {
-            existing.unref();
-            return Error.AlreadyExists;
-        }
-    }
-
     return fs.renameAt(
         old_op.dir,
         old_op.name,
         new_op.dir,
         new_op.name,
+        noreplace,
         allocator,
     );
 }

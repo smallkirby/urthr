@@ -298,24 +298,36 @@ test "renameat with an unopened new dirfd fails with EBADF" {
 
 test "renameat2 with RENAME_NOREPLACE fails with EEXIST when the destination exists" {
     const init = utest.getInit();
-    try createWith(init, name_file1, content_a);
-    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_file1, 0);
-    try createWith(init, name_file2, content_b);
-    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_file2, 0);
 
-    const ret = linux.renameat2(
-        linux.AT.FDCWD,
-        Test.base_dir ++ name_file1,
-        linux.AT.FDCWD,
-        Test.base_dir ++ name_file2,
-        .{ .NOREPLACE = true },
-    );
-    try testing.expectEqual(.EXIST, linux.errno(ret));
+    const bases = [_][]const u8{
+        Test.base_dir,
+        Test.base_dir ++ name_nested_dir,
+    };
+    inline for (bases) |base| {
+        const dirname = base ++ name_nested_dir;
+        const mkret = linux.mkdirat(linux.AT.FDCWD, dirname, 0o755);
+        defer if (linux.errno(mkret) == .SUCCESS) {
+            _ = linux.rmdir(dirname);
+        };
 
-    // Nothing should have changed.
-    var buf: [32]u8 = undefined;
-    const content = try readAll(init, name_file2, &buf);
-    try testing.expectEqualSlices(u8, content_b, content);
+        try createWith(init, dirname ++ "/" ++ name_nested_file1, content_a);
+        defer _ = linux.unlinkat(linux.AT.FDCWD, dirname ++ "/" ++ name_nested_file1, 0);
+        try createWith(init, dirname ++ "/" ++ name_nested_file2, content_b);
+        defer _ = linux.unlinkat(linux.AT.FDCWD, dirname ++ "/" ++ name_nested_file2, 0);
+
+        const root_fd = linux.open(Test.base_dir, .{ .DIRECTORY = true }, 0);
+        try testing.expectEqual(.SUCCESS, linux.errno(root_fd));
+        defer _ = linux.close(@intCast(root_fd));
+
+        const ret = linux.renameat2(
+            @intCast(root_fd),
+            dirname ++ "/" ++ name_nested_file1,
+            @intCast(root_fd),
+            dirname ++ "/" ++ name_nested_file2,
+            .{ .NOREPLACE = true },
+        );
+        try testing.expectEqual(.EXIST, linux.errno(ret));
+    }
 }
 
 test "rename moves a file" {

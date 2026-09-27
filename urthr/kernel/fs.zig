@@ -728,8 +728,8 @@ fn isEmptyDir(path: Path, allocator: Allocator) Error!bool {
 
 /// Move a directory entry to the specified directory with a new name.
 ///
-/// If the new name already exists, it is replaced atomically.
-pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []const u8, allocator: Allocator) Error!void {
+/// If the new name already exists and `noreplace` is not set, it is replaced atomically.
+pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []const u8, noreplace: bool, allocator: Allocator) Error!void {
     glock.lock();
     defer glock.unlock();
 
@@ -789,6 +789,9 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     // Renaming an entry onto itself is a no-op.
     if (dst_path) |d| {
         if (d.dentry == old_path.dentry) return;
+    }
+    if (noreplace and dst_path != null) {
+        return Error.AlreadyExists;
     }
 
     // Check file type consistency.
@@ -859,6 +862,7 @@ pub fn rename(oldpath: []const u8, newpath: []const u8, allocator: Allocator) Er
         old_basename,
         new_dir,
         new_basename,
+        false,
         allocator,
     );
 }
