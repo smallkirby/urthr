@@ -103,6 +103,8 @@ pub const Iterator = struct {
 pub const StatusFlags = struct {
     /// I/O on this file should not block.
     nonblock: bool = false,
+    /// Before each writes, the file offset is positioned at the end of the file.
+    append: bool = false,
 };
 
 /// Path this file is associated with.
@@ -189,6 +191,9 @@ pub fn write(self: *Self, buf: []const u8) Error!usize {
     if (!self.access.writable) return Error.BadAccess;
 
     if (self.ops.write) |f| {
+        if (self.status_flags.append) {
+            self.offset = self.size();
+        }
         self.utimeUpdate();
         const num_written = try f(
             self,

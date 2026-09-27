@@ -49,9 +49,12 @@ pub fn sysOpenAt(dirfd: usize, pathname: [*:0]const u8, flags: OpenFlags, mode: 
             else => return mapError(err),
         };
     }
+    file.status_flags.nonblock = flags.nonblock;
+    file.status_flags.append = flags.append;
 
-    const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch
-        return .err(.mfile);
+    const fd = sched.getCurrent().fs.fdtbl.allocAt(0, file, .{
+        .cloexec = flags.cloexec,
+    }) catch return .err(.mfile);
 
     return .success(@bitCast(fd));
 }
@@ -1484,6 +1487,7 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
             defer file.unref();
             const flags = OpenFlags{
                 .nonblock = file.status_flags.nonblock,
+                .append = file.status_flags.append,
             };
             return .success(@intCast(@as(i32, @bitCast(flags))));
         },
@@ -1492,6 +1496,7 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
             defer file.unref();
             const flags: OpenFlags = @bitCast(@as(u32, @truncate(arg)));
             file.status_flags.nonblock = flags.nonblock;
+            file.status_flags.append = flags.append;
             return .success(0);
         },
 

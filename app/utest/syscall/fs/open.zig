@@ -283,6 +283,81 @@ test "openat to create UTF-16 filenames" {
     }
 }
 
+test "O_APPEND write always appends to the end of the file" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    {
+        const file = try t.createFile();
+        defer file.close(init.io);
+        try file.writeStreamingAll(init.io, "0123456789");
+    }
+    defer t.deleteFile();
+
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ "/" ++ Test.file_name,
+        .{ .ACCMODE = .WRONLY, .APPEND = true },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    // Seek back to the beginning.
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.lseek(@intCast(fd), 0, linux.SEEK.SET),
+    ));
+
+    // Write to the file that should always append to the end.
+    const appended = "abc";
+    try testing.expectEqual(
+        @as(usize, appended.len),
+        linux.write(@intCast(fd), appended, appended.len),
+    );
+
+    const read_fd = linux.openat(linux.AT.FDCWD, Test.base_dir ++ "/" ++ Test.file_name, .{}, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(read_fd));
+    defer _ = linux.close(@intCast(read_fd));
+
+    var buf: [13]u8 = undefined;
+    try testing.expectEqual(.SUCCESS, linux.errno(
+        linux.read(@intCast(read_fd), &buf, buf.len),
+    ));
+    try testing.expectEqualSlices(u8, "0123456789" ++ appended, &buf);
+}
+
+test "openat with O_CLOEXEC sets FD_CLOEXEC on the returned fd" {
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        utest.myname,
+        .{ .CLOEXEC = true },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const FD_CLOEXEC = 1;
+    const got = linux.fcntl(@intCast(fd), linux.F.GETFD, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(got));
+    try testing.expectEqual(FD_CLOEXEC, got);
+}
+
+test "openat with O_NONBLOCK is reflected in F_GETFL" {
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        utest.myname,
+        .{ .NONBLOCK = true },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const O_NONBLOCK = 0o4000;
+    const got = linux.fcntl(@intCast(fd), linux.F.GETFL, 0);
+    try testing.expectEqual(.SUCCESS, linux.errno(got));
+    try testing.expect(got & O_NONBLOCK != 0);
+}
+
 test "openat with O_CREAT and O_EXCL on an existing file fails with EEXIST" {
     const init = utest.getInit();
     var t = Test.init();
