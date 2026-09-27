@@ -13,6 +13,8 @@ vtable: *const Vtable,
 
 /// Root directory.
 root: *Inode,
+/// Whether name lookups under this filesystem ignore case.
+case_insensitive: bool = false,
 
 pub const Vtable = struct {
     /// Get the label of the filesystem.

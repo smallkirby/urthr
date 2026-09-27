@@ -75,6 +75,7 @@ pub fn filesystem(self: *Self) fs.FileSystem {
         .ptr = self,
         .vtable = &fs_vtable,
         .root = &self.root.common,
+        .case_insensitive = true,
     };
 }
 

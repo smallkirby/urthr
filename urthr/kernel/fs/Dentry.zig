@@ -68,19 +68,38 @@ pub const Cache = struct {
 
     /// Key of the hash map.
     const Key = struct {
+        /// Parent dentry this key belongs to.
         parent: ?*Dentry,
+        /// Name of the dentry.
         name: []const u8,
+        /// Whether `name` is case-insensitive.
+        case_insensitive: bool,
     };
 
     const Context = struct {
         pub fn hash(_: Context, key: Key) u64 {
+            // Hash parent dentry.
             const dentry_hash = std.hash.Wyhash.hash(0, std.mem.asBytes(&key.parent));
-            const name_hash = std.hash.Wyhash.hash(0, key.name);
-            const combined = bits.concat(u128, dentry_hash, name_hash);
+            // Hash name.
+            var name_hasher = std.hash.Wyhash.init(0);
+            if (key.case_insensitive) {
+                for (key.name) |c| {
+                    const lc = std.ascii.toLower(c);
+                    name_hasher.update(std.mem.asBytes(&lc));
+                }
+            } else {
+                name_hasher.update(key.name);
+            }
+            // Combine the hashes of the parent dentry and the name.
+            const combined = bits.concat(u128, dentry_hash, name_hasher.final());
             return std.hash.Wyhash.hash(0, std.mem.asBytes(&combined));
         }
         pub fn eql(_: Context, a: Key, b: Key) bool {
-            return a.parent == b.parent and std.mem.eql(u8, a.name, b.name);
+            if (a.parent != b.parent) return false;
+            return if (a.case_insensitive or b.case_insensitive)
+                std.ascii.eqlIgnoreCase(a.name, b.name)
+            else
+                std.mem.eql(u8, a.name, b.name);
         }
     };
 
@@ -99,13 +118,14 @@ pub const Cache = struct {
     /// Lookup a dentry by parent and name.
     ///
     /// Caller must call `unref()` for the returned dentry after use.
-    pub fn lookup(self: *Cache, parent: ?*Dentry, name: []const u8) ?*Dentry {
+    pub fn lookup(self: *Cache, parent: ?*Dentry, name: []const u8, case_insensitive: bool) ?*Dentry {
         self._lock.lock();
         defer self._lock.unlock();
 
         const result = self._map.get(.{
             .parent = parent,
             .name = name,
+            .case_insensitive = case_insensitive,
         }) orelse return null;
 
         result.ref();
@@ -116,7 +136,7 @@ pub const Cache = struct {
     /// Remove a dentry from the cache, releasing the reference to it.
     ///
     /// Caller must ensure that the dentry is cached.
-    pub fn remove(self: *Cache, parent: ?*Dentry, name: []const u8) void {
+    pub fn remove(self: *Cache, parent: ?*Dentry, name: []const u8, case_insensitive: bool) void {
         // Release the reference outside the lock.
         const removed = blk: {
             self._lock.lock();
@@ -125,6 +145,7 @@ pub const Cache = struct {
             break :blk self._map.fetchRemove(.{
                 .parent = parent,
                 .name = name,
+                .case_insensitive = case_insensitive,
             });
         };
 
@@ -140,13 +161,14 @@ pub const Cache = struct {
     /// Returns the cached dentry.
     /// If a dentry with the same key is already cached, it is kept and `entry` is not inserted.
     /// Caller must call `unref()` for the returned dentry after use.
-    pub fn insert(self: *Cache, entry: *Dentry) *Dentry {
+    pub fn insert(self: *Cache, entry: *Dentry, case_insensitive: bool) *Dentry {
         self._lock.lock();
         defer self._lock.unlock();
 
         const result = self._map.getOrPut(.{
             .parent = entry.parent,
             .name = entry.name,
+            .case_insensitive = case_insensitive,
         }) catch unreachable;
         if (!result.found_existing) {
             entry.ref();

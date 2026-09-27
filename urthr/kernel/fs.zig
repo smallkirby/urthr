@@ -365,7 +365,7 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
         allocator,
     );
 
-    const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
+    const dentry = try insertDentry(cur, basename, inode, allocator);
     dentry.unref();
 }
 
@@ -405,7 +405,7 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
         allocator,
     );
 
-    const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
+    const dentry = try insertDentry(cur, basename, inode, allocator);
     dentry.unref();
 }
 
@@ -450,7 +450,7 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
         allocator,
     );
 
-    const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
+    const dentry = try insertDentry(cur, basename, inode, allocator);
     defer dentry.unref();
 
     return File.open(
@@ -643,7 +643,7 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
     const basename = std.fs.path.basenamePosix(s);
 
     try parent_dentry.inode.unlink(path.dentry.inode);
-    dcache.remove(parent_dentry, basename);
+    dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
 }
 
 /// Remove an empty directory at the specified path.
@@ -698,7 +698,7 @@ fn rmdirImpl(path: Path, s: []const u8, allocator: Allocator) Error!void {
     }
 
     try parent_dentry.inode.rmdir(path.dentry.inode);
-    dcache.remove(parent_dentry, basename);
+    dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
 }
 
 /// Check whether a directory has no entries.
@@ -802,10 +802,10 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     );
 
     // Remove the old and replaced dentry from the cache.
-    dcache.remove(old_cur.dentry, old_basename);
+    dcache.remove(old_cur.dentry, old_basename, isCaseInsensitive(old_cur.mount));
 
     if (dst_path != null) {
-        dcache.remove(new_cur.dentry, new_basename);
+        dcache.remove(new_cur.dentry, new_basename, isCaseInsensitive(new_cur.mount));
     }
 
     const name_copy = try old_path.dentry.allocator.dupe(u8, new_basename);
@@ -816,7 +816,7 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     old_path.dentry.parent = new_cur.dentry;
     if (prev_parent) |p| p.unref();
 
-    dcache.insert(old_path.dentry).unref();
+    dcache.insert(old_path.dentry, isCaseInsensitive(new_cur.mount)).unref();
 }
 
 /// Move a directory entry to the specified directory with a new name.
@@ -892,10 +892,11 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
 
         // Check if the current dentry is a mount point.
         cur = followDown(cur);
+        const ci = isCaseInsensitive(cur.mount);
 
         // Resolve this component.
         var next: Path = undefined;
-        if (dcache.lookup(cur.dentry, c.name)) |d| {
+        if (dcache.lookup(cur.dentry, c.name, ci)) |d| {
             next = .{ .dentry = d, .mount = cur.mount };
         } else {
             // Look up the child dentry.
@@ -919,7 +920,7 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
             };
             defer created.unref();
             next = .{
-                .dentry = dcache.insert(created),
+                .dentry = dcache.insert(created, ci),
                 .mount = cur.mount,
             };
         }
@@ -1037,11 +1038,11 @@ fn followSymlink(dir: Path, link: *Dentry, allocator: Allocator, depth: usize) E
 ///
 /// Inserted dentry holds two references.
 /// One for the dentry cache, and one for the caller.
-fn insertDentry(parent: *Dentry, name: []const u8, inode: *Inode, allocator: Allocator) Error!*Dentry {
+fn insertDentry(dir: Path, name: []const u8, inode: *Inode, allocator: Allocator) Error!*Dentry {
     const dentry = Dentry.create(
         name,
         inode,
-        parent,
+        dir.dentry,
         allocator,
     ) catch |err| {
         inode.unref();
@@ -1049,7 +1050,12 @@ fn insertDentry(parent: *Dentry, name: []const u8, inode: *Inode, allocator: All
     };
     defer dentry.unref();
 
-    return dcache.insert(dentry);
+    return dcache.insert(dentry, isCaseInsensitive(dir.mount));
+}
+
+/// Whether name lookups directly under the given mount should ignore case.
+fn isCaseInsensitive(mnt: ?*Mount) bool {
+    return if (mnt) |m| m.filesystem.case_insensitive else false;
 }
 
 // =============================================================
