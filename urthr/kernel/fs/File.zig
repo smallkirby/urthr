@@ -243,8 +243,8 @@ pub fn seek(self: *Self, offset: i64, whence: Whence) Error!usize {
 
     const new_offset: i64 = switch (whence) {
         .set => offset,
-        .cur => @as(i64, @intCast(self.offset)) + offset,
-        .end => @as(i64, @intCast(self.size())) + offset,
+        .cur => try addChecked(self.offset, offset),
+        .end => try addChecked(self.size(), offset),
     };
     if (new_offset < 0) return Error.InvalidArgument;
 
@@ -350,6 +350,14 @@ fn utimeUpdate(self: *Self) void {
     const times = &self.inode().times;
     times.mtime = now;
     times.ctime = now;
+}
+
+/// Add a signed offset to an unsigned base with overflow checking.
+fn addChecked(base: usize, offset: i64) Error!i64 {
+    const base_i64 = std.math.cast(i64, base) orelse {
+        return Error.InvalidArgument;
+    };
+    return std.math.add(i64, base_i64, offset) catch Error.InvalidArgument;
 }
 
 // =============================================================

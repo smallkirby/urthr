@@ -312,11 +312,10 @@ pub fn sysWritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
 }
 
 /// syscall: pwritev
-pub fn sysPwritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
+pub fn sysPwritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, pos_l: u64, _: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     defer file.unref();
-    const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
-    return vectoredXfer(writeFrom, writeError, file, iov, iovcnt, pos);
+    return vectoredXfer(writeFrom, writeError, file, iov, iovcnt, @intCast(pos_l));
 }
 
 /// syscall: ftruncate
@@ -355,11 +354,10 @@ pub fn sysReadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
 }
 
 /// syscall: preadv
-pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
+pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, pos_l: u64, _: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     defer file.unref();
-    const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
-    return vectoredXfer(readInto, mapError, file, iov, iovcnt, pos);
+    return vectoredXfer(readInto, mapError, file, iov, iovcnt, @intCast(pos_l));
 }
 
 // =============================================================
@@ -401,7 +399,8 @@ fn readInto(file: *fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult 
         const want = @min(count - done, buf.len);
         const r = blk: {
             const res = if (pos) |p|
-                file.pread(buf[0..want], p + done)
+                file.pread(buf[0..want], std.math.add(usize, p, done) catch
+                    return .{ .io = fs.Error.InvalidArgument })
             else
                 file.read(buf[0..want]);
 
@@ -457,7 +456,8 @@ fn writeFrom(file: *fs.File, uaddr: usize, count: usize, pos: ?usize) XferResult
         // Write the data from the bounce buffer into the file.
         const w = blk: {
             const res = if (pos) |p|
-                file.pwrite(buf[0..want], p + done)
+                file.pwrite(buf[0..want], std.math.add(usize, p, done) catch
+                    return .{ .io = fs.Error.InvalidArgument })
             else
                 file.write(buf[0..want]);
 
@@ -516,7 +516,9 @@ fn vectoredXfer(
         switch (xfer(file, @intFromPtr(v.base), v.len, cur_pos)) {
             .full => |n| {
                 total += n;
-                if (cur_pos) |*p| p.* += n;
+                if (cur_pos) |*p| p.* = std.math.add(usize, p.*, n) catch {
+                    return .success(@bitCast(total));
+                };
             },
 
             .partial => |n| return .success(@bitCast(total + n)),
@@ -2338,7 +2340,6 @@ const builtin = @import("builtin");
 const log = std.log.scoped(.pxfs);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
-const bits = common.bits;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const fs = urd.fs;

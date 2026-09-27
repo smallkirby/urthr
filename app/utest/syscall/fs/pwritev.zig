@@ -104,6 +104,33 @@ test "at a nonzero offset writes without moving the file offset" {
     try testing.expectEqualSlices(u8, "0123XX6789", &buf);
 }
 
+test "beyond the maximum FAT32 file size fails with EINVAL" {
+    const init = utest.getInit();
+    var t = Test.init();
+
+    const wfile = try t.createFile();
+    wfile.close(init.io);
+    defer t.deleteFile();
+
+    const fd = linux.openat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ "/" ++ Test.file_name,
+        .{ .ACCMODE = .RDWR },
+        0,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(fd));
+    defer _ = linux.close(@intCast(fd));
+
+    const beyond_4gib: i64 = @as(i64, std.math.maxInt(u32)) + 1;
+    const part = "x";
+    const iov = [_]posix.iovec_const{.{
+        .base = part.ptr,
+        .len = part.len,
+    }};
+    const ret = linux.pwritev(@intCast(fd), &iov, iov.len, beyond_4gib);
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
 // =============================================================
 // Imports
 // =============================================================

@@ -35,6 +35,26 @@ test "to a negative offset fails with EINVAL" {
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
+test "seeking past the maximum representable offset fails with EINVAL" {
+    const init = utest.getInit();
+
+    const file = try std.Io.Dir.openFileAbsolute(
+        init.io,
+        utest.myname,
+        .{},
+    );
+    defer file.close(init.io);
+
+    const max = std.math.maxInt(i64);
+    const set = linux.lseek(@intCast(file.handle), max, linux.SEEK.SET);
+    try testing.expectEqual(.SUCCESS, linux.errno(set));
+    try testing.expectEqual(@as(usize, @intCast(max)), set);
+
+    // Advancing by 1 from here overflows the signed 64-bit offset space.
+    const ret = linux.lseek(@intCast(file.handle), 1, linux.SEEK.CUR);
+    try testing.expectEqual(.INVAL, linux.errno(ret));
+}
+
 test "on a pipe fails with ESPIPE" {
     var fds: [2]i32 = undefined;
     const ret = linux.pipe2(&fds, .{});

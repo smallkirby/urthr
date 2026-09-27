@@ -978,6 +978,14 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     // Nothing to write and nothing to zero-fill.
     if (buf.len == 0 and offset <= inode.size) return 0;
 
+    // Check upper limit for the new file size.
+    const new_size = std.math.add(usize, offset, buf.len) catch {
+        return fs.Error.InvalidArgument;
+    };
+    if (new_size > std.math.maxInt(u32)) {
+        return fs.Error.InvalidArgument;
+    }
+
     fat32.lock.lock();
     defer fat32.lock.unlock();
 
@@ -1066,7 +1074,6 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     };
 
     // Update the directory entry.
-    const new_size = offset + buf.len;
     const grow = new_size > old_size;
     if (grow) inode.size = new_size;
     if (fat32.hasDirEntry(inode)) try fat32.updateDirEntry(
