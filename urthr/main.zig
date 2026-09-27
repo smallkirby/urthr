@@ -159,11 +159,11 @@ fn zmain() !void {
             .group = .rx,
             .user = .rwx,
         };
-        _ = urd.fs.mkdirAt(croot, "dev", mode, allocator) catch |err| switch (err) {
+        urd.fs.mkdirAt(croot, "dev", mode, allocator) catch |err| switch (err) {
             urd.fs.Error.AlreadyExists => {},
             else => return err,
         };
-        _ = urd.fs.mkdirAt(croot, "proc", mode, allocator) catch |err| switch (err) {
+        urd.fs.mkdirAt(croot, "proc", mode, allocator) catch |err| switch (err) {
             urd.fs.Error.AlreadyExists => {},
             else => return err,
         };

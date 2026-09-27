@@ -343,7 +343,7 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
 }
 
 /// Create a directory under the given directory with the given name.
-pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
+pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator) Error!void {
     glock.lock();
     defer glock.unlock();
 
@@ -366,13 +366,11 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
     );
 
     const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
-    defer dentry.unref();
-
-    return inode;
+    dentry.unref();
 }
 
 /// Create a directory at the specified path.
-pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
+pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!void {
     const cwd = getCwd();
     defer cwd.put();
 
@@ -385,7 +383,7 @@ pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
 }
 
 /// Create a symbolic link under the given directory with the given name pointing to `target`.
-pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
+pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator: Allocator) Error!void {
     glock.lock();
     defer glock.unlock();
 
@@ -408,13 +406,11 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
     );
 
     const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
-    defer dentry.unref();
-
-    return inode;
+    dentry.unref();
 }
 
 /// Create a symbolic link pointing to `target` at the specified path.
-pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) Error!*Inode {
+pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) Error!void {
     const cwd = getCwd();
     defer cwd.put();
 

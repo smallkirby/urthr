@@ -646,7 +646,7 @@ pub fn sysMkdirAt(dirfd: usize, pathname: [*:0]const u8, mode: Mode) ReturnType 
 
     const umask = sched.getCurrent().fs.info.umask;
     const effective_mode = umask.apply(mode.to());
-    _ = mkdirFileAt(
+    mkdirFileAt(
         dirfd,
         s,
         effective_mode,
@@ -673,7 +673,7 @@ pub fn sysSymlinkAt(target: [*:0]const u8, newdirfd: usize, linkpath: [*:0]const
     const target_s = copyPath(&tbuf, target) catch return .err(.fault);
     const linkpath_s = copyPath(&lbuf, linkpath) catch return .err(.fault);
 
-    _ = symlinkFileAt(
+    symlinkFileAt(
         newdirfd,
         linkpath_s,
         target_s,
@@ -2224,7 +2224,7 @@ fn createFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, access: A
 }
 
 /// Create a directory at the specified path relative to the given directory file descriptor.
-fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*fs.Inode {
+fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator: Allocator) Error!void {
     if (try resolveBaseDir(dirfd, pathname)) |base| {
         defer base.put();
         return fs.mkdirAt(base, pathname, mode, allocator);
@@ -2233,7 +2233,7 @@ fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator:
 }
 
 /// Create a symbolic link pointing to `target` at the specified path relative to the given directory file descriptor.
-fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) Error!*fs.Inode {
+fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) Error!void {
     if (try resolveBaseDir(dirfd, pathname)) |base| {
         defer base.put();
         return fs.symlinkAt(base, pathname, target, allocator);
