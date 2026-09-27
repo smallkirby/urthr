@@ -251,8 +251,9 @@ fn ichmod(inode: *fs.Inode, mode: fs.FileMode) fs.Error!void {
     const ctx = InodeImpl.from(inode);
     const self = ctx.fat32;
 
-    // The root directory has no on-disk directory entry of its own.
-    if (inode == &self.root.common) return;
+    if (!self.hasDirEntry(inode)) {
+        return;
+    }
 
     self.lock.lock();
     defer self.lock.unlock();
@@ -272,8 +273,9 @@ fn iutimes(inode: *fs.Inode) fs.Error!void {
     const ctx = InodeImpl.from(inode);
     const self = ctx.fat32;
 
-    // The root directory has no on-disk directory entry of its own.
-    if (inode == &self.root.common) return;
+    if (!self.hasDirEntry(inode)) {
+        return;
+    }
 
     self.lock.lock();
     defer self.lock.unlock();
@@ -1067,7 +1069,7 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     const new_size = offset + buf.len;
     const grow = new_size > old_size;
     if (grow) inode.size = new_size;
-    try fat32.updateDirEntry(
+    if (fat32.hasDirEntry(inode)) try fat32.updateDirEntry(
         inode.number,
         if (grow) new_size else null,
         inode.times,
@@ -1117,7 +1119,18 @@ fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
     ctx.cache = .{ .cluster = clus, .file_offset = clus_file_offset };
 
     inode.size = new_size;
-    try fat32.updateDirEntry(inode.number, new_size, inode.times);
+    if (fat32.hasDirEntry(inode)) {
+        try fat32.updateDirEntry(inode.number, new_size, inode.times);
+    }
+}
+
+/// Whether the inode still has a corresponding on-disk directory entry.
+///
+/// False for the root directory (which has no on-disk entry)
+/// and for inodes whose entry has already been marked deleted by unlink or rmdir.
+fn hasDirEntry(self: *Self, inode: *fs.Inode) bool {
+    if (inode == &self.root.common) return false;
+    return !InodeImpl.from(inode).unlinked;
 }
 
 /// Update mutable fields of the on-disk directory entry.
