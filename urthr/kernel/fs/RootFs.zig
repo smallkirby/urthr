@@ -8,12 +8,10 @@ const Self = @This();
 allocator: Allocator,
 /// Root inode of this filesystem.
 root_inode: *InodeImpl,
-/// Entries created in the root directory.
-entries: [max_entries]?DirEntry = [_]?DirEntry{null} ** max_entries,
-/// The number of entries currently created in the root directory.
-entry_count: usize = 0,
+/// Number of inodes created so far.
+inode_count: usize = 0,
 
-/// Maximum number of entries that can be created in the root directory.
+/// Maximum number of entries that can be created in a single directory.
 const max_entries = 8;
 
 /// Instantiate the root filesystem.
@@ -37,6 +35,7 @@ pub fn init(allocator: Allocator) fs.Error!*Self {
     self.* = .{
         .allocator = allocator,
         .root_inode = root,
+        .inode_count = 1,
     };
     return self;
 }
@@ -83,6 +82,10 @@ pub const InodeImpl = struct {
     rootfs: *Self,
     /// Target path this inode points to if this is a symlink.
     symlink_target: ?[]const u8 = null,
+    /// Entries created in this directory.
+    entries: [max_entries]?DirEntry = [_]?DirEntry{null} ** max_entries,
+    /// The number of entries currently created in this directory.
+    entry_count: usize = 0,
 
     pub fn from(inode: *fs.Inode) *InodeImpl {
         return @fieldParentPtr("common", inode);
@@ -95,16 +98,17 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
     const self = ctx.rootfs;
 
     rtt.expectEqual(.directory, dir.ftype);
-    rtt.expect(self.entry_count < max_entries);
+    if (ctx.entry_count >= max_entries) return fs.Error.NoSpace;
 
     const inode = try allocator.create(InodeImpl);
     errdefer allocator.destroy(inode);
     const name_copy = try allocator.dupe(u8, name);
     errdefer allocator.free(name_copy);
 
+    self.inode_count += 1;
     inode.* = .{
         .common = .{
-            .number = self.entry_count + 2,
+            .number = self.inode_count,
             .size = 0,
             .ftype = ftype,
             .mode = mode,
@@ -114,11 +118,11 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         .rootfs = self,
     };
 
-    self.entries[self.entry_count] = .{
+    ctx.entries[ctx.entry_count] = .{
         .name = name_copy,
         .inode = inode,
     };
-    self.entry_count += 1;
+    ctx.entry_count += 1;
 
     return &inode.common;
 }
@@ -129,7 +133,7 @@ fn isymlink(dir: *fs.Inode, name: []const u8, target: []const u8, allocator: All
     const self = ctx.rootfs;
 
     rtt.expectEqual(.directory, dir.ftype);
-    rtt.expect(self.entry_count < max_entries);
+    if (ctx.entry_count >= max_entries) return fs.Error.NoSpace;
 
     const inode = try allocator.create(InodeImpl);
     errdefer allocator.destroy(inode);
@@ -138,9 +142,10 @@ fn isymlink(dir: *fs.Inode, name: []const u8, target: []const u8, allocator: All
     const target_copy = try allocator.dupe(u8, target);
     errdefer allocator.free(target_copy);
 
+    self.inode_count += 1;
     inode.* = .{
         .common = .{
-            .number = self.entry_count + 2,
+            .number = self.inode_count,
             .size = target_copy.len,
             .ftype = .symlink,
             .iops = inode_vtable,
@@ -150,11 +155,11 @@ fn isymlink(dir: *fs.Inode, name: []const u8, target: []const u8, allocator: All
         .symlink_target = target_copy,
     };
 
-    self.entries[self.entry_count] = .{
+    ctx.entries[ctx.entry_count] = .{
         .name = name_copy,
         .inode = inode,
     };
-    self.entry_count += 1;
+    ctx.entry_count += 1;
 
     return &inode.common;
 }
@@ -169,12 +174,11 @@ fn ireadlink(inode: *fs.Inode, buf: []u8) fs.Error!usize {
     return n;
 }
 
-/// Lookup an inode by its name in the root directory.
+/// Lookup an inode by its name in the given directory.
 fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
     const ctx = InodeImpl.from(dir);
-    const self = ctx.rootfs;
 
-    for (self.entries[0..self.entry_count]) |entry| {
+    for (ctx.entries[0..ctx.entry_count]) |entry| {
         const e = entry orelse continue;
         if (std.mem.eql(u8, e.name, name)) {
             e.inode.common.ref();
@@ -217,11 +221,11 @@ fn fopen(inode: *fs.Inode, allocator: Allocator) fs.Error!*anyopaque {
 
 fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
     const ctx: *FileImpl = @ptrCast(@alignCast(iter.file.ctx));
-    const self = ctx.inode.rootfs;
+    const dir = ctx.inode;
 
-    if (iter.offset >= self.entry_count) return null;
+    if (iter.offset >= dir.entry_count) return null;
 
-    const e = self.entries[iter.offset] orelse return null;
+    const e = dir.entries[iter.offset] orelse return null;
     iter.offset += 1;
     return .{
         .name = try allocator.dupe(u8, e.name),
