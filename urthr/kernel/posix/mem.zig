@@ -89,6 +89,10 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
     const aligned_len = std.mem.alignForward(usize, len, urd.mem.page_size);
     const perm = prot.permission();
 
+    // Takes reference on the backing file.
+    var backing_file: ?*urd.fs.File = null;
+    defer if (backing_file) |f| f.unref();
+
     // Check backing type.
     const backing: task.Vmm.Backing = blk: {
         if (fd == -1) break :blk .anon;
@@ -100,6 +104,7 @@ pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, 
         else |_| {
             return .err(.badf);
         };
+        backing_file = file;
         if (!file.access.readable) {
             return .err(.nacces);
         }

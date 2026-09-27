@@ -66,6 +66,7 @@ pub fn sysDup(oldfd: usize) ReturnType {
     const file = getFile(oldfd) catch {
         return .err(.badf);
     };
+    defer file.unref();
     const fd = sched.getCurrent().fs.fdtbl.alloc(file) catch {
         return .err(.mfile);
     };
@@ -76,7 +77,8 @@ pub fn sysDup(oldfd: usize) ReturnType {
 /// syscall: dup2
 pub fn sysDup2(oldfd: usize, newfd: usize) ReturnType {
     if (oldfd == newfd) {
-        _ = getFile(oldfd) catch return .err(.badf);
+        const file = getFile(oldfd) catch return .err(.badf);
+        file.unref();
         return .success(@intCast(newfd));
     }
 
@@ -101,6 +103,7 @@ fn dupOnto(oldfd: usize, newfd: usize, flags: FdFlags) ReturnType {
     }
 
     const file = getFile(oldfd) catch return .err(.badf);
+    defer file.unref();
     const cur = sched.getCurrent();
 
     // Close newfd if already open.
@@ -254,6 +257,7 @@ const OpenFlags = switch (builtin.cpu.arch) {
 /// syscall: lseek
 pub fn sysLseek(fd: usize, offset: i64, whence: Whence) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
 
     const w: fs.File.Whence = switch (whence) {
         .set => .set,
@@ -289,6 +293,7 @@ const Whence = enum(i32) {
 /// syscall: write
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     return switch (writeFrom(file, buf, count, null)) {
         .full, .partial => |n| .success(@bitCast(n)),
         .fault => .err(.fault),
@@ -299,12 +304,14 @@ pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
 /// syscall: writev
 pub fn sysWritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     return vectoredXfer(writeFrom, writeError, file, iov, iovcnt, null);
 }
 
 /// syscall: pwritev
 pub fn sysPwritev(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
     return vectoredXfer(writeFrom, writeError, file, iov, iovcnt, pos);
 }
@@ -314,6 +321,7 @@ pub fn sysFtruncate(fd: usize, length: i64) ReturnType {
     if (length < 0) return .err(.inval);
 
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     file.truncate(@intCast(length)) catch |e| return switch (e) {
         fs.Error.Unsupported => .err(.inval),
         else => writeError(e),
@@ -328,6 +336,7 @@ pub fn sysFtruncate(fd: usize, length: i64) ReturnType {
 /// syscall: read
 pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     return switch (readInto(file, buf, count, null)) {
         .full, .partial => |n| .success(@bitCast(n)),
         .fault => .err(.fault),
@@ -338,12 +347,14 @@ pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
 // syscall: readv
 pub fn sysReadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     return vectoredXfer(readInto, mapError, file, iov, iovcnt, null);
 }
 
 /// syscall: preadv
 pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, offset_l: u32, offset_h: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     const pos: usize = @intCast(bits.concat(u64, offset_h, offset_l));
     return vectoredXfer(readInto, mapError, file, iov, iovcnt, pos);
 }
@@ -528,7 +539,9 @@ fn vectoredXfer(
 /// syscall: sendfile
 pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: usize) ReturnType {
     const out_file = getFile(out_fd) catch return .err(.badf);
+    defer out_file.unref();
     const in_file = getFile(in_fd) catch return .err(.badf);
+    defer in_file.unref();
 
     if (!in_file.access.readable or !out_file.access.writable) {
         return .err(.badf);
@@ -854,6 +867,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
 /// syscall: fstat
 pub fn sysFstat(fd: usize, statbuf: *align(1) Stat) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     urd.uaccess.putUser(
         Stat,
         statbuf,
@@ -1327,6 +1341,7 @@ pub fn sysGetDents64(fd: usize, ents: [*]u8, count: usize) ReturnType {
     const uaddr = @intFromPtr(ents);
 
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     if (file.getType() != .directory) {
         return .err(.notdir);
     }
@@ -1438,6 +1453,7 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
     switch (op) {
         .dupfd, .dupfd_cloexec => {
             const file = getFile(fd) catch return .err(.badf);
+            defer file.unref();
             const flags = FdFlags{ .cloexec = op == .dupfd_cloexec };
             const newfd = cur.fs.fdtbl.allocAt(
                 @intCast(arg),
@@ -1452,20 +1468,20 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
         },
 
         .getfd => {
-            _ = getFile(fd) catch return .err(.badf);
-            return .success(@intCast(@as(u32, @bitCast(cur.fs.fdtbl.fd_flags[fd]))));
+            const flags = cur.fs.fdtbl.getFlags(fd) catch return .err(.badf);
+            return .success(@intCast(@as(u32, @bitCast(flags))));
         },
         .setfd => {
             const flags: FdFlags = @bitCast(@as(u32, @truncate(arg)));
             if (flags._1 != 0) return .err(.inval);
 
-            _ = getFile(fd) catch return .err(.badf);
-            cur.fs.fdtbl.fd_flags[fd] = flags;
+            cur.fs.fdtbl.setFlags(fd, flags) catch return .err(.badf);
             return .success(0);
         },
 
         .getfl => {
             const file = getFile(fd) catch return .err(.badf);
+            defer file.unref();
             const flags = OpenFlags{
                 .nonblock = file.status_flags.nonblock,
             };
@@ -1473,6 +1489,7 @@ pub fn sysFcntl(fd: usize, op: FcntlOp, arg: u64) ReturnType {
         },
         .setfl => {
             const file = getFile(fd) catch return .err(.badf);
+            defer file.unref();
             const flags: OpenFlags = @bitCast(@as(u32, @truncate(arg)));
             file.status_flags.nonblock = flags.nonblock;
             return .success(0);
@@ -1507,6 +1524,7 @@ const FcntlOp = enum(i32) {
 /// syscall: ioctl
 pub fn sysIoctl(fd: usize, request: u64, arg: usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     const result = file.ioctl(request, arg) catch |err| return switch (err) {
         error.Unsupported => .err(.notty),
         else => {
@@ -1553,6 +1571,7 @@ pub fn sysFchmod(fd: usize, mode: Mode) ReturnType {
     const file = getFile(fd) catch {
         return .err(.badf);
     };
+    defer file.unref();
 
     file.chmod(mode.to()) catch |err| {
         return mapError(err);
@@ -1571,6 +1590,7 @@ const keep_id: u32 = std.math.maxInt(u32);
 /// syscall: fchown
 pub fn sysFchown(fd: usize, uid: u32, gid: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
 
     file.chown(
         if (uid == keep_id) null else uid,
@@ -1698,18 +1718,16 @@ pub fn sysUtimensAt(
         copyPath(&pbuf, p) catch return .err(.fault)
     else
         null;
-    var owned = true;
     const file = if (path_s) |p| openFileAt(
         dirfd,
         p,
         .{},
         urd.mem.bin,
         true,
-    ) catch |err| return mapError(err) else blk: {
-        owned = false;
-        break :blk getFile(dirfd) catch return .err(.badf);
-    };
-    defer if (owned) file.unref();
+    ) catch |err| {
+        return mapError(err);
+    } else getFile(dirfd) catch return .err(.badf);
+    defer file.unref();
 
     // Nothing to do if both fields are UTIME_OMIT.
     if (atime == null and mtime == null) return .success(0);
@@ -1761,6 +1779,7 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
 pub fn sysFchdir(fd: usize) ReturnType {
     const cur = sched.getCurrent();
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
 
     if (file.getType() != .directory) {
         return .err(.notdir);
@@ -1896,6 +1915,7 @@ fn pollImpl(fds: ?[*]PollFd, nfds: usize, ns: ?u64) ReturnType {
                 n_ready += 1;
                 continue;
             };
+            defer file.unref();
             const result = file.poll() catch {
                 pfd.revents.err = true;
                 n_ready += 1;
@@ -1990,11 +2010,8 @@ const PollEvents = packed struct(u16) {
 
 /// syscall: flock
 pub fn sysFlock(fd: usize, op: FlockOp) ReturnType {
-    const file = sched.getCurrent().fs.fdtbl.get(fd) catch {
-        return .err(.badf);
-    } orelse {
-        return .err(.badf);
-    };
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
 
     const user_lock = &file.path.dentry.inode.user_lock;
     switch (op.value()) {
@@ -2092,6 +2109,8 @@ fn writeError(e: Error) ReturnType {
 }
 
 /// Get a file from the given file descriptor.
+///
+/// The caller owns the returned reference and must call `unref()`.
 fn getFile(fd: usize) Error!*fs.File {
     const cur = sched.getCurrent();
     const file = cur.fs.fdtbl.get(fd) catch return Error.BadFileDescriptor;
@@ -2102,19 +2121,16 @@ fn getFile(fd: usize) Error!*fs.File {
 const ResolveFile = struct {
     /// Resolved file.
     file: *fs.File,
-    /// Whether the file holds an extra reference.
-    owned: bool,
 
     // De-initialize the file reference.
     fn deinit(self: ResolveFile) void {
-        if (self.owned) self.file.unref();
+        self.file.unref();
     }
 
     /// Resolve the target file for `at`-style syscall.
     fn at(dirfd: usize, pathname: []const u8, flags: AtFlags, allocator: Allocator) Error!ResolveFile {
         if (flags.empty_path and pathname.len == 0) return .{
             .file = try getFile(dirfd),
-            .owned = false,
         };
 
         const file = try openFileAt(
@@ -2124,7 +2140,7 @@ const ResolveFile = struct {
             allocator,
             !flags.symlink_nofollow,
         );
-        return .{ .file = file, .owned = true };
+        return .{ .file = file };
     }
 };
 
@@ -2184,11 +2200,8 @@ fn resolveBaseDir(dirfd: usize, pathname: []const u8) Error!?fs.Path {
         return cur.fs.info.getCwd();
     }
 
-    const dir = cur.fs.fdtbl.get(dirfd) catch {
-        return error.BadFileDescriptor;
-    } orelse {
-        return error.BadFileDescriptor;
-    };
+    const dir = try getFile(dirfd);
+    defer dir.unref();
     return dir.path.get();
 }
 

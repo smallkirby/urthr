@@ -66,6 +66,7 @@ pub fn sysConnect(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
     const file = getFile(fd) catch {
         return .err(.badf);
     };
+    defer file.unref();
 
     var sa = urd.uaccess.getUser(
         SockAddr,
@@ -99,6 +100,7 @@ pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
     const file = getFile(fd) catch {
         return .err(.badf);
     };
+    defer file.unref();
 
     var sa = urd.uaccess.getUser(
         SockAddr,
@@ -126,6 +128,7 @@ pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
 /// syscall: sendto
 pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, addr: ?*SockAddr, addrlen: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
 
     const data = urd.mem.bin.alloc(u8, len) catch return .err(.nomem);
     defer urd.mem.bin.free(data);
@@ -171,6 +174,7 @@ pub fn sysSendTo(fd: usize, buf: [*]const u8, len: usize, _: i32, addr: ?*SockAd
 /// syscall: recvfrom
 pub fn sysRecvFrom(sockfd: usize, buf: [*]u8, len: usize, _: i32, addr: ?*SockAddr, addrlen: ?*u32) ReturnType {
     const file = getFile(sockfd) catch return .err(.badf);
+    defer file.unref();
     if (!urd.uaccess.accessOk(@intFromPtr(buf), len)) return .err(.fault);
 
     const out = urd.mem.bin.alloc(u8, len) catch return .err(.nomem);
@@ -235,6 +239,7 @@ const MsgHdr = extern struct {
 /// syscall: recvmsg
 pub fn sysRecvMsg(sockfd: usize, msg: *align(1) MsgHdr, _: i32) ReturnType {
     const file = getFile(sockfd) catch return .err(.badf);
+    defer file.unref();
     var kmsg = urd.uaccess.getUser(
         MsgHdr,
         msg,
@@ -315,6 +320,7 @@ pub fn sysShutdown(sockfd: usize, _: ShutdownHow) ReturnType {
     const file = getFile(sockfd) catch {
         return .err(.badf);
     };
+    defer file.unref();
     SocketFs.shutdown(file, .{}) catch {
         return .err(.inval);
     };
@@ -368,6 +374,7 @@ const TcpOptName = enum(i32) {
 /// syscall: setsockopt
 pub fn sysSetSockOpt(fd: usize, level: SockOptLevel, optname: i32, _: ?*const anyopaque, _: u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     if (file.getType() != .socket) return .err(.inval);
 
     return switch (level) {
@@ -394,6 +401,7 @@ pub fn sysSetSockOpt(fd: usize, level: SockOptLevel, optname: i32, _: ?*const an
 /// syscall: getsockopt
 pub fn sysGetSockOpt(fd: usize, level: SockOptLevel, optname: i32, optval: ?*align(1) i32, optlen: ?*u32) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
     if (file.getType() != .socket) return .err(.inval);
 
     switch (level) {

@@ -33,7 +33,7 @@ entries: [max_fds]?*File = .{null} ** max_fds,
 fd_flags: [max_fds]FdFlags = .{FdFlags.none} ** max_fds,
 /// Number of threads sharing this instance.
 refcnt: usize = 1,
-/// Protects access to the reference count.
+/// Protects access to this table.
 _lock: SpinLock = .{},
 
 /// Create a new empty table.
@@ -54,9 +54,16 @@ pub fn ref(self: *Self) *Self {
 /// Get the file associated with the given file descriptor.
 ///
 /// Returns null if the descriptor is not open.
+/// The returned file is owned by the caller, who must call `unref()` after use.
 pub fn get(self: *Self, fd: usize) Error!?*File {
     if (fd >= max_fds) return Error.InvalidFd;
-    return self.entries[fd];
+
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    const file = self.entries[fd] orelse return null;
+    file.ref();
+    return file;
 }
 
 /// Assign a file to the given file descriptor.
@@ -65,7 +72,13 @@ pub fn get(self: *Self, fd: usize) Error!?*File {
 /// The table takes a reference on the file.
 pub fn set(self: *Self, fd: usize, file: *File) Error!void {
     if (fd >= max_fds) return Error.InvalidFd;
-    if (self.entries[fd] != null) return Error.AlreadyOpen;
+
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    if (self.entries[fd] != null) {
+        return Error.AlreadyOpen;
+    }
 
     file.ref();
     self.entries[fd] = file;
@@ -73,14 +86,20 @@ pub fn set(self: *Self, fd: usize, file: *File) Error!void {
 
 /// Allocate the lowest available file descriptor for the given file.
 ///
+/// Increment the reference count on the file.
 /// Returns the allocated descriptor, or error.TableFull if the table is full.
 pub fn alloc(self: *Self, file: *File) Error!usize {
     return self.allocAt(0, file, .{});
 }
 
 /// Allocate the lowest available file descriptor larger than or equalt to `min_fd` for the given file.
+///
+/// Increment the reference count on the file.
 pub fn allocAt(self: *Self, min_fd: usize, file: *File, flags: FdFlags) Error!usize {
     if (min_fd >= max_fds) return Error.InvalidFd;
+
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
 
     for (self.entries[min_fd..], min_fd..) |slot, fd| {
         if (slot == null) {
@@ -93,20 +112,54 @@ pub fn allocAt(self: *Self, min_fd: usize, file: *File, flags: FdFlags) Error!us
     return Error.TableFull;
 }
 
+/// Get the per-descriptor flags of the given file descriptor.
+pub fn getFlags(self: *Self, fd: usize) Error!FdFlags {
+    if (fd >= max_fds) return Error.InvalidFd;
+
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    if (self.entries[fd] == null) return Error.InvalidFd;
+    return self.fd_flags[fd];
+}
+
+/// Set the per-descriptor flags of the given file descriptor.
+pub fn setFlags(self: *Self, fd: usize, flags: FdFlags) Error!void {
+    if (fd >= max_fds) return Error.InvalidFd;
+
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    if (self.entries[fd] == null) return Error.InvalidFd;
+    self.fd_flags[fd] = flags;
+}
+
 /// Close the file descriptor and release the associated file.
 pub fn close(self: *Self, fd: usize) Error!void {
     if (fd >= max_fds) return Error.InvalidFd;
 
-    const file = self.entries[fd] orelse return Error.InvalidFd;
-    file.unref();
-    self.entries[fd] = null;
-    self.fd_flags[fd] = .{};
+    const closed = blk: {
+        const ie = self._lock.lockDisableIrq();
+        defer self._lock.unlockRestoreIrq(ie);
+
+        const file = self.entries[fd] orelse {
+            return Error.InvalidFd;
+        };
+        self.entries[fd] = null;
+        self.fd_flags[fd] = .{};
+
+        break :blk file;
+    };
+
+    closed.unref();
 }
 
 /// Create an independent copy of this table, taking a reference on each open file.
 pub fn clone(self: *Self, allocator: Allocator) Allocator.Error!*Self {
     const cloned = try allocator.create(Self);
     cloned.* = .{};
+
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
     for (self.entries, 0..) |slot, fd| {
         if (slot) |file| {
             file.ref();
@@ -125,6 +178,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     self._lock.unlockRestoreIrq(ie);
     if (!last) return;
 
+    // No other thread can reach this table anymore.
     for (&self.entries) |*slot| {
         if (slot.*) |file| {
             file.unref();
