@@ -377,14 +377,14 @@ pub fn waitExcept(mask: Mask) void {
 /// This function bypasses the signal mask
 /// to ensure that the signal is always delivered to avoid infinite fault loops.
 ///
-/// If the signal is blocked or already pending, this function immediately terminates the current thread.
+/// If the signal is blocked or already pending, this function immediately terminates the whole thread group.
 pub fn pushSync(signo: Signal, fault: ?usize) void {
     const th = sched.getCurrent();
     const bit: u6 = @intCast(@intFromEnum(signo) - 1);
     const mask = @as(Mask, 1) << bit;
 
     if (th.sigstate.pending & mask != 0 or th.sigstate.blocked & mask != 0) {
-        task.exit(.{ .signal = signo });
+        task.exitGroup(.{ .signal = signo });
     }
 
     th.sigstate.fault = if (fault) |addr| addr else 0;
@@ -736,7 +736,7 @@ fn getDefaultHandler(signo: Signal) *const fn (Signal) void {
 
 /// Default signal handler to abort.
 fn defaultAbort(signo: Signal) void {
-    task.exit(.{ .signal = signo });
+    task.exitGroup(.{ .signal = signo });
 }
 
 /// Default signal handler that does nothing.
