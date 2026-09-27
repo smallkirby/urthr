@@ -358,6 +358,9 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
     if (basename.len == 0) {
         return Error.AlreadyExists;
     }
+    if (std.mem.eql(u8, ".", basename) or std.mem.eql(u8, "..", basename)) {
+        return Error.AlreadyExists;
+    }
 
     const inode = try cur.dentry.inode.mkdir(
         basename,
@@ -396,7 +399,10 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
     defer cur.put();
 
     if (basename.len == 0) {
-        return Error.InvalidArgument;
+        return Error.AlreadyExists;
+    }
+    if (std.mem.eql(u8, ".", basename) or std.mem.eql(u8, "..", basename)) {
+        return Error.AlreadyExists;
     }
 
     const inode = try cur.dentry.inode.symlink(
@@ -437,6 +443,9 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
 
     if (basename.len == 0) {
         return Error.InvalidArgument;
+    }
+    if (std.mem.eql(u8, ".", basename) or std.mem.eql(u8, "..", basename)) {
+        return Error.AlreadyExists;
     }
 
     if (cur.dentry.inode.ftype != .directory) {
@@ -634,7 +643,7 @@ pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
 
 /// Detach the directory entry.
 fn unlinkImpl(path: Path, s: []const u8) Error!void {
-    if (path.dentry.inode.ftype != .regular) {
+    if (path.dentry.inode.ftype == .directory) {
         return Error.NotFile;
     }
 
