@@ -760,6 +760,11 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     );
     defer old_path.put();
 
+    // Cannot rename mount points.
+    if (old_path.dentry.parent == null) {
+        return Error.Busy;
+    }
+
     // The destination may or may not exist.
     const dst_path: ?Path = resolvePath(
         new_cur,
