@@ -137,9 +137,12 @@ pub fn unref(self: *Self) void {
 
 /// Create a directory under this inode with the given name.
 pub fn mkdir(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*Inode {
-    if (self.ftype != .directory) return Error.NotDirectory;
+    if (self.ftype != .directory) {
+        return Error.NotDirectory;
+    }
 
-    if (try self.lookup(name)) |_| {
+    if (try self.lookup(name)) |existing| {
+        existing.unref();
         return Error.AlreadyExists;
     }
 
@@ -160,9 +163,12 @@ pub fn mkdir(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Alloca
 
 /// Create a regular file under this inode with the given name.
 pub fn create(self: *Self, name: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*Inode {
-    if (self.ftype != .directory) return Error.NotDirectory;
+    if (self.ftype != .directory) {
+        return Error.NotDirectory;
+    }
 
-    if (try self.lookup(name)) |_| {
+    if (try self.lookup(name)) |existing| {
+        existing.unref();
         return Error.AlreadyExists;
     }
 
@@ -222,9 +228,12 @@ pub fn utimes(self: *Self, atime: ?fs.Timestamp, mtime: ?fs.Timestamp) Error!voi
 
 /// Create a symbolic link under this inode with the given name, pointing to `target`.
 pub fn symlink(self: *Self, name: []const u8, target: []const u8, allocator: Allocator) Error!*Inode {
-    if (self.ftype != .directory) return Error.NotDirectory;
+    if (self.ftype != .directory) {
+        return Error.NotDirectory;
+    }
 
-    if (try self.lookup(name)) |_| {
+    if (try self.lookup(name)) |existing| {
+        existing.unref();
         return Error.AlreadyExists;
     }
 
