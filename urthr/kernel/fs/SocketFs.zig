@@ -92,7 +92,6 @@ pub fn createSocket(self: *Self, backend: *const Backend, desc: usize) fs.Error!
         allocator,
     );
     errdefer dentry.unref();
-    inode.common.ref();
 
     // Allocate file context and file object.
     const ctx = try allocator.create(FileCtx);
@@ -110,7 +109,6 @@ pub fn createSocket(self: *Self, backend: *const Backend, desc: usize) fs.Error!
         .ctx = ctx,
         .allocator = allocator,
     };
-    file.ref();
 
     return file;
 }

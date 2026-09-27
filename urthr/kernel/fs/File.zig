@@ -118,7 +118,7 @@ seekable: bool = true,
 /// File operations.
 ops: Ops,
 /// Reference count.
-refcnt: std.atomic.Value(usize) = .init(0),
+refcnt: std.atomic.Value(usize) = .init(1),
 /// Type-erased pointer to the file instance.
 ctx: *anyopaque,
 /// Memory allocator.
@@ -129,6 +129,7 @@ flock: SharedLock.Holder = .{},
 /// Open a file at the specified path.
 ///
 /// Increments the reference to the given path.
+/// Caller owns the returned file.
 pub fn open(path: fs.Path, access: AccessMode, allocator: Allocator) Error!*File {
     _ = path.get();
     errdefer path.put();
@@ -149,7 +150,6 @@ pub fn open(path: fs.Path, access: AccessMode, allocator: Allocator) Error!*File
         .ctx = ctx,
     };
 
-    file.ref();
     return file;
 }
 

@@ -148,7 +148,6 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
         allocator,
     );
     errdefer rdentry.unref();
-    pipe.common.ref();
 
     const wdentry = try fs.Dentry.create(
         "",
@@ -180,7 +179,6 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
         .ctx = rctx,
         .allocator = allocator,
     };
-    read_file.ref();
 
     // Create write-end file.
     const write_file = try allocator.create(fs.File);
@@ -194,7 +192,6 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
         .ctx = wctx,
         .allocator = allocator,
     };
-    write_file.ref();
 
     return .{ .read = read_file, .write = write_file };
 }

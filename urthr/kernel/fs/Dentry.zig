@@ -15,11 +15,13 @@ parent: ?*Dentry,
 /// If this dentry is a mount point, the mount attached to this dentry.
 mount: ?*Mount = null,
 /// Reference count.
-refcnt: std.atomic.Value(usize) = .init(0),
+refcnt: std.atomic.Value(usize) = .init(1),
 /// Memory allocator.
 allocator: Allocator,
 
 /// Create a new dentry with the given name and inode.
+///
+/// Caller owns the returned dentry.
 pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allocator) Error!*Dentry {
     const dentry = try allocator.create(Dentry);
     errdefer allocator.destroy(dentry);
@@ -32,7 +34,6 @@ pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allo
     };
 
     if (parent) |p| p.ref();
-    dentry.ref();
     return dentry;
 }
 

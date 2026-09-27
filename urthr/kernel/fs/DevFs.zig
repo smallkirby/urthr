@@ -33,7 +33,6 @@ pub fn init(allocator: Allocator) fs.Error!*Self {
         },
         .devfs = self,
     };
-    root.common.ref();
 
     self.* = .{
         .allocator = allocator,
@@ -70,7 +69,6 @@ pub fn registerDevice(self: *Self, name: []const u8, fops: fs.File.Ops) fs.Error
         },
         .devfs = self,
     };
-    inode.common.ref();
 
     self.entries[self.entry_count] = .{
         .name = name_copy,

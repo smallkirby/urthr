@@ -106,7 +106,7 @@ iops: Ops,
 /// File operations.
 fops: File.Ops,
 /// Reference count.
-refcnt: std.atomic.Value(usize) = .init(0),
+refcnt: std.atomic.Value(usize) = .init(1),
 /// Advisory lock for user-level synchronization shared by all open files of this inode.
 ///
 /// This lock is completely for advisory purposes for users.

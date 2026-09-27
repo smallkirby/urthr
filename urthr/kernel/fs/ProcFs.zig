@@ -45,7 +45,6 @@ pub fn init(allocator: Allocator) fs.Error!*Self {
         },
         .procfs = self,
     };
-    root.common.ref();
 
     self.* = .{
         .allocator = allocator,
@@ -120,7 +119,6 @@ fn registerFile(self: *Self, dir: *InodeImpl, name: []const u8, function: ReadFn
         .procfs = self,
         .read_fn = function,
     };
-    inode.common.ref();
 
     dir.entries[dir.entry_count] = .{
         .name = name_copy,
@@ -150,7 +148,6 @@ fn registerDir(self: *Self, dir: *InodeImpl, name: []const u8) fs.Error!*InodeIm
         },
         .procfs = self,
     };
-    inode.common.ref();
 
     dir.entries[dir.entry_count] = .{
         .name = name_copy,
@@ -181,7 +178,6 @@ fn registerSymlink(self: *Self, dir: *InodeImpl, name: []const u8, function: Rea
         .procfs = self,
         .readlink_fn = function,
     };
-    inode.common.ref();
 
     dir.entries[dir.entry_count] = .{
         .name = name_copy,

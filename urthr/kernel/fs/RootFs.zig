@@ -33,7 +33,6 @@ pub fn init(allocator: Allocator) fs.Error!*Self {
         },
         .rootfs = self,
     };
-    root.common.ref();
 
     self.* = .{
         .allocator = allocator,
@@ -114,7 +113,6 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         },
         .rootfs = self,
     };
-    inode.common.ref();
 
     self.entries[self.entry_count] = .{
         .name = name_copy,
@@ -151,7 +149,6 @@ fn isymlink(dir: *fs.Inode, name: []const u8, target: []const u8, allocator: All
         .rootfs = self,
         .symlink_target = target_copy,
     };
-    inode.common.ref();
 
     self.entries[self.entry_count] = .{
         .name = name_copy,

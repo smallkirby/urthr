@@ -272,14 +272,12 @@ pub fn init(allocator: Allocator) Error!void {
         .iops = undefined,
         .fops = undefined,
     };
-    inode.ref();
     dentry.* = .{
         .name = "",
         .inode = inode,
         .parent = null,
         .allocator = allocator,
     };
-    dentry.ref(); // + for the root
     dentry.ref(); // + for the cwd
 
     const current = sched.getCurrent();
@@ -333,7 +331,6 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
         .parent = null,
         .allocator = allocator,
     };
-    root.ref();
     errdefer root.unref();
 
     // Attach the new mount to the mount point.
