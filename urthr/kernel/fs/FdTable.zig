@@ -112,6 +112,23 @@ pub fn allocAt(self: *Self, min_fd: usize, file: *File, flags: FdFlags) Error!us
     return Error.TableFull;
 }
 
+/// Atomically install the file at the exactly specified slot, closing whatever was open there.
+pub fn replaceAt(self: *Self, fd: usize, file: *File, flags: FdFlags) Error!void {
+    if (fd >= max_fds) return Error.InvalidFd;
+
+    const old = blk: {
+        const ie = self._lock.lockDisableIrq();
+        defer self._lock.unlockRestoreIrq(ie);
+
+        const old = self.entries[fd];
+        file.ref();
+        self.entries[fd] = file;
+        self.fd_flags[fd] = flags;
+        break :blk old;
+    };
+    if (old) |o| o.unref();
+}
+
 /// Get the per-descriptor flags of the given file descriptor.
 pub fn getFlags(self: *Self, fd: usize) Error!FdFlags {
     if (fd >= max_fds) return Error.InvalidFd;

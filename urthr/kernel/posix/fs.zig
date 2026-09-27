@@ -109,15 +109,9 @@ fn dupOnto(oldfd: usize, newfd: usize, flags: FdFlags) ReturnType {
     defer file.unref();
     const cur = sched.getCurrent();
 
-    // Close newfd if already open.
-    cur.fs.fdtbl.close(newfd) catch {};
-
-    // Allocate a nearest available fd.
-    _ = cur.fs.fdtbl.allocAt(
-        newfd,
-        file,
-        flags,
-    ) catch return .err(.mfile);
+    cur.fs.fdtbl.replaceAt(newfd, file, flags) catch {
+        return .err(.mfile);
+    };
 
     return .success(@intCast(newfd));
 }
