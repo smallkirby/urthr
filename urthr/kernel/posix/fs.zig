@@ -814,7 +814,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
             allocator,
             true,
         ) catch |err| return mapError(err);
-        path.dentry.unref();
+        path.put();
         return .success(0);
     }
 
@@ -836,7 +836,7 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
         allocator,
         true,
     ) catch |err| return mapError(err);
-    defer path.dentry.unref();
+    defer path.put();
 
     fs.mount(
         path,
@@ -1749,11 +1749,10 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
     };
 
     if (path.dentry.inode.ftype != .directory) {
-        path.dentry.unref();
+        path.put();
         return .err(.notdir);
     }
-    cur.fs.info.cwd.dentry.unref();
-    cur.fs.info.cwd = path;
+    cur.fs.info.setCwd(path);
 
     return .success(0);
 }
@@ -1767,9 +1766,7 @@ pub fn sysFchdir(fd: usize) ReturnType {
         return .err(.notdir);
     }
 
-    file.path.dentry.ref();
-    cur.fs.info.cwd.dentry.unref();
-    cur.fs.info.cwd = file.path;
+    cur.fs.info.setCwd(file.path.get());
 
     return .success(0);
 }
@@ -1778,8 +1775,12 @@ pub fn sysFchdir(fd: usize) ReturnType {
 pub fn sysGetCwd(buf: usize, size: usize) ReturnType {
     const allocator = urd.mem.bin;
     const cur = sched.getCurrent();
-    const path = fs.getPath(cur.fs.info.cwd, allocator) catch
+    const cwd = cur.fs.info.getCwd();
+    defer cwd.put();
+
+    const path = fs.getPath(cwd, allocator) catch {
         return .err(.again);
+    };
     defer allocator.free(path);
 
     if (size == 0) {
@@ -2171,6 +2172,8 @@ fn resolveOpenFile(dirfd: usize, pathname: []const u8, flags: OpenFlags, mode: M
 ///
 /// Returns null when `pathname` is absolute.
 /// In that case callers should use the root-relative FS function instead of the -at family.
+///
+/// Caller must call `put()` for the returned path after use.
 fn resolveBaseDir(dirfd: usize, pathname: []const u8) Error!?fs.Path {
     if (std.fs.path.isAbsolute(pathname)) {
         return null;
@@ -2178,7 +2181,7 @@ fn resolveBaseDir(dirfd: usize, pathname: []const u8) Error!?fs.Path {
 
     const cur = sched.getCurrent();
     if (dirfd == cwd_fd) {
-        return cur.fs.info.cwd;
+        return cur.fs.info.getCwd();
     }
 
     const dir = cur.fs.fdtbl.get(dirfd) catch {
@@ -2186,47 +2189,52 @@ fn resolveBaseDir(dirfd: usize, pathname: []const u8) Error!?fs.Path {
     } orelse {
         return error.BadFileDescriptor;
     };
-    return dir.path;
+    return dir.path.get();
 }
 
 /// Open a file at the specified path relative to the given directory file descriptor.
 fn openFileAt(dirfd: usize, pathname: []const u8, access: AccessMode, allocator: Allocator, follow: bool) Error!*fs.File {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.openAt(base, pathname, access, allocator, follow)
-    else
-        fs.open(pathname, access, allocator, follow);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.openAt(base, pathname, access, allocator, follow);
+    }
+    return fs.open(pathname, access, allocator, follow);
 }
 
 /// Create a file at the specified path relative to the given directory file descriptor.
 fn createFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, access: AccessMode, allocator: Allocator) Error!*fs.File {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.createAt(base, pathname, mode, access, allocator)
-    else
-        fs.create(pathname, mode, access, allocator);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.createAt(base, pathname, mode, access, allocator);
+    }
+    return fs.create(pathname, mode, access, allocator);
 }
 
 /// Create a directory at the specified path relative to the given directory file descriptor.
 fn mkdirFileAt(dirfd: usize, pathname: []const u8, mode: fs.FileMode, allocator: Allocator) Error!*fs.Inode {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.mkdirAt(base, pathname, mode, allocator)
-    else
-        fs.mkdir(pathname, mode, allocator);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.mkdirAt(base, pathname, mode, allocator);
+    }
+    return fs.mkdir(pathname, mode, allocator);
 }
 
 /// Create a symbolic link pointing to `target` at the specified path relative to the given directory file descriptor.
 fn symlinkFileAt(dirfd: usize, pathname: []const u8, target: []const u8, allocator: Allocator) Error!*fs.Inode {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.symlinkAt(base, pathname, target, allocator)
-    else
-        fs.symlink(target, pathname, allocator);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.symlinkAt(base, pathname, target, allocator);
+    }
+    return fs.symlink(target, pathname, allocator);
 }
 
 /// Read the target of a symbolic link at the specified path, relative to the given directory file descriptor, into `buf`.
 fn readlinkFileAt(dirfd: usize, pathname: []const u8, buf: []u8, allocator: Allocator) Error!usize {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.readlinkAt(base, pathname, buf, allocator)
-    else
-        fs.readlink(pathname, buf, allocator);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.readlinkAt(base, pathname, buf, allocator);
+    }
+    return fs.readlink(pathname, buf, allocator);
 }
 
 /// File information for a rename operation.
@@ -2235,24 +2243,22 @@ const RenameOperand = struct {
     dir: fs.Path,
     /// Basename of the file to rename.
     name: []const u8,
-    /// Whether the dentry holds a reference that must be released.
-    owned: bool,
 
     fn deinit(self: RenameOperand) void {
-        if (self.owned) self.dir.dentry.unref();
+        self.dir.put();
     }
 };
 
 /// Get a operand for a rename operation.
 fn resolveRenameOperand(dirfd: usize, pathname: []const u8, allocator: Allocator) Error!RenameOperand {
     if (try resolveBaseDir(dirfd, pathname)) |base| {
-        return .{ .dir = base, .name = pathname, .owned = false };
+        return .{ .dir = base, .name = pathname };
     } else {
         const basename = std.fs.path.basenamePosix(pathname);
         if (basename.len == 0) return fs.Error.InvalidArgument;
         const dirname = std.fs.path.dirnamePosix(pathname) orelse "/";
         const dir = try fs.resolve(dirname, allocator, true);
-        return .{ .dir = dir, .name = basename, .owned = true };
+        return .{ .dir = dir, .name = basename };
     }
 }
 
@@ -2289,18 +2295,20 @@ fn renameFileAt(olddirfd: usize, oldpath: []const u8, newdirfd: usize, newpath: 
 
 /// Remove a file at the specified path relative to the given directory file descriptor.
 fn unlinkFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) Error!void {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.unlinkAt(base, pathname, allocator)
-    else
-        fs.unlink(pathname, allocator);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.unlinkAt(base, pathname, allocator);
+    }
+    return fs.unlink(pathname, allocator);
 }
 
 /// Remove an empty directory at the specified path relative to the given directory file descriptor.
 fn rmdirFileAt(dirfd: usize, pathname: []const u8, allocator: Allocator) Error!void {
-    return if (try resolveBaseDir(dirfd, pathname)) |base|
-        fs.rmdirAt(base, pathname, allocator)
-    else
-        fs.rmdir(pathname, allocator);
+    if (try resolveBaseDir(dirfd, pathname)) |base| {
+        defer base.put();
+        return fs.rmdirAt(base, pathname, allocator);
+    }
+    return fs.rmdir(pathname, allocator);
 }
 
 // =============================================================

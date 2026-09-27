@@ -763,7 +763,7 @@ fn setupUserImage(
     // Record the absolute path of the executable.
     {
         const path = try urd.fs.resolve(exec_filename, allocator, true);
-        defer path.dentry.unref();
+        defer path.put();
         const abs = try urd.fs.getPath(path, allocator);
         defer allocator.free(abs);
         try th.group.setExePath(allocator, abs);

@@ -72,11 +72,31 @@ pub const FileType = enum {
     socket,
 };
 
+/// Location in the filesystem tree.
+///
+/// A function that returns a `Path` transfers its reference to the caller.
+/// The caller must `put()` it after use.
+///
+/// A function that takes a `Path` only borrows it,
+/// and takes its own reference only if it keeps the path.
+///
+/// Note that some functions may take over the reference to the path and consume it.
 pub const Path = struct {
     /// Directory entry.
     dentry: *Dentry,
     // Mount this path belongs to.
     mount: ?*Mount,
+
+    /// Take an additional reference to the path.
+    pub fn get(self: Path) Path {
+        self.dentry.ref();
+        return self;
+    }
+
+    /// Release the reference held by the path.
+    pub fn put(self: Path) void {
+        self.dentry.unref();
+    }
 };
 
 /// Timestamp in nanoseconds since the UNIX epoch.
@@ -339,13 +359,11 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
         path,
         allocator,
     );
+    const cur = followDown(parent);
+    defer cur.put();
+
     if (basename.len == 0) {
         return Error.AlreadyExists;
-    }
-
-    var cur = parent;
-    if (cur.dentry.mount) |mnt| {
-        cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
     const inode = try cur.dentry.inode.mkdir(
@@ -372,8 +390,11 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
 
 /// Create a directory at the specified path.
 pub fn mkdir(s: []const u8, mode: FileMode, allocator: Allocator) Error!*Inode {
+    const cwd = getCwd();
+    defer cwd.put();
+
     return mkdirAt(
-        sched.getCurrent().fs.info.cwd,
+        cwd,
         s,
         mode,
         allocator,
@@ -390,13 +411,11 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
         linkpath,
         allocator,
     );
+    const cur = followDown(parent);
+    defer cur.put();
+
     if (basename.len == 0) {
         return Error.InvalidArgument;
-    }
-
-    var cur = parent;
-    if (cur.dentry.mount) |mnt| {
-        cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
     const inode = try cur.dentry.inode.symlink(
@@ -423,8 +442,11 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
 
 /// Create a symbolic link pointing to `target` at the specified path.
 pub fn symlink(target: []const u8, linkpath: []const u8, allocator: Allocator) Error!*Inode {
+    const cwd = getCwd();
+    defer cwd.put();
+
     return symlinkAt(
-        sched.getCurrent().fs.info.cwd,
+        cwd,
         linkpath,
         target,
         allocator,
@@ -441,13 +463,11 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
         path,
         allocator,
     );
+    const cur = followDown(parent);
+    defer cur.put();
+
     if (basename.len == 0) {
         return Error.InvalidArgument;
-    }
-
-    var cur = parent;
-    if (cur.dentry.mount) |mnt| {
-        cur = .{ .dentry = mnt.root, .mount = mnt };
     }
 
     if (cur.dentry.inode.ftype != .directory) {
@@ -487,8 +507,11 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
 
 /// Create a new regular file at the specified path and open it.
 pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator: Allocator) Error!*File {
+    const cwd = getCwd();
+    defer cwd.put();
+
     return createAt(
-        sched.getCurrent().fs.info.cwd,
+        cwd,
         s,
         mode,
         access,
@@ -500,13 +523,12 @@ pub fn create(s: []const u8, mode: FileMode, access: File.AccessMode, allocator:
 ///
 /// If `follow` is true and the final component is a symbolic link, it is followed.
 ///
-/// Caller must call `path.dentry.unref()` after use.
+/// Caller must call `path.put()` after use.
 pub fn resolve(s: []const u8, allocator: Allocator, follow: bool) Error!Path {
-    const cur = sched.getCurrent();
-    const path = try resolvePath(cur.fs.info.cwd, s, allocator, follow);
-    path.dentry.ref();
+    const cwd = getCwd();
+    defer cwd.put();
 
-    return path;
+    return resolvePath(cwd, s, allocator, follow);
 }
 
 /// Read the target of a symbolic link at the specified path into the buffer.
@@ -515,8 +537,9 @@ pub fn resolve(s: []const u8, allocator: Allocator, follow: bool) Error!Path {
 ///
 /// Returns the number of bytes written to the buffer.
 pub fn readlink(s: []const u8, buf: []u8, allocator: Allocator) Error!usize {
-    const cur = sched.getCurrent();
-    const path = try resolvePath(cur.fs.info.cwd, s, allocator, false);
+    const path = try resolve(s, allocator, false);
+    defer path.put();
+
     return path.dentry.inode.readlink(buf);
 }
 
@@ -534,6 +557,8 @@ pub fn readlinkAt(dir: Path, s: []const u8, buf: []u8, allocator: Allocator) Err
     }
 
     const path = try resolvePath(dir, s, allocator, false);
+    defer path.put();
+
     return path.dentry.inode.readlink(buf);
 }
 
@@ -591,8 +616,9 @@ pub fn getPath(path: Path, allocator: Allocator) Error![]u8 {
 ///
 /// If `follow` is true and the final component is a symbolic link, it is followed.
 pub fn open(s: []const u8, access: File.AccessMode, allocator: Allocator, follow: bool) Error!*File {
-    const cur = sched.getCurrent();
-    const path = try resolvePath(cur.fs.info.cwd, s, allocator, follow);
+    const path = try resolve(s, allocator, follow);
+    defer path.put();
+
     return File.open(path, access, allocator);
 }
 
@@ -608,6 +634,8 @@ pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allo
     }
 
     const path = try resolvePath(dir, s, allocator, follow);
+    defer path.put();
+
     return File.open(path, access, allocator);
 }
 
@@ -619,8 +647,9 @@ pub fn unlink(s: []const u8, allocator: Allocator) Error!void {
     glock.lock();
     defer glock.unlock();
 
-    const cwd = sched.getCurrent().fs.info.cwd;
-    const path = try resolvePath(cwd, s, allocator, false);
+    const path = try resolve(s, allocator, false);
+    defer path.put();
+
     return unlinkImpl(path, s);
 }
 
@@ -640,6 +669,8 @@ pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
     defer glock.unlock();
 
     const path = try resolvePath(dir, s, allocator, false);
+    defer path.put();
+
     return unlinkImpl(path, s);
 }
 
@@ -662,8 +693,9 @@ pub fn rmdir(s: []const u8, allocator: Allocator) Error!void {
     glock.lock();
     defer glock.unlock();
 
-    const cwd = sched.getCurrent().fs.info.cwd;
-    const path = try resolvePath(cwd, s, allocator, false);
+    const path = try resolve(s, allocator, false);
+    defer path.put();
+
     return rmdirImpl(path, s, allocator);
 }
 
@@ -680,6 +712,8 @@ pub fn rmdirAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
     defer glock.unlock();
 
     const path = try resolvePath(dir, s, allocator, false);
+    defer path.put();
+
     return rmdirImpl(path, s, allocator);
 }
 
@@ -737,11 +771,17 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
         old_name,
         allocator,
     );
+    const old_cur = followDown(old_parent);
+    defer old_cur.put();
+
     const new_parent, const new_basename = try resolveParent(
         new_dir,
         new_name,
         allocator,
     );
+    const new_cur = followDown(new_parent);
+    defer new_cur.put();
+
     if (old_basename.len == 0 or new_basename.len == 0 or
         std.mem.eql(u8, ".", old_basename) or std.mem.eql(u8, "..", old_basename) or
         std.mem.eql(u8, ".", new_basename) or std.mem.eql(u8, "..", new_basename))
@@ -749,16 +789,6 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
         return Error.InvalidArgument;
     }
 
-    var old_cur = old_parent;
-    var new_cur = new_parent;
-    if (old_cur.dentry.mount) |mnt| old_cur = .{
-        .dentry = mnt.root,
-        .mount = mnt,
-    };
-    if (new_cur.dentry.mount) |mnt| new_cur = .{
-        .dentry = mnt.root,
-        .mount = mnt,
-    };
     if (old_cur.dentry.inode.ftype != .directory) return Error.NotDirectory;
     if (new_cur.dentry.inode.ftype != .directory) return Error.NotDirectory;
     if (old_cur.mount != new_cur.mount) return Error.CrossDevice;
@@ -770,6 +800,8 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
         allocator,
         false,
     );
+    defer old_path.put();
+
     // The destination may or may not exist.
     const dst_path: ?Path = resolvePath(
         new_cur,
@@ -780,6 +812,7 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
         Error.NotFound => null,
         else => return err,
     };
+    defer if (dst_path) |d| d.put();
 
     // Renaming an entry onto itself is a no-op.
     if (dst_path) |d| {
@@ -811,9 +844,6 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     );
 
     // Remove the old and replaced dentry from the cache.
-    // Keep the old dentry alive while it's inserted again to reuse it.
-    old_path.dentry.ref();
-    defer old_path.dentry.unref();
     dcache.remove(old_cur.dentry, old_basename);
 
     if (dst_path != null) {
@@ -835,20 +865,22 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
 ///
 /// If the new name already exists, it is replaced atomically.
 pub fn rename(oldpath: []const u8, newpath: []const u8, allocator: Allocator) Error!void {
-    const cur = sched.getCurrent();
     const old_basename = std.fs.path.basenamePosix(oldpath);
     const new_basename = std.fs.path.basenamePosix(newpath);
     if (old_basename.len == 0) return Error.InvalidArgument;
     if (new_basename.len == 0) return Error.InvalidArgument;
 
     const old_dir = if (std.fs.path.dirnamePosix(oldpath)) |dirname|
-        try resolvePath(cur.fs.info.cwd, dirname, allocator, true)
+        try resolve(dirname, allocator, true)
     else
-        cur.fs.info.cwd;
+        getCwd();
+    defer old_dir.put();
+
     const new_dir = if (std.fs.path.dirnamePosix(newpath)) |dirname|
-        try resolvePath(cur.fs.info.cwd, dirname, allocator, true)
+        try resolve(dirname, allocator, true)
     else
-        cur.fs.info.cwd;
+        getCwd();
+    defer new_dir.put();
 
     return renameAt(
         old_dir,
@@ -874,56 +906,34 @@ const max_symlink_depth = 40;
 ///
 /// Symbolic links in non-final components are always followed.
 /// The final component is followed only if `follow` is true.
+///
+/// Caller must call `put()` for the returned path after use.
 fn resolvePath(base: Path, s: []const u8, allocator: Allocator, follow: bool) Error!Path {
     return resolvePathImpl(base, s, allocator, follow, 0);
 }
 
 fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool, depth: usize) Error!Path {
     var cur: Path = if (std.fs.path.isAbsolutePosix(s))
-        sched.getCurrent().fs.info.root
+        sched.getCurrent().fs.info.getRoot()
     else
-        base;
-    // Whether `cur.dentry` holds a reference acquired by this function.
-    var owned = false;
-    errdefer if (owned) cur.dentry.unref();
+        base.get();
 
-    if (cur.dentry.mount) |mnt| {
-        cur = .{ .dentry = mnt.root, .mount = mnt };
-    }
+    cur = followDown(cur);
+    errdefer cur.put();
 
     var iter = ComponentIterator.init(s);
     while (iter.next()) |c| {
-        if (std.mem.eql(u8, ".", c.name)) continue;
+        if (std.mem.eql(u8, ".", c.name)) {
+            continue;
+        }
 
         if (std.mem.eql(u8, "..", c.name)) {
-            if (cur.mount) |mnt| {
-                if (cur.dentry == mnt.root) {
-                    // At the root of a mount.
-                    if (mnt.parent) |parent_mnt| {
-                        const parent_dentry = mnt.mntpoint.parent orelse mnt.mntpoint;
-                        if (owned) cur.dentry.unref();
-                        cur = .{ .dentry = parent_dentry, .mount = parent_mnt };
-                        owned = false;
-                    } else {
-                        // Reached the root of root filesystem. Stay here.
-                    }
-                    continue;
-                }
-            }
-
-            const parent_dentry = cur.dentry.parent orelse cur.dentry;
-            if (owned) cur.dentry.unref();
-            cur = .{ .dentry = parent_dentry, .mount = cur.mount };
-            owned = false;
+            cur = follow2dots(cur);
             continue;
         }
 
         // Check if the current dentry is a mount point.
-        if (cur.dentry.mount) |mnt| {
-            if (owned) cur.dentry.unref();
-            cur = .{ .dentry = mnt.root, .mount = mnt };
-            owned = false;
-        }
+        cur = followDown(cur);
 
         // Resolve this component.
         var next: Path = undefined;
@@ -956,48 +966,85 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
         // Follow a symlink.
         const is_last = iter.peekNext() == null;
         if (next.dentry.inode.ftype == .symlink and (!is_last or follow)) {
-            const resolved = followSymlink(
+            defer next.put();
+            const resolved = try followSymlink(
                 cur,
                 next.dentry,
                 allocator,
                 depth,
-            ) catch |err| {
-                next.dentry.unref();
-                return err;
-            };
-            next.dentry.unref();
-            if (owned) cur.dentry.unref();
-
+            );
+            cur.put();
             cur = resolved;
-            owned = false;
             continue;
         }
 
-        if (owned) cur.dentry.unref();
+        cur.put();
         cur = next;
-        owned = true;
     }
 
-    // Handle the case where the final path component is itself a mount point.
-    if (cur.dentry.mount) |mnt| {
-        if (owned) cur.dentry.unref();
-        cur = .{ .dentry = mnt.root, .mount = mnt };
-        owned = false;
+    return followDown(cur);
+}
+
+/// Step into the mount attached to the path if any.
+///
+/// Decrements the reference to `path` and returns a new path with reference.
+/// nop if the path is not a mount point.
+fn followDown(path: Path) Path {
+    const mnt = path.dentry.mount orelse {
+        return path;
+    };
+    const root = Path{
+        .dentry = mnt.root,
+        .mount = mnt,
+    };
+
+    // The mount root is kept alive only by `path`, so take a reference to it first.
+    const ret = root.get();
+    path.put();
+    return ret;
+}
+
+/// Step up to the parent directory, crossing the mount boundary if needed.
+///
+/// nop if the path is the root of the root filesystem.
+/// Decrements the reference to `path` and returns a new path with reference.
+fn follow2dots(path: Path) Path {
+    var parent = Path{
+        .dentry = path.dentry.parent orelse path.dentry,
+        .mount = path.mount,
+    };
+    if (path.mount) |mnt| {
+        if (path.dentry == mnt.root) {
+            const parent_mnt = mnt.parent orelse return path;
+            parent = .{
+                .dentry = mnt.mntpoint.parent orelse mnt.mntpoint,
+                .mount = parent_mnt,
+            };
+        }
     }
 
-    // Drop the transient reference acquired while resolving.
-    if (owned) cur.dentry.unref();
+    // The parent is kept alive only by `path`, so take a reference to it first.
+    const ret = parent.get();
+    path.put();
+    return ret;
+}
 
-    return cur;
+/// Get the current thread's working directory.
+///
+/// Caller must call `put()` for the returned path after use.
+fn getCwd() Path {
+    return sched.getCurrent().fs.info.getCwd();
 }
 
 /// Split the given path into its parent directory and final component.
+///
+/// Caller must call `put()` for the returned directory after use.
 fn resolveParent(base: Path, path: []const u8, allocator: Allocator) Error!struct { Path, []const u8 } {
     const basename = std.fs.path.basenamePosix(path);
     const parent = if (std.fs.path.dirnamePosix(path)) |dirname|
         try resolvePath(base, dirname, allocator, true)
     else
-        base;
+        base.get();
 
     return .{ parent, basename };
 }

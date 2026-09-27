@@ -163,10 +163,41 @@ pub const FsInfo = struct {
     _lock: SpinLock = .{},
 
     /// Create a new instance.
+    ///
+    /// Takes over the caller's references to `root` and `cwd`.
     pub fn new(allocator: Allocator, root: urd.fs.Path, cwd: urd.fs.Path) Allocator.Error!*FsInfo {
         const self = try allocator.create(FsInfo);
         self.* = .{ .root = root, .cwd = cwd };
         return self;
+    }
+
+    /// Get the root directory.
+    ///
+    /// Caller must call `put()` for the returned path after use.
+    pub fn getRoot(self: *FsInfo) urd.fs.Path {
+        const ie = self._lock.lockDisableIrq();
+        defer self._lock.unlockRestoreIrq(ie);
+        return self.root.get();
+    }
+
+    /// Get the current working directory.
+    ///
+    /// Caller must call `put()` for the returned path after use.
+    pub fn getCwd(self: *FsInfo) urd.fs.Path {
+        const ie = self._lock.lockDisableIrq();
+        defer self._lock.unlockRestoreIrq(ie);
+        return self.cwd.get();
+    }
+
+    /// Replace the current working directory.
+    ///
+    /// Takes over the caller's reference to `path`.
+    pub fn setCwd(self: *FsInfo, path: urd.fs.Path) void {
+        const ie = self._lock.lockDisableIrq();
+        const old = self.cwd;
+        self.cwd = path;
+        self._lock.unlockRestoreIrq(ie);
+        old.put();
     }
 
     /// Increment the reference count to share this instance.
@@ -179,16 +210,13 @@ pub const FsInfo = struct {
 
     /// Create an independent copy of this instance.
     pub fn clone(self: *FsInfo, allocator: Allocator) Allocator.Error!*FsInfo {
-        self.root.dentry.ref();
-        self.cwd.dentry.ref();
-        const copy = allocator.create(FsInfo) catch |err| {
-            self.root.dentry.unref();
-            self.cwd.dentry.unref();
-            return err;
-        };
+        const copy = try allocator.create(FsInfo);
+
+        const ie = self._lock.lockDisableIrq();
+        defer self._lock.unlockRestoreIrq(ie);
         copy.* = .{
-            .root = self.root,
-            .cwd = self.cwd,
+            .root = self.root.get(),
+            .cwd = self.cwd.get(),
             .umask = self.umask,
         };
         return copy;
