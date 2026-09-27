@@ -127,9 +127,11 @@ allocator: Allocator,
 flock: SharedLock.Holder = .{},
 
 /// Open a file at the specified path.
+///
+/// Increments the reference to the given path.
 pub fn open(path: fs.Path, access: AccessMode, allocator: Allocator) Error!*File {
-    path.dentry.ref();
-    errdefer path.dentry.unref();
+    _ = path.get();
+    errdefer path.put();
 
     rtt.expect(path.mount != null);
 

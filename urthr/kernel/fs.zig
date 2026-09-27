@@ -372,18 +372,8 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
         allocator,
     );
 
-    // Put the new directory into the dentry cache.
-    const dentry = Dentry.create(
-        basename,
-        inode,
-        cur.dentry,
-        allocator,
-    ) catch |err| {
-        inode.unref();
-        return err;
-    };
+    const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
     defer dentry.unref();
-    dcache.insert(dentry).unref();
 
     return inode;
 }
@@ -424,18 +414,8 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
         allocator,
     );
 
-    // Put the new symlink into the dentry cache.
-    const dentry = Dentry.create(
-        basename,
-        inode,
-        cur.dentry,
-        allocator,
-    ) catch |err| {
-        inode.unref();
-        return err;
-    };
+    const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
     defer dentry.unref();
-    dcache.insert(dentry).unref();
 
     return inode;
 }
@@ -481,23 +461,12 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
         allocator,
     );
 
-    // Put the new file into dentry cache.
-    const dentry = Dentry.create(
-        basename,
-        inode,
-        cur.dentry,
-        allocator,
-    ) catch |err| {
-        inode.unref();
-        return err;
-    };
+    const dentry = try insertDentry(cur.dentry, basename, inode, allocator);
     defer dentry.unref();
-    const cached = dcache.insert(dentry);
-    defer cached.unref();
 
     return File.open(
         .{
-            .dentry = cached,
+            .dentry = dentry,
             .mount = cur.mount,
         },
         access,
@@ -1067,6 +1036,28 @@ fn followSymlink(dir: Path, link: *Dentry, allocator: Allocator, depth: usize) E
         true,
         depth + 1,
     );
+}
+
+/// Create a dentry for the newly created inode and put it into the dentry cache.
+///
+/// Takes over the caller's reference to the inode.
+/// Returns the cached dentry with a new reference owned by the caller.
+///
+/// Inserted dentry holds two references.
+/// One for the dentry cache, and one for the caller.
+fn insertDentry(parent: *Dentry, name: []const u8, inode: *Inode, allocator: Allocator) Error!*Dentry {
+    const dentry = Dentry.create(
+        name,
+        inode,
+        parent,
+        allocator,
+    ) catch |err| {
+        inode.unref();
+        return err;
+    };
+    defer dentry.unref();
+
+    return dcache.insert(dentry);
 }
 
 // =============================================================
