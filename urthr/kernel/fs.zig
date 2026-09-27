@@ -320,16 +320,12 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
         return Error.AlreadyMounted;
     }
 
-    fs.root.ref();
-    errdefer fs.root.unref();
-
     // Create a new dentry for the root of the mounted filesystem.
-    const root = try allocator.create(Dentry);
-    root.* = .{
-        .name = try allocator.dupe(u8, ""),
-        .inode = fs.root,
-        .parent = null,
-        .allocator = allocator,
+    // The dentry takes over the inode reference only on success.
+    fs.root.ref();
+    const root = Dentry.create("", fs.root, null, allocator) catch |err| {
+        fs.root.unref();
+        return err;
     };
     errdefer root.unref();
 
@@ -916,12 +912,15 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
 
             // Create a new dentry and insert it into the cache.
             // If another thread has cached the same entry, use new one.
-            const created = try Dentry.create(
+            const created = Dentry.create(
                 c.name,
                 child,
                 cur.dentry,
                 allocator,
-            );
+            ) catch |err| {
+                child.unref();
+                return err;
+            };
             defer created.unref();
             next = .{
                 .dentry = dcache.insert(created),

@@ -35,8 +35,10 @@ fn socketInet(typ: SockType) ReturnType {
     };
 
     const desc = open() catch return .err(.nomem);
-    errdefer close(desc);
-    const file = urd.fs.createSocket(backend, desc) catch return .err(.nomem);
+    const file = urd.fs.createSocket(backend, desc) catch {
+        close(desc);
+        return .err(.nomem);
+    };
     defer file.unref();
 
     // Update file flags.

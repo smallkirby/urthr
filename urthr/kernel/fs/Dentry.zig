@@ -21,6 +21,7 @@ allocator: Allocator,
 
 /// Create a new dentry with the given name and inode.
 ///
+/// The returned dentry takes ownership of the inode reference.
 /// Caller owns the returned dentry.
 pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allocator) Error!*Dentry {
     const dentry = try allocator.create(Dentry);

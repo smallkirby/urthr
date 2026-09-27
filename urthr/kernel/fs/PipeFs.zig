@@ -128,7 +128,6 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
 
     // Initialize the pipe inode.
     const pipe = try allocator.create(InodeImpl);
-    errdefer allocator.destroy(pipe);
     pipe.* = .{
         .common = .{
             .number = 0,
@@ -141,22 +140,30 @@ pub fn createPipe(self: *Self) fs.Error!PipePair {
     };
 
     // Create read- and write-end disconnected dentries.
-    const rdentry = try fs.Dentry.create(
+    // The dentry takes over the inode reference only on success.
+    const rdentry = fs.Dentry.create(
         "",
         &pipe.common,
         null,
         allocator,
-    );
+    ) catch |err| {
+        pipe.common.unref();
+        return err;
+    };
     errdefer rdentry.unref();
 
-    const wdentry = try fs.Dentry.create(
+    pipe.common.ref(); // +1 for the write-end dentry
+
+    const wdentry = fs.Dentry.create(
         "",
         &pipe.common,
         null,
         allocator,
-    );
+    ) catch |err| {
+        pipe.common.unref();
+        return err;
+    };
     errdefer wdentry.unref();
-    pipe.common.ref();
 
     // Create pipe instance context for read- and write-end files.
     const rctx = try allocator.create(FileCtx);

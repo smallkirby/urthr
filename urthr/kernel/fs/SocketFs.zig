@@ -72,7 +72,6 @@ pub fn createSocket(self: *Self, backend: *const Backend, desc: usize) fs.Error!
 
     // Allocate inode.
     const inode = try allocator.create(InodeImpl);
-    errdefer allocator.destroy(inode);
     inode.* = .{
         .common = .{
             .number = 0, // TODO
@@ -85,12 +84,16 @@ pub fn createSocket(self: *Self, backend: *const Backend, desc: usize) fs.Error!
     };
 
     // Allocate dentry and associate it with the inode.
-    const dentry = try fs.Dentry.create(
+    // The dentry takes over the inode reference only on success.
+    const dentry = fs.Dentry.create(
         "",
         &inode.common,
         null,
         allocator,
-    );
+    ) catch |err| {
+        inode.common.unref();
+        return err;
+    };
     errdefer dentry.unref();
 
     // Allocate file context and file object.
