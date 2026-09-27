@@ -183,7 +183,7 @@ pub fn deliver(ctx: *Context) void {
             action,
         ) catch {
             log.err("Failed to setup sigframe for signal#{t}", .{signo});
-            task.exit(.{ .code = -1 });
+            task.exitGroup(.{ .signal = .segv });
         };
         th.sigstate.blocked |= action.mask | (@as(Mask, 1) << bit);
 
@@ -542,9 +542,6 @@ fn isDeliverable(_: SigInt, ctx: *const Context) bool {
 
 /// Setup sigframe and modify the user context to execute the signal handler.
 fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !void {
-    urd.uaccess.allowUserAccess();
-    defer urd.uaccess.disallowUserAccess();
-
     const trampoline = if (th.sigstate.trampoline) |addr|
         addr
     else
@@ -552,14 +549,12 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
 
     switch (builtin.cpu.arch) {
         .aarch64 => {
-            // Align the frame to 16 bytes.
-            const frame: *Frame = @ptrFromInt((ctx.sp_el0 - @sizeOf(Frame)) & ~@as(u64, 0xF));
-            const regs: *const [31]u64 = @ptrCast(ctx);
+            var local: Frame = std.mem.zeroes(Frame);
 
             // Save user context into the sigframe.
-            const sf = &frame.sigframe;
+            const regs: *const [31]u64 = @ptrCast(ctx);
+            const sf = &local.sigframe;
             {
-                sf.* = std.mem.zeroes(SigFrame);
                 sf.saved_mask = th.sigstate.blocked;
                 sf.mcontext = .{
                     .fault_addr = th.sigstate.fault,
@@ -571,9 +566,8 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             }
 
             // Push signal information.
-            const si = &frame.siginfo;
+            const si = &local.siginfo;
             {
-                si.* = std.mem.zeroes(SigInfo);
                 si.signo = @intCast(signo);
                 si.sigfield = switch (@as(Signal, @enumFromInt(signo))) {
                     .segv => .{ .fault = .{
@@ -583,23 +577,25 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
                 };
             }
 
+            // Copy constructed sigframe and siginfo to user space.
+            const frame_uaddr = (ctx.sp_el0 - @sizeOf(Frame)) & ~@as(u64, 0xF);
+            try urd.uaccess.copyToUser(frame_uaddr, std.mem.asBytes(&local));
+
             // Modify user context to execute the signal handler.
             ctx.x0 = signo;
-            ctx.x1 = @intFromPtr(si);
-            ctx.x2 = @intFromPtr(sf);
+            ctx.x1 = frame_uaddr + @offsetOf(Frame, "siginfo");
+            ctx.x2 = frame_uaddr + @offsetOf(Frame, "sigframe");
             ctx.pc = action.handler;
-            ctx.sp_el0 = @intFromPtr(frame);
+            ctx.sp_el0 = frame_uaddr;
             ctx.x30 = trampoline;
         },
 
         .x86_64 => {
-            // Align the frame to 16 bytes.
-            const frame: *Frame = @ptrFromInt((ctx.rsp - @sizeOf(Frame)) & ~@as(u64, 0xF));
+            var local: Frame = std.mem.zeroes(Frame);
 
             // Save user context into the sigframe.
-            const sf = &frame.sigframe;
+            const sf = &local.sigframe;
             {
-                sf.* = std.mem.zeroes(SigFrame);
                 sf.saved_mask = th.sigstate.blocked;
                 sf.mcontext = .{
                     .r8 = ctx.r8,
@@ -624,9 +620,8 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             }
 
             // Push signal information.
-            const si = &frame.siginfo;
+            const si = &local.siginfo;
             {
-                si.* = std.mem.zeroes(SigInfo);
                 si.signo = @intCast(signo);
                 si.sigfield = switch (@as(Signal, @enumFromInt(signo))) {
                     .segv => .{ .fault = .{
@@ -636,16 +631,20 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
                 };
             }
 
+            // Copy the constructed sigframe and siginfo to user space.
+            const frame_uaddr = (ctx.rsp - @sizeOf(Frame)) & ~@as(u64, 0xF);
+            try urd.uaccess.copyToUser(frame_uaddr, std.mem.asBytes(&local));
+
             // Push the trampoline address as the return address for the handler.
-            const ret_slot: *u64 = @ptrFromInt(@intFromPtr(frame) - @sizeOf(u64));
-            ret_slot.* = trampoline;
+            const ret_uaddr = frame_uaddr - @sizeOf(u64);
+            try urd.uaccess.putUser(u64, ret_uaddr, trampoline);
 
             // Modify user context to execute the signal handler.
             ctx.rdi = signo;
-            ctx.rsi = @intFromPtr(si);
-            ctx.rdx = @intFromPtr(sf);
+            ctx.rsi = frame_uaddr + @offsetOf(Frame, "siginfo");
+            ctx.rdx = frame_uaddr + @offsetOf(Frame, "sigframe");
             ctx.rip = action.handler;
-            ctx.rsp = @intFromPtr(frame) - @sizeOf(u64);
+            ctx.rsp = ret_uaddr;
         },
 
         else => @compileError("Unsupported architecture."),
@@ -667,8 +666,7 @@ fn allocateTrampoline(th: *Thread) !usize {
     // Place the trampoline code.
     const tramp = generateTrampoline();
     const src: [*]const u8 = @ptrFromInt(@intFromPtr(tramp.code));
-    const dest: [*]u8 = @ptrFromInt(uva);
-    @memcpy(dest[0..tramp.size], src[0..tramp.size]);
+    try urd.uaccess.copyToUser(uva, src[0..tramp.size]);
 
     // Remap as user-RX kernel-RX.
     try th.vmm.remap(uva, mem.page_size, .{
