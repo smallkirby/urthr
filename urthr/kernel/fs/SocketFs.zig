@@ -161,7 +161,7 @@ pub const ShutdownOption = packed struct {};
 /// Shut down the given socket file's underlying connection.
 pub fn shutdown(file: *fs.File, _: ShutdownOption) fs.Error!void {
     const ctx = try ctxFromFile(file);
-    ctx.backend.close(ctx.desc);
+    closeOnce(ctx);
 }
 
 // =============================================================
@@ -185,7 +185,16 @@ const FileCtx = struct {
     desc: usize,
     /// Pointer to the socket backend for the protocol.
     backend: *const Backend,
+    /// Whether the backend socket has already been released.
+    closed: bool = false,
 };
+
+/// Release the backend socket at most once.
+fn closeOnce(ctx: *FileCtx) void {
+    if (ctx.closed) return;
+    ctx.closed = true;
+    ctx.backend.close(ctx.desc);
+}
 
 const socket_iops = fs.Inode.Ops{
     .lookup = &iLookup,
@@ -251,7 +260,7 @@ fn fWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
 
 fn fClose(context: *anyopaque, allocator: Allocator) void {
     const ctx: *FileCtx = @ptrCast(@alignCast(context));
-    ctx.backend.close(ctx.desc);
+    closeOnce(ctx);
     allocator.destroy(ctx);
 }
 

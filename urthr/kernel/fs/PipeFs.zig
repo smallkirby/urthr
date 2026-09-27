@@ -260,6 +260,8 @@ fn fwRead(_: *fs.File, _: []u8, _: usize) fs.Error!usize {
 
 /// Read from read-end.
 fn frRead(file: *fs.File, buf: []u8, _: usize) fs.Error!usize {
+    if (buf.len == 0) return 0;
+
     const ctx: *FileCtx = @ptrCast(@alignCast(file.ctx));
     const pipe = ctx.pipe;
 
@@ -283,6 +285,8 @@ fn frRead(file: *fs.File, buf: []u8, _: usize) fs.Error!usize {
 
 /// Write to write-end.
 fn frWrite(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
+    if (buf.len == 0) return 0;
+
     const ctx: *FileCtx = @ptrCast(@alignCast(file.ctx));
     const pipe = ctx.pipe;
 
