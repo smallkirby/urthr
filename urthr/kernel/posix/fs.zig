@@ -532,7 +532,7 @@ fn vectoredXfer(
 }
 
 // =============================================================
-// Sendfile
+// sendfile / copy_file_range
 // =============================================================
 
 /// syscall: sendfile
@@ -550,46 +550,184 @@ pub fn sysSendfile(out_fd: usize, in_fd: usize, offset: ?*align(1) i64, count: u
     }
 
     var pos: usize = if (offset) |o| blk: {
-        const off = urd.uaccess.getUser(i64, o) catch return .err(.fault);
-        if (off < 0) return .err(.inval);
+        const off = urd.uaccess.getUser(i64, o) catch {
+            return .err(.fault);
+        };
+        if (off < 0) {
+            return .err(.inval);
+        }
         break :blk @intCast(off);
     } else in_file.offset;
 
-    // TODO: should be zero-copy
-    var buf: [4096]u8 = undefined;
-    var total: usize = 0;
-    var pending_err: ?ReturnType = null;
-    while (total < count) {
-        const chunk = @min(count - total, buf.len);
-        const nread = in_file.pread(buf[0..chunk], pos) catch |e| {
-            pending_err = mapError(e);
-            break;
-        };
-        if (nread.len == 0) break;
-
-        const nwritten = out_file.write(nread) catch |e| {
-            pending_err = writeError(e);
-            break;
-        };
-
-        pos += nwritten;
-        total += nwritten;
-        if (nwritten < nread.len) break;
-    }
+    var unused: usize = 0;
+    const result = copyFileLoop(
+        writeStream,
+        in_file,
+        out_file,
+        &pos,
+        &unused,
+        count,
+    );
 
     // When offset pointer is given, file offset is not update.
     if (offset) |o| {
-        urd.uaccess.putUser(i64, o, @intCast(pos)) catch return .err(.fault);
+        urd.uaccess.putUser(i64, o, @intCast(pos)) catch {
+            return .err(.fault);
+        };
     } else {
         in_file.offset = pos;
     }
 
-    // When at least one byte is transferred, error is ignored.
-    if (total == 0) {
-        if (pending_err) |e| return e;
+    // When at least one byte is transferred, returns success.
+    if (result.total == 0) {
+        if (result.err) |e| return e;
     }
 
-    return .success(@bitCast(total));
+    return .success(@bitCast(result.total));
+}
+
+/// copy_file_range
+pub fn sysCopyFileRange(fd_in: usize, off_in: ?*align(1) i64, fd_out: usize, off_out: ?*align(1) i64, len: usize, flags: u32) ReturnType {
+    if (flags != 0) {
+        return .err(.inval); // flags is reserved for future use
+    }
+
+    const file_in = getFile(fd_in) catch return .err(.badf);
+    defer file_in.unref();
+    const file_out = getFile(fd_out) catch return .err(.badf);
+    defer file_out.unref();
+
+    if (!file_in.access.readable or !file_out.access.writable) {
+        return .err(.badf);
+    }
+    if (file_out.status_flags.append) {
+        return .err(.badf);
+    }
+    if (off_in != null and !file_in.seekable) {
+        return .err(.badf);
+    }
+    if (off_out != null and !file_out.seekable) {
+        return .err(.badf);
+    }
+    if (file_in.getType() == .directory or file_out.getType() == .directory) {
+        return .err(.isdir);
+    }
+    if (file_in.getType() != .regular or file_out.getType() != .regular) {
+        return .err(.inval);
+    }
+
+    var pos_in: usize = if (off_in) |o| blk: {
+        const off = urd.uaccess.getUser(i64, o) catch {
+            return .err(.fault);
+        };
+        if (off < 0) {
+            return .err(.inval);
+        }
+        break :blk @intCast(off);
+    } else file_in.offset;
+
+    var pos_out: usize = if (off_out) |o| blk: {
+        const off = urd.uaccess.getUser(i64, o) catch {
+            return .err(.fault);
+        };
+        if (off < 0) {
+            return .err(.inval);
+        }
+        break :blk @intCast(off);
+    } else file_out.offset;
+
+    // Reject overlapping ranges within the same file.
+    if (file_in.path.dentry.inode == file_out.path.dentry.inode and
+        pos_in < pos_out + len and pos_out < pos_in + len)
+    {
+        return .err(.inval);
+    }
+
+    const result = copyFileLoop(
+        writeAt,
+        file_in,
+        file_out,
+        &pos_in,
+        &pos_out,
+        len,
+    );
+
+    // When offset pointer is given, the file's own offset is not updated.
+    if (off_in) |o| {
+        urd.uaccess.putUser(i64, o, @intCast(pos_in)) catch {
+            return .err(.fault);
+        };
+    } else {
+        file_in.offset = pos_in;
+    }
+    if (off_out) |o| {
+        urd.uaccess.putUser(i64, o, @intCast(pos_out)) catch {
+            return .err(.fault);
+        };
+    } else {
+        file_out.offset = pos_out;
+    }
+
+    // When at least one byte is transferred, return success.
+    if (result.total == 0) {
+        if (result.err) |e| return e;
+    }
+
+    return .success(@bitCast(result.total));
+}
+
+const CopyLoopResult = struct {
+    /// Bytes successfully copied.
+    total: usize,
+    /// Pending error.
+    err: ?ReturnType,
+};
+
+fn writeAt(file: *fs.File, buf: []const u8, pos: usize) fs.Error!usize {
+    return file.pwrite(buf, pos);
+}
+
+fn writeStream(file: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
+    return file.write(buf);
+}
+
+/// TODO: should be zero-copy
+fn copyFileLoop(
+    comptime write_fn: fn (*fs.File, []const u8, usize) fs.Error!usize,
+    in_file: *fs.File,
+    out_file: *fs.File,
+    pos_in: *usize,
+    pos_out: *usize,
+    count: usize,
+) CopyLoopResult {
+    var buf: [4096]u8 = undefined;
+    var total: usize = 0;
+    while (total < count) {
+        const chunk = @min(count - total, buf.len);
+        const nread = in_file.pread(
+            buf[0..chunk],
+            pos_in.*,
+        ) catch |e| {
+            return .{ .total = total, .err = mapError(e) };
+        };
+        if (nread.len == 0) break;
+
+        const nwritten = write_fn(
+            out_file,
+            nread,
+            pos_out.*,
+        ) catch |e| {
+            return .{ .total = total, .err = writeError(e) };
+        };
+
+        pos_in.* += nwritten;
+        pos_out.* += nwritten;
+        total += nwritten;
+
+        if (nwritten < nread.len) break;
+    }
+
+    return .{ .total = total, .err = null };
 }
 
 // =============================================================

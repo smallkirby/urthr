@@ -111,6 +111,7 @@ if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("prlimit64",           261,    posix.task.sysPrlimit64),
     .new("renameat2",           276,    posix.fs.sysRenameAt2),
     .new("getrandom",           278,    posix.system.sysGetRandom),
+    .new("copy_file_range",     285,    posix.fs.sysCopyFileRange),
     .new("statx",               291,    posix.fs.sysStatx),
 
     // =============================================================
@@ -247,6 +248,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("getcpu",               309,   posix.sched.sysGetCpu),
     .new("renameat2",            316,   posix.fs.sysRenameAt2),
     .new("getrandom",            318,   posix.system.sysGetRandom),
+    .new("copy_file_range",      326,   posix.fs.sysCopyFileRange),
     .new("statx",                332,   posix.fs.sysStatx),
 
     // =============================================================
