@@ -11,6 +11,8 @@ pub const num_cpus = 4;
 
 /// SGI ID used for the TLB shootdown IPI.
 pub const tlb_shootdown_vector = 0;
+/// SPI of the first virtio-mmio transport slot.
+const virtio_mmio_vector_base: usize = 48;
 
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
@@ -228,6 +230,11 @@ pub fn initPeripherals3() common.mem.Error!void {
                 mem.dma.interface(0),
                 urd.mem.bin,
             ) catch continue;
+
+            // Register IRQ.
+            const irq = virtio_mmio_vector_base + i;
+            arch.gicv3.enableIrq(irq);
+            virtio_blk_dev.?.registerIrq(irq);
 
             log.info("Found virtio-blk device#{d}", .{i});
             break;

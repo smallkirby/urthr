@@ -31,8 +31,10 @@ var xhc: ?*dd.usb.Xhc = null;
 const xhci_vector: u8 = 0x40;
 /// IDT vector assigned to the virtio-net interrupt.
 const virtio_net_vector: u8 = 0x41;
+/// IDT vector assigned to the virtio-blk interrupt.
+const virtio_blk_vector: u8 = 0x42;
 /// IDT vector assigned to the TLB shootdown IPI.
-pub const tlb_shootdown_vector: u8 = 0x42;
+pub const tlb_shootdown_vector: u8 = 0x60;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -464,6 +466,28 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
             log.warn("Failed to initialize virtio-blk: {t}", .{err});
             break :outer;
         };
+
+        // Register MSI-X.
+        const msix = result.msix;
+        const msg = arch.msi.buildMessage(
+            virtio_blk_vector,
+            arch.lapic.getId(),
+        );
+        const table = dd.pci.MsixTable{
+            .base = result.barmap.get(msix.table_bar) + msix.table_offset,
+        };
+        table.setEntry(0, msg.addr, msg.data);
+        table.maskEntry(0, false);
+        dd.pci.enableMsix(hc, result.addr, msix.cap_offset);
+
+        // Bind the request queue to MSI-X table entry #0.
+        result.dev.setQueueVector(0, 0) catch |err| {
+            log.warn("Failed to bind virtio-blk queue to MSI-X: {t}", .{err});
+            break :outer;
+        };
+
+        // Register IRQ.
+        virtio_blk_dev.?.registerIrq(virtio_blk_vector);
     }
 
     // virtio-net

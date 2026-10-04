@@ -22,6 +22,8 @@ allocator: Allocator,
 dma: DmaAllocator,
 /// Serializes access to the queue.
 lock: Mutex = .{},
+/// Event for signaling completion of I/O operations.
+event: Event = .{},
 
 /// Persistent DMA buffers.
 bufs: struct {
@@ -88,12 +90,38 @@ pub fn init(dev: virtio.Device, dma: DmaAllocator, allocator: Allocator) Error!S
     };
 }
 
+/// Register IRQ vector for the virtio-blk device.
+pub fn registerIrq(self: *Self, irq: urd.exception.Vector) void {
+    urd.exception.setHandler(irq, .{
+        .function = handleIrq,
+        .ctx = self,
+    }) catch {
+        @panic("Failed to set IRQ handler for device");
+    };
+}
+
 /// Get the block device interface.
 pub fn interface(self: *Self) block.Device {
     return .{
         .ptr = self,
         .vtable = &vtable_impl.vtable,
     };
+}
+
+/// IRQ handler for the virtio-blk device.
+fn handleIrq(_: urd.exception.Vector, ctx: ?*anyopaque) void {
+    if (ctx) |c| {
+        const self: *Self = @ptrCast(@alignCast(c));
+
+        // Reclaim completed descriptor chains from the used ring.
+        if (self.dev.getQueue(queue_index)) |vq| {
+            _ = vq.getUsed();
+        }
+        // Ack the interrupt.
+        self.dev.ackInterrupt();
+        // Wake any waiters for completed requests.
+        _ = self.event.wake();
+    }
 }
 
 // =============================================================
@@ -206,16 +234,9 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
     self.dev.notifyQueue(queue_index);
 
     // Wait for completion.
-    // TODO: should use interrupt.
-    var timeout: u32 = 1_000_000; // 1 sec
-    while (vq.getUsed() == null) {
-        timeout -= 1;
-        if (timeout == 0) {
-            log.err("read timeout", .{});
-            return Error.IoError;
-        }
-
-        arch.timer.spinWaitMicro(1);
+    if (!self.event.wait(urd.time.getCurrentTimestamp() + 1 * std.time.ns_per_s)) {
+        log.err("read timeout", .{});
+        return Error.IoError;
     }
 
     // Check status.
@@ -295,16 +316,9 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
     self.dev.notifyQueue(queue_index);
 
     // Wait for completion.
-    // TODO: should use interrupt.
-    var timeout: u32 = 1_000_000; // 1 sec
-    while (vq.getUsed() == null) {
-        timeout -= 1;
-        if (timeout == 0) {
-            log.err("write timeout", .{});
-            return Error.IoError;
-        }
-
-        arch.timer.spinWaitMicro(1);
+    if (!self.event.wait(urd.time.getCurrentTimestamp() + 1 * std.time.ns_per_s)) {
+        log.err("write timeout", .{});
+        return Error.IoError;
     }
 
     // Check status.
@@ -405,4 +419,5 @@ const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;
 const virtio = @import("virtio.zig");
 const urd = @import("urthr");
+const Event = urd.sync.Event;
 const Mutex = urd.sync.Mutex;

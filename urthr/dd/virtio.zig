@@ -38,6 +38,8 @@ pub const Device = struct {
         finishInit: *const fn (ptr: *anyopaque) void,
         /// Read bytes from the device config space at the given `offset`.
         readConfigBytes: *const fn (ptr: *anyopaque, offset: usize, buf: []u8) void,
+        /// Acknowledge a pending interrupt at the transport level.
+        ackInterrupt: *const fn (ptr: *anyopaque) void,
     };
 
     /// Setup a virtqueue indexed by `index`.
@@ -67,6 +69,11 @@ pub const Device = struct {
         var buf: [@sizeOf(T)]u8 align(@alignOf(T)) = undefined;
         self.vtable.readConfigBytes(self.ptr, offset, &buf);
         return @bitCast(buf);
+    }
+
+    /// Acknowledge a pending interrupt at the transport level.
+    pub fn ackInterrupt(self: Device) void {
+        self.vtable.ackInterrupt(self.ptr);
     }
 };
 

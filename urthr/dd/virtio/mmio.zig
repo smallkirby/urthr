@@ -176,6 +176,7 @@ const vtable = virtio.Device.Vtable{
     .notifyQueue = notifyQueue,
     .finishInit = finishInit,
     .readConfigBytes = readConfigBytes,
+    .ackInterrupt = ackInterrupt,
 };
 
 /// Setup a virtqueue.
@@ -257,6 +258,13 @@ fn readConfigBytes(ptr: *anyopaque, offset: usize, buf: []u8) void {
     const cbase = self.module.getMarkerAddress(.config);
     const src: [*]const volatile u8 = @ptrFromInt(cbase + offset);
     for (buf, 0..) |*b, i| b.* = src[i];
+}
+
+/// Acknowledge a pending interrupt.
+fn ackInterrupt(ctx: *anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ctx));
+    const status = self.module.read(InterruptStatus).value;
+    self.module.writei(InterruptAck, status);
 }
 
 // =============================================================

@@ -199,6 +199,7 @@ const vtable = virtio.Device.Vtable{
     .notifyQueue = notifyQueue,
     .finishInit = finishInit,
     .readConfigBytes = readConfigBytes,
+    .ackInterrupt = ackInterrupt,
 };
 
 /// Setup a virtqueue.
@@ -275,6 +276,11 @@ fn readConfigBytes(ctx: *anyopaque, offset: usize, buf: []u8) void {
     const src: [*]const volatile u8 = @ptrFromInt(self.dcfg + offset);
     for (buf, 0..) |*b, i| b.* = src[i];
 }
+
+/// Acknowledge a pending interrupt.
+///
+/// MSI-X doesn't need a transport-level ack.
+fn ackInterrupt(_: *anyopaque) void {}
 
 // =============================================================
 // Capability discovery
