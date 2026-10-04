@@ -17,9 +17,10 @@ var exception_handler: ?ExceptionHandler = null;
 
 /// Virtio block device instance.
 var virtio_blk_dev: ?dd.VirtioBlk = null;
-
 /// Virtio RNG device instance.
 var virtio_rng_dev: ?dd.VirtioRng = null;
+/// Base address of the virtio MMIO region.
+var virtio_base: usize = undefined;
 
 /// PCIe ECAM.
 var ecam: dd.pci.EcamHost = undefined;
@@ -169,37 +170,13 @@ pub fn initPeripherals2() urd.mem.Error!void {
         const virtio_size = dd.virtio.mmio.space_size;
 
         // Scan for virtio-blk device.
-        const virtio_base = try urd.mem.phys.reserveAndRemap(
+        virtio_base = try urd.mem.phys.reserveAndRemap(
             "virtio",
             memmap.virtio.start,
             util.roundup(memmap.virtio.size(), common.mem.size_4kib),
             null,
             .device,
         );
-
-        // virtio-blk
-        for (0..(memmap.virtio.size() / virtio_size)) |i| {
-            const base = virtio_base + i * virtio_size;
-
-            const dev = if (dd.virtio.mmio.init(
-                base,
-                .block,
-                urd.mem.page,
-                urd.mem.bin,
-            )) |result| if (result) |dev| dev else {
-                continue;
-            } else |_| {
-                continue;
-            };
-            virtio_blk_dev = dd.VirtioBlk.init(
-                dev.interface(),
-                mem.dma.interface(0),
-                urd.mem.bin,
-            ) catch continue;
-
-            log.info("Found virtio-blk device#{d}", .{i});
-            break;
-        }
 
         // virtio-rng
         for (0..(memmap.virtio.size() / virtio_size)) |i| {
@@ -228,6 +205,35 @@ pub fn initPeripherals2() urd.mem.Error!void {
 /// This function is called after initial task is spawned.
 /// This function can spawn new threads.
 pub fn initPeripherals3() common.mem.Error!void {
+    // virtio
+    {
+        const virtio_size = dd.virtio.mmio.space_size;
+
+        // virtio-blk
+        for (0..(memmap.virtio.size() / virtio_size)) |i| {
+            const base = virtio_base + i * virtio_size;
+
+            const dev = if (dd.virtio.mmio.init(
+                base,
+                .block,
+                urd.mem.page,
+                urd.mem.bin,
+            )) |result| if (result) |dev| dev else {
+                continue;
+            } else |_| {
+                continue;
+            };
+            virtio_blk_dev = dd.VirtioBlk.init(
+                dev.interface(),
+                mem.dma.interface(0),
+                urd.mem.bin,
+            ) catch continue;
+
+            log.info("Found virtio-blk device#{d}", .{i});
+            break;
+        }
+    }
+
     // xHC
     outer: {
         const hc = ecam.interface();

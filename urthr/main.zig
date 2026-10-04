@@ -139,6 +139,10 @@ fn zmain() !void {
 fn initialTask() !void {
     log.info("Initial task started.", .{});
 
+    // Initialize peripherals phase 3.
+    log.info("Initializing peripherals phase 3.", .{});
+    try board.initPeripherals3();
+
     // Mount root filesystem.
     log.info("Mounting root filesystem.", .{});
     {
@@ -206,10 +210,6 @@ fn initialTask() !void {
     // Warm up secondary CPUs.
     log.info("Warming up secondary CPUs.", .{});
     try urd.smp.init();
-
-    // Initialize peripherals phase 3.
-    log.info("Initializing peripherals phase 3.", .{});
-    try board.initPeripherals3();
 
     // Start networking subsystem.
     log.info("Starting networking subsystem.", .{});

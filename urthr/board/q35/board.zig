@@ -439,7 +439,13 @@ fn bringUpVirtioPci(
 /// Initialize peripherals phase 2.
 ///
 /// This function is called after exceptions are enabled.
-pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
+pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {}
+
+/// Initialize peripherals.
+///
+/// This function is called after initial task is spawned.
+/// This function can spawn new threads.
+pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     // virtio-blk
     if (ecam) |*e| outer: {
         // Scan for a virtio-blk device.
@@ -508,13 +514,7 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {
         );
         try netdev.appendInterface(iface);
     }
-}
 
-/// Initialize peripherals.
-///
-/// This function is called after initial task is spawned.
-/// This function can spawn new threads.
-pub fn initPeripherals3() common.mem.Error!void {
     // xHC
     if (ecam) |*e| outer: {
         const hc = e.interface();

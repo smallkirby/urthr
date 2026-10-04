@@ -173,7 +173,14 @@ pub fn initPeripherals1() urd.mem.Error!void {
 /// Initialize peripherals.
 ///
 /// This function is called after exceptions are enabled.
-pub fn initPeripherals2() urd.mem.Error!void {
+pub fn initPeripherals2() urd.mem.Error!void {}
+
+/// Initialize peripherals.
+///
+/// This function is called after initial task is spawned.
+/// This function can spawn new threads.
+pub fn initPeripherals3() common.mem.Error!void {
+
     // SDHC
     {
         const base = try urd.mem.phys.reserveAndRemap(
@@ -190,12 +197,6 @@ pub fn initPeripherals2() urd.mem.Error!void {
         );
     }
 }
-
-/// Initialize peripherals.
-///
-/// This function is called after initial task is spawned.
-/// This function can spawn new threads.
-pub fn initPeripherals3() common.mem.Error!void {}
 
 /// Prepare for waking up secondary cores.
 pub fn prepareSubcoreWakeup() urd.mem.Error!void {
