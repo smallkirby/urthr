@@ -364,7 +364,10 @@ fn registerController(self: *Self, irq: urd.exception.Vector) (Error || urd.exce
             .controller = self,
             .irq = irq,
         };
-        try urd.exception.setHandler(irq, irqHandler);
+        try urd.exception.setHandler(irq, .{
+            .function = irqHandler,
+            .ctx = &controllers[i],
+        });
 
         return;
     };
@@ -375,17 +378,16 @@ fn registerController(self: *Self, irq: urd.exception.Vector) (Error || urd.exce
 ///
 /// Drains the event ring and pushes the events to the event queue,
 /// then wakes up the worker thread to process the events.
-fn irqHandler(vector: urd.exception.Vector) void {
-    for (controllers) |c| if (c) |entry| {
-        if (entry.irq == vector) {
-            const self = entry.controller;
-            if (!self.ready) return;
+fn irqHandler(_: urd.exception.Vector, ctx: ?*anyopaque) void {
+    if (ctx) |c| {
+        const controller: *IrqController = @ptrCast(@alignCast(c));
+        const self = controller.controller;
+        if (!self.ready) return;
 
-            while (self.ering.next()) |trb| {
-                self.eq.push(trb.*);
-            }
+        while (self.ering.next()) |trb| {
+            self.eq.push(trb.*);
         }
-    };
+    }
 }
 
 /// Worker thread entry point for processing xHCI events.

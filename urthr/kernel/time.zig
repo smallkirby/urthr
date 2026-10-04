@@ -11,7 +11,10 @@ var lock: SpinLock = .{};
 
 /// Initialize the timer subsystem.
 pub fn initGlobal() void {
-    urd.exception.setHandler(arch.timer.ppi_intid, timerHandler) catch {
+    urd.exception.setHandler(arch.timer.ppi_intid, .{
+        .function = timerHandler,
+        .ctx = null,
+    }) catch {
         @panic("Failed to set timer interrupt handler.");
     };
 
@@ -380,7 +383,7 @@ fn getCurrentTimestampUs() Ktimestamp {
 /// Called in IRQ context.
 ///
 /// Re-arms the timer and dispatches all due callbacks.
-fn timerHandler(_: urd.exception.Vector) void {
+fn timerHandler(_: urd.exception.Vector, _: ?*anyopaque) void {
     armTimer();
 
     const ie = lock.lockDisableIrq();

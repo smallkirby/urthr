@@ -8,7 +8,14 @@ pub const Error = error{
 };
 
 /// Interrupt handler function signature.
-pub const Handler = *const fn (id: Vector) void;
+pub const Handler = *const fn (id: Vector, ctx: ?*anyopaque) void;
+/// Interrupt handler information.
+pub const HandlerInfo = struct {
+    /// Handler function.
+    function: Handler,
+    /// Context pointer passed to the handler.
+    ctx: ?*anyopaque,
+};
 
 /// Interrupt vector number.
 pub const Vector = u64;
@@ -19,7 +26,7 @@ const num_interrupts = 512;
 const large_interrupts_start = 8192;
 
 /// Interrupt handlers for fixed-size exceptions.
-var handlers: [num_interrupts]?Handler = [_]?Handler{null} ** num_interrupts;
+var handlers: [num_interrupts]?HandlerInfo = [_]?HandlerInfo{null} ** num_interrupts;
 /// Interrupt handlers for large exceptions.
 var large_handlers: LargeIrq.Tree = .{};
 
@@ -50,14 +57,15 @@ pub fn initLocal() urd.mem.Error!void {
 fn call(vector: Vector) ?void {
     switch (getExceptionType(vector)) {
         .fixed => if (handlers[vector]) |handler| {
-            handler(@intCast(vector));
+            handler.function(@intCast(vector), handler.ctx);
         } else {
             log.warn("No handler registered for interrupt vector: {}", .{vector});
             return null;
         },
 
         .large => if (large_handlers.find(vector)) |irq| {
-            irq.container().handler(@intCast(vector));
+            const handler = irq.container().handler;
+            handler.function(@intCast(vector), handler.ctx);
         } else {
             log.warn("No handler registered for large interrupt vector: {}", .{vector});
             return null;
@@ -73,7 +81,7 @@ fn call(vector: Vector) ?void {
 /// Set an interrupt handler for the given vector.
 ///
 /// Fails if a handler is already registered for the vector.
-pub fn setHandler(vector: Vector, handler: Handler) Error!void {
+pub fn setHandler(vector: Vector, handler: HandlerInfo) Error!void {
     switch (getExceptionType(vector)) {
         .fixed => {
             if (handlers[vector] != null) {
@@ -123,8 +131,8 @@ fn getExceptionType(vector: Vector) ExceptionType {
 const LargeIrq = struct {
     /// Exception vector.
     vector: Vector,
-    /// Handler function.
-    handler: Handler,
+    /// Interrupt handler information.
+    handler: HandlerInfo,
     /// Tree node.
     _rbnode: Tree.Node = .init,
 

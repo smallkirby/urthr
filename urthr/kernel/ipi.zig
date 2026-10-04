@@ -2,10 +2,10 @@
 
 /// Initialize the global IPI infrastructure.
 pub fn initGlobal() void {
-    urd.exception.setHandler(
-        board.tlb_shootdown_vector,
-        handleTlbShootdown,
-    ) catch {
+    urd.exception.setHandler(board.tlb_shootdown_vector, .{
+        .function = handleTlbShootdown,
+        .ctx = null,
+    }) catch {
         @panic("Failed to register TLB shootdown IPI handler.");
     };
 }
@@ -66,7 +66,7 @@ pub fn tlbShootdown(range: ?Range) void {
 }
 
 /// Handler invoked when a core receives a TLB shootdown IPI.
-fn handleTlbShootdown(_: urd.exception.Vector) void {
+fn handleTlbShootdown(_: urd.exception.Vector, _: ?*anyopaque) void {
     const bit = @as(u64, 1) << @intCast(urd.smp.getLogicalCoreId());
     if (tlb_shootdown_pending.load(.acquire) & bit == 0) return;
 

@@ -151,7 +151,10 @@ pub fn handleInput(dev: *Device, prot: Protocol, data: []const u8) Error!void {
 pub fn registerIrq(dev: *Device, irq: urd.exception.Vector) Error!void {
     dev.irq = irq;
 
-    urd.exception.setHandler(irq, handleIrq) catch {
+    urd.exception.setHandler(irq, .{
+        .function = handleIrq,
+        .ctx = dev,
+    }) catch {
         @panic("Failed to set IRQ handler for device");
     };
 }
@@ -159,12 +162,10 @@ pub fn registerIrq(dev: *Device, irq: urd.exception.Vector) Error!void {
 /// IRQ handler for all registered devices.
 ///
 /// Iterates through the device list to find the device associated with the given IRQ.
-fn handleIrq(irq: urd.exception.Vector) void {
-    var iter = device_list.iter();
-    while (iter.next()) |device| {
-        if (device.irq == irq) {
-            break pollDevice(device);
-        }
+fn handleIrq(_: urd.exception.Vector, ctx: ?*anyopaque) void {
+    if (ctx) |c| {
+        const device: *Device = @ptrCast(@alignCast(c));
+        pollDevice(device);
     }
 }
 
