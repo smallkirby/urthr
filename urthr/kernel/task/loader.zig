@@ -228,8 +228,12 @@ fn mapLoadSegment(phdr: Elf64_Phdr, th: *Thread, bias: usize, reader: *Reader) E
     reader.interface.readSliceAll(segment[0..phdr.p_filesz]) catch return error.InvalidElf;
 
     // Zero clear the remaining memory.
-    @memset(memory[0..offset_in_memory], 0);
-    @memset(segment[phdr.p_filesz..], 0);
+    {
+        urd.uaccess.allowUserAccess();
+        defer urd.uaccess.disallowUserAccess();
+        @memset(memory[0..offset_in_memory], 0);
+        @memset(segment[phdr.p_filesz..], 0);
+    }
 
     // Update attributes.
     try th.vmm.remap(
@@ -255,13 +259,18 @@ fn mapTlsSegment(phdr: Elf64_Phdr, th: *Thread, bias: usize) Error!usize {
     const tp_addr = try th.vmm.mapAnon(total_size, .rw);
     const tp = @as([*]u8, @ptrFromInt(tp_addr))[0..total_size];
 
-    // Copy TLS initialization image from the loaded segment.
-    const src = @as([*]const u8, @ptrFromInt(phdr.p_vaddr + bias))[0..phdr.p_filesz];
-    @memcpy(tp[tcp_size..][0..phdr.p_filesz], src);
+    {
+        urd.uaccess.allowUserAccess();
+        defer urd.uaccess.disallowUserAccess();
 
-    // Zero-clear the remaining memory.
-    @memset(tp[0..tcp_size], 0);
-    @memset(tp[tcp_size + phdr.p_filesz ..], 0);
+        // Copy TLS initialization image from the loaded segment.
+        const src = @as([*]const u8, @ptrFromInt(phdr.p_vaddr + bias))[0..phdr.p_filesz];
+        @memcpy(tp[tcp_size..][0..phdr.p_filesz], src);
+
+        // Zero-clear the remaining memory.
+        @memset(tp[0..tcp_size], 0);
+        @memset(tp[tcp_size + phdr.p_filesz ..], 0);
+    }
 
     return tp_addr;
 }

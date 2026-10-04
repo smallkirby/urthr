@@ -941,7 +941,9 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
             try fat32.device.readBlocks(lba, &sec_buf);
 
             const n = @min(sector_size - offset_in_sec, read_buf.len - bytes_read);
-            @memcpy(read_buf[bytes_read..][0..n], sec_buf[offset_in_sec..][0..n]);
+            uaccess.copy(read_buf[bytes_read..], sec_buf[offset_in_sec..], n) catch {
+                return error.IoError;
+            };
             break :blk n;
         };
 
@@ -1045,11 +1047,15 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
                 const zero_copy = @min(n, zero_len - written);
                 @memset(sec_buf[offset_in_sec..][0..zero_copy], 0);
                 if (zero_copy < n) {
-                    @memcpy(sec_buf[offset_in_sec + zero_copy ..][0 .. n - zero_copy], buf[0 .. n - zero_copy]);
+                    uaccess.copy(sec_buf[offset_in_sec + zero_copy ..], buf, n - zero_copy) catch {
+                        return error.IoError;
+                    };
                 }
             } else {
                 const data_off = written - zero_len;
-                @memcpy(sec_buf[offset_in_sec..][0..n], buf[data_off..][0..n]);
+                uaccess.copy(sec_buf[offset_in_sec..], buf[data_off..], n) catch {
+                    return error.IoError;
+                };
             }
 
             try fat32.device.writeBlocks(lba, &sec_buf);
@@ -2311,3 +2317,4 @@ const urd = @import("urthr");
 const fs = urd.fs;
 const sync = urd.sync;
 const Mutex = sync.Mutex;
+const uaccess = urd.uaccess;

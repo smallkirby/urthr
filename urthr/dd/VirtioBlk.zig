@@ -248,7 +248,9 @@ fn readSectors(self: *Self, sector: u64, buffer: []u8, count: usize) Error!void 
 
     // Copy data to user buffer.
     self.dma.syncForCpu(data_mem.cpu, data_buf_size);
-    @memcpy(buffer[0..data_buf_size], @as([*]const u8, @ptrFromInt(data_mem.cpu))[0..data_buf_size]);
+    uaccess.copy(buffer, data_mem.cpu, data_buf_size) catch {
+        return Error.IoError;
+    };
 }
 
 /// Read virtio-blk device configuration.
@@ -275,7 +277,9 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
     // Reuse DMA-capable buffers.
     try self.ensureDataCapacity(data.len);
     const data_mem = self.bufs.data;
-    @memcpy(@as([*]u8, @ptrFromInt(data_mem.cpu))[0..data.len], data);
+    uaccess.copy(data_mem.cpu, data, data.len) catch {
+        return Error.IoError;
+    };
     self.dma.syncForDevice(data_mem.cpu, data.len);
 
     const req_mem = self.bufs.req;
@@ -419,5 +423,6 @@ const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;
 const virtio = @import("virtio.zig");
 const urd = @import("urthr");
+const uaccess = urd.uaccess;
 const Event = urd.sync.Event;
 const Mutex = urd.sync.Mutex;

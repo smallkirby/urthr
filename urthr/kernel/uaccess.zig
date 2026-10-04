@@ -48,6 +48,21 @@ pub fn copyToUser(uaddr: anytype, src: []const u8) Error!void {
     if (remaining != 0) return Error.Fault;
 }
 
+/// Copies data from the source to the destination.
+///
+/// This function does not validate the source nor destination addresses.
+pub fn copy(dst: anytype, src: anytype, len: usize) Error!void {
+    const daddr = userAddress(dst);
+    const saddr = userAddress(src);
+
+    const remaining = arch.uaccess.copy(
+        @as([*]u8, @ptrFromInt(daddr)),
+        @as([*]const u8, @ptrFromInt(saddr)),
+        len,
+    );
+    if (remaining != 0) return Error.Fault;
+}
+
 /// Copies a slice of `T` values from the kernel slice into the user address.
 pub fn copySliceToUser(comptime T: type, uaddr: anytype, src: []const T) Error!void {
     try copyToUser(userAddress(uaddr), std.mem.sliceAsBytes(src));
