@@ -105,10 +105,6 @@ fn zmain() !void {
     // Start periodic console timer.
     urd.console.initTimer();
 
-    // Warm up secondary CPUs.
-    log.info("Warming up secondary CPUs.", .{});
-    try urd.smp.init();
-
     // Initialize RNG.
     log.info("Initializing RNG.", .{});
     urd.rng.init();
@@ -116,6 +112,32 @@ fn zmain() !void {
     // Initialize filesystem.
     log.info("Initializing filesystem.", .{});
     try urd.fs.init(urd.mem.bin);
+
+    // Initialize the task subsystem.
+    urd.task.init();
+
+    // Spawn the initial kernel thread.
+    log.info("Spawning initial task.", .{});
+    _ = try urd.task.kspawn("init", initialTask, .{});
+
+    // Start preemptive scheduling timer.
+    try urd.sched.start();
+
+    // Start the scheduler.
+    urd.sched.reschedule();
+
+    // If the idle watchdog is enabled, monitor the idle thread's execution time.
+    if (options.idle_watchdog != 0) {
+        while (true) {
+            urd.sched.reschedule();
+            arch.halt();
+        }
+    }
+}
+
+/// Initial kernel thread task.
+fn initialTask() !void {
+    log.info("Initial task started.", .{});
 
     // Mount root filesystem.
     log.info("Mounting root filesystem.", .{});
@@ -181,31 +203,9 @@ fn zmain() !void {
     log.info("Initializing syscall subsystem.", .{});
     urd.syscall.init();
 
-    // Initialize the task subsystem.
-    urd.task.init();
-
-    // Spawn the initial kernel thread.
-    log.info("Spawning initial task.", .{});
-    _ = try urd.task.kspawn("init", initialTask, .{});
-
-    // Start preemptive scheduling timer.
-    try urd.sched.start();
-
-    // Start the scheduler.
-    urd.sched.reschedule();
-
-    // If the idle watchdog is enabled, monitor the idle thread's execution time.
-    if (options.idle_watchdog != 0) {
-        while (true) {
-            urd.sched.reschedule();
-            arch.halt();
-        }
-    }
-}
-
-/// Initial kernel thread task.
-fn initialTask() !void {
-    log.info("Initial task started.", .{});
+    // Warm up secondary CPUs.
+    log.info("Warming up secondary CPUs.", .{});
+    try urd.smp.init();
 
     // Initialize peripherals phase 3.
     log.info("Initializing peripherals phase 3.", .{});

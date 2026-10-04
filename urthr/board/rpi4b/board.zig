@@ -206,7 +206,7 @@ pub fn prepareSubcoreWakeup() urd.mem.Error!void {
         urd.mem.page_size,
     );
     try arch.mmu.map4kb(
-        urd.mem.getInitAddressSpace(),
+        urd.sched.getCurrent().vmm.as,
         .{
             .va = kentry,
             .pa = kentry,
@@ -227,7 +227,7 @@ pub fn deinitSubcoreWakeup() void {
         urd.mem.page_size,
     );
     arch.mmu.unmap4kb(
-        urd.mem.getInitAddressSpace(),
+        urd.sched.getCurrent().vmm.as,
         kentry,
         kentry,
         .{},

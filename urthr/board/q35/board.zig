@@ -625,7 +625,7 @@ pub fn prepareSubcoreWakeup() urd.mem.Error!void {
 
     // Identity-map the trampoline page.
     try arch.mmu.map4kb(
-        urd.mem.getInitAddressSpace(),
+        urd.sched.getCurrent().vmm.as,
         .{
             .va = arch.smp.trampoline_phys,
             .pa = arch.smp.trampoline_phys,
@@ -643,7 +643,7 @@ pub fn prepareSubcoreWakeup() urd.mem.Error!void {
 /// Removes the identity mapping of the trampoline page.
 pub fn deinitSubcoreWakeup() void {
     arch.mmu.unmap4kb(
-        urd.mem.getInitAddressSpace(),
+        urd.sched.getCurrent().vmm.as,
         arch.smp.trampoline_phys,
         urd.mem.page_size,
         .{},
