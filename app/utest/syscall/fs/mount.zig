@@ -9,6 +9,7 @@ test "mount proc onto a fresh directory succeeds and exposes proc files" {
 
     const mount_ret = linux.mount("proc", dir_path, "proc", 0, 0);
     try testing.expectEqual(.SUCCESS, linux.errno(mount_ret));
+    defer _ = linux.umount2(dir_path, 0);
 
     var file = try std.Io.Dir.openFileAbsolute(init.io, file_path, .{});
     file.close(init.io);

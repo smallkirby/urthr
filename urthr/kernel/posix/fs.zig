@@ -997,6 +997,44 @@ pub fn sysMount(_: ?[*:0]const u8, target: [*:0]const u8, filesystem_type: ?[*:0
     return .success(0);
 }
 
+/// Flags for umount2.
+const UmountFlags = packed struct(u64) {
+    /// Ask the filesystem to abort pending requests before attempting the unmount.
+    force: bool = false,
+    /// Lazy unmount.
+    detach: bool = false,
+    /// Mark the mount as expired.
+    expire: bool = false,
+    /// Do not follow symbolic links.
+    nofollow: bool = false,
+    /// Reserved.
+    _4: u60 = 0,
+};
+
+/// syscall: umount2
+pub fn sysUmount2(target: [*:0]const u8, flags: UmountFlags) ReturnType {
+    const allocator = urd.mem.bin;
+    var tbuf: [path_max]u8 = undefined;
+    const s_target = copyPath(&tbuf, target) catch return .err(.fault);
+
+    if (flags.detach or flags.expire) {
+        return .err(.inval);
+    }
+
+    const path = fs.resolve(
+        s_target,
+        allocator,
+        !flags.nofollow,
+    ) catch |err| return mapError(err);
+    defer path.put();
+
+    fs.umount(path, allocator) catch |err| {
+        return mapError(err);
+    };
+
+    return .success(0);
+}
+
 // =============================================================
 // Stat
 // =============================================================

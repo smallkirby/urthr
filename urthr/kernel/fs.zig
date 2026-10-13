@@ -313,33 +313,31 @@ pub fn createSocket(backend: *const SocketFs.Backend, desc: usize) Error!*File {
 
 /// Mount a filesystem to the specified path.
 pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
-    if (path.dentry.inode.ftype != .directory) {
-        return Error.NotDirectory;
+    return mounts.attach(path, fs, allocator);
+}
+
+/// Unmount the filesystem mounted at the specified path.
+///
+/// `path` must be the root of a mount.
+/// The reference to `path` is not consumed.
+pub fn umount(path: Path, allocator: Allocator) Error!void {
+    glock.lock();
+    defer glock.unlock();
+
+    const mnt = path.mount orelse {
+        return Error.InvalidArgument;
+    };
+    if (path.dentry != mnt.root) {
+        return Error.InvalidArgument;
     }
-    if (path.dentry.mount != null) {
-        return Error.AlreadyMounted;
+    if (mnt.parent == null) {
+        return Error.Busy; // root filesystem cannot be unmounted.
     }
 
-    // Create a new dentry for the root of the mounted filesystem.
-    // The dentry takes over the inode reference only on success.
-    fs.root.ref();
-    const root = Dentry.create("", fs.root, null, allocator) catch |err| {
-        fs.root.unref();
-        return err;
-    };
-    errdefer root.unref();
+    // Drop cached dentries.
+    try dcache.removeSubtree(mnt.root);
 
-    // Attach the new mount to the mount point.
-    const mnt = try allocator.create(Mount);
-    errdefer allocator.destroy(mnt);
-    mnt.* = .{
-        .filesystem = fs,
-        .root = root,
-        .parent = path.mount,
-        .mntpoint = path.dentry,
-    };
-    path.dentry.ref(); // + for the mount point
-    path.dentry.mount = mnt;
+    return mounts.detach(mnt, allocator);
 }
 
 /// Create a directory under the given directory with the given name.
@@ -968,20 +966,8 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
 /// Step into the mount attached to the path if any.
 ///
 /// Decrements the reference to `path` and returns a new path with reference.
-/// nop if the path is not a mount point.
 fn followDown(path: Path) Path {
-    const mnt = path.dentry.mount orelse {
-        return path;
-    };
-    const root = Path{
-        .dentry = mnt.root,
-        .mount = mnt,
-    };
-
-    // The mount root is kept alive only by `path`, so take a reference to it first.
-    const ret = root.get();
-    path.put();
-    return ret;
+    return mounts.followDown(path);
 }
 
 /// Step up to the parent directory, crossing the mount boundary if needed.
@@ -1086,6 +1072,8 @@ const ComponentIterator = std.fs.path.ComponentIterator(.posix, u8);
 var dcache: Dentry.Cache = undefined;
 /// Serializes directory-namespace operations.
 var glock: Mutex = .{};
+/// Mounts of the filesystem tree.
+var mounts: Mount.Table = .{};
 
 // =============================================================
 // Anonymous filesystems

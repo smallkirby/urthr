@@ -156,6 +156,44 @@ pub const Cache = struct {
         }
     }
 
+    /// Remove all cached dentries that are descendants of the given dentry.
+    ///
+    /// Releases the references held by the cache.
+    pub fn removeSubtree(self: *Cache, root: *Dentry) Allocator.Error!void {
+        const allocator = self._map.allocator;
+        var removed: std.ArrayList(*Dentry) = .empty;
+        defer removed.deinit(allocator);
+
+        {
+            self._lock.lock();
+            defer self._lock.unlock();
+
+            var keys: std.ArrayList(Key) = .empty;
+            defer keys.deinit(allocator);
+
+            // Collect all keys of dentries that are descendants of the root.
+            var iter = self._map.iterator();
+            while (iter.next()) |kv| {
+                var cur = kv.value_ptr.*.parent;
+                while (cur) |d| : (cur = d.parent) {
+                    if (d == root) {
+                        try keys.append(allocator, kv.key_ptr.*);
+                        try removed.ensureUnusedCapacity(allocator, 1);
+                        break;
+                    }
+                }
+            }
+            // Delete all collected keys from the map.
+            for (keys.items) |key| {
+                const kv = self._map.fetchRemove(key) orelse continue;
+                removed.appendAssumeCapacity(kv.value);
+            }
+        }
+
+        // Release the references outside the lock.
+        for (removed.items) |d| d.unref();
+    }
+
     /// Insert the dentry to the cache.
     ///
     /// Returns the cached dentry.
