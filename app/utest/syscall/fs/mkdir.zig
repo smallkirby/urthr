@@ -21,6 +21,20 @@ test "mkdirat on an existing directory fails with EEXIST" {
     try testing.expectEqual(.EXIST, linux.errno(ret2));
 }
 
+test "mkdirat after a failed lookup of the same name succeeds" {
+    const init = utest.getInit();
+    const path = Test.base_dir ++ "negmkdir";
+
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(path, .{}, 0)));
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(path, .{}, 0)));
+
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.mkdirat(linux.AT.FDCWD, path, 0o755)));
+    defer _ = linux.rmdir(path);
+
+    var dir = try std.Io.Dir.openDirAbsolute(init.io, path, .{});
+    dir.close(init.io);
+}
+
 test "mkdirat with an unopened dirfd fails with EBADF" {
     const ret = linux.mkdirat(999, "somedir1", 0o755);
     try testing.expectEqual(.BADF, linux.errno(ret));

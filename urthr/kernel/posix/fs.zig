@@ -637,7 +637,7 @@ pub fn sysCopyFileRange(fd_in: usize, off_in: ?*align(1) i64, fd_out: usize, off
     } else file_out.offset;
 
     // Reject overlapping ranges within the same file.
-    if (file_in.path.dentry.inode == file_out.path.dentry.inode and
+    if (file_in.path.dentry.getInode() == file_out.path.dentry.getInode() and
         pos_in < pos_out + len and pos_out < pos_in + len)
     {
         return .err(.inval);
@@ -1060,7 +1060,7 @@ fn statFromFile(file: *fs.File) Stat {
 
     return .{
         .st_dev = 0,
-        .st_ino = file.path.dentry.inode.number,
+        .st_ino = file.path.dentry.getInode().number,
         .st_mode = @bitCast(Mode.from(file)),
         .st_nlink = 1,
         .st_uid = file.getUid(),
@@ -1147,7 +1147,7 @@ pub fn sysStatx(dirfd: usize, pathname: [*:0]const u8, flags: AtFlags, _: u32, s
         .uid = file.getUid(),
         .gid = file.getGid(),
         .mode = @truncate(@as(u32, @bitCast(Mode.from(file)))),
-        .ino = file.path.dentry.inode.number,
+        .ino = file.path.dentry.getInode().number,
         .size = @intCast(file.size()),
         .blocks = @intCast(file.size() / 512),
         .attributes_mask = 0,
@@ -1910,7 +1910,7 @@ pub fn sysUtimensAt(
     if (atime == null and mtime == null) return .success(0);
 
     // Update the timestamps.
-    file.path.dentry.inode.utimes(atime, mtime) catch |err| {
+    file.path.dentry.getInode().utimes(atime, mtime) catch |err| {
         return mapError(err);
     };
 
@@ -1943,7 +1943,7 @@ pub fn sysChdir(pathname: [*:0]const u8) ReturnType {
         return mapError(err);
     };
 
-    if (path.dentry.inode.ftype != .directory) {
+    if (path.dentry.getInode().ftype != .directory) {
         path.put();
         return .err(.notdir);
     }
@@ -2190,7 +2190,7 @@ pub fn sysFlock(fd: usize, op: FlockOp) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     defer file.unref();
 
-    const user_lock = &file.path.dentry.inode.user_lock;
+    const user_lock = &file.path.dentry.getInode().user_lock;
     switch (op.value()) {
         .lock_shared,
         .lock_exclusive,

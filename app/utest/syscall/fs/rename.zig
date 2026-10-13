@@ -141,6 +141,54 @@ test "renameat replaces an existing destination file" {
     try testing.expectEqualSlices(u8, content_a, content);
 }
 
+test "renameat to a name that was looked up as missing before" {
+    const init = utest.getInit();
+    try createWith(init, name_file1, content_a);
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_file1, 0);
+
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(Test.base_dir ++ name_file2, .{}, 0)));
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(Test.base_dir ++ name_file2, .{}, 0)));
+
+    const ret = linux.renameat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_file1,
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_file2,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_file2, 0);
+
+    var buf: [32]u8 = undefined;
+    const read = try readAll(init, name_file2, &buf);
+    try testing.expectEqualSlices(u8, content_a, read);
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(Test.base_dir ++ name_file1, .{}, 0)));
+}
+
+test "renameat a directory to a name that was looked up as missing before" {
+    const init = utest.getInit();
+
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.mkdirat(linux.AT.FDCWD, Test.base_dir ++ name_dir1, 0o755)));
+    defer _ = linux.rmdir(Test.base_dir ++ name_dir1);
+    try createWith(init, name_dir1 ++ "/" ++ name_file1, content_a);
+
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(Test.base_dir ++ name_dir2, .{}, 0)));
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(Test.base_dir ++ name_dir2, .{}, 0)));
+
+    const ret = linux.renameat(
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_dir1,
+        linux.AT.FDCWD,
+        Test.base_dir ++ name_dir2,
+    );
+    try testing.expectEqual(.SUCCESS, linux.errno(ret));
+    defer _ = linux.rmdir(Test.base_dir ++ name_dir2);
+    defer _ = linux.unlinkat(linux.AT.FDCWD, Test.base_dir ++ name_dir2 ++ "/" ++ name_file1, 0);
+
+    var buf: [32]u8 = undefined;
+    const read = try readAll(init, name_dir2 ++ "/" ++ name_file1, &buf);
+    try testing.expectEqualSlices(u8, content_a, read);
+}
+
 test "renameat onto itself is a no-op and succeeds" {
     const init = utest.getInit();
     try createWith(init, name_file1, content_a);

@@ -8,8 +8,6 @@ const Error = fs.Error;
 
 /// File name.
 name: []const u8,
-/// Inode associated with this dentry.
-inode: *Inode,
 /// Parent dentry. `null` if this is the root dentry.
 parent: ?*Dentry,
 /// If this dentry is a mount point, the mount attached to this dentry.
@@ -19,18 +17,26 @@ refcnt: std.atomic.Value(usize) = .init(1),
 /// Memory allocator.
 allocator: Allocator,
 
+/// Inode associated with this dentry.
+///
+/// `null` if the dentry does not have an associated inode (negative dentry).
+///
+/// User must obtain the inode using the `getInode()` helper
+/// ensuring that this dentry is not a negative dentry.
+_inode: ?*Inode,
+
 /// Create a new dentry with the given name and inode.
 ///
 /// The returned dentry takes ownership of the inode reference.
 /// The ownership of the `name` is not transferred.
 /// Caller owns the returned dentry.
-pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allocator) Error!*Dentry {
+pub fn create(name: []const u8, inode: ?*Inode, parent: ?*Dentry, allocator: Allocator) Error!*Dentry {
     const dentry = try allocator.create(Dentry);
     errdefer allocator.destroy(dentry);
 
     dentry.* = .{
         .name = try allocator.dupe(u8, name),
-        .inode = inode,
+        ._inode = inode,
         .parent = parent,
         .allocator = allocator,
     };
@@ -56,9 +62,21 @@ pub fn unref(self: *Self) void {
     }
 }
 
+/// Get the inode associated with this dentry.
+///
+/// Caller must ensure that this dentry is not a negative dentry.
+pub fn getInode(self: *Self) *Inode {
+    return self._inode.?;
+}
+
+/// Check if this dentry is a negative dentry.
+pub fn isNegative(self: *Self) bool {
+    return self._inode == null;
+}
+
 /// Deinitialize the dentry and release its resources.
 fn deinit(self: *Self) void {
-    self.inode.unref();
+    if (self._inode) |inode| inode.unref();
     self.allocator.free(self.name);
     if (self.parent) |parent| parent.unref();
     self.allocator.destroy(self);
@@ -143,6 +161,20 @@ pub const Cache = struct {
     ///
     /// Caller must ensure that the dentry is cached.
     pub fn remove(self: *Cache, parent: ?*Dentry, name: []const u8, case_insensitive: bool) void {
+        _ = self.removeImpl(parent, name, case_insensitive, true);
+    }
+
+    /// Remove a dentry from the cache if it exists.
+    ///
+    /// Returns whether the dentry was removed from the cache.
+    pub fn mayRemove(self: *Cache, parent: ?*Dentry, name: []const u8, case_insensitive: bool) bool {
+        return self.removeImpl(parent, name, case_insensitive, false);
+    }
+
+    /// Remove a dentry from the cache, releasing the reference to it.
+    ///
+    /// If `must_exist` is true, the function will assert if the dentry is not found in the cache.
+    fn removeImpl(self: *Cache, parent: ?*Dentry, name: []const u8, case_insensitive: bool, must_exist: bool) bool {
         // Release the reference outside the lock.
         const removed = blk: {
             self._lock.lock();
@@ -158,8 +190,10 @@ pub const Cache = struct {
         if (removed) |kv| {
             kv.value.unref();
         } else {
-            rtt.expect(false);
+            rtt.expect(!must_exist);
         }
+
+        return removed != null;
     }
 
     /// Remove all cached dentries that are descendants of the given dentry.
@@ -203,7 +237,10 @@ pub const Cache = struct {
     /// Insert the dentry to the cache.
     ///
     /// Returns the cached dentry.
-    /// If a dentry with the same key is already cached, it is kept and `entry` is not inserted.
+    /// When a dentry with the same key is already cached:
+    ///   - If the dentry is a negative dentry, it's modified to point to the given inode.
+    ///   - Otherwise, it is kept and `entry` is not inserted.
+    ///
     /// Caller must call `unref()` for the returned dentry after use.
     pub fn insert(self: *Cache, entry: *Dentry, case_insensitive: bool) *Dentry {
         self._lock.lock();
@@ -214,13 +251,21 @@ pub const Cache = struct {
             .name = entry.name,
             .case_insensitive = case_insensitive,
         }) catch unreachable;
-        if (!result.found_existing) {
-            entry.ref();
+
+        if (result.found_existing) {
+            if (result.value_ptr.*.isNegative()) {
+                if (entry._inode) |inode| {
+                    inode.ref();
+                    result.value_ptr.*._inode = inode;
+                }
+            }
+        } else {
+            entry.ref(); // +1 for the cache
             result.value_ptr.* = entry;
         }
 
         const cached = result.value_ptr.*;
-        cached.ref();
+        cached.ref(); // +1 for the caller
 
         return cached;
     }

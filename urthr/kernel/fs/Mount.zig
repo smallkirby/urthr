@@ -27,7 +27,7 @@ pub const Table = struct {
         self.lock.lock(.exclusive);
         defer self.lock.unlock(.exclusive);
 
-        if (path.dentry.inode.ftype != .directory) {
+        if (path.dentry.getInode().ftype != .directory) {
             return Error.NotDirectory;
         }
         if (path.dentry.mount != null) {

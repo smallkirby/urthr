@@ -852,7 +852,7 @@ fn fpoll(file: *fs.File) fs.Error!fs.PollResult {
 fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.IterResult {
     const file = iter.file;
     const ctx = FileImpl.from(file);
-    const inode = InodeImpl.from(file.path.dentry.inode);
+    const inode = InodeImpl.from(file.path.dentry.getInode());
     const fat32 = inode.fat32;
 
     fat32.lock.lock();
@@ -896,7 +896,7 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
 fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
     const ctx = FileImpl.from(file);
 
-    const file_size = file.path.dentry.inode.size;
+    const file_size = file.path.dentry.getInode().size;
     if (offset >= file_size) return 0;
 
     const fat32 = ctx.fat32;
@@ -974,7 +974,7 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
 fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
     const ctx = FileImpl.from(file);
     const fat32 = ctx.fat32;
-    const inode = file.path.dentry.inode;
+    const inode = file.path.dentry.getInode();
     const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
 
     // Nothing to write and nothing to zero-fill.
@@ -1099,7 +1099,7 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
 fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
     const ctx = FileImpl.from(file);
     const fat32 = ctx.fat32;
-    const inode = file.path.dentry.inode;
+    const inode = file.path.dentry.getInode();
 
     // No size change.
     if (new_size == inode.size) {

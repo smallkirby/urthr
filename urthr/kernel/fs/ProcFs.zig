@@ -381,7 +381,7 @@ fn fRegIterate(_: *File.Iterator, _: Allocator) fs.Error!?File.IterResult {
 }
 
 fn fRegRead(file: *File, buf: []u8, pos: usize) fs.Error!usize {
-    const inode = InodeImpl.from(file.path.dentry.inode);
+    const inode = InodeImpl.from(file.path.dentry.getInode());
     const read_fn = inode.read_fn orelse return 0;
     return read_fn(buf, pos);
 }

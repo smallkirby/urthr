@@ -138,7 +138,7 @@ pub fn open(path: fs.Path, access: AccessMode, allocator: Allocator) Error!*File
 
     rtt.expect(path.mount != null);
 
-    const node = path.dentry.inode;
+    const node = path.dentry.getInode();
     const file = try allocator.create(File);
     errdefer allocator.destroy(file);
 
@@ -341,7 +341,7 @@ pub fn getGid(self: *const Self) u32 {
 
 /// Helper function to get the inode associated with this file.
 fn inode(self: *const Self) *Inode {
-    return self.path.dentry.inode;
+    return self.path.dentry.getInode();
 }
 
 /// Set the modification and status-change timestamps to the current time.

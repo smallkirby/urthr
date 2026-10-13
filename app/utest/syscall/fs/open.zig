@@ -31,6 +31,23 @@ test "try to open a non-existent file" {
     ));
 }
 
+test "creating a file after a failed lookup of the same name succeeds" {
+    const init = utest.getInit();
+    const path = Test.base_dir ++ "negopen";
+
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(path, .{}, 0)));
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(path, .{}, 0)));
+
+    const file = try std.Io.Dir.createFileAbsolute(init.io, path, .{});
+    file.close(init.io);
+
+    const opened = try std.Io.Dir.openFileAbsolute(init.io, path, .{});
+    opened.close(init.io);
+
+    try testing.expectEqual(.SUCCESS, linux.errno(linux.unlink(path)));
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(path, .{}, 0)));
+}
+
 test "syscall: open with a null pathname fails with EFAULT" {
     if (comptime !builtin.cpu.arch.isX86()) return error.SkipZigTest;
 

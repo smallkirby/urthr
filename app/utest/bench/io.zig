@@ -161,6 +161,28 @@ test "large directory lookup" {
     }
 }
 
+test "non existing file lookup" {
+    const iter = 10000;
+
+    try testing.expectEqual(.NOENT, linux.errno(linux.open(
+        "/not-exist",
+        .{ .CREAT = false },
+        0o644,
+    )));
+
+    const start = now();
+    for (0..iter) |_| {
+        _ = linux.open(
+            "/not-exist",
+            .{ .CREAT = false },
+            0o644,
+        );
+    }
+    const end = now();
+
+    std.log.info("non existing file lookup: {d} ns/op", .{(end - start) / iter});
+}
+
 // =============================================================
 // Helpers
 // =============================================================

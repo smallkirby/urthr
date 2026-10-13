@@ -418,7 +418,7 @@ fn writeBackSharedPage(vma: *const VmArea, va: usize, pa: usize) Error!void {
     const fb = vma.backing.file;
     const file_offset = fb.offset + (va - vma.start);
 
-    const file_size = fb.file.path.dentry.inode.size;
+    const file_size = fb.file.path.dentry.getInode().size;
     if (file_offset >= file_size) return;
     const len = @min(urd.mem.page_size, file_size - file_offset);
 

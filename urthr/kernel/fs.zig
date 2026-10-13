@@ -274,7 +274,7 @@ pub fn init(allocator: Allocator) Error!void {
     };
     dentry.* = .{
         .name = "",
-        .inode = inode,
+        ._inode = inode,
         .parent = null,
         .allocator = allocator,
     };
@@ -360,7 +360,7 @@ pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator
         return Error.AlreadyExists;
     }
 
-    const inode = try cur.dentry.inode.mkdir(
+    const inode = try cur.dentry.getInode().mkdir(
         basename,
         mode,
         allocator,
@@ -403,7 +403,7 @@ pub fn symlinkAt(dir: Path, linkpath: []const u8, target: []const u8, allocator:
         return Error.AlreadyExists;
     }
 
-    const inode = try cur.dentry.inode.symlink(
+    const inode = try cur.dentry.getInode().symlink(
         basename,
         target,
         allocator,
@@ -446,12 +446,12 @@ pub fn createAt(dir: Path, path: []const u8, mode: FileMode, access: File.Access
         return Error.AlreadyExists;
     }
 
-    if (cur.dentry.inode.ftype != .directory) {
+    if (cur.dentry.getInode().ftype != .directory) {
         return Error.NotDirectory;
     }
 
     // Create new file in the directory.
-    const inode = try cur.dentry.inode.create(
+    const inode = try cur.dentry.getInode().create(
         basename,
         mode,
         allocator,
@@ -505,7 +505,7 @@ pub fn readlink(s: []const u8, buf: []u8, allocator: Allocator) Error!usize {
     const path = try resolve(s, allocator, false);
     defer path.put();
 
-    return path.dentry.inode.readlink(buf);
+    return path.dentry.getInode().readlink(buf);
 }
 
 /// Read the target of a symbolic link relative to the given directory into the buffer.
@@ -517,14 +517,14 @@ pub fn readlinkAt(dir: Path, s: []const u8, buf: []u8, allocator: Allocator) Err
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
-    if (dir.dentry.inode.ftype != .directory) {
+    if (dir.dentry.getInode().ftype != .directory) {
         return Error.NotDirectory;
     }
 
     const path = try resolvePath(dir, s, allocator, false);
     defer path.put();
 
-    return path.dentry.inode.readlink(buf);
+    return path.dentry.getInode().readlink(buf);
 }
 
 /// Build the absolute path string for a given Path.
@@ -594,7 +594,7 @@ pub fn openAt(dir: Path, s: []const u8, access: File.AccessMode, allocator: Allo
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
-    if (dir.dentry.inode.ftype != .directory) {
+    if (dir.dentry.getInode().ftype != .directory) {
         return Error.NotDirectory;
     }
 
@@ -626,7 +626,7 @@ pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
-    if (dir.dentry.inode.ftype != .directory) {
+    if (dir.dentry.getInode().ftype != .directory) {
         return Error.NotDirectory;
     }
 
@@ -641,7 +641,7 @@ pub fn unlinkAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
 
 /// Detach the directory entry.
 fn unlinkImpl(path: Path, s: []const u8) Error!void {
-    if (path.dentry.inode.ftype == .directory) {
+    if (path.dentry.getInode().ftype == .directory) {
         return Error.NotFile;
     }
 
@@ -649,7 +649,7 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
     const parent_dentry = path.dentry.parent.?;
     const basename = std.fs.path.basenamePosix(s);
 
-    try parent_dentry.inode.unlink(path.dentry.inode);
+    try parent_dentry.getInode().unlink(path.dentry.getInode());
     dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
 }
 
@@ -669,7 +669,7 @@ pub fn rmdirAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
     if (std.fs.path.isAbsolute(s)) {
         return Error.InvalidArgument;
     }
-    if (dir.dentry.inode.ftype != .directory) {
+    if (dir.dentry.getInode().ftype != .directory) {
         return Error.NotDirectory;
     }
 
@@ -684,7 +684,7 @@ pub fn rmdirAt(dir: Path, s: []const u8, allocator: Allocator) Error!void {
 
 /// Detach the directory entry for an empty directory.
 fn rmdirImpl(path: Path, s: []const u8, allocator: Allocator) Error!void {
-    if (path.dentry.inode.ftype != .directory) {
+    if (path.dentry.getInode().ftype != .directory) {
         return Error.NotDirectory;
     }
 
@@ -704,7 +704,7 @@ fn rmdirImpl(path: Path, s: []const u8, allocator: Allocator) Error!void {
         return Error.NotEmpty;
     }
 
-    try parent_dentry.inode.rmdir(path.dentry.inode);
+    try parent_dentry.getInode().rmdir(path.dentry.getInode());
     dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
 }
 
@@ -754,8 +754,8 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
         return Error.InvalidArgument;
     }
 
-    if (old_cur.dentry.inode.ftype != .directory) return Error.NotDirectory;
-    if (new_cur.dentry.inode.ftype != .directory) return Error.NotDirectory;
+    if (old_cur.dentry.getInode().ftype != .directory) return Error.NotDirectory;
+    if (new_cur.dentry.getInode().ftype != .directory) return Error.NotDirectory;
     if (old_cur.mount != new_cur.mount) return Error.CrossDevice;
 
     // The source must exist.
@@ -793,9 +793,9 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     }
 
     // Check file type consistency.
-    const src_ftype = old_path.dentry.inode.ftype;
+    const src_ftype = old_path.dentry.getInode().ftype;
     if (dst_path) |d| {
-        const dst_ftype = d.dentry.inode.ftype;
+        const dst_ftype = d.dentry.getInode().ftype;
         if (src_ftype == .directory and dst_ftype != .directory) return Error.NotDirectory;
         if (src_ftype != .directory and dst_ftype == .directory) return Error.NotFile;
         // Replacing an existing directory would require removing it.
@@ -808,20 +808,17 @@ pub fn renameAt(old_dir: Path, old_name: []const u8, new_dir: Path, new_name: []
     }
 
     // Do the actual rename operation on the filesystem.
-    try old_cur.dentry.inode.rename(
+    try old_cur.dentry.getInode().rename(
         old_basename,
-        old_path.dentry.inode,
-        new_cur.dentry.inode,
+        old_path.dentry.getInode(),
+        new_cur.dentry.getInode(),
         new_basename,
-        if (dst_path) |d| d.dentry.inode else null,
+        if (dst_path) |d| d.dentry.getInode() else null,
     );
 
     // Remove the old and replaced dentry from the cache.
     dcache.remove(old_cur.dentry, old_basename, isCaseInsensitive(old_cur.mount));
-
-    if (dst_path != null) {
-        dcache.remove(new_cur.dentry, new_basename, isCaseInsensitive(new_cur.mount));
-    }
+    _ = dcache.mayRemove(new_cur.dentry, new_basename, isCaseInsensitive(new_cur.mount));
 
     const name_copy = try old_path.dentry.allocator.dupe(u8, new_basename);
     old_path.dentry.allocator.free(old_path.dentry.name);
@@ -913,13 +910,27 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
         // Resolve this component.
         var next: Path = undefined;
         if (dcache.lookup(cur.dentry, c.name, ci)) |d| {
-            next = .{ .dentry = d, .mount = cur.mount };
+            if (d.isNegative()) {
+                d.unref();
+                return Error.NotFound;
+            } else {
+                next = .{ .dentry = d, .mount = cur.mount };
+            }
         } else {
             // Look up the child dentry.
-            if (cur.dentry.inode.ftype != .directory) {
+            if (cur.dentry.getInode().ftype != .directory) {
                 return Error.NotDirectory;
             }
-            const child = try cur.dentry.inode.lookup(c.name) orelse {
+            const child = try cur.dentry.getInode().lookup(c.name) orelse {
+                // Put a negative dentry into the cache.
+                const ndent = insertDentry(
+                    cur,
+                    c.name,
+                    null,
+                    allocator,
+                ) catch return Error.NotFound;
+                ndent.unref();
+
                 return Error.NotFound;
             };
 
@@ -943,7 +954,7 @@ fn resolvePathImpl(base: Path, s: []const u8, allocator: Allocator, follow: bool
 
         // Follow a symlink.
         const is_last = iter.peekNext() == null;
-        if (next.dentry.inode.ftype == .symlink and (!is_last or follow)) {
+        if (next.dentry.getInode().ftype == .symlink and (!is_last or follow)) {
             defer next.put();
             const resolved = try followSymlink(
                 cur,
@@ -1024,7 +1035,7 @@ fn followSymlink(dir: Path, link: *Dentry, allocator: Allocator, depth: usize) E
     const symlink_max_len = 4096;
     const buf = try allocator.alloc(u8, symlink_max_len);
     defer allocator.free(buf);
-    const n = try link.inode.readlink(buf);
+    const n = try link.getInode().readlink(buf);
 
     return resolvePathImpl(
         dir,
@@ -1036,20 +1047,22 @@ fn followSymlink(dir: Path, link: *Dentry, allocator: Allocator, depth: usize) E
 }
 
 /// Create a dentry for the newly created inode and put it into the dentry cache.
+/// Or insert a negative dentry if the inode is null.
 ///
 /// Takes over the caller's reference to the inode.
 /// Returns the cached dentry with a new reference owned by the caller.
 ///
-/// Inserted dentry holds two references.
-/// One for the dentry cache, and one for the caller.
-fn insertDentry(dir: Path, name: []const u8, inode: *Inode, allocator: Allocator) Error!*Dentry {
+/// Returns the cached dentry with a new reference owned by the caller.
+///
+/// If a dentry with the same key already exists, that one is returned and the new dentry is discarded.
+fn insertDentry(dir: Path, name: []const u8, inode: ?*Inode, allocator: Allocator) Error!*Dentry {
     const dentry = Dentry.create(
         name,
         inode,
         dir.dentry,
         allocator,
     ) catch |err| {
-        inode.unref();
+        if (inode) |i| i.unref();
         return err;
     };
     defer dentry.unref();
