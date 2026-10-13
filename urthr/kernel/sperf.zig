@@ -24,7 +24,7 @@ fn at(core: usize, i: usize) Record {
 
 /// Record an event with the current timestamp and thread ID.
 pub fn record(payload: EventPayload) void {
-    if (!options.enable_perf) return;
+    if (!options.enable_sperf) return;
 
     const timestamp_ns: u64 = @intCast((@as(u128, arch.timer.getCount()) * std.time.ns_per_s) / arch.timer.getFreq());
     const tid = urd.sched.getCurrent().id;
@@ -46,7 +46,7 @@ pub fn record(payload: EventPayload) void {
 
 /// Record the name of the current thread.
 pub fn recordThreadName(name: []const u8) void {
-    if (!options.enable_perf) return;
+    if (!options.enable_sperf) return;
 
     var buf: [perf.ThreadName.max_len]u8 = @splat(0);
     const n = @min(name.len, buf.len);
@@ -56,13 +56,14 @@ pub fn recordThreadName(name: []const u8) void {
 
 /// Write the buffered records to a file mounted on the root filesystem.
 pub fn dump() fs.Error!void {
-    if (!options.enable_perf) return;
+    if (!options.enable_sperf) return;
 
     const allocator = urd.mem.bin;
     const file = fs.open(
         dump_path,
         .write_only,
         allocator,
+        true,
     ) catch |err| switch (err) {
         fs.Error.NotFound => try fs.create(
             dump_path,
@@ -139,7 +140,7 @@ const CoreBuffer = struct {
     lock: SpinLock = .{},
 };
 
-var cores: [if (options.enable_perf) board.num_cpus else 0]CoreBuffer = @splat(.{});
+var cores: [if (options.enable_sperf) board.num_cpus else 0]CoreBuffer = @splat(.{});
 
 // =============================================================
 // Imports

@@ -255,7 +255,7 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
         arch.thread.restoreFpu(f);
     }
 
-    // Perf recording.
+    // Structured perf recording.
     if (cur.last_exec_start == 0) {
         sperf.recordThreadName(cur.name);
     }

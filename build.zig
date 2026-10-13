@@ -82,9 +82,9 @@ pub fn build(b: *std.Build) !void {
         "Enable runtime tests in the kernel.",
     ) orelse false;
 
-    const enable_perf = b.option(
+    const enable_sperf = b.option(
         bool,
-        "perf",
+        "sperf",
         "Enable structured performance trace event recording.",
     ) orelse false;
     const enable_aperf = b.option(
@@ -150,7 +150,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(board.BoardType, "board", board_type);
     options.addOption(bool, "serial_boot", serial_boot);
     options.addOption(bool, "enable_rtt", enable_rtt);
-    options.addOption(bool, "enable_perf", enable_perf);
+    options.addOption(bool, "enable_sperf", enable_sperf);
     options.addOption(bool, "enable_aperf", enable_aperf);
     options.addOption([]const u8, "init", init_path);
     options.addOption(bool, "restart_on_panic", restart);
