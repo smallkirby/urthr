@@ -85,7 +85,12 @@ pub fn build(b: *std.Build) !void {
     const enable_perf = b.option(
         bool,
         "perf",
-        "Enable performance trace event recording.",
+        "Enable structured performance trace event recording.",
+    ) orelse false;
+    const enable_aperf = b.option(
+        bool,
+        "aperf",
+        "Enable arbitrary performance trace event recording.",
     ) orelse false;
 
     const init_path = b.option(
@@ -146,6 +151,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(bool, "serial_boot", serial_boot);
     options.addOption(bool, "enable_rtt", enable_rtt);
     options.addOption(bool, "enable_perf", enable_perf);
+    options.addOption(bool, "enable_aperf", enable_aperf);
     options.addOption([]const u8, "init", init_path);
     options.addOption(bool, "restart_on_panic", restart);
     options.addOption(u64, "idle_watchdog", idle_watchdog);
@@ -710,6 +716,7 @@ pub fn build(b: *std.Build) !void {
                     else => false,
                 };
                 utest_options.addOption(bool, "net_supported", is_net_supported);
+                utest_options.addOption(bool, "enable_aperf", enable_aperf);
             }
 
             break :blk exe;

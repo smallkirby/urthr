@@ -9,9 +9,11 @@ var initialized: bool = false;
 const heap_size = 4096 * 16;
 
 /// Initialize the arbitrary performance tracer subsystem.
-///
-/// TODO: enable only when specified by build options.
 pub fn init(allocator: Allocator) Allocator.Error!void {
+    if (!enabled) {
+        return;
+    }
+
     const buffer = try allocator.alloc(u8, heap_size);
     heap = .init(buffer);
     map = .init(heap.allocator());
@@ -19,7 +21,11 @@ pub fn init(allocator: Allocator) Allocator.Error!void {
 }
 
 /// Begin recording an arbitrary performance trace event with the given name.
-pub fn begin(comptime name: []const u8) AperfHandle {
+pub inline fn begin(comptime name: []const u8) AperfHandle {
+    if (!enabled) {
+        return .empty;
+    }
+
     if (!initialized) {
         return .empty;
     }
@@ -30,7 +36,7 @@ pub fn begin(comptime name: []const u8) AperfHandle {
     };
 }
 
-const AperfHandle = struct {
+const AperfHandle = if (enabled) struct {
     /// Comptime name of the event.
     name: []const u8,
     /// Timestamp when the event recording started.
@@ -38,13 +44,13 @@ const AperfHandle = struct {
     /// Indicates whether the handle is valid.
     valid: bool = true,
 
-    pub const empty = AperfHandle{
+    pub const empty = @This(){
         .name = undefined,
         .start = 0,
         .valid = false,
     };
 
-    pub fn end(self: AperfHandle) void {
+    pub fn end(self: @This()) void {
         if (self.valid == false) {
             return;
         }
@@ -68,6 +74,9 @@ const AperfHandle = struct {
             }) catch @panic("Failed to insert performance record");
         }
     }
+} else struct {
+    pub const empty = @This(){};
+    pub inline fn end(_: @This()) void {}
 };
 
 const AperfRecord = struct {
@@ -88,6 +97,10 @@ const AperfRecord = struct {
 /// Fetched items are written into the user buffer and cleared from the records.
 /// When `buf` is too small to hold all records, this returns error and all records are not cleared.
 pub fn sysAperf(buf: [*]u8, len: usize) syscall.ReturnType {
+    if (!enabled) {
+        return .err(.nosys);
+    }
+
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
@@ -133,3 +146,4 @@ const urd = @import("urthr");
 const sync = urd.sync;
 const syscall = urd.syscall;
 const uaccess = urd.uaccess;
+const enabled = @import("options").enable_aperf;

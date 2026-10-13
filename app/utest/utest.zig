@@ -120,6 +120,10 @@ test "hello" {
 }
 
 test "aperf" {
+    if (!options.enable_aperf) {
+        return error.SkipZigTest;
+    }
+
     const init = getInit();
     const gpa = init.gpa;
 
