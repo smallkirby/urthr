@@ -22,6 +22,7 @@ allocator: Allocator,
 /// Create a new dentry with the given name and inode.
 ///
 /// The returned dentry takes ownership of the inode reference.
+/// The ownership of the `name` is not transferred.
 /// Caller owns the returned dentry.
 pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allocator) Error!*Dentry {
     const dentry = try allocator.create(Dentry);
@@ -33,8 +34,8 @@ pub fn create(name: []const u8, inode: *Inode, parent: ?*Dentry, allocator: Allo
         .parent = parent,
         .allocator = allocator,
     };
-
     if (parent) |p| p.ref();
+
     return dentry;
 }
 
@@ -49,13 +50,18 @@ pub fn ref(self: *Self) void {
 pub fn unref(self: *Self) void {
     const prev = self.refcnt.fetchSub(1, .acq_rel);
     rtt.expect(prev != 0);
+
     if (prev == 1) {
-        const parent = self.parent;
-        self.inode.unref();
-        self.allocator.free(self.name);
-        self.allocator.destroy(self);
-        if (parent) |p| p.unref();
+        self.deinit();
     }
+}
+
+/// Deinitialize the dentry and release its resources.
+fn deinit(self: *Self) void {
+    self.inode.unref();
+    self.allocator.free(self.name);
+    if (self.parent) |parent| parent.unref();
+    self.allocator.destroy(self);
 }
 
 // =============================================================
