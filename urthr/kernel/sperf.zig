@@ -1,4 +1,4 @@
-//! Performance trace event recorder.
+//! Structured performance trace event recorder.
 
 /// Path of the dump file on the mounted root filesystem.
 pub const dump_path = "/PERFLOG";

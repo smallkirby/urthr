@@ -70,7 +70,7 @@ pub fn start() !void {
     // Initialize idle thread runtime accounting.
     getCurrent().last_exec_start = arch.timer.getCount();
 
-    urd.perf.recordThreadName(getCurrent().name);
+    sperf.recordThreadName(getCurrent().name);
 }
 
 /// Add a thread to the ready queue.
@@ -257,9 +257,9 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
 
     // Perf recording.
     if (cur.last_exec_start == 0) {
-        urd.perf.recordThreadName(cur.name);
+        sperf.recordThreadName(cur.name);
     }
-    urd.perf.record(.init(.sched_switch, .{}));
+    sperf.record(.init(.sched_switch, .{}));
 }
 
 /// Pick the next thread from the ready queue eligible to run on this core.
@@ -361,6 +361,7 @@ const rtt = common.rtt;
 const page_size = common.mem.size_4kib;
 const urd = @import("urthr");
 const pcpu = urd.pcpu;
+const sperf = urd.sperf;
 const SpinLock = urd.sync.SpinLock;
 const thread = urd.task.thread;
 const Thread = thread.Thread;
