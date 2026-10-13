@@ -120,6 +120,7 @@ if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
 
     .new("ping",        512,    sysPing),
     .new("perf_dump",   513,    sysPerfDump),
+    .new("aperf",       514,    aperf.sysAperf),
 }
 
 // =============================================================
@@ -258,6 +259,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
 
     .new("ping",                 512,   sysPing),
     .new("perf_dump",            513,   sysPerfDump),
+    .new("aperf",                514,   aperf.sysAperf),
 }
 else [_]Descriptor{}
 ;
@@ -559,6 +561,7 @@ const std = @import("std");
 const log = std.log.scoped(.syscall);
 const arch = @import("arch").impl;
 const urd = @import("urthr");
+const aperf = urd.aperf;
 const sperf = urd.sperf;
 const trace = urd.trace.scoped(.syscall, .syscall);
 const posix = urd.posix;

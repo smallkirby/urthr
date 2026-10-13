@@ -27,6 +27,8 @@ pub const signal = @import("syscall/signal.zig");
 pub const task = @import("syscall/task.zig");
 pub const time = @import("syscall/time.zig");
 
+pub const aperf = @import("aperf.zig");
+
 // =============================================================
 // Helpers
 // =============================================================
@@ -115,6 +117,18 @@ fn forkChild(ctx: usize, reset_sig: ?linux.SIG, T: anytype) linux.pid_t {
 
 test "hello" {
     std.log.info("Hello, Urthr Unit Test Framework!", .{});
+}
+
+test "aperf" {
+    const init = getInit();
+    const gpa = init.gpa;
+
+    var iter = try aperf.fetch(gpa);
+    defer iter.deinit();
+
+    while (iter.next()) |rec| {
+        std.log.info("name: {s}, count: {d}, ns: {d}", .{ rec.name, rec.count, rec.ns });
+    }
 }
 
 comptime {

@@ -82,3 +82,19 @@ pub const Record = extern struct {
     /// Event-specific payload.
     payload: EventPayload,
 };
+
+// =============================================================
+// Arbitrary performance trace events
+// =============================================================
+
+/// Performance record for arbitrary events.
+pub const AperfRecord = extern struct {
+    /// Size in bytes of the event name.
+    name_size: u64 align(1),
+    /// Number of occurrences of the event.
+    count: u64 align(1),
+    /// Total time spent in the event in nanoseconds.
+    ns: u128 align(1),
+    /// Event name stored inline after this struct.
+    __name: void align(1) = {},
+};

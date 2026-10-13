@@ -1,3 +1,4 @@
+pub const aperf = @import("kernel/aperf.zig");
 pub const console = @import("kernel/console.zig");
 pub const dev = @import("kernel/dev.zig");
 pub const exception = @import("kernel/exception.zig");

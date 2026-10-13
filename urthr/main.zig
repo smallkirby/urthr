@@ -207,6 +207,10 @@ fn initialTask() !void {
     log.info("Initializing syscall subsystem.", .{});
     urd.syscall.init();
 
+    // Initialize arbitrary performance tracer subsystem.
+    log.info("Initializing arbitrary performance tracer.", .{});
+    try urd.aperf.init(urd.mem.bin);
+
     // Warm up secondary CPUs.
     log.info("Warming up secondary CPUs.", .{});
     try urd.smp.init();
