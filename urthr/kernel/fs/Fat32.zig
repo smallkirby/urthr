@@ -1009,7 +1009,10 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
 
     // Seek to the cluster that contains `dst_start`.
     const clsoff = if (dst_start != 0 and dst_start % bytes_per_cluster == 0) blk: {
-        // Cluster boundary. Get next cluster or allocate a new one.
+        // Cluster boundary. Reuse the cached cluster if it already starts at `dst_start`.
+        if (ctx.cache) |c| if (c.file_offset == dst_start) break :blk c;
+
+        // Get next cluster or allocate a new one.
         const prev = try ctx.seekCluster(dst_start - 1);
         const next =
             try fat32.getNextCluster(prev.cluster) orelse
