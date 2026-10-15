@@ -458,7 +458,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         const result = (try bringUpVirtioPci(
             hc,
             &.{ dd.VirtioBlk.pci_device_id_legacy, dd.VirtioBlk.pci_device_id_modern },
-            dd.VirtioBlk.Features{},
+            dd.VirtioBlk.Features{ .flush = true },
         )) orelse break :outer;
 
         // Initialize virtio-blk device.

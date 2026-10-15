@@ -219,7 +219,7 @@ pub fn initPeripherals3() common.mem.Error!void {
             const dev = if (dd.virtio.mmio.init(
                 base,
                 .block,
-                dd.VirtioBlk.Features{},
+                dd.VirtioBlk.Features{ .flush = true },
                 urd.mem.page,
                 urd.mem.bin,
             )) |result| if (result) |dev| dev else {
