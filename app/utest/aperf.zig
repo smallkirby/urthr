@@ -17,7 +17,7 @@ pub fn fetch(allocator: Allocator) Allocator.Error!Iterator {
 
 /// Clear all recorded events.
 pub fn clear() void {
-    _ = aperf();
+    _ = aperf() catch @panic("Failed to clear aperf");
 }
 
 pub const Record = struct {
