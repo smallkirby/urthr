@@ -99,7 +99,7 @@ fn fsSync(ctx: *anyopaque) fs.Error!void {
     self.lock.lock();
     defer self.lock.unlock();
 
-    self.flushCache();
+    try self.cache.flushAll(self);
     return self.device.flush() catch fs.Error.IoError;
 }
 
@@ -1942,8 +1942,10 @@ fn writeBlocks(self: *Self, lba: Lba, data: []const u8) fs.Error!void {
 }
 
 /// Flush all cached sectors to the device.
+///
+/// Failed sectors are kept dirty.
 fn flushCache(self: *Self) void {
-    self.cache.flushAll(self);
+    self.cache.flushAll(self) catch {};
 }
 
 /// Write-back cache for FAT sectors.
@@ -1998,7 +2000,10 @@ const SectorCache = struct {
     }
 
     /// Flush all dirty cache slots to the device.
-    pub fn flushAll(self: *SectorCache, fat32: *Self) void {
+    ///
+    /// Failed sectors are kept dirty.
+    pub fn flushAll(self: *SectorCache, fat32: *Self) fs.Error!void {
+        var failed = false;
         for (&self.slots, 0..) |*s, i| {
             if (!s.dirty) {
                 continue;
@@ -2008,10 +2013,13 @@ const SectorCache = struct {
                 self.sector(i),
             ) catch |e| {
                 log.err("failed to flush dirty cache: {t}", .{e});
+                failed = true;
                 continue; // keep it dirty
             };
             s.dirty = false;
         }
+
+        if (failed) return fs.Error.IoError;
     }
 
     /// Reserve a cache slot for the given LBA,
