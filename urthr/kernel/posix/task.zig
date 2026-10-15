@@ -517,18 +517,29 @@ pub fn sysReboot(magic1: u32, magic2: RebootMagic2, cmd: RebootCmd, _: ?*anyopaq
         .restart,
         .restart2,
         => {
+            syncFilesystems();
             board.reset(0);
             while (true) arch.halt();
         },
         .power_off,
         .halt,
-        => board.powerOff(),
+        => {
+            syncFilesystems();
+            board.powerOff();
+        },
 
         .cad_off,
         .cad_on,
         => .success(0),
 
         _ => .err(.inval),
+    };
+}
+
+/// Flush all filesystems.
+fn syncFilesystems() void {
+    urd.fs.syncAll() catch |err| {
+        log.warn("Failed to sync filesystems: {t}", .{err});
     };
 }
 
@@ -581,6 +592,7 @@ pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) R
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.pxtask);
 const common = @import("common");
 const Permission = common.mem.Permission;
 const board = @import("board").impl;

@@ -355,6 +355,47 @@ pub fn sysPreadv(fd: usize, iov: ?[*]const Iovec, iovcnt: usize, pos_l: u64, _: 
 }
 
 // =============================================================
+// Sync
+// =============================================================/
+
+/// syscall: sync
+pub fn sysSync() ReturnType {
+    fs.syncAll() catch |e| return mapError(e);
+    return .success(0);
+}
+
+/// syscall: syncfs
+pub fn sysSyncFs(fd: usize) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+
+    fs.syncFsAt(file.path) catch |e| return mapError(e);
+    return .success(0);
+}
+
+/// syscall: fsync
+///
+/// TODO: fine-grained sync, not FS-wide flush.
+pub fn sysFsync(fd: usize) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+
+    fs.syncFsAt(file.path) catch |e| return mapError(e);
+    return .success(0);
+}
+
+/// syscall: fdatasync
+///
+/// TODO: fine-grained sync, not FS-wide flush.
+pub fn sysFdataSync(fd: usize) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+
+    fs.syncFsAt(file.path) catch |e| return mapError(e);
+    return .success(0);
+}
+
+// =============================================================
 // User data helper
 // =============================================================
 
@@ -2506,6 +2547,7 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
+const aperf = urd.aperf;
 const fs = urd.fs;
 const mem = urd.mem;
 const posix = urd.posix;

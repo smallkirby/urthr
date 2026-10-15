@@ -24,6 +24,7 @@ comptime {
     _ = @import("fs/sendfile.zig");
     _ = @import("fs/stat.zig");
     _ = @import("fs/symlink.zig");
+    _ = @import("fs/sync.zig");
     _ = @import("fs/truncate.zig");
     _ = @import("fs/umask.zig");
     _ = @import("fs/unlink.zig");
