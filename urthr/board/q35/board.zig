@@ -345,6 +345,8 @@ fn bringUpVirtioPci(
     hc: dd.pci.Host,
     /// Requested device IDs.
     ids: []const u16,
+    /// Device-specific feature bits the driver wants to enable.
+    wanted_features: anytype,
 ) urd.mem.Error!?VirtioScanResult {
     // Scan for a virtio-blk device.
     var scan_buf: [16]dd.pci.ScanResult = undefined;
@@ -420,6 +422,7 @@ fn bringUpVirtioPci(
         vdev.addr,
         caps,
         barmap,
+        wanted_features,
         urd.mem.page,
         urd.mem.bin,
     ) catch |err| {
@@ -455,6 +458,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         const result = (try bringUpVirtioPci(
             hc,
             &.{ dd.VirtioBlk.pci_device_id_legacy, dd.VirtioBlk.pci_device_id_modern },
+            dd.VirtioBlk.Features{},
         )) orelse break :outer;
 
         // Initialize virtio-blk device.
@@ -497,6 +501,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         const bringup = (try bringUpVirtioPci(
             hc,
             &.{ dd.net.VirtioNet.pci_device_id_legacy, dd.net.VirtioNet.pci_device_id_modern },
+            0,
         )) orelse break :outer;
 
         // Initialize virtio-net device.

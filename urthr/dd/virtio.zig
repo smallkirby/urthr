@@ -40,6 +40,8 @@ pub const Device = struct {
         readConfigBytes: *const fn (ptr: *anyopaque, offset: usize, buf: []u8) void,
         /// Acknowledge a pending interrupt at the transport level.
         ackInterrupt: *const fn (ptr: *anyopaque) void,
+        /// Get the feature bits negotiated with the device.
+        getFeatures: *const fn (ptr: *anyopaque) u64,
     };
 
     /// Setup a virtqueue indexed by `index`.
@@ -75,7 +77,22 @@ pub const Device = struct {
     pub fn ackInterrupt(self: Device) void {
         self.vtable.ackInterrupt(self.ptr);
     }
+
+    /// Get the feature bits negotiated with the device.
+    pub fn getFeatures(self: Device) u64 {
+        return self.vtable.getFeatures(self.ptr);
+    }
 };
+
+/// Select the feature bits to accept.
+///
+/// `offered` is the set of features the device offers.
+/// `wanted` is the device-specific features the driver requested.
+pub fn selectFeatures(offered: u64, wanted: u64) u64 {
+    const feature_version_1: u64 = 1 << 32; // VIRTIO_F_VERSION_1
+
+    return offered & (wanted | feature_version_1);
+}
 
 /// Virtio device ID.
 pub const DeviceId = enum(u32) {

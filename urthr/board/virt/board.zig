@@ -187,6 +187,7 @@ pub fn initPeripherals2() urd.mem.Error!void {
             const dev = if (dd.virtio.mmio.init(
                 base,
                 .entropy,
+                0,
                 urd.mem.page,
                 urd.mem.bin,
             )) |result| if (result) |dev| dev else {
@@ -218,6 +219,7 @@ pub fn initPeripherals3() common.mem.Error!void {
             const dev = if (dd.virtio.mmio.init(
                 base,
                 .block,
+                dd.VirtioBlk.Features{},
                 urd.mem.page,
                 urd.mem.bin,
             )) |result| if (result) |dev| dev else {

@@ -49,6 +49,52 @@ pub const pci_device_id_legacy: u16 = 0x1001;
 /// PCI device ID of a modern virtio-blk device.
 pub const pci_device_id_modern: u16 = 0x1042;
 
+/// Feature bits supported by the virtio-blk device.
+pub const Features = packed struct(u64) {
+    /// Device supports request barriers.
+    barrier: bool = false,
+    /// Maximum size of any single segment is in `size_max`.
+    size_max: bool = false,
+    /// Maximum number of segments in a request is in `seg_max`.
+    seg_max: bool = false,
+    ///
+    _3: u1 = 0,
+    /// Disk-style Geometry specified in geometry.
+    geometry: bool = false,
+    /// Device is read-only.
+    ro: bool = false,
+    /// Block size of disk is in `blk_size`.
+    blk_size: bool = false,
+    /// Device supports scsi packet commands.
+    scsi: bool = false,
+    ///
+    _8: u1 = 0,
+    /// Cache flush command support.
+    flush: bool = false,
+    /// Device exports information on optimal I/O alignment.
+    topology: bool = false,
+    /// Device can toggle its cache between writeback and writethrough modes.
+    config_wce: bool = false,
+    /// Device supports multiqueue.
+    mq: bool = false,
+    /// Device can support discard command.
+    discard: bool = false,
+    /// device can support write zeroes command.
+    write_zeroes: bool = false,
+    /// Device supports providing storage lifetime information.
+    lifetime: bool = false,
+    /// Device supports secure erase command.
+    secure_erase: bool = false,
+    /// Device is a Zoned Block Device.
+    zoned: bool = false,
+    ///
+    _18: u46 = 0,
+
+    pub fn from(bits: u64) Features {
+        return @bitCast(bits);
+    }
+};
+
 // =============================================================
 // API
 // =============================================================

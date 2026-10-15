@@ -12,6 +12,8 @@ device_id: virtio.DeviceId,
 version: Version,
 /// Virtqueues indexed by queue number.
 queues: QueueMap,
+/// Feature bits negotiated with the device.
+features: u64 = 0,
 
 /// Page allocator for DMA operations.
 page_allocator: PageAllocator,
@@ -78,7 +80,18 @@ const default_queue_size = 128;
 /// Allocators are "managed" by the device instance.
 ///
 /// Returns null if the device is not present or of the wrong type.
-pub fn init(base: usize, expected: virtio.DeviceId, page_allocator: PageAllocator, allocator: Allocator) virtio.Error!?*Self {
+pub fn init(
+    /// Base address of the MMIO region.
+    base: usize,
+    /// Wanted device ID.
+    expected: virtio.DeviceId,
+    /// Device-specific feature bits the driver wants to enable.
+    wanted_features: anytype,
+    /// Page allocator.
+    page_allocator: PageAllocator,
+    /// General-purpose allocator.
+    allocator: Allocator,
+) virtio.Error!?*Self {
     var mod = Module{};
     mod.setBase(base);
 
@@ -116,13 +129,16 @@ pub fn init(base: usize, expected: virtio.DeviceId, page_allocator: PageAllocato
     };
 
     // Initialize the device.
-    try self.initDevice();
+    try self.initDevice(switch (@typeInfo(@TypeOf(wanted_features))) {
+        .comptime_int => wanted_features,
+        else => @bitCast(wanted_features),
+    });
 
     return self;
 }
 
 /// Initialize the device following virtio spec 3.1.1.
-fn initDevice(self: *Self) virtio.Error!void {
+fn initDevice(self: *Self, wanted_features: u64) virtio.Error!void {
     // Reset the device.
     self.module.writei(Status, 0);
     self.module.modify(Status, .{ .ack = true });
@@ -144,17 +160,14 @@ fn initDevice(self: *Self) virtio.Error!void {
     };
 
     // Negotiate features.
-    // TODO: accept callback to delegate feature selection to caller.
+    self.features = virtio.selectFeatures(device_features, wanted_features);
     if (self.version == .legacy) {
-        self.module.writei(DriverFeat, @as(u32, @truncate(device_features)));
+        self.module.writei(DriverFeat, @as(u32, @truncate(self.features)));
     } else {
-        const virtio_f_version1: u64 = 1 << 32;
-
-        const features: u64 = device_features & virtio_f_version1;
         self.module.writei(DriverFeatSel, 0);
-        self.module.writei(DriverFeat, bits.extract(u32, features, 0));
+        self.module.writei(DriverFeat, bits.extract(u32, self.features, 0));
         self.module.writei(DriverFeatSel, 1);
-        self.module.writei(DriverFeat, bits.extract(u32, features, 32));
+        self.module.writei(DriverFeat, bits.extract(u32, self.features, 32));
     }
 
     // Set FEATURES_OK status bit (device does not accept features after this).
@@ -177,6 +190,7 @@ const vtable = virtio.Device.Vtable{
     .finishInit = finishInit,
     .readConfigBytes = readConfigBytes,
     .ackInterrupt = ackInterrupt,
+    .getFeatures = getFeatures,
 };
 
 /// Setup a virtqueue.
@@ -265,6 +279,12 @@ fn ackInterrupt(ctx: *anyopaque) void {
     const self: *Self = @ptrCast(@alignCast(ctx));
     const status = self.module.read(InterruptStatus).value;
     self.module.writei(InterruptAck, status);
+}
+
+/// Get the feature bits negotiated with the device.
+fn getFeatures(ctx: *anyopaque) u64 {
+    const self: *Self = @ptrCast(@alignCast(ctx));
+    return self.features;
 }
 
 // =============================================================

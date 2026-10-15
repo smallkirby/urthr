@@ -15,6 +15,8 @@ dcfg: usize,
 
 /// Virtqueues indexed by queue number.
 queues: QueueMap,
+/// Feature bits negotiated with the device.
+features: u64 = 0,
 
 /// Page allocator for DMA operations.
 page_allocator: PageAllocator,
@@ -89,6 +91,8 @@ pub fn init(
     caps: Caps,
     /// Regions mapped by BARs.
     barmap: BarMap,
+    /// Device-specific feature bits the driver wants to enable.
+    wanted_features: anytype,
     /// Page allocator.
     page_allocator: PageAllocator,
     /// General-purpose memory allocator.
@@ -128,13 +132,16 @@ pub fn init(
     };
 
     // Initialize device.
-    try self.initDevice();
+    try self.initDevice(switch (@typeInfo(@TypeOf(wanted_features))) {
+        .comptime_int => wanted_features,
+        else => @bitCast(wanted_features),
+    });
 
     return self;
 }
 
 /// Initialize the device following virtio spec 3.1.1.
-fn initDevice(self: *Self) virtio.Error!void {
+fn initDevice(self: *Self, wanted_features: u64) virtio.Error!void {
     // Reset the device.
     self.ccfg.writei(Status, 0);
     self.ccfg.modify(Status, .{ .ack = true });
@@ -153,13 +160,11 @@ fn initDevice(self: *Self) virtio.Error!void {
     };
 
     // Negotiate features.
-    // TODO: accept callback to delegate feature selection to caller.
-    const virtio_f_version_1: u64 = 1 << 32;
-    const driver_features: u64 = device_features & virtio_f_version_1;
+    self.features = virtio.selectFeatures(device_features, wanted_features);
     self.ccfg.writei(DriverFeatSel, 0);
-    self.ccfg.writei(DriverFeat, bits.extract(u32, driver_features, 0));
+    self.ccfg.writei(DriverFeat, bits.extract(u32, self.features, 0));
     self.ccfg.writei(DriverFeatSel, 1);
-    self.ccfg.writei(DriverFeat, bits.extract(u32, driver_features, 32));
+    self.ccfg.writei(DriverFeat, bits.extract(u32, self.features, 32));
 
     // Set FEATURES_OK status bit (device does not accept features after this).
     self.ccfg.modify(Status, .{ .features_ok = true });
@@ -200,6 +205,7 @@ const vtable = virtio.Device.Vtable{
     .finishInit = finishInit,
     .readConfigBytes = readConfigBytes,
     .ackInterrupt = ackInterrupt,
+    .getFeatures = getFeatures,
 };
 
 /// Setup a virtqueue.
@@ -281,6 +287,12 @@ fn readConfigBytes(ctx: *anyopaque, offset: usize, buf: []u8) void {
 ///
 /// MSI-X doesn't need a transport-level ack.
 fn ackInterrupt(_: *anyopaque) void {}
+
+/// Get the feature bits negotiated with the device.
+fn getFeatures(ctx: *anyopaque) u64 {
+    const self: *Self = @ptrCast(@alignCast(ctx));
+    return self.features;
+}
 
 // =============================================================
 // Capability discovery
