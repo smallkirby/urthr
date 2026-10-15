@@ -50,6 +50,11 @@ pub const Device = struct {
         ///
         /// Returns the number of bytes written.
         write: *const fn (ctx: *anyopaque, lba: Lba, data: []const u8) Error!usize,
+
+        /// Write back all dirty data to the storage device.
+        ///
+        /// null if the device has no write cache.
+        flush: ?*const fn (ctx: *anyopaque) Error!void = null,
     };
 
     /// Get the block size of the device in bytes.
@@ -82,5 +87,12 @@ pub const Device = struct {
         }
 
         _ = try self.vtable.write(self.ptr, lba, data);
+    }
+
+    /// Write back all dirty data to the storage device.
+    pub fn flush(self: Self) Error!void {
+        if (self.vtable.flush) |f| {
+            try f(self.ptr);
+        }
     }
 };

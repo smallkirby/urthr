@@ -180,6 +180,7 @@ const vtable_impl = struct {
         .blockCount = &getBlockCount,
         .read = &read,
         .write = &write,
+        .flush = &flush,
     };
 
     /// Get the block size in bytes.
@@ -223,6 +224,13 @@ const vtable_impl = struct {
         };
 
         return data.len;
+    }
+
+    /// Flush the volatile write cache of the device.
+    fn flush(ctx: *anyopaque) block.Error!void {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+
+        return self.flushCache() catch block.Error.IoError;
     }
 };
 
@@ -375,6 +383,65 @@ fn writeSectors(self: *Self, sector: u64, data: []const u8, count: usize) Error!
     self.dma.syncForCpu(status_mem.cpu, @sizeOf(Status));
     if (status.* != .ok) {
         log.err("write failed: status={d}", .{status.*});
+        return Error.IoError;
+    }
+}
+
+/// Flush the volatile write cache of the device.
+fn flushCache(self: *Self) Error!void {
+    if (!Features.from(self.dev.getFeatures()).flush) {
+        return;
+    }
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    const vq = self.dev.getQueue(queue_index) orelse {
+        return Error.DeviceError;
+    };
+
+    const req_mem = self.bufs.req;
+    const req: *Request = @ptrFromInt(req_mem.cpu);
+
+    const status_mem = self.bufs.status;
+    const status: *Status = @ptrFromInt(status_mem.cpu);
+
+    req.* = .{
+        .type = .flush,
+        .sector = 0, // must be 0
+    };
+    self.dma.syncForDevice(req_mem.cpu, @sizeOf(Request));
+
+    // Build descriptor chain.
+    const bufs = [_]virtio.Buffer{
+        .{
+            .addr = req_mem.bus,
+            .len = @sizeOf(Request),
+            .write = false,
+        },
+        .{
+            .addr = status_mem.bus,
+            .len = 1,
+            .write = true,
+        },
+    };
+
+    // Add buffers to the queue.
+    _ = vq.addBuf(&bufs) catch return Error.DeviceError;
+
+    // Notify the device.
+    self.dev.notifyQueue(queue_index);
+
+    // Wait for completion.
+    if (!self.event.wait(urd.time.getCurrentTimestamp() + 5 * std.time.ns_per_s)) {
+        log.err("flush timeout", .{});
+        return Error.IoError;
+    }
+
+    // Check status.
+    self.dma.syncForCpu(status_mem.cpu, @sizeOf(Status));
+    if (status.* != .ok) {
+        log.err("flush failed: status={d}", .{status.*});
         return Error.IoError;
     }
 }

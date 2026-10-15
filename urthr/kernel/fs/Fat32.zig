@@ -85,11 +85,22 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 
 const fs_vtable = fs.FileSystem.Vtable{
     .getLabel = fsGetLabel,
+    .sync = fsSync,
 };
 
 fn fsGetLabel(ctx: *const anyopaque, allocator: Allocator) fs.Error![]const u8 {
     const self: *const Self = @ptrCast(@alignCast(ctx));
     return allocator.dupe(u8, self.bpb.label[0..]);
+}
+
+fn fsSync(ctx: *anyopaque) fs.Error!void {
+    const self: *Self = @ptrCast(@alignCast(ctx));
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    self.flushCache();
+    return self.device.flush() catch fs.Error.IoError;
 }
 
 // =============================================================

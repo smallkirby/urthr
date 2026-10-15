@@ -18,6 +18,7 @@ pub const Partition = struct {
         .blockCount = &blockCount,
         .read = &read,
         .write = &write,
+        .flush = &flush,
     };
 
     /// Get the block size of the partition device.
@@ -62,6 +63,12 @@ pub const Partition = struct {
         // Translate LBA to parent device LBA.
         const parent_lba = self.lba + lba;
         return self.parent.vtable.write(self.parent.ptr, parent_lba, data);
+    }
+
+    /// Flush the partition device.
+    fn flush(ctx: *anyopaque) block.Error!void {
+        const self: *Partition = @ptrCast(@alignCast(ctx));
+        return self.parent.flush();
     }
 
     /// Get the block device interface for this partition.

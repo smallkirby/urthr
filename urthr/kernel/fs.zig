@@ -340,6 +340,17 @@ pub fn umount(path: Path, allocator: Allocator) Error!void {
     return mounts.detach(mnt, allocator);
 }
 
+/// Write back all dirty data of all mounted filesystems.
+pub fn syncAll() Error!void {
+    return mounts.syncAll();
+}
+
+/// Write back all dirty data of the filesystem the given path belongs to.
+pub fn syncFsAt(path: Path) Error!void {
+    const mnt = path.mount orelse return Error.InvalidArgument;
+    return mnt.filesystem.sync();
+}
+
 /// Create a directory under the given directory with the given name.
 pub fn mkdirAt(dir: Path, path: []const u8, mode: FileMode, allocator: Allocator) Error!void {
     glock.lock();

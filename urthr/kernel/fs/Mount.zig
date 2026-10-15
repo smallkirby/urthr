@@ -19,8 +19,13 @@ mntpoint: *Dentry,
 
 /// List of mounts in the system.
 pub const Table = struct {
+    /// Maximum number of mounts in the system.
+    const max_mounts = 32;
+
     /// Protects the attachment of mounts to mount point dentries.
     lock: SharedLock = .{},
+    /// All the mounts in the system.
+    all: [max_mounts]?*Mount = @splat(null),
 
     /// Mount a filesystem to the specified path.
     pub fn attach(self: *Table, path: Path, filesystem: FileSystem, allocator: Allocator) Error!void {
@@ -33,6 +38,10 @@ pub const Table = struct {
         if (path.dentry.mount != null) {
             return Error.AlreadyMounted;
         }
+
+        const slot = for (&self.all) |*s| {
+            if (s.* == null) break s;
+        } else return Error.NoSpace;
 
         // Create a new dentry for the root of the mounted filesystem.
         // The dentry takes over the inode reference only on success.
@@ -54,6 +63,7 @@ pub const Table = struct {
         };
         path.dentry.ref(); // + for the mount point
         path.dentry.mount = mnt;
+        slot.* = mnt;
     }
 
     /// Detach the mount from its mount point.
@@ -68,10 +78,30 @@ pub const Table = struct {
             return Error.Busy;
         }
 
+        try mnt.filesystem.sync();
+
+        for (&self.all) |*s| {
+            if (s.* == mnt) s.* = null;
+        }
         mnt.mntpoint.mount = null;
         mnt.mntpoint.unref();
         mnt.root.unref();
         allocator.destroy(mnt);
+    }
+
+    /// Sync all the mounted filesystems.
+    pub fn syncAll(self: *Table) Error!void {
+        self.lock.lock(.shared);
+        defer self.lock.unlock(.shared);
+
+        var result: Error!void = {};
+        for (self.all) |m| {
+            const mnt = m orelse continue;
+            mnt.filesystem.sync() catch |err| {
+                result = result catch err;
+            };
+        }
+        return result;
     }
 
     /// Step into the mount attached to the path if any.
