@@ -98,7 +98,7 @@ pub const Table = struct {
         for (self.all) |m| {
             const mnt = m orelse continue;
             mnt.filesystem.sync() catch |err| {
-                result = result catch err;
+                if (result) |_| result = err else |_| {}
             };
         }
         return result;
