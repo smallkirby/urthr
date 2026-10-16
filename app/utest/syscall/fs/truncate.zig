@@ -49,7 +49,7 @@ test "syscall: ftruncate extends the file and zero-fills the new region" {
     var buf: [16]u8 = undefined;
     const n = linux.read(@intCast(fd), &buf, buf.len);
     try testing.expectEqual(.SUCCESS, linux.errno(n));
-    try testing.expectEqualSlices(u8, "hello" ++ [_]u8{0} ** 5, buf[0..n]);
+    try testing.expectEqualSlices(u8, "hello" ++ @as([5]u8, @splat(0)), buf[0..n]);
 }
 
 test "ftruncate extends an empty file beyond a cluster" {
@@ -82,7 +82,7 @@ test "ftruncate extends an empty file beyond a cluster" {
     const n = linux.read(@intCast(fd), &buf, buf.len);
     try testing.expectEqual(.SUCCESS, linux.errno(n));
     try testing.expectEqual(4, n);
-    try testing.expectEqualSlices(u8, &[_]u8{0} ** 4, buf[0..n]);
+    try testing.expectEqualSlices(u8, &@as([4]u8, @splat(0)), buf[0..n]);
 }
 
 test "ftruncate with an unopened fd fails with EBADF" {

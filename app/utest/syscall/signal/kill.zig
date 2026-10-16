@@ -1,17 +1,17 @@
 test "with signal 0 checks for process existence without sending a signal" {
     const pid = linux.getpid();
-    const ret = linux.kill(pid, @enumFromInt(0));
+    const ret = linux.kill(pid, @fromBackingInt(@intCast(0)));
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
 }
 
 test "fails with EINVAL for an out-of-range signal number" {
     const pid = linux.getpid();
-    const ret = linux.kill(pid, @enumFromInt(999));
+    const ret = linux.kill(pid, @fromBackingInt(@intCast(999)));
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }
 
 test "fails with ESRCH for a nonexistent pid" {
-    const ret = linux.kill(999_999, @enumFromInt(0));
+    const ret = linux.kill(999_999, @fromBackingInt(@intCast(0)));
     try testing.expectEqual(.SRCH, linux.errno(ret));
 }
 
@@ -40,7 +40,7 @@ test "terminates another process by pid" {
 }
 
 test "can send signal#0 to its own group" {
-    const ret = linux.kill(0, @enumFromInt(0));
+    const ret = linux.kill(0, @fromBackingInt(@intCast(0)));
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
 }
 
@@ -59,7 +59,7 @@ test "fails with EPERM when the sender's UID does not match the target's UID" {
             ));
 
             // Try to kill the parent process whose UID is different.
-            const ret = linux.kill(parent_pid, @enumFromInt(0));
+            const ret = linux.kill(parent_pid, @fromBackingInt(@intCast(0)));
             try testing.expectEqual(.PERM, linux.errno(ret));
         }
     });

@@ -153,6 +153,7 @@ pub const intr = struct {
 // Force evaluate symbols exported but not referenced in Zig.
 comptime {
     _ = @import("head.zig");
+    _ = @import("rt.zig");
 }
 
 const svc = @import("svc.zig");

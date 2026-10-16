@@ -30,7 +30,7 @@ test "consumes an already pending signal immediately" {
         signal.mask_size,
     );
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
-    try testing.expectEqual(@intFromEnum(linux.SIG.USR1), @as(u32, @intCast(ret)));
+    try testing.expectEqual(@backingInt(linux.SIG.USR1), @as(u32, @intCast(ret)));
     try testing.expectEqual(linux.SIG.USR1, info.signo);
 }
 
@@ -139,7 +139,7 @@ test "timer can wake up a thread" {
         signal.mask_size,
     );
     try testing.expectEqual(.SUCCESS, linux.errno(ret));
-    try testing.expectEqual(@intFromEnum(linux.SIG.ALRM), @as(u32, @intCast(ret)));
+    try testing.expectEqual(@backingInt(linux.SIG.ALRM), @as(u32, @intCast(ret)));
 }
 
 // =============================================================

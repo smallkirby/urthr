@@ -7,7 +7,7 @@ pub const Error = error{
 const max_backends = 2;
 
 /// Registered console backends.
-var backends: [max_backends]?Console = [_]?Console{null} ** max_backends;
+var backends: [max_backends]?Console = @splat(null);
 /// Lock to protect console module.
 var lock: SpinLock = .{};
 

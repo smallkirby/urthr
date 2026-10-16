@@ -31,7 +31,7 @@ test "thread pinned to a single core is never observed running elsewhere" {
             stop.store(true, .release);
 
             for (0..num_competitors) |_| {
-                var status: u32 = undefined;
+                var status: i32 = undefined;
                 _ = linux.wait4(-1, &status, 0, null);
             }
         }

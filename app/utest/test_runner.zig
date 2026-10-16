@@ -124,34 +124,34 @@ fn runSingle(test_fn: anytype, allocator: Allocator) void {
     // Child.
     if (pid == 0) {
         if (test_fn.func()) |_| {
-            std.process.exit(@intFromEnum(TestResult.pass));
+            std.process.exit(@backingInt(TestResult.pass));
         } else |err| {
             if (err == error.SkipZigTest) {
-                std.process.exit(@intFromEnum(TestResult.skip));
+                std.process.exit(@backingInt(TestResult.skip));
             } else {
                 log.info("FAIL: {s} ({t})", .{ test_fn.name, err });
-                std.process.exit(@intFromEnum(TestResult.fail));
+                std.process.exit(@backingInt(TestResult.fail));
             }
         }
         unreachable;
     }
 
     // Parent: wait for the child to finish.
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const wret = linux.wait4(@intCast(pid), &status, 0, null);
     if (linux.errno(wret) != .SUCCESS) {
         log.err("Failed to wait for test process: {t}", .{linux.errno(wret)});
         @panic("utest failed.");
     }
 
-    if (!std.posix.W.IFEXITED(status)) {
+    if (!std.posix.W.IFEXITED(@bitCast(status))) {
         log.err("Test process exited abnormally: status={d}", .{status});
         @panic("utest failed.");
     }
 
-    const result: TestResult = switch (std.posix.W.EXITSTATUS(status)) {
-        @intFromEnum(TestResult.pass) => .pass,
-        @intFromEnum(TestResult.skip) => .skip,
+    const result: TestResult = switch (std.posix.W.EXITSTATUS(@bitCast(status))) {
+        @backingInt(TestResult.pass) => .pass,
+        @backingInt(TestResult.skip) => .skip,
         else => .fail,
     };
     switch (result) {

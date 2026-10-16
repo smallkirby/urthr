@@ -21,7 +21,7 @@ pub fn getFreq() u32 {
 fn queryFreq() ?u64 {
     // CPUID returns the data of the highest basic leaf for out-of-range leaves.
     const max_leaf = cpuid.Leaf.query(.maximum_input, null).eax;
-    if (max_leaf < @intFromEnum(cpuid.Leaf.tsc)) {
+    if (max_leaf < @backingInt(cpuid.Leaf.tsc)) {
         return null;
     }
 
@@ -38,7 +38,7 @@ fn queryFreq() ?u64 {
     }
 
     // Request processor base frequency instead.
-    if (max_leaf < @intFromEnum(cpuid.Leaf.freq)) {
+    if (max_leaf < @backingInt(cpuid.Leaf.freq)) {
         return null;
     }
     const base: u64 = cpuid.Leaf.query(.freq, null).eax;

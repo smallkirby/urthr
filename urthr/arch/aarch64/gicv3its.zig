@@ -176,7 +176,7 @@ pub fn getTranslaterPhys() usize {
 ///
 /// The command is not committed until `commit()` is called.
 fn submitCmd(cmd: [4]CommandWord, op: Command) void {
-    cq.value[cmd_idx + 0] = cmd[0] | @intFromEnum(op);
+    cq.value[cmd_idx + 0] = cmd[0] | @backingInt(op);
     cq.value[cmd_idx + 1] = cmd[1];
     cq.value[cmd_idx + 2] = cmd[2];
     cq.value[cmd_idx + 3] = cmd[3];

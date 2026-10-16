@@ -80,7 +80,7 @@ pub fn dump() fs.Error!void {
         else => return err,
     };
 
-    var cursors = [_]usize{0} ** board.num_cpus;
+    var cursors: [board.num_cpus]usize = @splat(0);
     var lens: [board.num_cpus]usize = undefined;
     for (0..board.num_cpus) |core| lens[core] = len(core);
 

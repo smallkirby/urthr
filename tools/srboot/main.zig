@@ -129,14 +129,14 @@ fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     // Set baudrate.
     const cbaud: u32 = 0o010017;
     var cflag: u32 = @bitCast(termios.cflag);
-    cflag = (cflag & ~cbaud) | @intFromEnum(speed);
+    cflag = (cflag & ~cbaud) | @backingInt(speed);
     termios.cflag = @bitCast(cflag);
     termios.ispeed = speed;
     termios.ospeed = speed;
 
     // Block until at least one byte is available without a timeout.
-    termios.cc[@intFromEnum(linux.V.MIN)] = 1;
-    termios.cc[@intFromEnum(linux.V.TIME)] = 0;
+    termios.cc[@backingInt(linux.V.MIN)] = 1;
+    termios.cc[@backingInt(linux.V.TIME)] = 0;
 
     if (linux.errno(linux.tcsetattr(
         sr.handle,
@@ -151,7 +151,7 @@ fn setBaudrate(sr: *std.Io.File, comptime baudrate: u32) !void {
     if (linux.errno(linux.tcgetattr(sr.handle, &check)) != .SUCCESS) {
         return error.TcGetAttr;
     }
-    if (@as(u32, @bitCast(check.cflag)) & cbaud != @intFromEnum(speed)) {
+    if (@as(u32, @bitCast(check.cflag)) & cbaud != @backingInt(speed)) {
         return error.BaudrateNotApplied;
     }
 

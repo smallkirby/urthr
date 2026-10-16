@@ -39,7 +39,7 @@ pub const Itimerval = extern struct {
 pub fn setitimer(which: linux.ITIMER, new_value: *const Itimerval, old_value: ?*Itimerval) usize {
     return std.os.linux.syscall3(
         .setitimer,
-        @intCast(@intFromEnum(which)),
+        @intCast(@backingInt(which)),
         @intFromPtr(new_value),
         if (old_value) |p| @intFromPtr(p) else 0,
     );

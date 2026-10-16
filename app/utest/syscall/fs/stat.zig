@@ -35,7 +35,7 @@ test "fstat with an unopened fd fails with EBADF" {
 test "fstatat a non-existent file fails with ENOENT" {
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @bitCast(@as(isize, linux.AT.FDCWD)),
         @intFromPtr((Test.base_dir ++ "/no-such-file").ptr),
         @intFromPtr(&statbuf),
@@ -47,7 +47,7 @@ test "fstatat a non-existent file fails with ENOENT" {
 test "fstatat with an unopened dirfd fails with EBADF" {
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         999,
         @intFromPtr("somefile".ptr),
         @intFromPtr(&statbuf),
@@ -63,7 +63,7 @@ test "fstatat with a regular-file fd as dirfd fails with ENOTDIR" {
 
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @intCast(fd),
         @intFromPtr("somefile".ptr),
         @intFromPtr(&statbuf),
@@ -75,7 +75,7 @@ test "fstatat with a regular-file fd as dirfd fails with ENOTDIR" {
 test "fstatat with a negative dirfd that is not AT_FDCWD fails with EBADF" {
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @bitCast(@as(isize, -2)),
         @intFromPtr("somefile".ptr),
         @intFromPtr(&statbuf),
@@ -94,7 +94,7 @@ test "fstatat with a regular file as a non-final path component fails with ENOTD
 
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @bitCast(@as(isize, linux.AT.FDCWD)),
         @intFromPtr((Test.base_dir ++ "/" ++ Test.file_name ++ "/subpath").ptr),
         @intFromPtr(&statbuf),
@@ -115,7 +115,7 @@ test "fstatat via a directory fd with a relative pathname succeeds" {
 
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @intCast(dir.handle),
         @intFromPtr("bin".ptr),
         @intFromPtr(&statbuf),
@@ -136,7 +136,7 @@ test "fstatat with AT_EMPTY_PATH and an empty pathname stats the dirfd itself" {
 
     var statbuf: [4096]u8 align(8) = undefined;
     const ret = std.os.linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @intCast(fd),
         @intFromPtr("".ptr),
         @intFromPtr(&statbuf),
@@ -384,7 +384,7 @@ test "getdents64 with small buffer" {
     const nfiles = 32;
     for (0..nfiles) |i| {
         var nbuf: [8]u8 = undefined;
-        const name = std.fmt.bufPrintZ(&nbuf, "g{d}", .{i}) catch unreachable;
+        const name = std.mem.printSentinel(&nbuf, "g{d}", .{i}, 0) catch unreachable;
         const fd = linux.openat(dfd, name, .{
             .ACCMODE = .WRONLY,
             .CREAT = true,
@@ -395,7 +395,7 @@ test "getdents64 with small buffer" {
     }
     defer for (0..nfiles) |i| {
         var nbuf: [8]u8 = undefined;
-        const name = std.fmt.bufPrintZ(&nbuf, "g{d}", .{i}) catch unreachable;
+        const name = std.mem.printSentinel(&nbuf, "g{d}", .{i}, 0) catch unreachable;
         _ = linux.unlinkat(dfd, name, 0);
     };
 
@@ -405,7 +405,7 @@ test "getdents64 with small buffer" {
     });
     defer iterdir.close(init.io);
 
-    var seen = [_]bool{false} ** nfiles;
+    var seen: [nfiles]bool = @splat(false);
     var buf: [96]u8 = undefined;
     while (true) {
         const n = linux.getdents64(@intCast(iterdir.handle), &buf, buf.len);
@@ -453,7 +453,7 @@ test "getdents64 re-reads from the start after lseek to 0" {
     const nfiles = 32;
     for (0..nfiles) |i| {
         var nbuf: [8]u8 = undefined;
-        const name = std.fmt.bufPrintZ(&nbuf, "h{d}", .{i}) catch unreachable;
+        const name = std.mem.printSentinel(&nbuf, "h{d}", .{i}, 0) catch unreachable;
         const fd = linux.openat(dfd, name, .{
             .ACCMODE = .WRONLY,
             .CREAT = true,
@@ -464,7 +464,7 @@ test "getdents64 re-reads from the start after lseek to 0" {
     }
     defer for (0..nfiles) |i| {
         var nbuf: [8]u8 = undefined;
-        const name = std.fmt.bufPrintZ(&nbuf, "h{d}", .{i}) catch unreachable;
+        const name = std.mem.printSentinel(&nbuf, "h{d}", .{i}, 0) catch unreachable;
         _ = linux.unlinkat(dfd, name, 0);
     };
 
@@ -488,7 +488,7 @@ test "getdents64 re-reads from the start after lseek to 0" {
     ));
 
     // A full scan after the rewind must still report every entry.
-    var seen = [_]bool{false} ** nfiles;
+    var seen: [nfiles]bool = @splat(false);
     var buf: [512]u8 = undefined;
     while (true) {
         const n = linux.getdents64(ifd, &buf, buf.len);

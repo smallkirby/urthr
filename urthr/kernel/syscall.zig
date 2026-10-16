@@ -304,7 +304,7 @@ pub const ReturnType = union(enum) {
     pub fn int(self: ReturnType) ?i64 {
         return switch (self) {
             ._s => |v| v,
-            ._e => |e| @intFromEnum(e),
+            ._e => |e| @backingInt(e),
             ._nop => null,
         };
     }
@@ -320,10 +320,10 @@ pub fn init() void {
 /// Call a system call handler corresponding to the given syscall number.
 fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) ?i64 {
     if (nr >= num_syscall) {
-        return @intFromEnum(ErrorEnum.nosys);
+        return @backingInt(ErrorEnum.nosys);
     }
 
-    trace("call: {d} ({s})", .{ nr, std.enums.tagName(SyscallEnum, @enumFromInt(nr)) orelse "unknown" });
+    trace("call: {d} ({s})", .{ nr, std.enums.tagName(SyscallEnum, @fromBackingInt(@intCast(nr))) orelse "unknown" });
 
     sperf.record(.init(.syscall_enter, .{ .nr = nr }));
     defer sperf.record(.init(.syscall_exit, .{ .nr = nr }));
@@ -337,7 +337,7 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
         arg6,
     ) else {
         log.warn("Unhandled syscall: {d}", .{nr});
-        return @intFromEnum(ErrorEnum.nosys);
+        return @backingInt(ErrorEnum.nosys);
     };
 
     return ret.int();
@@ -451,7 +451,7 @@ const SyscallHandler = struct {
 
         const S = struct {
             inline fn ArgType(comptime i: usize) type {
-                return func.params[i].type orelse @compileError("sys(): Invalid parameter type");
+                return func.param_types[i] orelse @compileError("sys(): Invalid parameter type");
             }
 
             fn f0(_: u64, _: u64, _: u64, _: u64, _: u64, _: u64) ReturnType {
@@ -502,7 +502,7 @@ const SyscallHandler = struct {
             }
         };
 
-        return switch (func.params.len) {
+        return switch (func.param_types.len) {
             0 => return S.f0,
             1 => return S.f1,
             2 => return S.f2,
@@ -538,10 +538,10 @@ const SyscallHandler = struct {
                 else => @compileError("convert(): Invalid integer size"),
             },
             .@"enum" => |t| switch (@bitSizeOf(t.tag_type)) {
-                8 => @enumFromInt(@as(t.tag_type, @bitCast(@as(u8, @truncate(arg))))),
-                16 => @enumFromInt(@as(t.tag_type, @bitCast(@as(u16, @truncate(arg))))),
-                32 => @enumFromInt(@as(t.tag_type, @bitCast(@as(u32, @truncate(arg))))),
-                64 => @enumFromInt(@as(t.tag_type, @bitCast(@as(u64, @truncate(arg))))),
+                8 => @fromBackingInt(@intCast(@as(t.tag_type, @bitCast(@as(u8, @truncate(arg)))))),
+                16 => @fromBackingInt(@intCast(@as(t.tag_type, @bitCast(@as(u16, @truncate(arg)))))),
+                32 => @fromBackingInt(@intCast(@as(t.tag_type, @bitCast(@as(u32, @truncate(arg)))))),
+                64 => @fromBackingInt(@intCast(@as(t.tag_type, @bitCast(@as(u64, @truncate(arg)))))),
                 else => @compileError("convert(): Invalid enum size"),
             },
             .@"struct" => switch (@bitSizeOf(T)) {

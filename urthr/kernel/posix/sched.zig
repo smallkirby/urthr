@@ -107,7 +107,7 @@ const CpuSet = extern struct {
     bits: [cpu_set_size / @bitSizeOf(CpuMaskT)]CpuMaskT,
 
     comptime {
-        urd.comptimeAssert(@bitSizeOf(CpuSet) == cpu_set_size, "Size of CpuSet.", .{});
+        urd.comptimeAssert(@sizeOf(CpuSet) * 8 == cpu_set_size, "Size of CpuSet.", .{});
     }
 
     /// Clear all bits of the CPU set.

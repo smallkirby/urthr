@@ -67,7 +67,7 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
     if (sigsetsize != @sizeOf(signal.Mask)) {
         return .err(.inval);
     }
-    if (@intFromEnum(signum) <= 0 or @intFromEnum(signum) > signal.num_signals) {
+    if (@backingInt(signum) <= 0 or @backingInt(signum) > signal.num_signals) {
         return .err(.inval);
     }
     if (signum == .kill or signum == .stop) {
@@ -76,7 +76,7 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
     }
 
     const th = sched.getCurrent();
-    const bit: usize = @intCast(@intFromEnum(signum) - 1);
+    const bit: usize = @intCast(@backingInt(signum) - 1);
 
     // Save old action if requested.
     if (oldact) |old| {
@@ -107,12 +107,12 @@ pub fn sysRtSigAction(signum: Signal, act: ?*const SigAction, oldact: ?*SigActio
 
 /// syscall: kill
 pub fn sysKill(pid: i32, signum: Signal) ReturnType {
-    if (@intFromEnum(signum) < 0 or @intFromEnum(signum) > signal.num_signals) {
+    if (@backingInt(signum) < 0 or @backingInt(signum) > signal.num_signals) {
         return .err(.inval);
     }
 
     const should_deliver = signum != .check;
-    const target_signal: signal.Signal = @enumFromInt(@intFromEnum(signum));
+    const target_signal: signal.Signal = @fromBackingInt(@intCast(@backingInt(signum)));
     const sender = sched.getCurrent().group.getCredential();
 
     // Single process identified by TGID.
@@ -160,7 +160,7 @@ pub fn sysTKill(tid: i32, signum: Signal) ReturnType {
     if (tid <= 0) {
         return .err(.inval);
     }
-    if (@intFromEnum(signum) < 0 or @intFromEnum(signum) > signal.num_signals) {
+    if (@backingInt(signum) < 0 or @backingInt(signum) > signal.num_signals) {
         return .err(.inval);
     }
 
@@ -173,7 +173,7 @@ pub fn sysTKill(tid: i32, signum: Signal) ReturnType {
 
     // Send the signal to the target.
     if (signum != .check) {
-        signal.pushTo(target, @enumFromInt(@intFromEnum(signum)));
+        signal.pushTo(target, @fromBackingInt(@intCast(@backingInt(signum))));
     }
 
     return .success(0);
@@ -184,7 +184,7 @@ pub fn sysTgKill(tgid: i32, tid: i32, signum: Signal) ReturnType {
     if (tgid <= 0 or tid <= 0) {
         return .err(.inval);
     }
-    if (@intFromEnum(signum) < 0 or @intFromEnum(signum) > signal.num_signals) {
+    if (@backingInt(signum) < 0 or @backingInt(signum) > signal.num_signals) {
         return .err(.inval);
     }
 
@@ -202,7 +202,7 @@ pub fn sysTgKill(tgid: i32, tid: i32, signum: Signal) ReturnType {
 
     // Send the signal to the target.
     if (signum != .check) {
-        signal.pushTo(target, @enumFromInt(@intFromEnum(signum)));
+        signal.pushTo(target, @fromBackingInt(@intCast(@backingInt(signum))));
     }
 
     return .success(0);
@@ -287,8 +287,8 @@ pub fn sysRtSigProcMask(how: How, set: ?*const signal.Mask, oldset: ?*signal.Mas
 
         // SIGKILL and SIGSTOP cannot be blocked.
         const unblockable =
-            (@as(signal.Mask, 1) << (@intFromEnum(Signal.kill) - 1)) |
-            (@as(signal.Mask, 1) << (@intFromEnum(Signal.stop) - 1));
+            (@as(signal.Mask, 1) << (@backingInt(Signal.kill) - 1)) |
+            (@as(signal.Mask, 1) << (@backingInt(Signal.stop) - 1));
         th.sigstate.blocked &= ~unblockable;
     }
 
@@ -337,8 +337,8 @@ pub fn sysRtSigSuspend(set: *const signal.Mask, sigsetsize: usize) ReturnType {
 
     const th = sched.getCurrent();
     const unblockable =
-        (@as(signal.Mask, 1) << (@intFromEnum(signal.Signal.kill) - 1)) |
-        (@as(signal.Mask, 1) << (@intFromEnum(signal.Signal.stop) - 1));
+        (@as(signal.Mask, 1) << (@backingInt(signal.Signal.kill) - 1)) |
+        (@as(signal.Mask, 1) << (@backingInt(signal.Signal.stop) - 1));
 
     const kset = urd.uaccess.getUser(
         signal.Mask,

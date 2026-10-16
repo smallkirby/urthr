@@ -1,6 +1,9 @@
 //! FPU operation is confined to this file since Zig code is compiled without fp_armv8 feature.
 //!
 
+.arch_extension fp
+.arch_extension simd
+
 // fpuSaveState(state: *anyopaque) -> void
 .global fpuSaveState
 fpuSaveState:

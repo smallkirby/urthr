@@ -124,18 +124,18 @@ pub fn affinityInfo(target: u64, lowest_affinity_level: u64) Error!AffinityState
         .x1 = target,
         .x2 = lowest_affinity_level,
     } });
-    return @enumFromInt(ret);
+    return @fromBackingInt(@intCast(ret));
 }
 
 /// Call a PSCI function.
 fn psci(func: Func) Error!u32 {
     const ret = switch (func) {
-        inline else => |v| am.smc(@intFromEnum(func), v.x1, v.x2, v.x3),
+        inline else => |v| am.smc(@backingInt(func), v.x1, v.x2, v.x3),
     };
     const iret: i32 = @bitCast(@as(u32, @truncate(ret)));
 
     if (iret < 0) {
-        return @as(ErrorCodes, @enumFromInt(iret)).unwrap();
+        return @as(ErrorCodes, @fromBackingInt(@intCast(iret))).unwrap();
     } else {
         return @bitCast(iret);
     }

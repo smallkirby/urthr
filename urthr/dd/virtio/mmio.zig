@@ -105,7 +105,7 @@ pub fn init(
     // Check version.
     const version = mod.read(Version);
     if (version != .modern and version != .legacy) {
-        log.debug("Unsupported virtio version: {d}", .{@intFromEnum(version)});
+        log.debug("Unsupported virtio version: {d}", .{@backingInt(version)});
         return virtio.Error.InvalidDevice;
     }
 

@@ -823,11 +823,11 @@ const SocketTable = struct {
     const Self = @This();
 
     /// Socket table.
-    sockets: [max_sockets]Socket = [_]Socket{std.mem.zeroInit(Socket, .{
+    sockets: [max_sockets]Socket = @splat(std.mem.zeroInit(Socket, .{
         .state = State.free,
         .local = Endpoint.empty,
         .remote = Endpoint.empty,
-    })} ** max_sockets,
+    })),
 
     /// Lock to protect a socket table.
     lock: SpinLock = .{},

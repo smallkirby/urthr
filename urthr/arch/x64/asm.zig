@@ -29,7 +29,7 @@ pub fn wrmsr(comptime msr: SystemReg, value: regs.Type(msr)) void {
         : .{});
 }
 
-pub fn wrmsri(comptime msr: SystemReg, value: std.meta.Int(.unsigned, @bitSizeOf(regs.Type(msr)))) void {
+pub fn wrmsri(comptime msr: SystemReg, value: @Int(.unsigned, @bitSizeOf(regs.Type(msr)))) void {
     return wrmsr(msr, @bitCast(value));
 }
 

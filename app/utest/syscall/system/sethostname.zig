@@ -17,7 +17,7 @@ test "sethostname rejects a name longer than the maximum host name length" {
     const orig_name = std.mem.sliceTo(&orig.nodename, 0);
     defer setHostname(orig_name) catch unreachable;
 
-    const too_long = [_]u8{'a'} ** 65;
+    const too_long: [65]u8 = @splat('a');
     const ret = linux.syscall2(.sethostname, @intFromPtr(&too_long), too_long.len);
     try testing.expectEqual(.INVAL, linux.errno(ret));
 }

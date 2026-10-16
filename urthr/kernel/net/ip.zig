@@ -7,7 +7,7 @@ pub const vtable = net.Protocol.Vtable{
 /// IP address type.
 pub const IpAddr = extern struct {
     /// Integer representation of the IP address in network byte order.
-    _value: Inner,
+    _value: [length]u8,
 
     const Inner = @Vector(length, u8);
 
@@ -18,12 +18,12 @@ pub const IpAddr = extern struct {
 
     /// Wildcard IP address that matches any address.
     pub const any = IpAddr{
-        ._value = Inner{ 0, 0, 0, 0 },
+        ._value = .{ 0, 0, 0, 0 },
     };
 
     /// Limited broadcast IP address.
     pub const limited_broadcast = IpAddr{
-        ._value = Inner{ 0xFF, 0xFF, 0xFF, 0xFF },
+        ._value = .{ 0xFF, 0xFF, 0xFF, 0xFF },
     };
 
     /// Custom formatter.
@@ -92,12 +92,12 @@ pub const IpAddr = extern struct {
 
     /// Get the subnet address by applying the netmask.
     pub fn subnet(self: IpAddr, netmask: IpAddr) IpAddr {
-        return .{ ._value = self._value & netmask._value };
+        return .{ ._value = @as(Inner, self._value) & @as(Inner, netmask._value) };
     }
 
     /// Get the directed broadcast address for the given netmask.
     pub fn getDirectedBroadcast(self: IpAddr, netmask: IpAddr) IpAddr {
-        return .{ ._value = (self._value & netmask._value) | ~netmask._value };
+        return .{ ._value = (@as(Inner, self._value) & @as(Inner, netmask._value)) | ~@as(Inner, netmask._value) };
     }
 
     /// Check equality with another IP address.
@@ -238,7 +238,7 @@ fn inputImpl(dev: *const net.Device, data: []const u8) net.Error!void {
             data[hlen..total_length],
         );
     } else {
-        log.warn("Unsupported IP protocol: {d}", .{@intFromEnum(protocol)});
+        log.warn("Unsupported IP protocol: {d}", .{@backingInt(protocol)});
         return;
     }
 }

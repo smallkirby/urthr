@@ -65,11 +65,11 @@ const FutexOp = enum(i32) {
     const private_flag = 0x80;
 
     pub fn isPrivate(self: FutexOp) bool {
-        return (@intFromEnum(self) & private_flag) != 0;
+        return (@backingInt(self) & private_flag) != 0;
     }
 
     pub fn command(self: FutexOp) FutexOp {
-        return @enumFromInt(@intFromEnum(self) & command_mask);
+        return @fromBackingInt(@intCast(@backingInt(self) & command_mask));
     }
 };
 

@@ -23,8 +23,8 @@ pub fn Register(T: type, Width: type) type {
     return struct {
         const Self = @This();
 
-        const IntW = std.meta.Int(.unsigned, @bitSizeOf(Width));
-        const IntT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const IntW = @Int(.unsigned, @bitSizeOf(Width));
+        const IntT = @Int(.unsigned, @bitSizeOf(T));
 
         /// Read from the MMIO register at the given address.
         ///
@@ -33,7 +33,7 @@ pub fn Register(T: type, Width: type) type {
             const ptr: *const volatile Width = @ptrFromInt(addr);
             const value: Width = ptr.*;
             return switch (@typeInfo(T)) {
-                .@"enum" => @enumFromInt(value),
+                .@"enum" => @fromBackingInt(@intCast(value)),
                 else => @bitCast(@as(IntT, @truncate(value))),
             };
         }
@@ -56,8 +56,8 @@ pub fn Register(T: type, Width: type) type {
         /// Caller must ensure that the given `addr` is aligned to `Width`.
         pub fn modify(addr: usize, value: anytype) void {
             var now = read(addr);
-            inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
-                @field(now, field.name) = @field(value, field.name);
+            inline for (@typeInfo(@TypeOf(value)).@"struct".field_names) |name| {
+                @field(now, name) = @field(value, name);
             }
             write(addr, now);
         }
@@ -130,7 +130,7 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
         /// Get the required alignment for the register.
         fn getAlignment(T: type) type {
             return switch (Width) {
-                .natural => |max| std.meta.Int(.unsigned, @min(@bitSizeOf(T), @bitSizeOf(max))),
+                .natural => |max| @Int(.unsigned, @min(@bitSizeOf(T), @bitSizeOf(max))),
                 .size => |size| size,
             };
         }
@@ -304,8 +304,8 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             const v = MT.read(self.base + offset);
 
             var matched = true;
-            inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
-                if (@field(v, field.name) != @field(value, field.name)) {
+            inline for (@typeInfo(@TypeOf(value)).@"struct".field_names) |name| {
+                if (@field(v, name) != @field(value, name)) {
                     matched = false;
                     break;
                 }
@@ -327,7 +327,7 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
                 @panic("Module.hexdump: length is not aligned");
             }
 
-            const T = std.meta.Int(.unsigned, width * 8);
+            const T = @Int(.unsigned, width * 8);
             const p: [*]const volatile T = @ptrFromInt(self.base + offset);
             var printed: usize = 0;
 

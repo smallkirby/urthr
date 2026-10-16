@@ -45,8 +45,7 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\
     );
-    inline for (@typeInfo(map).@"struct".decls) |field| {
-        const name = field.name;
+    inline for (@typeInfo(map).@"struct".decl_names) |name| {
         const value = @field(map, name);
 
         try writeItem(value, name, writer_if, "P_");
@@ -61,8 +60,7 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\
     );
-    inline for (@typeInfo(vmemmap).@"struct".decls) |field| {
-        const name = field.name;
+    inline for (@typeInfo(vmemmap).@"struct".decl_names) |name| {
         const value = @field(vmemmap, name);
 
         try writeItem(value, name, writer_if, "V_");
@@ -77,8 +75,7 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\
     );
-    inline for (@typeInfo(arch).@"struct".decls) |field| {
-        const name = field.name;
+    inline for (@typeInfo(arch).@"struct".decl_names) |name| {
         const value = @field(arch, name);
 
         try writeItem(value, name, writer_if, "ARCH_");

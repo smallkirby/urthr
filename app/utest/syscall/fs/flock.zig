@@ -611,14 +611,14 @@ fn expectWaitChildTimeout(pid: linux.pid_t, expected_code: u32) !void {
     const interval_ms = 10;
 
     // Wait for the child to exit until the timeout is reached.
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     var elapsed: u64 = 0;
     while (elapsed < timeout_ms) : (elapsed += interval_ms) {
         const ret = linux.wait4(pid, &status, linux.W.NOHANG, null);
         try testing.expectEqual(.SUCCESS, linux.errno(ret));
         if (ret == @as(usize, @intCast(pid))) {
-            try testing.expect(linux.W.IFEXITED(status));
-            try testing.expectEqual(expected_code, linux.W.EXITSTATUS(status));
+            try testing.expect(linux.W.IFEXITED(@bitCast(status)));
+            try testing.expectEqual(expected_code, linux.W.EXITSTATUS(@bitCast(status)));
             return;
         }
         sleepMs(interval_ms);

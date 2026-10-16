@@ -187,28 +187,28 @@ fn parseOffer(buf: []const u8, entry: *const QueryEntry) net.Error!QueryResult {
                 log.err("Invalid server_id option length: {d}", .{opt.data.len});
                 return net.Error.InvalidPacket;
             } else {
-                server = @bitCast(IpAddr.from(opt.data[0..4]));
+                server = .from(opt.data[0..4]);
             },
 
             .subnet_mask => if (opt.data.len != 4) {
                 log.err("Invalid subnet_mask option length: {d}", .{opt.data.len});
                 return net.Error.InvalidPacket;
             } else {
-                subnet_mask = @bitCast(IpAddr.from(opt.data[0..4]));
+                subnet_mask = .from(opt.data[0..4]);
             },
 
             .router => if (opt.data.len != 4) {
                 log.err("Invalid router option length: {d}", .{opt.data.len});
                 return net.Error.InvalidPacket;
             } else {
-                router = @bitCast(IpAddr.from(opt.data[0..4]));
+                router = .from(opt.data[0..4]);
             },
 
             .dns => if (opt.data.len != 4) {
                 log.err("Invalid dns option length: {d}", .{opt.data.len});
                 return net.Error.InvalidPacket;
             } else {
-                dns = @bitCast(IpAddr.from(opt.data[0..4]));
+                dns = .from(opt.data[0..4]);
             },
 
             else => {},
@@ -424,7 +424,7 @@ const Option = union(OptionEnum) {
         request = 3,
 
         pub fn copy(self: @This(), out: []u8) void {
-            out[0] = @intFromEnum(self);
+            out[0] = @backingInt(self);
         }
 
         pub fn len(_: @This()) usize {
@@ -498,7 +498,7 @@ const OptionWriter = struct {
         switch (code) {
             inline else => |c| {
                 const opt = try self.nbuf.append(2 + c.len());
-                opt[0] = @intFromEnum(code);
+                opt[0] = @backingInt(code);
                 opt[1] = @intCast(c.len());
                 c.copy(opt[2..]);
             },
@@ -508,7 +508,7 @@ const OptionWriter = struct {
     pub fn finalize(self: *Self) net.Error!void {
         // Append END option.
         const opt = try self.nbuf.append(1);
-        opt[0] = @intFromEnum(Option.end);
+        opt[0] = @backingInt(Option.end);
 
         // Prepend cookie.
         const cookie = try self.nbuf.prepend(4);
@@ -557,10 +557,10 @@ const OptionReader = struct {
         }
 
         const code = self.cur[0];
-        if (code == @intFromEnum(Option.end)) {
+        if (code == @backingInt(Option.end)) {
             return null;
         }
-        if (code == @intFromEnum(Option.pad)) {
+        if (code == @backingInt(Option.pad)) {
             self.cur = self.cur[1..];
             return self.next();
         }
@@ -575,7 +575,7 @@ const OptionReader = struct {
         self.cur = self.cur[2 + len ..];
 
         return .{
-            .code = @enumFromInt(code),
+            .code = @fromBackingInt(@intCast(code)),
             .data = data,
         };
     }

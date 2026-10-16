@@ -380,7 +380,7 @@ pub fn sysSetSockOpt(fd: usize, level: SockOptLevel, optname: i32, _: ?*const an
     if (file.getType() != .socket) return .err(.inval);
 
     return switch (level) {
-        .socket => switch (@as(SocketOptName, @enumFromInt(optname))) {
+        .socket => switch (@as(SocketOptName, @fromBackingInt(@intCast(optname)))) {
             .reuseaddr,
             .sndbuf,
             .rcvbuf,
@@ -388,7 +388,7 @@ pub fn sysSetSockOpt(fd: usize, level: SockOptLevel, optname: i32, _: ?*const an
             => .success(0),
             else => .err(.noprotoopt),
         },
-        .tcp => switch (@as(TcpOptName, @enumFromInt(optname))) {
+        .tcp => switch (@as(TcpOptName, @fromBackingInt(@intCast(optname)))) {
             .nodelay,
             .keepidle,
             .keepintvl,
@@ -407,7 +407,7 @@ pub fn sysGetSockOpt(fd: usize, level: SockOptLevel, optname: i32, optval: ?*ali
     if (file.getType() != .socket) return .err(.inval);
 
     switch (level) {
-        .socket => switch (@as(SocketOptName, @enumFromInt(optname))) {
+        .socket => switch (@as(SocketOptName, @fromBackingInt(@intCast(optname)))) {
             .socket_error => {
                 const valp = optval orelse return .err(.inval);
                 const lenp = optlen orelse return .err(.inval);

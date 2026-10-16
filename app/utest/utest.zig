@@ -47,16 +47,16 @@ pub fn runChild(T: anytype) !void {
     const child_pid: linux.pid_t = @intCast(ret);
     try testing.expect(child_pid > 0);
 
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const wret = linux.wait4(child_pid, &status, 0, null);
     try testing.expectEqual(@as(usize, @intCast(child_pid)), wret);
 
-    const exit_code = linux.W.EXITSTATUS(status);
+    const exit_code = linux.W.EXITSTATUS(@bitCast(status));
     return if (exit_code == 0) {} else @errorFromInt(@as(u16, @intCast(exit_code)));
 }
 
 /// Run a child process and expect it to exit with the given status.
-pub fn expectRunChild(expected_status: u32, T: anytype) !void {
+pub fn expectRunChild(expected_status: i32, T: anytype) !void {
     try expectWaitChild(
         forkChild(0, null, T),
         expected_status,
@@ -64,10 +64,10 @@ pub fn expectRunChild(expected_status: u32, T: anytype) !void {
 }
 
 /// Wait for the child process to exit with the expected status.
-pub fn expectWaitChild(child_pid: linux.pid_t, expected_status: u32) !void {
+pub fn expectWaitChild(child_pid: linux.pid_t, expected_status: i32) !void {
     try testing.expect(child_pid > 0);
 
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const wret = linux.wait4(child_pid, &status, 0, null);
     try testing.expectEqual(@as(usize, @intCast(child_pid)), wret);
     try testing.expectEqual(expected_status, status);
@@ -85,11 +85,11 @@ pub fn expectRunChildSignaled(sig: linux.SIG, ctx: usize, T: anytype) !void {
 pub fn expectWaitChildSignaled(child_pid: linux.pid_t, sig: linux.SIG) !void {
     try testing.expect(child_pid > 0);
 
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const wret = linux.wait4(child_pid, &status, 0, null);
     try testing.expectEqual(.SUCCESS, linux.errno(wret));
-    try testing.expect(linux.W.IFSIGNALED(status));
-    try testing.expectEqual(sig, linux.W.TERMSIG(status));
+    try testing.expect(linux.W.IFSIGNALED(@bitCast(status)));
+    try testing.expectEqual(sig, linux.W.TERMSIG(@bitCast(status)));
 }
 
 fn forkChild(ctx: usize, reset_sig: ?linux.SIG, T: anytype) linux.pid_t {

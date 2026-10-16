@@ -129,11 +129,11 @@ pub fn build(b: *std.Build) !void {
         "Enable graphical display window in QEMU.",
     ) orelse false;
 
-    var sdin = b.option(
+    var sdin: ?LazyPath = if (b.option(
         []const u8,
         "sdin",
         "Path to SD card image file for QEMU.",
-    ) orelse null;
+    )) |p| b.graph.cwdRelativePath(p) else null;
     const sdcreate = b.option(
         bool,
         "sdcreate",
@@ -451,6 +451,14 @@ pub fn build(b: *std.Build) !void {
             .linkage = .static,
             .use_llvm = true,
         });
+
+        // BUG: Zig 0.17.0: Cannot build Zig's compiler-rt with soft_float enabled.
+        //   ref. https://codeberg.org/ziglang/zig/issues/37006
+        if (board_type.arch() == .x86_64) {
+            exe.bundle_compiler_rt = false;
+            exe.root_module.stack_check = false;
+        }
+
         exe.entry = .{ .symbol_name = "_start" };
         exe.linker_script = urthr_ld;
         exe.root_module.addImport("common", common_module);
@@ -487,7 +495,7 @@ pub fn build(b: *std.Build) !void {
     // Raw Urthr image.
     const urthr_bin = blk: {
         const objcopy = b.addObjCopy(urthr.getEmittedBin(), .{
-            .format = .bin,
+            .format = .binary,
         });
         objcopy.step.dependOn(&urthr.step);
         break :blk iu.createInstallFile(
@@ -545,7 +553,7 @@ pub fn build(b: *std.Build) !void {
         switch (board_type.arch()) {
             .aarch64 => {
                 const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
-                    .format = .bin,
+                    .format = .binary,
                 });
                 objcopy.step.dependOn(&wyrd.step);
                 break :blk iu.createInstallFile(
@@ -768,7 +776,7 @@ pub fn build(b: *std.Build) !void {
 
         if (sdcreate) {
             b.getInstallStep().dependOn(bootfs);
-            sdin = try std.fmt.allocPrint(b.allocator, "{s}/bootfs.img", .{iu.getInstallPath(.target, .root)});
+            sdin = iu.getInstallPath(.target, .root).path(b, "bootfs.img");
         }
 
         break :outer apps;
@@ -809,8 +817,8 @@ pub fn build(b: *std.Build) !void {
 
         // Create ESP image.
         const run = b.addSystemCommand(&.{ "bash", "scripts/create_esp.bash" });
-        run.addArg(iu.getInstallPath(.target, .esp));
-        run.addArg(b.fmt("{s}/esp.img", .{iu.getInstallPath(.target, .root)}));
+        run.addDirectoryArg(iu.getInstallPath(.target, .esp));
+        run.addFileArg(iu.getInstallPath(.target, .root).path(b, "esp.img"));
         run.step.dependOn(&cp_remote.step);
         b.getInstallStep().dependOn(&run.step);
 
@@ -828,8 +836,8 @@ pub fn build(b: *std.Build) !void {
                 "bash",
                 "scripts/merge_rootfs.bash",
                 rootfs_dir,
-                iu.getInstallPath(.target, .esp),
             });
+            merge_rootfs.addDirectoryArg(iu.getInstallPath(.target, .esp));
             merge_rootfs.step.dependOn(&cp_remote.step);
             for (app_artifact_steps) |s| merge_rootfs.step.dependOn(s);
             run.step.dependOn(&merge_rootfs.step);
@@ -847,7 +855,7 @@ pub fn build(b: *std.Build) !void {
             else => unreachable,
         };
         const drive = switch (board_type) {
-            .q35 => b.fmt("{s}/esp.img", .{iu.getInstallPath(.target, .root)}),
+            .q35 => iu.getInstallPath(.target, .root).path(b, "esp.img"),
             else => null,
         };
         const qemu = Qemu{
@@ -855,10 +863,7 @@ pub fn build(b: *std.Build) !void {
             .machine = board_type,
             .graphic = if (enable_graphic) .display else .none,
             .memory = "2G",
-            .kernel = b.fmt(
-                "{s}/{s}",
-                .{ iu.getInstallPath(.target, .bin), booter.dest_rel_path },
-            ),
+            .kernel = iu.getInstallPath(.target, .bin).path(b, booter.dest_rel_path),
             .serial = if (serial) |s| blk: {
                 break :blk if (std.mem.eql(u8, s, "pts")) .pts else .stdio;
             } else .stdio,
@@ -871,16 +876,16 @@ pub fn build(b: *std.Build) !void {
         };
 
         // Run QEMU through a wrapper script.
-        var qemu_argvs = std.array_list.Aligned([]const u8, null).empty;
-        defer qemu_argvs.deinit(b.allocator);
-        try qemu_argvs.appendSlice(b.allocator, &.{
+        const qemu_cmd = b.addSystemCommand(&.{
             "bash",
             "scripts/run_qemu.bash",
             @tagName(board_type.arch()),
         });
-        try qemu_argvs.appendSlice(b.allocator, try qemu.command(b.allocator));
-
-        const qemu_cmd = b.addSystemCommand(qemu_argvs.items);
+        for (try qemu.command(b.allocator)) |arg| switch (arg) {
+            .str => |v| qemu_cmd.addArg(v),
+            .file => |v| qemu_cmd.addFileArg(v),
+            .prefixed_file => |v| qemu_cmd.addPrefixedFileArg(v.prefix, v.path),
+        };
         qemu_cmd.step.dependOn(b.getInstallStep());
 
         const run_qemu = b.step("run", "Run Urthr on QEMU");
@@ -1027,8 +1032,8 @@ const InstallUtil = struct {
     /// Get installation path for the given target.
     ///
     /// Example: `zig-out/rpi4b/bin`, but `zig-out` part is determined by user option.
-    pub fn getInstallPath(self: *Self, target: Target, sub: Sub) []const u8 {
-        return self.b.fmt("{s}/{s}", .{ self.b.install_path, self.getPath(target, sub) });
+    pub fn getInstallPath(self: *Self, target: Target, sub: Sub) LazyPath {
+        return self.b.graph.path(.install_prefix, self.getPath(target, sub));
     }
 };
 
@@ -1036,7 +1041,7 @@ const InstallUtil = struct {
 fn preprocess(b: *std.Build, input: LazyPath, output: []const u8, deps: []const LazyPath) struct { LazyPath, *InstallFile } {
     const run = b.addSystemCommand(&.{"cpp"});
     run.addArg("-P");
-    run.addArg(b.fmt("-I{s}/include", .{b.install_path}));
+    run.addPrefixedDirectoryArg("-I", b.graph.path(.install_include, ""));
     for (deps) |dep| {
         run.addPrefixedDirectoryArg("-I", dep.dirname());
         run.addFileInput(dep);
@@ -1055,14 +1060,14 @@ fn addAsmPreProcessed(iu: *InstallUtil, module: *std.Build.Module, inputs: []con
     for (inputs) |input| {
         const run = b.addSystemCommand(&.{"cpp"});
         run.addArg("-P");
-        run.addArg(b.fmt("-I{s}/include", .{b.install_path}));
+        run.addPrefixedDirectoryArg("-I", b.graph.path(.install_include, ""));
         for (deps) |dep| {
             run.addPrefixedDirectoryArg("-I", dep.dirname());
             run.addFileInput(dep);
         }
         run.addFileArg(input);
 
-        const basename = input.basename(b, null);
+        const basename = std.fs.path.basename(input.src_path.sub_path);
         const out = run.addPrefixedOutputFileArg("-o", basename);
         module.addAssemblyFile(out);
 
@@ -1143,7 +1148,7 @@ const Qemu = struct {
     /// Memory size.
     memory: []const u8,
     /// Kernel path.
-    kernel: []const u8,
+    kernel: LazyPath,
     /// How to handle serial I/O.
     serial: enum {
         /// Redirect serial to stdio.
@@ -1152,9 +1157,9 @@ const Qemu = struct {
         pts,
     },
     /// Path to SD card image file.
-    sd: ?[]const u8,
+    sd: ?LazyPath,
     /// Path to drive image file.
-    drive: ?[]const u8,
+    drive: ?LazyPath,
     /// QEMU verbose log outputs.
     verbose_logs: []const u8,
     /// Wait for GDB connection on startup.
@@ -1164,7 +1169,17 @@ const Qemu = struct {
     /// Enable KVM acceleration.
     kvm: bool = false,
 
-    pub fn command(self: Qemu, allocator: std.mem.Allocator) ![]const []const u8 {
+    const Arg = union(enum) {
+        /// Simple string.
+        str: []const u8,
+        /// File path.
+        file: LazyPath,
+        /// File path with a prefix.
+        prefixed_file: struct { prefix: []const u8, path: LazyPath },
+    };
+    const Args = std.array_list.Aligned(Arg, null);
+
+    pub fn command(self: Qemu, allocator: Allocator) ![]const Arg {
         if (self.append) |_| switch (self.machine) {
             .virt, .q35 => {},
             else => @panic("Command line arguments cannot be specified for this board."),
@@ -1177,25 +1192,25 @@ const Qemu = struct {
             .q35 => "q35",
         };
 
-        var args = std.array_list.Aligned([]const u8, null).empty;
+        var args = Args.empty;
         defer args.deinit(allocator);
 
-        try args.appendSlice(allocator, &.{
-            self.qemu,
+        try args.append(allocator, .{
+            .str = self.qemu,
         });
-        try args.appendSlice(allocator, &.{
+        try appendStrings(&args, allocator, &.{
             "-M",
             machine_name,
         });
         switch (self.machine) {
-            .virt => try args.appendSlice(allocator, &.{
+            .virt => try appendStrings(&args, allocator, &.{
                 "-cpu",
                 "cortex-a76",
                 "-smp",
                 "4",
             }),
             .q35 => {
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-cpu",
                     if (self.kvm)
                         "host,+fsgsbase,+smap,+smep,+rdrand,+avx,+sse4.2,+xsave,+xsaveopt"
@@ -1203,47 +1218,52 @@ const Qemu = struct {
                         "qemu64,+fsgsbase,+smap,+smep,+rdrand,+avx,+sse4.2,+xsave,+xsaveopt",
                 });
                 if (self.kvm) {
-                    try args.appendSlice(allocator, &.{"-enable-kvm"});
+                    try appendStrings(&args, allocator, &.{"-enable-kvm"});
                 }
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-smp",
                     "4",
                     "-bios",
                     "/usr/share/ovmf/OVMF.fd", // TODO
                     "-drive",
-                    try std.fmt.allocPrint(allocator, "file={s},format=raw,if=virtio,media=disk", .{self.drive.?}),
                 });
+                try args.append(allocator, .{ .prefixed_file = .{
+                    .prefix = "format=raw,if=virtio,media=disk,file=",
+                    .path = self.drive.?,
+                } });
             },
             else => {},
         }
-        try args.appendSlice(allocator, &.{
+        try appendStrings(&args, allocator, &.{
             "-m",
             self.memory,
         });
         if (self.machine != .q35) {
-            try args.appendSlice(allocator, &.{
+            try appendStrings(&args, allocator, &.{
                 "-kernel",
-                self.kernel,
+            });
+            try args.append(allocator, .{
+                .file = self.kernel,
             });
         }
         switch (self.graphic) {
-            .none => try args.appendSlice(allocator, &.{"-nographic"}),
-            .display => try args.appendSlice(allocator, &.{ "-display", "gtk" }),
+            .none => try appendStrings(&args, allocator, &.{"-nographic"}),
+            .display => try appendStrings(&args, allocator, &.{ "-display", "gtk" }),
         }
-        try args.appendSlice(allocator, &.{
+        try appendStrings(&args, allocator, &.{
             "-no-reboot",
         });
-        try args.appendSlice(allocator, &.{
+        try appendStrings(&args, allocator, &.{
             "-s",
             "-d",
             "guest_errors",
         });
         switch (self.serial) {
-            .stdio => try args.appendSlice(allocator, &.{
+            .stdio => try appendStrings(&args, allocator, &.{
                 "-serial",
                 "mon:stdio",
             }),
-            .pts => try args.appendSlice(allocator, &.{
+            .pts => try appendStrings(&args, allocator, &.{
                 "-chardev",
                 "stdio,id=term",
                 "-chardev",
@@ -1262,39 +1282,48 @@ const Qemu = struct {
         }
         if (self.sd) |sd_path| {
             switch (self.machine) {
-                .rpi4b, .rpi5 => try args.appendSlice(allocator, &.{
-                    "-sd",
-                    sd_path,
-                }),
-                .virt => try args.appendSlice(allocator, &.{
-                    "-device",
-                    "virtio-blk-device,drive=disk",
-                    "-drive",
-                    try std.fmt.allocPrint(allocator, "file={s},format=raw,if=none,media=disk,id=disk", .{sd_path}),
-                }),
+                .rpi4b, .rpi5 => {
+                    try appendStrings(&args, allocator, &.{
+                        "-sd",
+                    });
+                    try args.append(allocator, .{
+                        .file = sd_path,
+                    });
+                },
+                .virt => {
+                    try appendStrings(&args, allocator, &.{
+                        "-device",
+                        "virtio-blk-device,drive=disk",
+                        "-drive",
+                    });
+                    try args.append(allocator, .{ .prefixed_file = .{
+                        .prefix = "format=raw,if=none,media=disk,id=disk,file=",
+                        .path = sd_path,
+                    } });
+                },
                 .q35 => unreachable,
             }
         }
         // semihosting
         switch (self.machine) {
-            .rpi4b => try args.appendSlice(allocator, &.{
+            .rpi4b => try appendStrings(&args, allocator, &.{
                 "-semihosting",
             }),
             .virt => {
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-semihosting",
                 });
-                if (self.append) |append| try args.appendSlice(allocator, &.{
+                if (self.append) |append| try appendStrings(&args, allocator, &.{
                     "-fw_cfg",
                     try std.fmt.allocPrint(allocator, "name={s},string={s}", .{ fwcfg_name, append }),
                 });
             },
             .q35 => {
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-device",
                     "isa-debug-exit,iobase=0xF4,iosize=0x04",
                 });
-                if (self.append) |append| try args.appendSlice(allocator, &.{
+                if (self.append) |append| try appendStrings(&args, allocator, &.{
                     "-fw_cfg",
                     try std.fmt.allocPrint(allocator, "name={s},string={s}", .{ fwcfg_name, append }),
                 });
@@ -1303,14 +1332,14 @@ const Qemu = struct {
         }
         // GDB
         if (self.wait_gdb) {
-            try args.appendSlice(allocator, &.{
+            try appendStrings(&args, allocator, &.{
                 "-S",
             });
         }
 
         // Default peripherals
         switch (self.machine) {
-            .virt => try args.appendSlice(allocator, &.{
+            .virt => try appendStrings(&args, allocator, &.{
                 "-object",
                 "rng-random,id=rng0,filename=/dev/urandom",
                 "-device",
@@ -1322,7 +1351,7 @@ const Qemu = struct {
                 "-device",
                 "usb-kbd",
             }),
-            .q35 => try args.appendSlice(allocator, &.{
+            .q35 => try appendStrings(&args, allocator, &.{
                 "-device",
                 "nec-usb-xhci,id=xhci",
                 "-device",
@@ -1341,7 +1370,7 @@ const Qemu = struct {
             if (log.len == 0) continue;
 
             if (std.mem.eql(u8, log, "sd")) {
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-trace",
                     "sdhci_*",
                     "-trace",
@@ -1350,7 +1379,7 @@ const Qemu = struct {
                 continue;
             }
             if (std.mem.eql(u8, log, "usb")) {
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-trace",
                     "xhci_*",
                     "-trace",
@@ -1359,7 +1388,7 @@ const Qemu = struct {
                 continue;
             }
             if (std.mem.eql(u8, log, "gic")) {
-                try args.appendSlice(allocator, &.{
+                try appendStrings(&args, allocator, &.{
                     "-trace",
                     "gic*",
                 });
@@ -1371,6 +1400,12 @@ const Qemu = struct {
 
         return args.toOwnedSlice(allocator);
     }
+
+    fn appendStrings(args: *Args, allocator: Allocator, strs: []const []const u8) !void {
+        for (strs) |str| {
+            try args.append(allocator, .{ .str = str });
+        }
+    }
 };
 
 // =============================================================
@@ -1378,6 +1413,7 @@ const Qemu = struct {
 // =============================================================
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const board = @import("urthr/board.zig");
 const LazyPath = std.Build.LazyPath;
 const InstallFile = std.Build.Step.InstallFile;

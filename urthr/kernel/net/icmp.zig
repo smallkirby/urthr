@@ -104,7 +104,7 @@ pub const Message = union(MessageType) {
 
     /// Get the type of the message.
     fn typ(self: Message) MessageType {
-        return @enumFromInt(@intFromEnum(self));
+        return @fromBackingInt(@intCast(@backingInt(self)));
     }
 
     /// Fill the given buffer with the message content.

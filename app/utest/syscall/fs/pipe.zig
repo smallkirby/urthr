@@ -153,7 +153,7 @@ test "a single write wakes all readers blocked on the same pipe" {
     try testing.expectEqual(@as(usize, 1), linux.read(pfds[0], &buf, 1));
 
     // Check if the child process got waken up and exited.
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     _ = linux.wait4(child_pid, &status, 0, null);
 }
 

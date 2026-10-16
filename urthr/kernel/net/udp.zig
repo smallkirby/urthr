@@ -405,11 +405,11 @@ const SocketTable = struct {
     const Self = @This();
 
     /// Socket table.
-    sockets: [max_sockets]Socket = [_]Socket{.{
+    sockets: [max_sockets]Socket = @splat(.{
         .state = .free,
         .ep = .empty,
         .pending_data = .{},
-    }} ** max_sockets,
+    }),
 
     /// Lock to protect a socket table.
     lock: SpinLock = .{},

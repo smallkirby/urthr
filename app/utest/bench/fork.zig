@@ -24,7 +24,7 @@ test "fork/wait latency" {
                 unreachable;
             }
 
-            var status: u32 = undefined;
+            var status: i32 = undefined;
             const wret = linux.wait4(
                 @as(linux.pid_t, @intCast(pid)),
                 &status,

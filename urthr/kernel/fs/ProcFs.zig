@@ -247,7 +247,7 @@ const InodeImpl = struct {
     /// Read function for symbolic links.
     readlink_fn: ?ReadlinkFn = null,
     /// Child entries of directories.
-    entries: [max_entries]?Entry = [_]?Entry{null} ** max_entries,
+    entries: [max_entries]?Entry = @splat(null),
     /// Number of child entries currently registered.
     entry_count: usize = 0,
 

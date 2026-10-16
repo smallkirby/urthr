@@ -217,7 +217,7 @@ pub const Desc = extern struct {
     };
 
     comptime {
-        if (@bitSizeOf(Desc) != 16 * 8) @compileError("Desc size must be 16 bytes");
+        if (@sizeOf(Desc) != 16) @compileError("Desc size must be 16 bytes");
     }
 };
 

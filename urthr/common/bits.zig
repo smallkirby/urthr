@@ -5,12 +5,12 @@ pub fn fromBigEndian(value: anytype) @TypeOf(value) {
     } else switch (@typeInfo(@TypeOf(value))) {
         .@"struct" => {
             const size = @sizeOf(@TypeOf(value));
-            const T = std.meta.Int(.unsigned, size * 8);
+            const T = @Int(.unsigned, size * 8);
             return @bitCast(@byteSwap(@as(T, @bitCast(value))));
         },
         .@"enum" => {
-            const repr = @intFromEnum(value);
-            return @enumFromInt(@byteSwap(repr));
+            const repr = @backingInt(value);
+            return @fromBackingInt(@intCast(@byteSwap(repr)));
         },
         else => return @byteSwap(value),
     }
@@ -27,7 +27,7 @@ pub fn fromLittleEndian(value: anytype) @TypeOf(value) {
     } else switch (@typeInfo(@TypeOf(value))) {
         .@"struct" => {
             const size = @sizeOf(@TypeOf(value));
-            const T = std.meta.Int(.unsigned, size * 8);
+            const T = @Int(.unsigned, size * 8);
             return @bitCast(@byteSwap(@as(T, @bitCast(value))));
         },
         else => return @byteSwap(value),
@@ -88,7 +88,9 @@ pub inline fn concat(T: type, a: anytype, b: @TypeOf(a)) T {
 /// - `T`   : Type of the output value.
 /// - `args`: Arbitrary number of values to concatnate.
 pub fn concatMany(T: type, args: anytype) T {
-    const fields = std.meta.fields(@TypeOf(args));
+    const field_types = @typeInfo(@TypeOf(args)).@"struct".field_types;
+    const field_names = @typeInfo(@TypeOf(args)).@"struct".field_names;
+    const field_len = field_types.len;
 
     // Check if the total width of the args is equal to the output type.
     comptime {
@@ -98,8 +100,8 @@ pub fn concatMany(T: type, args: anytype) T {
         }
 
         var width = 0;
-        for (fields) |field| {
-            width += switch (@typeInfo(field.type)) {
+        for (field_types) |ft| {
+            width += switch (@typeInfo(ft)) {
                 .int => |t| t.bits,
                 else => @compileError("concatMany: invalid type of entry"),
             };
@@ -110,11 +112,13 @@ pub fn concatMany(T: type, args: anytype) T {
     // Calculate the result.
     comptime var cur_width = 0;
     var result: T = 0;
-    comptime var index = fields.len;
+    comptime var index = field_len;
     inline while (index > 0) : (index -= 1) {
-        const field = fields[index - 1];
-        const val = @field(args, field.name);
-        const val_width = switch (@typeInfo(field.type)) {
+        const fname = field_names[index - 1];
+        const ftype = field_types[index - 1];
+
+        const val = @field(args, fname);
+        const val_width = switch (@typeInfo(ftype)) {
             .int => |t| t.bits,
             else => @compileError("concatMany: invalid type of entry"),
         };
@@ -144,7 +148,7 @@ pub inline fn concatAny(T: type, a: anytype, b: @TypeOf(a)) T {
 pub fn set(val: anytype, nth: anytype) @TypeOf(val) {
     const int_nth = switch (@typeInfo(@TypeOf(nth))) {
         .int, .comptime_int => nth,
-        .@"enum" => @intFromEnum(nth),
+        .@"enum" => @backingInt(nth),
         else => @compileError("isset: invalid type"),
     };
     return val | (@as(@TypeOf(val), 1) << @intCast(int_nth));
@@ -157,7 +161,7 @@ pub fn set(val: anytype, nth: anytype) @TypeOf(val) {
 pub fn unset(val: anytype, nth: anytype) @TypeOf(val) {
     const int_nth = switch (@typeInfo(@TypeOf(nth))) {
         .int, .comptime_int => nth,
-        .@"enum" => @intFromEnum(nth),
+        .@"enum" => @backingInt(nth),
         else => @compileError("isset: invalid type"),
     };
     return val & ~(@as(@TypeOf(val), 1) << @intCast(int_nth));
@@ -170,7 +174,7 @@ pub fn unset(val: anytype, nth: anytype) @TypeOf(val) {
 pub fn isset(val: anytype, nth: anytype) bool {
     const int_nth = switch (@typeInfo(@TypeOf(nth))) {
         .int, .comptime_int => nth,
-        .@"enum" => @intFromEnum(nth),
+        .@"enum" => @backingInt(nth),
         else => @compileError("isset: invalid type"),
     };
     return ((val >> @intCast(int_nth)) & 1) != 0;
@@ -180,7 +184,7 @@ pub fn isset(val: anytype, nth: anytype) bool {
 fn RepInt(T: type) type {
     return switch (@typeInfo(T)) {
         .int, .comptime_int => T,
-        else => std.meta.Int(.unsigned, @bitSizeOf(T)),
+        else => @Int(.unsigned, @bitSizeOf(T)),
     };
 }
 

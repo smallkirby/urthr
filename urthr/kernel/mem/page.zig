@@ -223,7 +223,7 @@ const Arena = struct {
     /// Create a new arena.
     pub fn new() Arena {
         return Arena{
-            .lists = [_]FreeList{FreeList.new()} ** avail_orders,
+            .lists = @splat(.new()),
         };
     }
 

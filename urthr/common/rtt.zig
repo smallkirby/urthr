@@ -67,6 +67,7 @@ const inner = struct {
         switch (@typeInfo(@TypeOf(actual))) {
             .noreturn,
             .@"opaque",
+            .spirv,
             .frame,
             .@"anyframe",
             => @compileError("value of type " ++ @typeName(@TypeOf(actual)) ++ " encountered"),
@@ -94,7 +95,7 @@ const inner = struct {
             .error_set,
             => {
                 if (actual != expected) {
-                    log.err("expected {}, found {}\n", .{ expected, actual });
+                    log.err("expected {any}, found {any}\n", .{ expected, actual });
                     return error.TestExpectedEqual;
                 }
             },
@@ -123,39 +124,50 @@ const inner = struct {
             .array => |array| try expectEqualSlices(array.child, &expected, &actual),
 
             .vector => |info| {
-                var i: usize = 0;
-                while (i < info.len) : (i += 1) {
-                    if (!std.meta.eql(expected[i], actual[i])) {
-                        log.err("index {d} incorrect. expected {any}, found {any}\n", .{
-                            i, expected[i], actual[i],
-                        });
-                        return error.TestExpectedEqual;
+                const expect_array: [info.len]info.child = expected;
+                const actual_array: [info.len]info.child = actual;
+                try expectEqualSlices(info.child, &expect_array, &actual_array);
+            },
+
+            .@"struct" => |@"struct"| {
+                inline for (@"struct".field_names) |field_name| {
+                    try inner.expectEqual(@field(expected, field_name), @field(actual, field_name));
+                }
+            },
+
+            .@"union" => |@"union"| if (@"union".backing_integer) |Int| {
+                try inner.expectEqual(@as(Int, @bitCast(expected)), @as(Int, @bitCast(actual)));
+            } else switch (@"union".layout) {
+                .@"packed" => {
+                    const Int = @Int(.unsigned, @bitSizeOf(T));
+                    try inner.expectEqual(@as(Int, @bitCast(expected)), @as(Int, @bitCast(actual)));
+                },
+                .@"extern" => {
+                    const first_size = @bitSizeOf(@"union".field_types[0]);
+                    inline for (@"union".field_types) |field_type| {
+                        if (@bitSizeOf(field_type) != first_size) {
+                            @compileError("Unable to compare extern unions with varying field sizes for type " ++ @typeName(T));
+                        }
                     }
-                }
-            },
+                    const FieldInt = @Int(.unsigned, first_size);
+                    const expected_field = @field(expected, @"union".field_names[0]);
+                    const actual_field = @field(actual, @"union".field_names[0]);
+                    return inner.expectEqual(
+                        @as(FieldInt, @bitCast(expected_field)),
+                        @as(FieldInt, @bitCast(actual_field)),
+                    );
+                },
+                .auto => {
+                    const Tag = @"union".tag_type orelse @compileError("byteSwapAllFields expects packed, extern, or tagged union");
 
-            .@"struct" => |structType| {
-                inline for (structType.fields) |field| {
-                    try inner.expectEqual(@field(expected, field.name), @field(actual, field.name));
-                }
-            },
-
-            .@"union" => |union_info| {
-                if (union_info.tag_type == null) {
-                    @compileError("Unable to compare untagged union values");
-                }
-
-                const Tag = std.meta.Tag(@TypeOf(expected));
-
-                const expectedTag = @as(Tag, expected);
-                const actualTag = @as(Tag, actual);
-
-                try inner.expectEqual(expectedTag, actualTag);
-
-                // we only reach this switch if the tags are equal
-                switch (expected) {
-                    inline else => |val, tag| try inner.expectEqual(val, @field(actual, @tagName(tag))),
-                }
+                    try inner.expectEqual(@as(Tag, expected), @as(Tag, actual));
+                    switch (expected) {
+                        inline else => |expected_payload, tag| {
+                            const actual_payload = @field(actual, @tagName(tag));
+                            try inner.expectEqual(expected_payload, actual_payload);
+                        },
+                    }
+                },
             },
 
             .optional => {

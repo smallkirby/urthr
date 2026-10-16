@@ -905,7 +905,7 @@ const CmdIdx = union(enum) {
 
     pub fn toInt(self: CmdIdx) u6 {
         return switch (self) {
-            inline else => |c| @intFromEnum(c),
+            inline else => |c| @backingInt(c),
         };
     }
 
@@ -997,10 +997,14 @@ const CommandResponse = struct {
 
     /// Convert the response value to the specified type.
     pub fn as(self: CommandResponse, T: type) T {
-        const size = @bitSizeOf(T);
-        const truncated: std.meta.Int(.unsigned, size) = @truncate(self.value._data);
+        if (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".layout == .@"extern") {
+            return std.mem.bytesToValue(T, std.mem.asBytes(&self.value._data)[0..@sizeOf(T)]);
+        } else {
+            const size = @bitSizeOf(T);
+            const truncated: @Int(.unsigned, size) = @truncate(self.value._data);
 
-        return @bitCast(truncated);
+            return @bitCast(truncated);
+        }
     }
 
     /// Get the raw response value.
@@ -1278,9 +1282,9 @@ const Csd = union(CsdStructure) {
 
     /// Construct CSD from raw 128-bit response value.
     pub fn from(value: u128) Csd {
-        const typ: CsdStructure = @enumFromInt(
+        const typ: CsdStructure = @fromBackingInt(@intCast(
             bits.extract(u2, value, @bitOffsetOf(CsdV1, "csd_structure")),
-        );
+        ));
         const raw: u120 = @truncate(value);
         return switch (typ) {
             .v1 => .{ .v1 = @bitCast(raw) },
@@ -2317,19 +2321,19 @@ const Version = packed struct(u16) {
         v4_20 = 0x05,
 
         pub fn lt(self: Spec, rhs: Spec) bool {
-            return @intFromEnum(self) < @intFromEnum(rhs);
+            return @backingInt(self) < @backingInt(rhs);
         }
 
         pub fn gt(self: Spec, rhs: Spec) bool {
-            return @intFromEnum(self) > @intFromEnum(rhs);
+            return @backingInt(self) > @backingInt(rhs);
         }
 
         pub fn lte(self: Spec, rhs: Spec) bool {
-            return @intFromEnum(self) <= @intFromEnum(rhs);
+            return @backingInt(self) <= @backingInt(rhs);
         }
 
         pub fn gte(self: Spec, rhs: Spec) bool {
-            return @intFromEnum(self) >= @intFromEnum(rhs);
+            return @backingInt(self) >= @backingInt(rhs);
         }
     };
 };

@@ -88,7 +88,7 @@ test "a blocked signal is not delivered until it is unblocked" {
 var handler_called: bool = false;
 
 fn onSignal(signo: linux.SIG) callconv(.c) void {
-    log.info("Signal#{d} handler called", .{@intFromEnum(signo)});
+    log.info("Signal#{d} handler called", .{@backingInt(signo)});
     handler_called = true;
 }
 

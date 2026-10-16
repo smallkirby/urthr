@@ -59,7 +59,7 @@ pub const StackCreator = struct {
 
     /// Append an opaque data to the stack.
     pub fn appendOpaque(self: *Self, data: []const u8) !OpaqueHandle {
-        const handle: OpaqueHandle = @enumFromInt(self.opq.items.len);
+        const handle: OpaqueHandle = @fromBackingInt(@intCast(self.opq.items.len));
         const dup = try self.allocator.dupe(u8, data);
         try self.opq.append(self.allocator, dup);
         return handle;

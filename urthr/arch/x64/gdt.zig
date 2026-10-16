@@ -57,13 +57,13 @@ pub fn setKernelStack(addr: usize) void {
 /// Determined by reading the currently-loaded TSS selector.
 fn currentTss() *Tss {
     const tr: SegSel = @bitCast(am.str());
-    const cpu = (@intFromEnum(tr.index) - @intFromEnum(SegIndex.kernel_tss_base)) / 2;
+    const cpu = (@backingInt(tr.index) - @backingInt(SegIndex.kernel_tss_base)) / 2;
     return &early.tss[cpu];
 }
 
 /// Get the TSS descriptor index assigned to the given logical CPU.
 fn tssIndex(cpu: usize) SegIndex {
-    return @enumFromInt(@intFromEnum(SegIndex.kernel_tss_base) + 2 * cpu);
+    return @fromBackingInt(@intCast(@backingInt(SegIndex.kernel_tss_base) + 2 * cpu));
 }
 
 /// Load kernel segment selectors.
@@ -338,7 +338,7 @@ const TssDesc = packed struct(u128) {
     base_low: u24,
 
     /// Type: TSS.
-    type: u4 = @intFromEnum(SegDesc.AccessType.System.tss_available),
+    type: u4 = @backingInt(SegDesc.AccessType.System.tss_available),
     /// Descriptor type: System.
     desc_type: SegDesc.DescriptorType = .system,
     /// Descriptor Privilege Level.
@@ -380,7 +380,7 @@ const Gdt = extern struct {
     const DescriptorTable = [num_gdt]SegDesc;
 
     /// The number of GDT entries.
-    const num_gdt = @intFromEnum(SegIndex.kernel_tss_base) + 2 * max_cpus;
+    const num_gdt = @backingInt(SegIndex.kernel_tss_base) + 2 * max_cpus;
 
     /// Segment descriptor table.
     _data: DescriptorTable,
@@ -409,23 +409,23 @@ const Gdt = extern struct {
 
     /// Set a segment descriptor at the given index.
     pub fn set(self: *Self, index: SegIndex, desc: SegDesc) void {
-        self._data[@intFromEnum(index)] = desc;
+        self._data[@backingInt(index)] = desc;
     }
 
     /// Get a copy of segment descriptor at the given index.
     pub fn get(self: *Self, index: SegIndex) SegDesc {
-        return self._data[@intFromEnum(index)];
+        return self._data[@backingInt(index)];
     }
 
     /// Get a copy of TSS descriptor at the given index.
     pub fn getTss(self: *Self, index: SegIndex) TssDesc {
-        const desc: *TssDesc = @ptrCast(@alignCast(&self._data[@intFromEnum(index)]));
+        const desc: *TssDesc = @ptrCast(@alignCast(&self._data[@backingInt(index)]));
         return desc.*;
     }
 
     /// Set a TSS descriptor at the given index.
     fn setTss(self: *Self, index: SegIndex, tss: TssDesc) void {
-        const to: *TssDesc = @ptrCast(@alignCast(&self._data[@intFromEnum(index)]));
+        const to: *TssDesc = @ptrCast(@alignCast(&self._data[@backingInt(index)]));
         to.* = tss;
     }
 
@@ -517,7 +517,7 @@ const Gdtr = extern struct {
     base: *Gdt.DescriptorTable align(1),
 
     comptime {
-        if (@bitSizeOf(Gdtr) != 80) {
+        if (@sizeOf(Gdtr) != 10) {
             @compileError("Invalid size of GDTR.");
         }
     }

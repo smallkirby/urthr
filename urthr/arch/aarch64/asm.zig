@@ -37,7 +37,7 @@ pub fn mrs(comptime reg: SystemReg) regs.Type(reg) {
 
 /// Read a system register and return integer value.
 pub fn mrsi(comptime reg: SystemReg) u64 {
-    const IntR = std.meta.Int(.unsigned, @bitSizeOf(regs.Type(reg)));
+    const IntR = @Int(.unsigned, @bitSizeOf(regs.Type(reg)));
     return @as(IntR, @bitCast(mrs(reg)));
 }
 
@@ -57,8 +57,8 @@ pub fn msr(comptime reg: SystemReg, value: regs.Type(reg)) void {
 /// Read modify write a system register.
 pub fn modifySreg(comptime reg: SystemReg, value: anytype) void {
     var now = mrs(reg);
-    inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
-        @field(now, field.name) = @field(value, field.name);
+    inline for (@typeInfo(@TypeOf(value)).@"struct".field_names) |name| {
+        @field(now, name) = @field(value, name);
     }
     msr(reg, now);
 }

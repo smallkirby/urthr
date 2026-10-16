@@ -47,7 +47,7 @@ fn iterate(_: *fs.File.Iterator, _: Allocator) fs.Error!?fs.File.IterResult {
 fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
     const console = ctx(file);
 
-    switch (@as(Request, @enumFromInt(request))) {
+    switch (@as(Request, @fromBackingInt(@intCast(request)))) {
         .tcgets => {
             urd.uaccess.putUser(
                 urd.input.Termios,

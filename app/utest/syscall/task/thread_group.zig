@@ -101,7 +101,7 @@ test "thread group is not waitable until every member has exited" {
     try testing.expectEqual(@as(usize, 1), linux.read(to_parent[0], &buf, 1));
 
     // The group is not waitable yet since the worker thread is still alive.
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const WNOHANG = 1;
     ret = linux.wait4(child_pid, &status, WNOHANG, null);
     try testing.expectEqual(@as(usize, 0), ret);
@@ -112,7 +112,7 @@ test "thread group is not waitable until every member has exited" {
 
     ret = linux.wait4(child_pid, &status, 0, null);
     try testing.expectEqual(@as(usize, @intCast(child_pid)), ret);
-    try testing.expectEqual(@as(u32, S.blocking_exit_code << 8), status);
+    try testing.expectEqual(@as(i32, S.blocking_exit_code << 8), status);
 }
 
 // =============================================================

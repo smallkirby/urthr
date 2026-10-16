@@ -1,6 +1,6 @@
 # Urthr
 
-![Zig](https://shields.io/badge/Zig-v0%2E16%2E0-blue?logo=zig&color=F7A41D&style=for-the-badge)
+![Zig](https://shields.io/badge/Zig-v0%2E17%2E0-blue?logo=zig&color=F7A41D&style=for-the-badge)
 
 ![Lint](https://github.com/smallkirby/urthr/actions/workflows/lint.yml/badge.svg)
 ![Unit Tests](https://github.com/smallkirby/urthr/actions/workflows/unittest.yml/badge.svg)

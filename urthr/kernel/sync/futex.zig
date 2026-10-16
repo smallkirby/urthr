@@ -113,7 +113,7 @@ const FutexValue = u32;
 const FutexMap = struct {
     const capacity = 256;
 
-    entries: [capacity]Entry = [_]Entry{.{}} ** capacity,
+    entries: [capacity]Entry = @splat(.{}),
 
     pub fn get(self: *FutexMap, addr: FutexAddress) *Entry {
         const key = FutexKey{ .addr = @ptrFromInt(addr) };

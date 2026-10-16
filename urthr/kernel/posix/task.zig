@@ -20,7 +20,7 @@ pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, _: usize) Return
     if (wstatus) |ws| {
         const status: i32 = switch (result.exit_status) {
             .code => |c| (c & 0xFF) << 8,
-            .signal => |s| @intCast(@intFromEnum(s) & 0x7F),
+            .signal => |s| @intCast(@backingInt(s) & 0x7F),
         };
         urd.uaccess.putUser(
             i32,

@@ -9,7 +9,7 @@ allocator: Allocator,
 /// Root inode of this filesystem.
 root_inode: *InodeImpl,
 /// Registered device entries.
-entries: [max_entries]?DevEntry = [_]?DevEntry{null} ** max_entries,
+entries: [max_entries]?DevEntry = @splat(null),
 /// The number of registered devices.
 entry_count: usize = 0,
 

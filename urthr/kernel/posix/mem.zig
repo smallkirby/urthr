@@ -65,7 +65,7 @@ const Mprot = packed struct(u32) {
 };
 
 /// syscall: mmap
-pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i64, offset: usize) ReturnType {
+pub fn sysMmap(addr: usize, len: usize, prot: Mprot, flags: MmapFlags, fd: i32, offset: usize) ReturnType {
     const cur = sched.getCurrent();
     const shared = flags.shared or flags.shared_validate;
 

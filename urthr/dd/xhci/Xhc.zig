@@ -348,7 +348,7 @@ fn findDeviceBySlot(self: *Self, slot: u8) ?*Device {
 // =============================================================
 
 /// List of registered controllers.
-var controllers: [3]?IrqController = [_]?IrqController{null} ** 3;
+var controllers: [3]?IrqController = @splat(null);
 
 const IrqController = struct {
     /// Controller instance.
@@ -407,7 +407,7 @@ fn handleEvent(self: *Self, trb: trbs.Trb) Error!void {
         .command_completion => try self.onCmdComplete(@ptrCast(&trb)),
         .transfer_event => try self.onXferEvent(@ptrCast(&trb)),
 
-        else => log.err("Unsupported event type: {d}", .{@intFromEnum(trb.type)}),
+        else => log.err("Unsupported event type: {d}", .{@backingInt(trb.type)}),
     }
 }
 

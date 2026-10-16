@@ -318,7 +318,7 @@ const Icr = packed struct {
     oeic: bool,
 
     /// Get the mask for all bits.
-    pub fn mask() std.meta.Int(.unsigned, @bitSizeOf(Icr)) {
+    pub fn mask() @Int(.unsigned, @bitSizeOf(Icr)) {
         return 0x7FF;
     }
 };

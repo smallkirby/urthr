@@ -2,7 +2,7 @@
 ///
 /// Returns null if no suitable driver is found.
 pub fn from(device: *Device, iface: *Device.Interface) Error!?Driver {
-    const code: Class = @enumFromInt(iface.desc.class);
+    const code: Class = @fromBackingInt(@intCast(iface.desc.class));
 
     return switch (code) {
         .hid => try @import("class/Hid.zig").init(device, iface),

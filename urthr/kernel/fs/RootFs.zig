@@ -83,7 +83,7 @@ pub const InodeImpl = struct {
     /// Target path this inode points to if this is a symlink.
     symlink_target: ?[]const u8 = null,
     /// Entries created in this directory.
-    entries: [max_entries]?DirEntry = [_]?DirEntry{null} ** max_entries,
+    entries: [max_entries]?DirEntry = @splat(null),
     /// The number of entries currently created in this directory.
     entry_count: usize = 0,
 

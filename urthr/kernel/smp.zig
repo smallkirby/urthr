@@ -6,7 +6,7 @@ const substack_size = 5 * urd.mem.size_4kib;
 const substack_pages = substack_size / urd.mem.page_size;
 
 /// Mapping from logical CPU ID to architecture-specific core ID.
-var idmap = [_]u64{0} ** board.num_cpus;
+var idmap: [board.num_cpus]u64 = @splat(0);
 
 /// This core's logical CPU ID.
 var logical_id: usize linksection(pcpu.section) = 0;

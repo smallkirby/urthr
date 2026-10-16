@@ -28,9 +28,9 @@ pub const FdFlags = packed struct(u32) {
 };
 
 /// File entries.
-entries: [max_fds]?*File = .{null} ** max_fds,
+entries: [max_fds]?*File = @splat(null),
 /// Per-descriptor flags parallel to entries.
-fd_flags: [max_fds]FdFlags = .{FdFlags.none} ** max_fds,
+fd_flags: [max_fds]FdFlags = @splat(.none),
 /// Number of threads sharing this instance.
 refcnt: usize = 1,
 /// Protects access to this table.

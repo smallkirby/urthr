@@ -260,7 +260,7 @@ const RxQueue = struct {
     /// Next descriptor index to start searching for received packets.
     next_idx: usize = 0,
     /// Tracks descriptors that have been acquired but not yet released.
-    in_flights: std.StaticBitSet(num_desc) = std.StaticBitSet(num_desc).initEmpty(),
+    in_flights: std.StaticBitSet(num_desc) = .empty,
 
     /// DMA allocator that manages the memory.
     allocator: DmaAllocator,

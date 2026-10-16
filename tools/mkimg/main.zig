@@ -265,14 +265,14 @@ const MkImage = struct {
         var min_seg_addr: u64 = std.math.maxInt(u64);
         var max_seg_addr: u64 = 0;
         while (try piter.next()) |ph| {
-            if (ph.p_type != std.elf.PT_LOAD) continue;
+            if (ph.type != .LOAD) continue;
 
-            if (ph.p_vaddr < min_seg_addr) {
-                min_seg_addr = ph.p_vaddr;
+            if (ph.vaddr < min_seg_addr) {
+                min_seg_addr = ph.vaddr;
             }
 
-            if (ph.p_vaddr + ph.p_memsz > max_seg_addr) {
-                max_seg_addr = ph.p_vaddr + ph.p_memsz;
+            if (ph.vaddr + ph.memsz > max_seg_addr) {
+                max_seg_addr = ph.vaddr + ph.memsz;
             }
         }
 

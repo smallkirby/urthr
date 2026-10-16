@@ -1,5 +1,5 @@
 test "fails with ECHILD when the caller has no children" {
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const ret = linux.wait4(
         linux.getpid(),
         &status,
@@ -11,7 +11,7 @@ test "fails with ECHILD when the caller has no children" {
 
 test "with WNOHANG fails with ECHILD when the caller has no children" {
     const WNOHANG: u32 = 1;
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     const ret = linux.wait4(
         linux.getpid(),
         &status,
@@ -81,7 +81,7 @@ test "waiting on a non-leader thread's own tid fails with ECHILD" {
     try testing.expect(worker_tid != child_pid);
 
     // Cannot wait on non-leader thread.
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     ret = linux.wait4(worker_tid, &status, 0, null);
     try testing.expectEqual(.CHILD, linux.errno(ret));
 
@@ -103,7 +103,7 @@ test "a child forked by one thread can be wait-ed by another thread in the same 
             _ = linux.read(pfds[0], std.mem.asBytes(&gc_pid), @sizeOf(i32));
 
             // The grandchild is not forked by this thread though belongs to the same process.
-            var status: u32 = undefined;
+            var status: i32 = undefined;
             const ret = linux.wait4(gc_pid, &status, 0, null);
             const ok = [_]u8{if (ret == @as(usize, @intCast(gc_pid))) 1 else 0};
             _ = linux.write(pfds[1], &ok, 1);

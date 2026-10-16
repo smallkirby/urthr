@@ -10,7 +10,7 @@ pub fn Register(T: type, Width: type) type {
     }
 
     return struct {
-        const IntT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const IntT = @Int(.unsigned, @bitSizeOf(T));
 
         /// Read from the register at the given I/O port.
         pub fn read(port: u16) T {
@@ -20,7 +20,7 @@ pub fn Register(T: type, Width: type) type {
                 else => unreachable,
             };
             return switch (@typeInfo(T)) {
-                .@"enum" => @enumFromInt(value),
+                .@"enum" => @fromBackingInt(@intCast(value)),
                 else => @bitCast(@as(IntT, @truncate(value))),
             };
         }
@@ -41,8 +41,8 @@ pub fn Register(T: type, Width: type) type {
         /// Read modify write the register at the given I/O port.
         pub fn modify(port: u16, value: anytype) void {
             var now = read(port);
-            inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field| {
-                @field(now, field.name) = @field(value, field.name);
+            inline for (@typeInfo(@TypeOf(value)).@"struct".field_names) |name| {
+                @field(now, name) = @field(value, name);
             }
             write(port, now);
         }
@@ -84,7 +84,7 @@ pub fn Module(comptime fields: []const struct { u16, type }) type {
             inline for (fields) |field| {
                 const offset, const U = field;
                 if (U == T) {
-                    return .{ offset, Register(T, std.meta.Int(.unsigned, @bitSizeOf(T))) };
+                    return .{ offset, Register(T, @Int(.unsigned, @bitSizeOf(T))) };
                 }
             }
             @compileError("Register not found in Module: " ++ @typeName(T));

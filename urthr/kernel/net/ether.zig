@@ -103,7 +103,7 @@ const EtherType = enum(u16) {
         return switch (prot) {
             .ipv4 => .ipv4,
             .arp => .arp,
-            else => @enumFromInt(@intFromEnum(prot)),
+            else => @fromBackingInt(@intCast(@backingInt(prot))),
         };
     }
 
@@ -112,7 +112,7 @@ const EtherType = enum(u16) {
         return switch (self) {
             .ipv4 => .ipv4,
             .arp => .arp,
-            else => @enumFromInt(@intFromEnum(self)),
+            else => @fromBackingInt(@intCast(@backingInt(self))),
         };
     }
 };

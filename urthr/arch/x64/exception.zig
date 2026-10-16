@@ -45,10 +45,10 @@ pub fn initLocal() void {
 
         // Use the dedicated interrupt stack for the double fault handler
         // so that a stack overflow does not turn into a triple fault.
-        idt.setIst(@intFromEnum(Exception.df), 1);
+        idt.setIst(@backingInt(Exception.df), 1);
 
         // Use a separate dedicated interrupt stack for the page fault handler.
-        idt.setIst(@intFromEnum(Exception.pf), 2);
+        idt.setIst(@backingInt(Exception.pf), 2);
     }
 
     idt.load();
@@ -89,7 +89,7 @@ pub fn callEreturnHook(ctx: *Context) void {
 /// Called from the ISR common stub.
 pub fn dispatch(ctx: *Context) void {
     // Handle page fault exceptions specially.
-    if (ctx.vector == @intFromEnum(Exception.pf)) blk: {
+    if (ctx.vector == @backingInt(Exception.pf)) blk: {
         const ec: PfErrorCode = @bitCast(@as(u32, @truncate(ctx.ec)));
         const far = am.readCr2();
 
@@ -156,7 +156,7 @@ var console: Console = undefined;
 
 fn defaultHandler(ctx: *Context) void {
     var w = UnsafeWriter.init(console);
-    const exception: Exception = @enumFromInt(ctx.vector);
+    const exception: Exception = @fromBackingInt(@intCast(ctx.vector));
 
     w.log("", .{});
     w.log("=== Oops! ===============================", .{});

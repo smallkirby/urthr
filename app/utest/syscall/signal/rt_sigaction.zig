@@ -19,7 +19,7 @@ var signal_called: bool = false;
 
 /// Signal handler.
 fn onSignal(signo: linux.SIG) callconv(.c) void {
-    log.info("Signal#{d} handler called", .{@intFromEnum(signo)});
+    log.info("Signal#{d} handler called", .{@backingInt(signo)});
     signal_called = true;
 }
 
@@ -45,7 +45,7 @@ test "fails with EINVAL for an out-of-range signal number" {
 
 test "fails with EINVAL for SIGKILL" {
     const ret = signal.sigAction(
-        @intFromEnum(linux.SIG.KILL),
+        @backingInt(linux.SIG.KILL),
         null,
         null,
         signal.mask_size,
@@ -55,7 +55,7 @@ test "fails with EINVAL for SIGKILL" {
 
 test "fails with EINVAL for SIGSTOP" {
     const ret = signal.sigAction(
-        @intFromEnum(linux.SIG.STOP),
+        @backingInt(linux.SIG.STOP),
         null,
         null,
         signal.mask_size,
@@ -65,7 +65,7 @@ test "fails with EINVAL for SIGSTOP" {
 
 test "fails with EINVAL for a wrong sigsetsize" {
     const ret = signal.sigAction(
-        @intFromEnum(linux.SIG.TERM),
+        @backingInt(linux.SIG.TERM),
         null,
         null,
         signal.mask_size + 1,
@@ -76,7 +76,7 @@ test "fails with EINVAL for a wrong sigsetsize" {
 test "can query the current action without changing it" {
     var old: signal.SigAction = undefined;
     const ret = signal.sigAction(
-        @intFromEnum(linux.SIG.USR1),
+        @backingInt(linux.SIG.USR1),
         null,
         &old,
         signal.mask_size,

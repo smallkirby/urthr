@@ -68,7 +68,7 @@ pub fn WireReader(T: type) type {
             const U = @FieldType(T, name);
             const bitoffset = @bitOffsetOf(T, name);
             const offset = @offsetOf(T, name);
-            const bitsize = @bitSizeOf(U);
+            const bitsize = bitSizeOf(U);
 
             if (bitsize % 8 != 0 or bitoffset % 8 != 0) {
                 @compileError("Unsupported field alignment for WireReader");
@@ -132,7 +132,7 @@ pub fn WireWriter(T: type) type {
             const U = @FieldType(T, name);
             const bitoffset = @bitOffsetOf(T, name);
             const offset = @offsetOf(T, name);
-            const bitsize = @bitSizeOf(U);
+            const bitsize = bitSizeOf(U);
 
             if (bitsize % 8 != 0 or bitoffset % 8 != 0) {
                 @compileError("Unsupported field alignment for WireWriter");
@@ -177,6 +177,18 @@ pub fn WireWriter(T: type) type {
             const dest = @intFromPtr(self.p) + offset;
             return @as([*]u8, @ptrFromInt(dest))[0..@sizeOf(U)];
         }
+    };
+}
+
+/// Get the size of a type in bits.
+fn bitSizeOf(comptime U: type) comptime_int {
+    return switch (@typeInfo(U)) {
+        .@"struct" => |s| if (s.layout == .@"extern")
+            @sizeOf(U) * 8
+        else
+            @bitSizeOf(U),
+
+        else => @bitSizeOf(U),
     };
 }
 

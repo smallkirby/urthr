@@ -189,13 +189,13 @@ test "non existing file lookup" {
 
 /// Format the benchmark file name for index `i` into `buf`.
 fn lookupName(buf: *[16]u8, i: usize) [:0]const u8 {
-    return std.fmt.bufPrintZ(buf, "f{d}", .{i}) catch unreachable;
+    return std.mem.printSentinel(buf, "f{d}", .{i}, 0) catch unreachable;
 }
 
 ///
 fn statAt(dirfd: i32, name: [*:0]const u8, buf: []u8) usize {
     return linux.syscall4(
-        .fstatat64,
+        .newfstatat,
         @intCast(dirfd),
         @intFromPtr(name),
         @intFromPtr(buf.ptr),

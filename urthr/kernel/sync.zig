@@ -19,7 +19,7 @@ pub fn syncAllCores() void {
         /// Shared sense.
         var global_sense: std.atomic.Value(bool) = .init(false);
         /// Core-local sense.
-        var local_sense: [board.num_cpus]bool = [_]bool{false} ** board.num_cpus;
+        var local_sense: [board.num_cpus]bool = @splat(false);
     };
 
     const sense = &S.local_sense[smp.getLogicalCoreId()];

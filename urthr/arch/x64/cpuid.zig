@@ -31,12 +31,12 @@ pub const Leaf = enum(u32) {
 
     /// Convert u64 to Leaf.
     pub fn from(rax: u64) Leaf {
-        return @enumFromInt(rax);
+        return @fromBackingInt(@intCast(rax));
     }
 
     /// Issues CPUID instruction to query the leaf and sub-leaf.
     pub fn query(self: Leaf, subleaf: ?u32) CpuidRegs {
-        return cpuid(@intFromEnum(self), subleaf orelse 0);
+        return cpuid(@backingInt(self), subleaf orelse 0);
     }
 };
 

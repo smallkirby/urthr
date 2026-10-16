@@ -298,7 +298,7 @@ pub fn getUsbHost1Base() usize {
 
 /// Get the IRQ number of RP1 peripherals.
 pub fn getIrqNumber(irq: MsiIrq) u16 {
-    return @intFromEnum(irq) + mip0_spi_offset + spi_offset;
+    return @backingInt(irq) + mip0_spi_offset + spi_offset;
 }
 
 /// Get the MSI-X IRQ corresponding to the given IRQ number.
@@ -488,12 +488,12 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
         };
 
         // Ethernet
-        const irq_eth: u32 = @intFromEnum(MsiIrq.eth);
+        const irq_eth: u32 = @backingInt(MsiIrq.eth);
         table.setEntry(irq_eth, mip0_range.pci, irq_eth);
         table.maskEntry(irq_eth, false);
 
         // USB Host1
-        const irq_usb1: u32 = @intFromEnum(MsiIrq.usb1);
+        const irq_usb1: u32 = @backingInt(MsiIrq.usb1);
         table.setEntry(irq_usb1, mip0_range.pci, irq_usb1);
         table.maskEntry(irq_usb1, false);
     }
@@ -524,7 +524,7 @@ fn msixConfigSet(cfg: PcieCfg, irq: MsiIrq, value: MsixCfg) void {
     const set_offset = 0x800;
     const ptr: [*]volatile u32 = @ptrFromInt(cfg.getMarkerAddress(.msix_cfgs) + set_offset);
 
-    ptr[@intFromEnum(irq)] = @bitCast(value);
+    ptr[@backingInt(irq)] = @bitCast(value);
 }
 
 /// Acknowledge MSI-X interrupt.

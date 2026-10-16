@@ -41,7 +41,7 @@ pub const Signal = enum(SigInt) {
 };
 comptime {
     for (std.enums.values(Signal)) |sig| {
-        urd.comptimeAssert(@intFromEnum(sig) <= num_signals, "Invalid signal number.", .{});
+        urd.comptimeAssert(@backingInt(sig) <= num_signals, "Invalid signal number.", .{});
     }
 }
 
@@ -75,7 +75,7 @@ pub const Handlers = struct {
     /// Freed when it drops to zero.
     refcnt: usize = 1,
     /// Per-signal action table (0-origin).
-    actions: [num_signals]Action = [_]Action{.{}} ** num_signals,
+    actions: [num_signals]Action = @splat(.{}),
 
     /// Create a new, default-initialized handler table.
     pub fn new(allocator: Allocator) Allocator.Error!*Handlers {
@@ -154,7 +154,7 @@ pub fn deliver(ctx: *Context) void {
         if (deliverable == 0) break;
 
         const bit: u6 = @intCast(@ctz(deliverable));
-        const signo: Signal = @enumFromInt(bit + 1);
+        const signo: Signal = @fromBackingInt(@intCast(bit + 1));
         const action = th.sigstate.handlers.actions[bit];
 
         // Clear pending bit.
@@ -179,7 +179,7 @@ pub fn deliver(ctx: *Context) void {
         setupSigFrame(
             ctx,
             th,
-            @intFromEnum(signo),
+            @backingInt(signo),
             action,
         ) catch {
             log.err("Failed to setup sigframe for signal#{t}", .{signo});
@@ -256,7 +256,7 @@ pub fn push(signo: Signal) void {
 
 /// Push a pending signal to the given thread.
 pub fn pushTo(th: *Thread, signo: Signal) void {
-    const bit: u6 = @intCast(@intFromEnum(signo) - 1);
+    const bit: u6 = @intCast(@backingInt(signo) - 1);
     const bitmask = @as(Mask, 1) << bit;
 
     const ie = waiters_lock.lockDisableIrq();
@@ -380,7 +380,7 @@ pub fn waitExcept(mask: Mask) void {
 /// If the signal is blocked or already pending, this function immediately terminates the whole thread group.
 pub fn pushSync(signo: Signal, fault: ?usize) void {
     const th = sched.getCurrent();
-    const bit: u6 = @intCast(@intFromEnum(signo) - 1);
+    const bit: u6 = @intCast(@backingInt(signo) - 1);
     const mask = @as(Mask, 1) << bit;
 
     if (th.sigstate.pending & mask != 0 or th.sigstate.blocked & mask != 0) {
@@ -417,13 +417,13 @@ pub const SigFrame = switch (builtin.cpu.arch) {
         /// Signal mask.
         saved_mask: Mask = 0,
         /// Not used.
-        _rsvd: [120]u8 = [_]u8{0} ** 120,
+        _rsvd: [120]u8 = @splat(0),
         /// CPU context.
         mcontext: extern struct {
             /// Fault address.
             fault_addr: u64,
             /// General-purpose registers x0–x30.
-            regs: [31]u64 = [_]u64{0} ** 31,
+            regs: [31]u64 = @splat(0),
             /// User SP.
             sp: u64,
             /// User PC at signal entry.
@@ -502,15 +502,15 @@ const SigInfo = extern struct {
             /// Faulting address.
             addr: usize,
             /// Padding.
-            _rsvd1: [104]u8 = [_]u8{0} ** 104,
+            _rsvd1: [104]u8 = @splat(0),
         },
         zero: extern struct {
-            _rsvd: [112]u8 = [_]u8{0} ** 112,
+            _rsvd: [112]u8 = @splat(0),
         },
     } = .{ .zero = .{} },
 };
 comptime {
-    urd.comptimeAssert(@bitSizeOf(SigInfo) == 128 * 8, "Invalid SigInfo size.", .{});
+    urd.comptimeAssert(@sizeOf(SigInfo) == 128, "Invalid SigInfo size.", .{});
 }
 
 /// Stack frame pushed before delivering a signal.
@@ -569,7 +569,7 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             const si = &local.siginfo;
             {
                 si.signo = @intCast(signo);
-                si.sigfield = switch (@as(Signal, @enumFromInt(signo))) {
+                si.sigfield = switch (@as(Signal, @fromBackingInt(@intCast(signo)))) {
                     .segv => .{ .fault = .{
                         .addr = th.sigstate.fault,
                     } },
@@ -623,7 +623,7 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             const si = &local.siginfo;
             {
                 si.signo = @intCast(signo);
-                si.sigfield = switch (@as(Signal, @enumFromInt(signo))) {
+                si.sigfield = switch (@as(Signal, @fromBackingInt(@intCast(signo)))) {
                     .segv => .{ .fault = .{
                         .addr = th.sigstate.fault,
                     } },

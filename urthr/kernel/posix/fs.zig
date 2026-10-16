@@ -1482,7 +1482,7 @@ const Mode = packed struct(u32) {
             .other = .from(mode.other),
             .group = .from(mode.group),
             .user = .from(mode.user),
-            .type = @enumFromInt(0),
+            .type = @fromBackingInt(@intCast(0)),
             .flags = .from(mode.flags),
         };
     }
@@ -1638,7 +1638,7 @@ const DirEnt64 = extern struct {
         const dirent = Self{
             .inum = inum,
             .reclen = size,
-            .type = @intFromEnum(ftype),
+            .type = @backingInt(ftype),
         };
         var cur: [*]u8 = buf.ptr;
         @memcpy(cur[0..struct_size], std.mem.asBytes(&dirent)[0..struct_size]);
@@ -2277,11 +2277,11 @@ const FlockOp = enum(i32) {
     const non_block: i32 = 4;
 
     pub fn value(self: FlockOp) FlockOp {
-        return @enumFromInt(@intFromEnum(self) & ~non_block);
+        return @fromBackingInt(@intCast(@backingInt(self) & ~non_block));
     }
 
     pub fn isNonBlock(self: FlockOp) bool {
-        return (@intFromEnum(self) & non_block) != 0;
+        return (@backingInt(self) & non_block) != 0;
     }
 };
 

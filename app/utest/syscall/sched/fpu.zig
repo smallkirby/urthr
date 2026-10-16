@@ -14,8 +14,8 @@ const bytes_fpu = switch (builtin.cpu.arch) {
 const FpuState = [num_fpu * bytes_fpu]u8;
 
 const S = struct {
-    var corrupted = [_]std.atomic.Value(bool){.init(false)} ** num_threads;
-    var done = [_]std.atomic.Value(bool){.init(false)} ** num_threads;
+    var corrupted: [num_threads]std.atomic.Value(bool) = @splat(.init(false));
+    var done: [num_threads]std.atomic.Value(bool) = @splat(.init(false));
 
     fn threadMain(idx: usize) callconv(.c) u8 {
         var i: usize = 0;
@@ -107,7 +107,7 @@ fn yield(pattern: *const FpuState, out: *FpuState) void {
             :
             : [p] "r" (pattern),
               [out] "r" (out),
-              [nr] "{rax}" (@intFromEnum(linux.SYS.sched_yield)),
+              [nr] "{rax}" (@backingInt(linux.SYS.sched_yield)),
             : .{
               .memory = true,
               .rax = true,
@@ -170,7 +170,7 @@ fn yield(pattern: *const FpuState, out: *FpuState) void {
             :
             : [p] "r" (pattern),
               [out] "r" (out),
-              [nr] "{x8}" (@intFromEnum(linux.SYS.sched_yield)),
+              [nr] "{x8}" (@backingInt(linux.SYS.sched_yield)),
             : .{
               .memory = true,
               .x0 = true,

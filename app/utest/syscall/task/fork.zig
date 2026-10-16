@@ -49,8 +49,8 @@ test "vfork" {
         // parent entry
         \\1:
         : [ret] "={rax}" (-> u64),
-        : [nr] "{rax}" (@intFromEnum(linux.SYS.vfork)),
-          [exit_nr] "r" (@intFromEnum(linux.SYS.exit_group)),
+        : [nr] "{rax}" (@backingInt(linux.SYS.vfork)),
+          [exit_nr] "r" (@backingInt(linux.SYS.exit_group)),
           [code] "r" (@as(u64, expected_exit)),
         : .{ .rdi = true, .rcx = true, .r11 = true, .memory = true });
 

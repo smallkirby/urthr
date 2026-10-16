@@ -254,7 +254,7 @@ pub const Gpt = struct {
         }
 
         fn read(self: GptHeader, field: Fields, comptime T: type) T {
-            const offset: usize = @intFromEnum(field);
+            const offset: usize = @backingInt(field);
             return std.mem.readInt(T, self.buf[offset..][0..@sizeOf(T)], .little);
         }
 
@@ -281,7 +281,7 @@ pub const Gpt = struct {
         }
 
         fn read(self: PartitionEntry, field: Fields, comptime T: type) T {
-            const offset: usize = @intFromEnum(field);
+            const offset: usize = @backingInt(field);
             return std.mem.readInt(T, self.buf[offset..][0..@sizeOf(T)], .little);
         }
 

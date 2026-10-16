@@ -545,7 +545,7 @@ pub fn ctrlXfer(self: *Self, data: SetupData, ctx: ?*anyopaque, cb: XferCb) Erro
     // Setup stage.
     var setup_trb = trbs.SetupTrb{
         .request_type = @bitCast(data.request_type),
-        .request = @intFromEnum(data.request),
+        .request = @backingInt(data.request),
         .value = data.value,
         .index = data.index,
         .length = data.length,
@@ -614,7 +614,7 @@ fn popPendingEp0Xfer(self: *Self) ?Ep0Completion {
 
 /// Calculate the Device Context Index (DCI).
 fn calcDci(ep: u4, direction: RequestDirection) u5 {
-    return (@as(u5, ep) << 1) + @as(u5, @intFromEnum(direction));
+    return (@as(u5, ep) << 1) + @as(u5, @backingInt(direction));
 }
 
 /// Convert USB endpoint descriptor bInterval to xHCI Endpoint Context Interval.
@@ -696,7 +696,7 @@ fn parseConfigDesc(self: *Self, cdesc: *const volatile ConfigDesc) Error!void {
 
             else => log.warn(
                 "Unexpected descriptor type {d} in configuration descriptor (length={d}).",
-                .{ @intFromEnum(cur.type), cur.length },
+                .{ @backingInt(cur.type), cur.length },
             ),
         }
 
@@ -1255,7 +1255,7 @@ const EpDesc = packed struct(u56) {
         direction: RequestDirection,
 
         pub inline fn dci(self: Address) u5 {
-            return (@as(u5, self.ep) << 1) + @as(u5, @intFromEnum(self.direction));
+            return (@as(u5, self.ep) << 1) + @as(u5, @backingInt(self.direction));
         }
     };
 };

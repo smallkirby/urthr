@@ -15,7 +15,7 @@ extern const __per_cpu_start: void;
 extern const __per_cpu_end: void;
 
 /// Offsets of per-CPU data.
-var cpu_offsets = [_]usize{0} ** board.num_cpus;
+var cpu_offsets: [board.num_cpus]usize = @splat(0);
 
 /// Per-CPU data instance.
 var percpu_instance: []u8 = undefined;
@@ -93,7 +93,7 @@ inline fn rawGetCpuHead(cpu: usize) [*]u8 {
 /// Whether per-CPU data is initialized globally.
 var percpu_initialized: bool = false;
 /// Whether per-CPU data is initialized for each CPU.
-var percpu_thiscpu_initialized = [_]bool{false} ** board.num_cpus;
+var percpu_thiscpu_initialized: [board.num_cpus]bool = @splat(false);
 
 // =============================================================
 // Imports

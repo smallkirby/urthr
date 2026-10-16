@@ -248,8 +248,8 @@ fn Io(Module: type) type {
         /// Read-modify-write the config space at `offset` using fields of `value`.
         pub fn modifyAs(self: Self, offset: u12, comptime T: type, value: anytype) void {
             var current: T = @bitCast(self.read(offset));
-            inline for (@typeInfo(@TypeOf(value)).@"struct".fields) |field|
-                @field(current, field.name) = @field(value, field.name);
+            inline for (@typeInfo(@TypeOf(value)).@"struct".field_names) |name|
+                @field(current, name) = @field(value, name);
             self.write(offset, @bitCast(current));
         }
 

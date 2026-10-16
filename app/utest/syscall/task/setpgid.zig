@@ -61,7 +61,7 @@ test "propagates to every thread in the same thread group" {
     try testing.expectEqual(@as(usize, 1), linux.read(to_parent[0], &buf, 1));
     try testing.expectEqual(@as(u8, 1), buf[0]);
 
-    var status: u32 = undefined;
+    var status: i32 = undefined;
     _ = linux.wait4(child_pid, &status, 0, null);
 }
 

@@ -42,7 +42,7 @@ fn read(_: *fs.File, buf: []u8, _: usize) fs.Error!usize {
 fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
     const tty = ctx(file);
 
-    switch (@as(Request, @enumFromInt(request))) {
+    switch (@as(Request, @fromBackingInt(@intCast(request)))) {
         .tcgets => {
             urd.uaccess.putUser(
                 urd.input.Termios,

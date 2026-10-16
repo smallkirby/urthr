@@ -26,7 +26,7 @@ const num_interrupts = 512;
 const large_interrupts_start = 8192;
 
 /// Interrupt handlers for fixed-size exceptions.
-var handlers: [num_interrupts]?HandlerInfo = [_]?HandlerInfo{null} ** num_interrupts;
+var handlers: [num_interrupts]?HandlerInfo = @splat(null);
 /// Interrupt handlers for large exceptions.
 var large_handlers: LargeIrq.Tree = .{};
 

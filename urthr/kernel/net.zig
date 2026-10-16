@@ -142,7 +142,7 @@ pub fn handleInput(dev: *Device, prot: Protocol, data: []const u8) Error!void {
         return handler.input(dev, data);
     } else {
         // Ignore unrecognized protocol
-        std.log.warn("Unsupported protocol: {d}", .{@intFromEnum(prot)});
+        std.log.warn("Unsupported protocol: {d}", .{@backingInt(prot)});
         return;
     }
 }

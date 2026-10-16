@@ -1586,7 +1586,7 @@ fn sfnArray(name: []const u8) [DirEntry.sfn_len]u8 {
 
     const stem = sfnGetStem(name);
     const ext = sfnGetExt(name);
-    var sfn: [DirEntry.sfn_len]u8 = [_]u8{' '} ** DirEntry.sfn_len;
+    var sfn: [DirEntry.sfn_len]u8 = @splat(' ');
     @memcpy(sfn[0..stem.len], stem);
     @memcpy(sfn[8..][0..ext.len], ext);
 
@@ -1640,7 +1640,7 @@ fn genShortName(self: *Self, dir_cluster: Cluster, name: []const u8) fs.Error![D
         const tail_str = std.fmt.bufPrint(&tail_buf, "~{d}", .{tail}) catch unreachable;
         const base_len = @min(stem_len, stem_buf.len - tail_str.len);
 
-        var candidate: [DirEntry.sfn_len]u8 = [_]u8{' '} ** DirEntry.sfn_len;
+        var candidate: [DirEntry.sfn_len]u8 = @splat(' ');
         @memcpy(candidate[0..base_len], stem_buf[0..base_len]);
         @memcpy(candidate[base_len..][0..tail_str.len], tail_str);
         @memcpy(candidate[8..][0..ext_len], ext_buf[0..ext_len]);
@@ -1685,7 +1685,7 @@ fn buildLfnEntries(buf: []LongNameEntry, name: []const u16, sfn_checksum: u8) []
         const seg_start = (ord - 1) * chars_per_entry;
         const seg = name[seg_start..@min(seg_start + chars_per_entry, name.len)];
 
-        var chars: [LongNameEntry.chars_per_entry]u16 = [_]u16{0xFFFF} ** chars_per_entry;
+        var chars: [LongNameEntry.chars_per_entry]u16 = @splat(0xFFFF);
         @memcpy(chars[0..seg.len], seg);
         if (seg.len < chars.len) chars[seg.len] = 0x0000;
 
@@ -1966,7 +1966,7 @@ const SectorCache = struct {
     };
 
     /// Per-slot metadata.
-    slots: [nslots]Slot = [_]Slot{.{}} ** nslots,
+    slots: [nslots]Slot = @splat(.{}),
     /// Sector data for all cached entries.
     data: []u8 = &.{},
     /// Monotonic access counter.
@@ -2155,9 +2155,9 @@ const Bpb = extern struct {
     fil_sys_type: [8]u8 align(1),
 
     comptime {
-        const size = @bitSizeOf(Bpb);
-        const expected = 90 * @bitSizeOf(u8);
-        urd.comptimeAssert(size == expected, "Invalid size of BPB: expected {d} bits, found {d} bits", .{ expected, size });
+        const size = @sizeOf(Bpb);
+        const expected = 90;
+        urd.comptimeAssert(size == expected, "Invalid size of BPB: expected {d} bytes, found {d} bytes", .{ expected, size });
     }
 };
 
@@ -2231,7 +2231,7 @@ const LongNameEntry = extern struct {
     }
 
     comptime {
-        urd.comptimeAssert(32 * 8 == @bitSizeOf(LongNameEntry), "Invalid size of LongNameEntry", .{});
+        urd.comptimeAssert(32 == @sizeOf(LongNameEntry), "Invalid size of LongNameEntry", .{});
     }
 };
 
@@ -2266,7 +2266,7 @@ const DirEntry = extern struct {
     file_size: u32 align(1),
 
     comptime {
-        urd.comptimeAssert(32 * 8 == @bitSizeOf(DirEntry), "Invalid size of DirEntry", .{});
+        urd.comptimeAssert(32 == @sizeOf(DirEntry), "Invalid size of DirEntry", .{});
     }
 
     const Attributes = packed struct(u8) {

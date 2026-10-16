@@ -150,8 +150,8 @@ fn changeProtocol(self: *Self, protocol: Protocol) Error!void {
     };
     const setup_data = Device.SetupData{
         .request_type = request_type,
-        .request = @enumFromInt(0x0B), // SET_PROTOCOL
-        .value = @intFromEnum(protocol),
+        .request = @fromBackingInt(@intCast(0x0B)), // SET_PROTOCOL
+        .value = @backingInt(protocol),
         .index = self.iface.desc.interface_number,
         .length = 0,
     };

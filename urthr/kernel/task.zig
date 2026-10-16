@@ -833,7 +833,7 @@ fn setupUserImage(
         var random: [16]u8 = undefined;
         urd.rng.getRandom(&random);
         const handle = try scon.appendOpaque(&random);
-        try scon.appendAux(.new(.random, @intFromEnum(handle)));
+        try scon.appendAux(.new(.random, @backingInt(handle)));
 
         // AT_PAGESZ.
         try scon.appendAux(.new(.pagesz, mem.page_size));

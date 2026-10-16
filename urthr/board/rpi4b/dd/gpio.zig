@@ -32,7 +32,7 @@ pub fn selectAltFn(pin: u8, alt: Fsel) void {
     const old = Gpfsel.read(addr);
     const shift: u5 = @intCast(@bitSizeOf(Fsel) * field_index);
     const mask = @as(u32, 0b111) << shift;
-    const new = (old & ~mask) | @as(u32, @intFromEnum(alt)) << shift;
+    const new = (old & ~mask) | @as(u32, @backingInt(alt)) << shift;
     Gpfsel.write(addr, new);
 }
 
