@@ -1004,6 +1004,11 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
     return bytes_read;
 }
 
+/// Zeroes used to zero-fills sectors.
+///
+/// The size must be smaller than a cluster size.
+const zero_chunk: [32 * sector_size]u8 = @splat(0);
+
 /// Write data to a regular file.
 ///
 /// Extend the file size if necessary.
@@ -1068,13 +1073,28 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
         const num_whole_sec = (total_len - written) / sector_size;
         const sec_in_clus_remain = fat32.bpb.sec_per_clus - sector_in_clus;
         const nsectors = @min(num_whole_sec, sec_in_clus_remain);
-        const to_write = if (offset_in_sec == 0 and written >= zero_len and nsectors > 0) blk: {
-            // Fast path.
+        const num_zero_sec = if (written < zero_len)
+            (zero_len - written) / sector_size
+        else
+            0;
+
+        const to_write = if (offset_in_sec == 0 and num_zero_sec > 0) blk: {
+            // Zero-fill fast path: batch write zero-sectors
+            const chunk_len = @as(usize, @min(
+                num_zero_sec,
+                sec_in_clus_remain,
+                zero_chunk.len / sector_size,
+            )) * sector_size;
+            try fat32.device.writeBlocks(lba, zero_chunk[0..chunk_len]);
+            break :blk chunk_len;
+        } else if (offset_in_sec == 0 and written >= zero_len and nsectors > 0) blk: {
+            // Fast path: batch write whole sectors from the buffer
             const chunk_len = nsectors * sector_size;
             const data_off = written - zero_len;
             try fat32.device.writeBlocks(lba, buf[data_off..][0..chunk_len]);
             break :blk chunk_len;
         } else blk: {
+            // Slow-path: read-modify-write for partial sectors
             const n = @min(sector_size - offset_in_sec, total_len - written);
 
             // Read-modify-write unless we're overwriting the whole sector.
