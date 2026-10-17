@@ -968,14 +968,20 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
         const sec_in_clus_remain = fat32.bpb.sec_per_clus - sector_in_clus;
         const nsectors = @min(num_whole_sec, sec_in_clus_remain);
         const to_copy = if (offset_in_sec == 0 and nsectors > 0) blk: {
-            // Fast path.
+            // Fast path: read whole sectors directly from the device.
             const chunk_len = nsectors * sector_size;
+
+            // Write-back dirty sectors before multiple sector reads.
+            try fat32.cache.flushRange(fat32, lba, nsectors);
+            // Read directly from the device since cached I/O is limited to single-sector accesses.
             try fat32.device.readBlocks(lba, read_buf[bytes_read..][0..chunk_len]);
             break :blk chunk_len;
         } else blk: {
-            // Slow path.
+            // Slow path: read partial sectors through the cache.
+
+            // Read through cache since this is always single-sector read.
             var sec_buf: [sector_size]u8 = undefined;
-            try fat32.device.readBlocks(lba, &sec_buf);
+            try fat32.cache.read(fat32, lba, &sec_buf);
 
             const n = @min(sector_size - offset_in_sec, read_buf.len - bytes_read);
             uaccess.copy(read_buf[bytes_read..], sec_buf[offset_in_sec..], n) catch {
@@ -1085,12 +1091,14 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
                 sec_in_clus_remain,
                 zero_chunk.len / sector_size,
             )) * sector_size;
+            fat32.cache.discard(lba, chunk_len / sector_size);
             try fat32.device.writeBlocks(lba, zero_chunk[0..chunk_len]);
             break :blk chunk_len;
         } else if (offset_in_sec == 0 and written >= zero_len and nsectors > 0) blk: {
             // Fast path: batch write whole sectors from the buffer
             const chunk_len = nsectors * sector_size;
             const data_off = written - zero_len;
+            fat32.cache.discard(lba, nsectors);
             try fat32.device.writeBlocks(lba, buf[data_off..][0..chunk_len]);
             break :blk chunk_len;
         } else blk: {
@@ -1100,7 +1108,7 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
             // Read-modify-write unless we're overwriting the whole sector.
             var sec_buf: [sector_size]u8 = undefined;
             if (offset_in_sec != 0 or n < sector_size) {
-                try fat32.device.readBlocks(lba, &sec_buf);
+                try fat32.cache.read(fat32, lba, &sec_buf);
             }
 
             if (written < zero_len) {
@@ -1118,7 +1126,7 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
                 };
             }
 
-            try fat32.device.writeBlocks(lba, &sec_buf);
+            try fat32.cache.write(fat32, lba, &sec_buf);
             break :blk n;
         };
 
@@ -2051,6 +2059,35 @@ const SectorCache = struct {
         if (!self.slots[i].dirty) self.ndirty += 1;
         self.slots[i].dirty = true;
         self.touch(i);
+    }
+
+    /// Discard cached sectors in the given range without writing them back.
+    ///
+    /// Can be used when the range is about to be overwritten bypassing the cache.
+    pub fn discard(self: *SectorCache, lba: Lba, count: usize) void {
+        for (0..count) |i| {
+            const index = self.find(lba + i) orelse continue;
+            if (self.slots[index].dirty) {
+                self.slots[index].dirty = false;
+                self.ndirty -= 1;
+            }
+            self.slots[index].lba = null;
+        }
+    }
+
+    /// Flush dirty cache slots in the given range to the device.
+    ///
+    /// Failed sectors are kept dirty.
+    pub fn flushRange(self: *SectorCache, fat32: *Self, lba: Lba, count: usize) fs.Error!void {
+        if (self.ndirty == 0) return;
+
+        for (0..count) |i| {
+            const index = self.find(lba + i) orelse continue;
+            if (!self.slots[index].dirty) continue;
+            try fat32.device.writeBlocks(lba + i, self.sector(index));
+            self.slots[index].dirty = false;
+            self.ndirty -= 1;
+        }
     }
 
     /// Flush all dirty cache slots to the device.
