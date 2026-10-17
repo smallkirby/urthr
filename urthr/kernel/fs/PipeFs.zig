@@ -7,7 +7,7 @@
 const Self = @This();
 
 /// Size in bytes of the pipe ring buffer in bytes.
-const buf_size = 4096;
+const buf_size = 64 * 1024;
 
 /// Memory allocator.
 allocator: Allocator,
