@@ -86,6 +86,11 @@ pub fn setPageFaultHandler(f: exception.PageFaultHandler) void {
     exception.setPageFaultHandler(f);
 }
 
+/// Set user fault handler function.
+pub fn setUserFaultHandler(f: exception.UserFaultHandler) void {
+    exception.setUserFaultHandler(f);
+}
+
 /// Cache operation type.
 const CacheOp = enum {
     /// Invalidate cache lines.

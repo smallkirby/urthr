@@ -13,6 +13,9 @@ var handler: ?HandlerSignature = null;
 /// Function pointer to the registered page fault handler.
 var pagefault_handler: ?PageFaultHandler = null;
 
+/// Function pointer to the registered user fault handler.
+var userfault_handler: ?UserFaultHandler = null;
+
 /// Exception handler function signature.
 ///
 /// Returns null if the exception cannot be handled.
@@ -26,6 +29,24 @@ pub const HandlerSignature = *const fn () ?void;
 ///
 /// Returns false if the fault is unrecoverable.
 pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType, user: bool) bool;
+
+/// User mode fault kinds.
+pub const UserFault = enum {
+    /// Segmentation fault.
+    segv,
+    /// Illegal instruction.
+    ill,
+    /// Floating point exception.
+    fpe,
+    /// Bus error.
+    bus,
+    /// Trap.
+    trap,
+};
+/// User fault handler function signature.
+///
+/// Called for synchronous exceptions taken from EL0, other than data aborts and SVC.
+pub const UserFaultHandler = *const fn (kind: UserFault, addr: usize) void;
 
 /// ERET hook function signature.
 pub const EreturnHook = *const fn (ctx: *Context) void;
@@ -57,6 +78,11 @@ pub fn setHandler(h: HandlerSignature) void {
 /// Set the page fault handler function.
 pub fn setPageFaultHandler(h: PageFaultHandler) void {
     pagefault_handler = h;
+}
+
+/// Set the user fault handler function.
+pub fn setUserFaultHandler(h: UserFaultHandler) void {
+    userfault_handler = h;
 }
 
 /// Set hook called before every return to EL0.
@@ -239,6 +265,13 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
             return handleDataAbortUser(ctx);
         },
 
+        // Other faults caused by the user program.
+        .iabort_lower, .unknown, .illegal_exec_state, .simd, .bti, .pc_align, .sp_align, .brk_a64 => {
+            maskIrq(false);
+            defer maskIrq(true);
+            return handleUserFault(ctx);
+        },
+
         // Unhandled.
         else => return defaultHandler(ctx, "Synchronous, Lower EL, A64"),
     }
@@ -257,7 +290,13 @@ fn handleDataAbortUser(ctx: *Context) void {
     const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
     const far = am.mrsi(.far_el1);
 
-    if (pagefault_handler) |pf| {
+    if (iss.dfsc == .alignment) {
+        if (userfault_handler) |uf| {
+            uf(.bus, far);
+            callEreturnHook(ctx);
+            return;
+        }
+    } else if (pagefault_handler) |pf| {
         if (pf(
             far,
             if (iss.wnr == .write) .write else .read,
@@ -268,6 +307,38 @@ fn handleDataAbortUser(ctx: *Context) void {
         }
     }
     return defaultHandler(ctx, "Synchronous, Lower EL, A64 (Data Abort)");
+}
+
+/// Call user-mode exception handler.
+fn handleUserFault(ctx: *Context) void {
+    const esr = am.mrs(.esr_el1);
+    const ec = esr.ec;
+    const far = am.mrsi(.far_el1);
+
+    // Call page fault handler if the fault was a translation fault on instruction fetch.
+    const fsc: regs.Esr.Dfsc = @fromBackingInt(@truncate(esr.iss));
+    if (ec == .iabort_lower and isTranslationFault(fsc)) {
+        if (pagefault_handler) |pf| {
+            if (pf(far, .read, true)) {
+                callEreturnHook(ctx);
+                return;
+            }
+        }
+    }
+
+    // Call user-mode exception handler.
+    if (userfault_handler) |uf| {
+        switch (ec) {
+            .iabort_lower => uf(.segv, far),
+            .pc_align => uf(.bus, ctx.pc),
+            .sp_align => uf(.bus, ctx.sp_el0),
+            .brk_a64 => uf(.trap, ctx.pc),
+            else => uf(.ill, ctx.pc),
+        }
+        callEreturnHook(ctx);
+        return;
+    }
+    return defaultHandler(ctx, "Synchronous, Lower EL, A64");
 }
 
 /// Handle a data abort taken while running in EL1.
@@ -308,6 +379,14 @@ fn handleDataAbortKernel(ctx: *Context) void {
 fn isPermissionFault(dfsc: regs.Esr.Dfsc) bool {
     return switch (dfsc) {
         .perm_lvl0, .perm_lvl1, .perm_lvl2, .perm_lvl3 => true,
+        else => false,
+    };
+}
+
+/// Whether the given fault status code denotes a translation fault.
+fn isTranslationFault(fsc: regs.Esr.Dfsc) bool {
+    return switch (fsc) {
+        .trans_lvl0, .trans_lvl1, .trans_lvl2, .trans_lvl3 => true,
         else => false,
     };
 }

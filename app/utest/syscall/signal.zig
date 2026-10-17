@@ -1,4 +1,5 @@
 comptime {
+    _ = @import("signal/fault.zig");
     _ = @import("signal/fpstate.zig");
     _ = @import("signal/kill.zig");
     _ = @import("signal/rt_sigaction.zig");

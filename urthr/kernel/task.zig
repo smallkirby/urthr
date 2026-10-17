@@ -47,6 +47,8 @@ var zombie_lock: SpinLock = .{};
 pub fn init() void {
     // Set #PF handler.
     arch.setPageFaultHandler(handlePageFault);
+    // Set other user-mode exception handler.
+    arch.setUserFaultHandler(handleUserFault);
 }
 
 /// Handle a page fault.
@@ -65,6 +67,20 @@ fn handlePageFault(far: usize, access: common.mem.AccessType, user: bool) bool {
     };
 
     return true;
+}
+
+/// Handle a CPU exception taken in user mode.
+fn handleUserFault(kind: arch.exception.UserFault, addr: usize) void {
+    log.err("user fault: kind={t} addr=0x{X}", .{ kind, addr });
+
+    // Terminate the thread by sending a signal.
+    signal.pushSync(switch (kind) {
+        .segv => .segv,
+        .ill => .ill,
+        .fpe => .fpe,
+        .bus => .bus,
+        .trap => .trap,
+    }, addr);
 }
 
 /// Spawn a new kernel thread with the given entry function and arguments.

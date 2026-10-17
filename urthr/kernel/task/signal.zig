@@ -14,6 +14,14 @@ pub const Signal = enum(SigInt) {
     interrupt = 2,
     /// Quit from keyboard.
     quit = 3,
+    /// Illegal instruction.
+    ill = 4,
+    /// Trap.
+    trap = 5,
+    /// Bus error.
+    bus = 7,
+    /// Floating-point exception.
+    fpe = 8,
     /// Kill signal.
     kill = 9,
     /// Segmentation fault.
@@ -766,7 +774,7 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             {
                 si.signo = @intCast(signo);
                 si.sigfield = switch (@as(Signal, @fromBackingInt(@intCast(signo)))) {
-                    .segv => .{ .fault = .{
+                    .segv, .ill, .fpe, .bus, .trap => .{ .fault = .{
                         .addr = th.sigstate.fault,
                     } },
                     else => .{ .zero = .{} },
@@ -831,7 +839,7 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             {
                 si.signo = @intCast(signo);
                 si.sigfield = switch (@as(Signal, @fromBackingInt(@intCast(signo)))) {
-                    .segv => .{ .fault = .{
+                    .segv, .ill, .fpe, .bus, .trap => .{ .fault = .{
                         .addr = th.sigstate.fault,
                     } },
                     else => .{ .zero = .{} },

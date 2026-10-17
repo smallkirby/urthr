@@ -22,6 +22,24 @@ pub const EreturnHook = *const fn (ctx: *Context) void;
 /// Returns false if the fault is unrecoverable.
 pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType, user: bool) bool;
 
+/// User mode fault kinds.
+pub const UserFault = enum {
+    /// Segmentation fault.
+    segv,
+    /// Illegal instruction.
+    ill,
+    /// Floating point exception.
+    fpe,
+    /// Bus error.
+    bus,
+    /// Trap.
+    trap,
+};
+/// User fault handler function signature.
+///
+/// Called for exceptions taken from Ring-3, other than #PF.
+pub const UserFaultHandler = *const fn (kind: UserFault, addr: usize) void;
+
 /// Interrupt Descriptor Table.
 var idt: Idt align(idt_align) = undefined;
 /// Function pointer to the registered interrupt handler.
@@ -32,6 +50,8 @@ var terminator: ?*const fn (u8) void = null;
 var eret_hook: ?EreturnHook = null;
 /// Function pointer to the registered page fault handler.
 var pagefault_handler: ?PageFaultHandler = null;
+/// Function pointer to the registered user fault handler.
+var userfault_handler: ?UserFaultHandler = null;
 
 /// Whether we are currently handling an exception.
 var in_handling: bool linksection(common.pcpu.section) = false;
@@ -74,6 +94,11 @@ pub fn setPageFaultHandler(h: PageFaultHandler) void {
     pagefault_handler = h;
 }
 
+/// Set the user fault handler function.
+pub fn setUserFaultHandler(h: UserFaultHandler) void {
+    userfault_handler = h;
+}
+
 /// Set the hook called before returning to Ring-3.
 pub fn setEreturnHook(f: EreturnHook) void {
     eret_hook = f;
@@ -114,6 +139,21 @@ pub fn dispatch(ctx: *Context) void {
         if (uaccess.fixupFor(ctx.rip)) |fixup| {
             ctx.rip = fixup;
             return;
+        }
+    }
+
+    // Call user-mode exception handler.
+    if (ctx.isFromUserMode()) {
+        const exception: Exception = @fromBackingInt(@intCast(ctx.vector));
+        if (exception.asUserFault()) |kind| {
+            if (userfault_handler) |uf| {
+                uf(kind, switch (exception) {
+                    .de, .db, .bp, .ud, .nm, .mf, .xm => ctx.rip,
+                    else => 0,
+                });
+                callEreturnHook(ctx);
+                return;
+            }
         }
     }
 
@@ -289,6 +329,20 @@ const Exception = enum(usize) {
             _ => "External interrupt",
         };
     }
+
+    /// Get the corresponding user fault kind.
+    ///
+    /// Returns null if the exception does not have a corresponding user fault.
+    fn asUserFault(self: Exception) ?UserFault {
+        return switch (self) {
+            .de, .mf, .xm => .fpe,
+            .db, .bp => .trap,
+            .ud, .nm => .ill,
+            .of, .br, .ts, .gp, .cp => .segv,
+            .np, .ss, .ac => .bus,
+            else => null,
+        };
+    }
 };
 
 /// Interrupt Descriptor Table.
@@ -302,7 +356,8 @@ const Idt = extern struct {
                 @intFromPtr(&isr.generateIsr(i)),
                 .kernel_cs,
                 .interrupt_gate,
-                0,
+                // Allow INT3 from Ring-3.
+                if (i == @backingInt(Exception.bp)) 3 else 0,
             );
         }
     }

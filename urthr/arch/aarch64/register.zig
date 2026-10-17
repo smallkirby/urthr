@@ -306,6 +306,7 @@ pub const Esr = packed struct(u64) {
         dabort_lower = 0b100100,
         dabort_cur = 0b100101,
         sp_align = 0b100110,
+        brk_a64 = 0b111100,
 
         _,
     };
@@ -416,6 +417,8 @@ pub const Esr = packed struct(u64) {
         perm_lvl1 = 0b001101,
         perm_lvl2 = 0b001110,
         perm_lvl3 = 0b001111,
+
+        alignment = 0b100001,
 
         _,
     };
