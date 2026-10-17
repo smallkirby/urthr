@@ -9,7 +9,7 @@ pub fn sysExitGroup(code: i32) ReturnType {
 }
 
 /// syscall: wait4
-pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, _: usize) ReturnType {
+pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, rusage: usize) ReturnType {
     const result = task.waitChild(
         pid,
         options.nohang,
@@ -29,8 +29,17 @@ pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, _: usize) Return
         ) catch return .err(.fault);
     }
 
+    // TODO: Resource usage is not accounted yet.
+    if (rusage != 0) {
+        const zero: [rusage_size]u8 = @splat(0);
+        urd.uaccess.copyToUser(rusage, &zero) catch return .err(.fault);
+    }
+
     return .success(@intCast(result.pid));
 }
+
+/// Size in bytes of rusage.
+const rusage_size = 144;
 
 const WaitOptions = packed struct(u32) {
     /// Dont't block waiting.
