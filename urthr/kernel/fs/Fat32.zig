@@ -57,6 +57,9 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
     // Allocate buffer for sector cache.
     const cache_buf = try allocator.alloc(u8, SectorCache.nslots * sector_size);
     errdefer allocator.free(cache_buf);
+    const cache_slots = try allocator.alloc(SectorCache.Slot, SectorCache.nslots);
+    errdefer allocator.free(cache_slots);
+    @memset(cache_slots, .{});
 
     self.* = .{
         .device = device,
@@ -64,7 +67,7 @@ pub fn init(device: block.Device, allocator: Allocator) fs.Error!*Self {
         .allocator = allocator,
         .root = root,
         .free_clus_hint = bpb.root_clus,
-        .cache = .{ .data = cache_buf },
+        .cache = .{ .slots = cache_slots, .data = cache_buf },
     };
     return self;
 }
@@ -1950,10 +1953,14 @@ fn flushCache(self: *Self) void {
 
 /// Write-back cache for FAT sectors.
 const SectorCache = struct {
+    /// Number of ways in a set.
+    const nways = 4; // TODO: find most optimal number
+    /// Number of sets.
+    const nsets = 1024;
     /// Number of cache slots.
     ///
     /// One slot caches a single sector.
-    const nslots = 64;
+    const nslots = nsets * nways;
 
     /// Cache entry slot type.
     const Slot = struct {
@@ -1966,11 +1973,13 @@ const SectorCache = struct {
     };
 
     /// Per-slot metadata.
-    slots: [nslots]Slot = @splat(.{}),
+    slots: []Slot = &.{},
     /// Sector data for all cached entries.
     data: []u8 = &.{},
     /// Monotonic access counter.
     clock: u64 = 0,
+    /// Number of dirty slots.
+    ndirty: usize = 0,
 
     /// Read one sector at the given LBA into the given buffer.
     ///
@@ -1995,6 +2004,7 @@ const SectorCache = struct {
     pub fn write(self: *SectorCache, fat32: *Self, lba: Lba, data: []const u8) fs.Error!void {
         const i = self.find(lba) orelse try self.reserve(fat32, lba);
         @memcpy(self.sector(i), data);
+        if (!self.slots[i].dirty) self.ndirty += 1;
         self.slots[i].dirty = true;
         self.touch(i);
     }
@@ -2003,8 +2013,10 @@ const SectorCache = struct {
     ///
     /// Failed sectors are kept dirty.
     pub fn flushAll(self: *SectorCache, fat32: *Self) fs.Error!void {
+        if (self.ndirty == 0) return;
+
         var failed = false;
-        for (&self.slots, 0..) |*s, i| {
+        for (self.slots, 0..) |*s, i| {
             if (!s.dirty) {
                 continue;
             }
@@ -2017,6 +2029,7 @@ const SectorCache = struct {
                 continue; // keep it dirty
             };
             s.dirty = false;
+            self.ndirty -= 1;
         }
 
         if (failed) return fs.Error.IoError;
@@ -2027,9 +2040,10 @@ const SectorCache = struct {
     /// When cache slots are full, the least-recently-used slot is evicted to the device.
     /// Returns the index of the reserved cache slot.
     fn reserve(self: *SectorCache, fat32: *Self, lba: Lba) fs.Error!usize {
-        var victim: usize = 0;
+        const base = getBaseOfSet(lba);
+        var victim: usize = base;
         var oldest: u64 = std.math.maxInt(u64);
-        for (&self.slots, 0..) |*s, i| {
+        for (self.slots[base .. base + nways], base..) |*s, i| {
             if (s.lba) |_| {
                 if (s.stamp < oldest) {
                     oldest = s.stamp;
@@ -2048,6 +2062,7 @@ const SectorCache = struct {
                 self.sector(victim),
             );
             slot.dirty = false;
+            self.ndirty -= 1;
         }
         slot.lba = lba;
         return victim;
@@ -2060,9 +2075,15 @@ const SectorCache = struct {
 
     /// Find a cache slot containing the sector with the given LBA.
     fn find(self: *SectorCache, lba: Lba) ?usize {
-        for (&self.slots, 0..) |*s, i| {
+        const base = getBaseOfSet(lba);
+        for (self.slots[base .. base + nways], base..) |*s, i| {
             if (s.lba == lba) return i;
         } else return null;
+    }
+
+    /// Get the index of the first slot in the set that the given LBA maps to.
+    fn getBaseOfSet(lba: Lba) usize {
+        return (lba % nsets) * nways;
     }
 
     /// Update the access timestamp for the given cache slot.
