@@ -110,10 +110,18 @@ pub fn sleepUs(duration_us: u64) void {
     };
 
     const ie = qsleep_lock.lockDisableIrq();
-    defer qsleep_lock.unlockRestoreIrq(ie);
     qsleep.append(&entry);
 
+    // The lock is released by the scheduler.
     urd.sched.blockCurrent(&qsleep_lock);
+
+    // Ensure that the entry is no longer linked in the queue.
+    {
+        const ie_inner = qsleep_lock.lockDisableIrq();
+        defer qsleep_lock.unlockRestoreIrq(ie_inner);
+        if (!entry.fired) qsleep.remove(&entry);
+    }
+    arch.intr.setMask(ie);
 }
 
 /// Interval for checking sleeping threads in microseconds.
@@ -132,6 +140,8 @@ const SleepEntry = struct {
     thread: *Thread,
     /// Absolute wake-up time in nanoseconds.
     deadline_ns: u64,
+    /// Whether the entry has been removed from the queue.
+    fired: bool = false,
     /// List head.
     _head: List.Head = .{},
 
@@ -156,6 +166,7 @@ fn checkSleepers() void {
             rtt.expect(qsleep.len > 0);
 
             qsleep.remove(entry);
+            entry.fired = true;
             urd.sched.enqueue(entry.thread);
 
             woke_any = true;
