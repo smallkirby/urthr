@@ -15,6 +15,8 @@ dcfg: usize,
 
 /// Virtqueues indexed by queue number.
 queues: QueueMap,
+/// Virtual addresses of the notification registers indexed by queue number.
+notify_addrs: NotifyMap,
 /// Feature bits negotiated with the device.
 features: u64 = 0,
 
@@ -24,6 +26,7 @@ page_allocator: PageAllocator,
 allocator: Allocator,
 
 const QueueMap = std.AutoHashMap(u32, *virtio.Virtqueue);
+const NotifyMap = std.AutoHashMap(u32, usize);
 
 /// PCI vendor ID assigned to all virtio devices.
 pub const vendor_id: u16 = 0x1AF4;
@@ -127,6 +130,7 @@ pub fn init(
         .notify_off_mult = region_notify.notify_off_mult,
         .dcfg = base_dcfg,
         .queues = .init(allocator),
+        .notify_addrs = .init(allocator),
         .page_allocator = page_allocator,
         .allocator = allocator,
     };
@@ -245,6 +249,12 @@ fn setupQueue(ctx: *anyopaque, index: u32) virtio.Error!void {
     self.ccfg.writei(QueueDevice, self.page_allocator.translateP(vq.getUsedAddr()));
     self.ccfg.write(QueueEnable, .{ .value = .enable });
 
+    // Cache the notification address to avoid selecting the queue every time.
+    const notify_off: usize = self.ccfg.read(QueueNotifyOff).value;
+    self.notify_addrs.put(index, self.notify + notify_off * self.notify_off_mult) catch {
+        return virtio.Error.OutOfMemory;
+    };
+
     self.queues.put(index, vq) catch return virtio.Error.OutOfMemory;
 }
 
@@ -258,15 +268,9 @@ fn getQueue(ctx: *anyopaque, index: u32) ?*virtio.Virtqueue {
 fn notifyQueue(ctx: *anyopaque, queue_index: u16) void {
     const self: *const Self = @ptrCast(@alignCast(ctx));
 
-    // Select the queue first.
-    self.ccfg.writei(QueueSelect, queue_index);
-
-    // Calculate the address of the queue's notification register.
-    const notify_off: usize = self.ccfg.read(QueueNotifyOff).value;
-    const addr = self.notify + notify_off * self.notify_off_mult;
-    const ptr: *volatile u16 = @ptrFromInt(addr);
-
     // Notify the device.
+    const addr = self.notify_addrs.get(queue_index) orelse return;
+    const ptr: *volatile u16 = @ptrFromInt(addr);
     ptr.* = queue_index;
 }
 
