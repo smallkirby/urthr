@@ -89,7 +89,7 @@ pub fn initStack(stack: []u8, entry: anytype, arg: anytype) []u8 {
 }
 
 /// Initialize the thread stack for a cloned child process.
-pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize) []u8 {
+pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize, tls: ?usize) []u8 {
     var addr: usize = @intFromPtr(stack.ptr) + stack.len;
 
     addr -= @sizeOf(IsrContext);
@@ -101,7 +101,7 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize)
     ic.* = parent_ctx.*;
     ic.x0 = 0; // return value for the child.
     ic.sp_el0 = user_sp;
-    ic.tpidr_el0 = am.mrsi(.tpidr_el0);
+    ic.tpidr_el0 = tls orelse am.mrsi(.tpidr_el0);
 
     // Construct initial switch context for the child.
     sc.* = std.mem.zeroInit(SwitchContext, .{

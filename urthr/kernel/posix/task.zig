@@ -42,9 +42,13 @@ const WaitOptions = packed struct(u32) {
 };
 
 /// syscall: clone
-pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp: usize, tls: usize) ReturnType {
-    _ = parent_tidp;
-    _ = tls;
+pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, arg4: usize, arg5: usize) ReturnType {
+    // The order of the last two arguments depends on the architecture.
+    const child_tidp, const tls = switch (builtin.cpu.arch) {
+        .x86_64 => .{ arg4, arg5 },
+        .aarch64 => .{ arg5, arg4 },
+        else => @compileError("Unsupported architecture."),
+    };
 
     if (flags.pidfd) urd.unimplemented("clone: pidfd");
     if (flags.ptrace) urd.unimplemented("clone: ptrace");
@@ -52,6 +56,13 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
 
     if (flags.thread and !flags.sighand) return .err(.inval);
     if (flags.sighand and !flags.vm) return .err(.inval);
+
+    if (flags.parent_settid and parent_tidp != 0 and !uaccess.accessOk(parent_tidp, @sizeOf(u32))) {
+        return .err(.fault);
+    }
+    if (flags.child_clear_tid and child_tidp != 0 and !uaccess.accessOk(child_tidp, @sizeOf(u32))) {
+        return .err(.fault);
+    }
 
     const ch_flags = std.mem.zeroInit(task.CloneFlags, .{
         .vm = flags.vm,
@@ -64,6 +75,11 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, child_tidp:
             @as(*u32, @ptrFromInt(child_tidp))
         else
             null,
+        .parent_tidp = if (flags.parent_settid and parent_tidp != 0)
+            @as(*u32, @ptrFromInt(parent_tidp))
+        else
+            null,
+        .tls = if (flags.settls) tls else null,
     });
     const child = task.clone(
         ch_flags,
@@ -124,7 +140,11 @@ const CloneFlags = packed struct(u64) {
     /// Have the same thread group.
     thread: bool,
     /// Reserved.
-    _17: u4 = 0,
+    _17: u2 = 0,
+    /// TLS descriptor is set to the given value.
+    settls: bool,
+    /// Store the child thread ID at the location pointed to the given value in the parent's memory.
+    parent_settid: bool,
     /// Clear and futex-wake the word when the child exits.
     child_clear_tid: bool,
     /// Reserved.
@@ -591,6 +611,7 @@ pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) R
 // Imports
 // =============================================================
 
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.pxtask);
 const common = @import("common");

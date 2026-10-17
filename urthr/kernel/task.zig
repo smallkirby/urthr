@@ -309,6 +309,10 @@ pub const CloneFlags = struct {
     files: bool,
     /// User address to be cleared and futex-woken when the child exits.
     child_tidp: ?*u32 = null,
+    /// User address in parent memory where the child's thread ID is stored.
+    parent_tidp: ?*u32 = null,
+    /// Thread pointer for the child.
+    tls: ?usize = null,
 };
 
 /// Clone the current thread.
@@ -331,6 +335,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         kstack,
         pctx,
         usp,
+        flags.tls,
     );
 
     // Initialize FPU.
@@ -342,6 +347,12 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         defer lock.unlockRestoreIrq(ie);
         break :blk allocateId();
     };
+
+    // Store child's TID.
+    if (flags.parent_tidp) |p| {
+        // Access check should be performed by the caller.
+        urd.uaccess.putUser(u32, p, @intCast(id)) catch unreachable;
+    }
 
     // Share or copy VM.
     const vmm = if (flags.vm)
