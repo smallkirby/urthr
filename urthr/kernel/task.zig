@@ -199,6 +199,9 @@ pub fn execve(
     // =============================================================
     // No error can be returned after this point.
 
+    // Close descriptors marked as close-on-exec.
+    current.fs.fdtbl.closeOnExec();
+
     // Reset signal handlers.
     {
         const new_handlers = try current.sigstate.handlers.reset(allocator);

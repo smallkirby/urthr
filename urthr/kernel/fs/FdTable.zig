@@ -169,6 +169,33 @@ pub fn close(self: *Self, fd: usize) Error!void {
     closed.unref();
 }
 
+/// Close every descriptor marked as close-on-exec.
+pub fn closeOnExec(self: *Self) void {
+    var closeds: [max_fds]*File = undefined;
+    var num_closed: usize = 0;
+
+    const ie = self._lock.lockDisableIrq();
+    for (0..max_fds) |fd| {
+        const file = blk: {
+            if (!self.fd_flags[fd].cloexec) continue;
+
+            const f = self.entries[fd] orelse continue;
+            self.entries[fd] = null;
+            self.fd_flags[fd] = .{};
+
+            break :blk f;
+        };
+
+        closeds[num_closed] = file;
+        num_closed += 1;
+    }
+    self._lock.unlockRestoreIrq(ie);
+
+    for (closeds[0..num_closed]) |file| {
+        file.unref();
+    }
+}
+
 /// Create an independent copy of this table, taking a reference on each open file.
 pub fn clone(self: *Self, allocator: Allocator) Allocator.Error!*Self {
     const cloned = try allocator.create(Self);
@@ -209,7 +236,8 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 // Imports
 // =============================================================
 
-const Allocator = @import("std").mem.Allocator;
+const std = @import("std");
+const Allocator = std.mem.Allocator;
 const urd = @import("urthr");
 const fs = urd.fs;
 const File = fs.File;

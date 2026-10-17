@@ -620,6 +620,7 @@ const board = @import("board").impl;
 const urd = @import("urthr");
 const sched = urd.sched;
 const task = urd.task;
+const uaccess = urd.uaccess;
 const arch = @import("arch").impl;
 const sig = urd.task.signal;
 const ReturnType = urd.syscall.ReturnType;
