@@ -17,6 +17,8 @@ lock: Mutex = .{},
 allocator: Allocator,
 /// Write-back cache for FAT sectors.
 cache: SectorCache,
+/// Incremented whenever any file's cluster chain is shortened.
+chain_gen: u64 = 0,
 
 /// Index of a cluster.
 const Cluster = u32;
@@ -809,8 +811,15 @@ const FileImpl = struct {
     fat32: *Self,
     /// Starting cluster of the file.
     start_cluster: Cluster,
-    /// Cache of the cluster accessed by the most recent read or write.
+    /// Cache of the cluster position accessed by the most recent read or write.
     cache: ?ClsOff = null,
+    /// Clusters of the file in order.
+    ///
+    /// Note that this list may not include all clusters.
+    /// This chain only includes clusters that have been accessed so far.
+    chain: std.ArrayList(Cluster) = .empty,
+    /// Chain generation when `chain` was constructed.
+    chain_gen: u64 = 0,
     /// Cached directory-stream cursor for sequential iteration.
     dcursor: ?DirCursor = null,
 
@@ -822,20 +831,33 @@ const FileImpl = struct {
     ///
     /// Use cached cluster information, fallback to iterating the FAT chain if necessary.
     fn seekCluster(self: *FileImpl, target: u64) fs.Error!ClsOff {
-        const bytes_per_cluster = @as(u64, self.fat32.bpb.sec_per_clus) * sector_size;
-        var clus, var clus_file_offset = if (self.cache) |c|
-            if (c.file_offset <= target)
-                .{ c.cluster, c.file_offset }
-            else
-                .{ self.start_cluster, @as(u64, 0) }
-        else
-            .{ self.start_cluster, @as(u64, 0) };
+        const fat32 = self.fat32;
+        const bytes_per_cluster = @as(u64, fat32.bpb.sec_per_clus) * sector_size;
+        const index: usize = @intCast(target / bytes_per_cluster);
 
-        while (clus_file_offset + bytes_per_cluster <= target) : (clus_file_offset += bytes_per_cluster) {
-            clus = try self.fat32.getNextCluster(clus) orelse return fs.Error.CorruptedData;
+        // Discard the chain if any cluster has been freed since it was built.
+        if (self.chain_gen != fat32.chain_gen) {
+            self.chain.clearRetainingCapacity();
+            self.chain_gen = fat32.chain_gen;
+        }
+        // Set the first cluster if not present in the chain cache.
+        if (self.chain.items.len == 0) {
+            self.chain.append(fat32.allocator, self.start_cluster) catch {
+                return fs.Error.OutOfMemory;
+            };
         }
 
-        return .{ .cluster = clus, .file_offset = clus_file_offset };
+        // Extend the chain until it contains the target cluster.
+        while (self.chain.items.len <= index) {
+            const last = self.chain.items[self.chain.items.len - 1];
+            const next = try fat32.getNextCluster(last) orelse return fs.Error.CorruptedData;
+            self.chain.append(fat32.allocator, next) catch return fs.Error.OutOfMemory;
+        }
+
+        return .{
+            .cluster = self.chain.items[index],
+            .file_offset = index * bytes_per_cluster,
+        };
     }
 };
 
@@ -846,6 +868,7 @@ fn fclose(ctx: *anyopaque, allocator: Allocator) void {
     file.fat32.lock.lock();
     file.fat32.flushCache();
     file.fat32.lock.unlock();
+    file.chain.deinit(file.fat32.allocator);
 
     allocator.destroy(file);
 }
@@ -1141,6 +1164,7 @@ fn ftruncate(file: *fs.File, new_size: usize) fs.Error!void {
 
     // Free the rest of the chain and terminate it at the kept cluster.
     if (try fat32.getNextCluster(clus)) |next| {
+        fat32.chain_gen +%= 1;
         try fat32.freeCluster(next);
         try fat32.setFatEntry(clus, fat_eoc_min);
     }
