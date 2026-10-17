@@ -10,6 +10,25 @@ const xsave_mask = std.mem.zeroInit(StateBitmap, .{
     .avx = true,
 });
 
+/// Offset in the XSAVE region of the XSAVE header.
+const xsave_header_offset = 512;
+
+/// XSAVE header.
+const XsaveHeader = extern struct {
+    /// Bitmap of the state components in the region.
+    xstate_bv: u64,
+    /// Compaction information. Must be zero for the standard format.
+    xcomp_bv: u64,
+    /// Reserved. Must be zero.
+    _reserved: [6]u64,
+
+    comptime {
+        if (@sizeOf(XsaveHeader) != 64) {
+            @compileError("Invalid XsaveHeader size.");
+        }
+    }
+};
+
 /// Reset value of MXCSR register. See SDM Vol.1, 11.6.4.
 const mxcsr_reset_intel: u32 = 0x1F80;
 
@@ -88,8 +107,35 @@ pub fn restoreState(state: *anyopaque) void {
         : .{ .memory = true, .eax = true, .edx = true });
 }
 
+/// Check if the given XSAVE region has a valid header.
+///
+/// XRSTOR raises #GP on an invalid header.
+pub fn isValidState(state: []const u8) bool {
+    if (state.len < xsave_header_offset + @sizeOf(XsaveHeader)) {
+        return false;
+    }
+    const header: *const XsaveHeader = @ptrCast(@alignCast(state.ptr + xsave_header_offset));
+
+    if (header.xstate_bv & ~getXfeatures() != 0) {
+        return false;
+    }
+    if (header.xcomp_bv != 0) {
+        return false;
+    }
+    if (!std.mem.allEqual(u64, &header._reserved, 0)) {
+        return false;
+    }
+
+    return true;
+}
+
+/// Get the bitmap of the saved state components.
+pub fn getXfeatures() u64 {
+    return @as(u64, @bitCast(xsave_mask));
+}
+
 /// Get the size in bytes of the XSAVE region.
-fn getXsaveRegionSize() usize {
+pub fn getXsaveRegionSize() usize {
     const S = struct {
         var cached: ?usize = null;
     };

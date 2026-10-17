@@ -111,6 +111,9 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize,
     return stack[0..(addr - @intFromPtr(stack.ptr))];
 }
 
+/// Layout of the saved FPU state.
+pub const FpuState = fpu.State;
+
 /// Initialize FPU state.
 ///
 /// Returns the pointer to the initialized FPU state.
@@ -126,6 +129,16 @@ pub fn deinitFpu(state: *anyopaque, allocator: Allocator) void {
 /// Restore the FPU state of the current thread using the given saved state.
 pub fn restoreFpu(state: *anyopaque) void {
     fpu.restoreState(state);
+}
+
+/// Save the FPU state of the current thread into the given region.
+pub fn saveFpu(state: *anyopaque) void {
+    fpu.saveState(state);
+}
+
+/// Get the size in bytes of the FPU state.
+pub fn getFpuStateSize() usize {
+    return fpu.getStateSize();
 }
 
 /// Get the user stack pointer recorded in the given ISR context.

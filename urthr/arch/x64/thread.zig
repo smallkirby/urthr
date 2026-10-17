@@ -87,9 +87,29 @@ pub fn deinitFpu(state: *anyopaque, allocator: Allocator) void {
     fpu.deinitState(state, allocator);
 }
 
+/// Save the FPU state of the current thread into the given XSAVE region.
+pub fn saveFpu(state: *anyopaque) void {
+    fpu.saveState(state);
+}
+
 /// Restore the FPU state of the current thread using the given XSAVE region.
 pub fn restoreFpu(state: *anyopaque) void {
     fpu.restoreState(state);
+}
+
+/// Check if the given XSAVE region is valid.
+pub fn isValidFpuState(state: []const u8) bool {
+    return fpu.isValidState(state);
+}
+
+/// Get the size in bytes of the FPU state.
+pub fn getFpuStateSize() usize {
+    return fpu.getXsaveRegionSize();
+}
+
+/// Get the bitmap of the state components in the saved FPU state.
+pub fn fpuXfeatures() u64 {
+    return fpu.getXfeatures();
 }
 
 /// Get the user stack pointer recorded in the given ISR context.

@@ -1,7 +1,17 @@
 /// Size in bytes of the saved FPU state.
-const size_state = 32 * 16 + 4 * 2; // + for FPSR and FPCR
+const size_state = @sizeOf(State);
 /// Required alignment of the FPU state region.
 const align_state = 16;
+
+/// Layout of the saved FPU state.
+pub const State = extern struct {
+    /// 128-bit Vector registers V0-V31.
+    vregs: [32][16]u8,
+    /// Floating-point Status Register.
+    fpsr: u32,
+    /// Floating-point Control Register.
+    fpcr: u32,
+};
 
 /// Initialize the FPU state and return a pointer to it.
 pub fn initState(allocator: Allocator) Allocator.Error!*anyopaque {
@@ -19,6 +29,11 @@ pub fn deinitState(state: *anyopaque, allocator: Allocator) void {
     const ptr: [*]const u8 = @ptrCast(state);
     const slice: []const u8 = ptr[0..size_state];
     allocator.free(slice);
+}
+
+/// Get the size in bytes of the saved FPU state.
+pub fn getStateSize() usize {
+    return size_state;
 }
 
 /// Save the current FPU state into the given region.

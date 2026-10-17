@@ -211,6 +211,8 @@ pub fn sigreturn() void {
             ctx.sp_el0 = frame.mcontext.sp;
             ctx.pc = frame.mcontext.pc;
             ctx.pstate = frame.mcontext.pstate;
+            // Restore FP context.
+            FpContext.restore(frame);
 
             break :blk frame.saved_mask;
         },
@@ -218,6 +220,7 @@ pub fn sigreturn() void {
         .x86_64 => blk: {
             const frame: *const SigFrame = @ptrFromInt(ctx.rsp);
             const mc = &frame.mcontext;
+            const saved_mask = frame.saved_mask;
 
             // Restore general-purpose registers.
             ctx.r8 = mc.r8;
@@ -239,8 +242,10 @@ pub fn sigreturn() void {
             ctx.rsp = mc.rsp;
             ctx.rip = mc.rip;
             ctx.rflags = mc.flags;
+            // Restore FP context.
+            FpContext.restore(frame);
 
-            break :blk frame.saved_mask;
+            break :blk saved_mask;
         },
 
         else => @compileError("Unsupported architecture."),
@@ -396,13 +401,26 @@ pub fn pushSync(signo: Signal, fault: ?usize) void {
 // Arch-specific code
 // =============================================================
 
+const UcFlags = switch (builtin.cpu.arch) {
+    .aarch64 => u64,
+    .x86_64 => packed struct(u64) {
+        /// Indicates the presence of extended state information.
+        fp: bool = false,
+        /// CS and SS field valid.
+        ss: bool = false,
+        /// Not used.
+        _2: u62 = 0,
+    },
+    else => @compileError("Unsupported architecture."),
+};
+
 /// Register context saved onto the user stack when a signal is delivered.
 ///
 /// Compatible with `ucontext_t` in the Linux ABI.
 pub const SigFrame = switch (builtin.cpu.arch) {
     .aarch64 => extern struct {
         /// Context flags.
-        flags: u64 = 0,
+        flags: UcFlags = 0,
         /// Not used.
         link: u64 = 0,
         /// Stack information.
@@ -430,12 +448,14 @@ pub const SigFrame = switch (builtin.cpu.arch) {
             pc: u64,
             /// User PSTATE.
             pstate: u64,
+            /// FP/SIMD state and future expansion.
+            reserved: [4096]u8 align(16) = @splat(0),
         } align(16),
     },
 
     .x86_64 => extern struct {
         /// Context flags.
-        flags: u64 = 0,
+        flags: UcFlags = .{},
         /// Not used.
         link: u64 = 0,
         /// Stack information.
@@ -467,6 +487,16 @@ pub const SigFrame = switch (builtin.cpu.arch) {
             rsp: u64,
             rip: u64,
             flags: u64,
+            cs: u16,
+            gs: u16,
+            fs: u16,
+            ss: u16,
+            err: u64,
+            trapno: u64,
+            oldmask: u64,
+            cr2: u64,
+            fpstate: u64 = 0, // User address of the saved FPU state.
+            _reserved1: [8]u64 = @splat(0),
         },
         /// Saved signal mask.
         saved_mask: Mask,
@@ -484,6 +514,13 @@ comptime {
         "Invalid mcontext offset.",
         .{},
     );
+    if (builtin.cpu.arch == .x86_64) {
+        urd.comptimeAssert(
+            @sizeOf(@FieldType(SigFrame, "mcontext")) == 256 and @offsetOf(SigFrame, "saved_mask") == 296,
+            "Invalid mcontext size.",
+            .{},
+        );
+    }
 }
 
 /// Signal information passed to a signal handler.
@@ -519,6 +556,165 @@ const Frame = extern struct {
     sigframe: SigFrame,
     /// Signal information.
     siginfo: SigInfo,
+};
+
+/// Size in bytes of the red-zone.
+const red_zone_size: u64 = switch (builtin.cpu.arch) {
+    .x86_64 => 128, // SysV
+    .aarch64 => 0,
+    else => @compileError("Unsupported architecture."),
+};
+
+/// Handles saving and restoring FP context in sigframe.
+const FpContext = switch (builtin.cpu.arch) {
+    .aarch64 => struct {
+        /// Magic number.
+        const fpsimd_magic = 0x46508001;
+
+        /// Header of a record.
+        const Head = extern struct {
+            magic: u32,
+            size: u32,
+        };
+
+        /// FP/SIMD state record.
+        const FpSimd = extern struct {
+            head: Head,
+            fpsr: u32,
+            fpcr: u32,
+            vregs: [32][16]u8, // 32 128-bit vregisters.
+        };
+
+        /// Save the state into the sigframe.
+        ///
+        /// Returns the SP as is.
+        fn save(sf: *SigFrame, sp: u64) !u64 {
+            var state: arch.thread.FpuState align(16) = undefined;
+            arch.thread.saveFpu(&state);
+
+            const rec: FpSimd = .{
+                .head = .{ .magic = fpsimd_magic, .size = @sizeOf(FpSimd) },
+                .fpsr = state.fpsr,
+                .fpcr = state.fpcr,
+                .vregs = state.vregs,
+            };
+            @memcpy(sf.mcontext.reserved[0..@sizeOf(FpSimd)], std.mem.asBytes(&rec));
+
+            return sp;
+        }
+
+        /// Restore the state from the sigframe.
+        ///
+        /// The FPU state is left untouched if there is no FP/SIMD record.
+        fn restore(sf: *const SigFrame) void {
+            const reserved = &sf.mcontext.reserved;
+            var off: usize = 0;
+            while (off + @sizeOf(Head) <= reserved.len) {
+                const head = std.mem.bytesToValue(Head, reserved[off..][0..@sizeOf(Head)]);
+                if (head.magic == 0 or head.size < @sizeOf(Head)) {
+                    return;
+                }
+                if (head.size % 16 != 0) {
+                    return;
+                }
+                if (off + head.size > reserved.len) {
+                    return;
+                }
+
+                if (head.magic == fpsimd_magic and head.size >= @sizeOf(FpSimd)) {
+                    const rec = std.mem.bytesToValue(FpSimd, reserved[off..][0..@sizeOf(FpSimd)]);
+                    var state: arch.thread.FpuState align(16) = .{
+                        .vregs = rec.vregs,
+                        .fpsr = rec.fpsr,
+                        .fpcr = rec.fpcr,
+                    };
+                    arch.thread.restoreFpu(&state);
+                    return;
+                }
+                off += head.size;
+            }
+        }
+    },
+
+    .x86_64 => struct {
+        /// Required alignment in bytes of the XSAVE area.
+        const xarea_align = 64;
+        /// Magic number indicating the XSAVE area.
+        const xstate_magic1 = 0x46505853;
+        /// Magic number placed after the XSAVE area.
+        const xstate_magic2 = 0x46505845;
+        /// Offset in the XSAVE area of the SW reserved area.
+        const sw_reserved_offset = 464;
+
+        /// SW reserved bytes in the XSAVE area.
+        const SwBytes = extern struct {
+            /// When set to magic1, this is an xstate context. Otherwise, legacy frame.
+            magic1: u32,
+            /// Total size in bytes of the fpstate area.
+            extended_size: u32,
+            /// Feature bit mask that's present in the memory layout.
+            xfeatures: u64,
+            /// Size in bytes of the XSAVE area.
+            xstate_size: u32,
+            ///
+            _padding: [7]u32 = @splat(0),
+        };
+
+        /// Save the state onto the user stack.
+        ///
+        /// Returns the lowest user stack address occupied by the saved state.
+        fn save(sf: *SigFrame, sp: u64) !u64 {
+            // Copy to kernel buffer first.
+            const size = arch.thread.getFpuStateSize();
+            const total = size + @sizeOf(u32); // + for trailing magic2
+            const raw = try mem.bin.alloc(u8, total + xarea_align);
+            defer mem.bin.free(raw);
+            const buf = raw[std.mem.alignPointerOffset(raw.ptr, xarea_align).?..][0..total];
+            @memset(buf, 0);
+            arch.thread.saveFpu(buf.ptr);
+
+            // Describe the extent of the area.
+            const sw: SwBytes = .{
+                .magic1 = xstate_magic1,
+                .extended_size = @intCast(total),
+                .xfeatures = arch.thread.fpuXfeatures(),
+                .xstate_size = @intCast(size),
+            };
+            @memcpy(buf[sw_reserved_offset..][0..@sizeOf(SwBytes)], std.mem.asBytes(&sw));
+            std.mem.writeInt(u32, buf[size..][0..@sizeOf(u32)], xstate_magic2, .little);
+
+            // Put the saved state onto the user stack.
+            const uaddr = (sp - total) & ~@as(u64, xarea_align - 1);
+            try urd.uaccess.copyToUser(uaddr, buf);
+
+            // Update sigframe information.
+            sf.flags.fp = true;
+            sf.mcontext.fpstate = uaddr;
+
+            return uaddr;
+        }
+
+        /// Restore the state from the sigframe.
+        ///
+        /// The FPU state is left untouched if the area can't be read or has an invalid header.
+        fn restore(sf: *const SigFrame) void {
+            // Copy from user stack into the kernel buffer first.
+            const size = arch.thread.getFpuStateSize();
+            const raw = mem.bin.alloc(u8, size + xarea_align) catch return;
+            defer mem.bin.free(raw);
+            const buf = raw[std.mem.alignPointerOffset(raw.ptr, xarea_align).?..][0..size];
+            urd.uaccess.copyFromUser(buf, sf.mcontext.fpstate) catch return;
+
+            // Validate FPU state so that restoring it always succeeds.
+            if (!arch.thread.isValidFpuState(buf)) {
+                return;
+            }
+
+            arch.thread.restoreFpu(buf.ptr);
+        }
+    },
+
+    else => @compileError("Unsupported architecture."),
 };
 
 /// Check if signals can be delivered in the current context.
@@ -577,8 +773,11 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
                 };
             }
 
+            // Push the FP state skipping red-zone.
+            const fp_sp = try FpContext.save(sf, ctx.sp_el0 - red_zone_size);
+            const frame_uaddr = (fp_sp - @sizeOf(Frame)) & ~@as(u64, 0xF);
+
             // Copy constructed sigframe and siginfo to user space.
-            const frame_uaddr = (ctx.sp_el0 - @sizeOf(Frame)) & ~@as(u64, 0xF);
             try urd.uaccess.copyToUser(frame_uaddr, std.mem.asBytes(&local));
 
             // Modify user context to execute the signal handler.
@@ -616,6 +815,14 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
                     .rsp = ctx.rsp,
                     .rip = ctx.rip,
                     .flags = ctx.rflags,
+                    .cs = @truncate(ctx.cs),
+                    .gs = 0, // TODO
+                    .fs = 0, // TODO
+                    .ss = @truncate(ctx.ss),
+                    .err = 0, // TODO
+                    .trapno = 0, // TODO
+                    .oldmask = 0, // TODO
+                    .cr2 = th.sigstate.fault,
                 };
             }
 
@@ -631,8 +838,10 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
                 };
             }
 
-            // Copy the constructed sigframe and siginfo to user space.
-            const frame_uaddr = (ctx.rsp - @sizeOf(Frame)) & ~@as(u64, 0xF);
+            // Push the FP state skipping red-zone.
+            const fp_sp = try FpContext.save(sf, ctx.rsp - red_zone_size);
+            const frame_uaddr = (fp_sp - @sizeOf(Frame)) & ~@as(u64, 0xF);
+            // Copy constructed sigframe to user space.
             try urd.uaccess.copyToUser(frame_uaddr, std.mem.asBytes(&local));
 
             // Push the trampoline address as the return address for the handler.
