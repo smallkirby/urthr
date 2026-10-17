@@ -115,6 +115,10 @@ const FreeList = struct {
     ///
     /// This contains both used and free blocks.
     num_total: usize,
+    /// Number of blocks in the list.
+    num_free: usize = 0,
+    /// Block most recently inserted into the list.
+    hint: ?*FreePage = null,
 
     /// Doubly linked list of free pages.
     pub const FreePageLink = DoublyLinkedList;
@@ -141,7 +145,16 @@ const FreeList = struct {
 
     /// Allocate a block of pages from the free list.
     pub fn allocBlock(self: *FreeList) Error!*FreePage {
-        return self.link.popFirst() orelse Error.OutOfMemory;
+        const page = self.link.popFirst() orelse {
+            return Error.OutOfMemory;
+        };
+        self.num_free -= 1;
+
+        if (self.hint == page) {
+            self.hint = null;
+        }
+
+        return page;
     }
 
     /// Detach the given block from the freelist.
@@ -150,6 +163,11 @@ const FreeList = struct {
     /// Caller MUST ensure that the block is in the list.
     pub fn detachBlock(self: *FreeList, block: *FreePage) void {
         self.link.remove(block);
+        self.num_free -= 1;
+
+        if (self.hint == block) {
+            self.hint = null;
+        }
         self.num_total -= 1;
     }
 
@@ -171,19 +189,52 @@ const FreeList = struct {
 
     /// Insert the block to the freelist keeping list sorted in ascending order of physical addresses.
     ///
-    /// Note that this function does not increment the counter.
+    /// The search starts from the head, the tail, or the last inserted block.
+    ///
+    /// Note that this function does not increment `num_total`.
     ///
     /// TODO: Use binary search.
     fn insertSorted(self: *FreeList, new_page: *FreePage) void {
-        // Starting from the last block, find the first block whose address is smaller than the new block.
-        var cur: ?*FreePage = self.link.last;
-        while (cur) |page| : (cur = page.prev) {
-            if (@intFromPtr(page) < @intFromPtr(new_page)) break;
+        defer {
+            self.num_free += 1;
+            self.hint = new_page;
         }
-        if (cur) |c| {
-            self.link.insertAfter(c, new_page);
-        } else {
+
+        // Find the nearest starting point for insertion.
+        const addr = @intFromPtr(new_page);
+        var start: ?*FreePage = null;
+        var distance: usize = std.math.maxInt(usize);
+        for ([_]?*FreePage{ self.link.first, self.hint, self.link.last }) |cand| {
+            const node = cand orelse continue;
+            const p = @intFromPtr(node);
+            const dist = if (p > addr) p - addr else addr - p;
+            if (dist < distance) {
+                start = node;
+                distance = dist;
+            }
+        }
+
+        var cur = start orelse {
             self.link.prepend(new_page);
+            return;
+        };
+
+        // Find the last block whose address is smaller than the new block.
+        if (@intFromPtr(cur) < addr) {
+            while (cur.next) |next| : (cur = next) {
+                if (@intFromPtr(next) > addr) break;
+            }
+            self.link.insertAfter(cur, new_page);
+        } else {
+            var prev: ?*FreePage = cur;
+            while (prev) |page| : (prev = page.prev) {
+                if (@intFromPtr(page) < addr) break;
+            }
+            if (prev) |p| {
+                self.link.insertAfter(p, new_page);
+            } else {
+                self.link.prepend(new_page);
+            }
         }
     }
 
@@ -201,7 +252,7 @@ const FreeList = struct {
 
     /// Get the number of blocks in the freelist.
     pub inline fn numFree(self: FreeList) usize {
-        return self.link.len();
+        return self.num_free;
     }
 
     /// Get the number of blocks in use.
