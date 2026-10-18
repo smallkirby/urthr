@@ -322,6 +322,9 @@ pub fn mount(path: Path, fs: FileSystem, allocator: Allocator) Error!void {
 /// `path` must be the root of a mount.
 /// The reference to `path` is not consumed.
 pub fn umount(path: Path, allocator: Allocator) Error!void {
+    // Flush all dirty pages before unmounting.
+    try page_cache.flushAll();
+
     glock.lock();
     defer glock.unlock();
 
@@ -343,12 +346,14 @@ pub fn umount(path: Path, allocator: Allocator) Error!void {
 
 /// Write back all dirty data of all mounted filesystems.
 pub fn syncAll() Error!void {
+    try page_cache.flushAll();
     return mounts.syncAll();
 }
 
 /// Write back all dirty data of the filesystem the given path belongs to.
 pub fn syncFsAt(path: Path) Error!void {
     const mnt = path.mount orelse return Error.InvalidArgument;
+    try page_cache.flushAll(); // TODO: flush only pages of this filesystem.
     return mnt.filesystem.sync();
 }
 

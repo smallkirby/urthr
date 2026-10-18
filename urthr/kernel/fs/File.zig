@@ -211,9 +211,11 @@ pub fn truncate(self: *Self, new_size: usize) Error!void {
 
     if (self.ops.truncate) |f| {
         self.utimeUpdate();
-        try f(self, new_size);
+
         if (self.inode().cacheable) {
-            fs.page_cache.truncate(self.inode(), new_size);
+            try fs.page_cache.truncate(self, new_size);
+        } else {
+            try f(self, new_size);
         }
     } else {
         return Error.Unsupported;
