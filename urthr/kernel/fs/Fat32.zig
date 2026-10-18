@@ -929,6 +929,9 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
     } else return null;
 }
 
+/// Maximum number of sectors read by a single device request.
+const max_read_sectors = 256;
+
 /// Read data from a regular file.
 fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
     const ctx = FileImpl.from(file);
@@ -966,8 +969,19 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
 
         const num_whole_sec = (read_buf.len - bytes_read) / sector_size;
         const sec_in_clus_remain = fat32.bpb.sec_per_clus - sector_in_clus;
-        const nsectors = @min(num_whole_sec, sec_in_clus_remain);
+        var nsectors = @min(num_whole_sec, sec_in_clus_remain);
+        var extra_clus: u32 = 0;
         const to_copy = if (offset_in_sec == 0 and nsectors > 0) blk: {
+            // Merge physically contiguous clusters into a single request.
+            if (nsectors == sec_in_clus_remain) {
+                while (nsectors < @min(num_whole_sec, max_read_sectors)) {
+                    const next = try fat32.getNextCluster(cur_clus + extra_clus) orelse break;
+                    if (next != cur_clus + extra_clus + 1) break; // not physically contiguous
+                    extra_clus += 1;
+                    nsectors += @min(num_whole_sec - nsectors, fat32.bpb.sec_per_clus);
+                }
+            }
+
             // Fast path: read whole sectors directly from the device.
             const chunk_len = nsectors * sector_size;
 
@@ -992,6 +1006,8 @@ fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
 
         bytes_read += to_copy;
         cur_offset += to_copy;
+        cur_clus += extra_clus;
+        cur_clus_file_offset += @as(u64, extra_clus) * bytes_per_cluster;
 
         // If we crossed a cluster boundary, follow the FAT chain to seek the next cluster.
         if (cur_offset - cur_clus_file_offset >= bytes_per_cluster) {
