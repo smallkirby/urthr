@@ -732,12 +732,32 @@ pub fn build(b: *std.Build) !void {
         iu.installArtifact(utest, .target, .bin);
 
         // =============================================================
+        // aperf-ctrl
+
+        const aperf_ctrl = blk: {
+            const exe = b.addExecutable(.{
+                .name = "aperf-ctrl",
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path("app/aperf-ctrl/main.zig"),
+                    .target = user_target,
+                }),
+                .linkage = .static,
+                .use_llvm = true,
+            });
+
+            break :blk exe;
+        };
+        aperf_ctrl.root_module.addImport("common", common_module);
+        iu.installArtifact(aperf_ctrl, .target, .bin);
+
+        // =============================================================
         // BootFS
 
         const bootfs = b.step("bootfs", "Create BootFS image");
         const apps = [_]*std.Build.Step.Compile{
             init,
             utest,
+            aperf_ctrl,
         };
         const bootfs_boot_dir = b.fmt("zig-out/{s}/bootfs/boot", .{@tagName(board_type)});
 
