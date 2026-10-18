@@ -112,6 +112,11 @@ refcnt: std.atomic.Value(usize) = .init(1),
 /// This lock is completely for advisory purposes for users.
 user_lock: SharedLock = .{},
 
+/// Whether the file data can be cached in the page cache.
+cacheable: bool = false,
+/// Cached pages for this inode.
+cache: fs.page_cache.InodeCache = .{},
+
 /// Lookup an inode by its name.
 pub fn lookup(self: *Self, name: []const u8) Error!?*Inode {
     if (self.ftype != .directory) return Error.NotDirectory;
@@ -131,6 +136,7 @@ pub fn unref(self: *Self) void {
     const prev = self.refcnt.fetchSub(1, .acq_rel);
     rtt.expect(prev != 0);
     if (prev == 1) {
+        if (self.cacheable) fs.page_cache.dropInode(self);
         self.iops.deinit(self);
     }
 }

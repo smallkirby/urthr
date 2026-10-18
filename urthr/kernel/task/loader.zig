@@ -340,11 +340,8 @@ const Reader = struct {
     fn stream(reader: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
         const self: *Reader = @alignCast(@fieldParentPtr("interface", reader));
         const dest = limit.slice(w.writableSliceGreedy(1) catch return error.WriteFailed);
-        const n = self.file.ops.read(
-            self.file,
-            dest,
-            self.pos,
-        ) catch return error.ReadFailed;
+        const res = self.file.pread(dest, self.pos) catch return error.ReadFailed;
+        const n = res.len;
 
         self.pos += n;
         w.advance(n);

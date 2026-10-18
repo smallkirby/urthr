@@ -3,6 +3,7 @@ pub const Inode = @import("fs/Inode.zig");
 pub const Dentry = @import("fs/Dentry.zig");
 pub const File = @import("fs/File.zig");
 pub const Mount = @import("fs/Mount.zig");
+pub const page_cache = @import("fs/page_cache.zig");
 
 pub const Fat32 = @import("fs/Fat32.zig");
 pub const RootFs = @import("fs/RootFs.zig");

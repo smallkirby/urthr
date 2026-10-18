@@ -160,11 +160,7 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
     if (self.inode().ftype == .directory) return Error.NotFile;
     if (!self.access.readable) return Error.BadAccess;
 
-    const num_read = try self.ops.read(
-        self,
-        buf,
-        self.offset,
-    );
+    const num_read = try self.readAt(buf, self.offset);
     self.offset += @intCast(num_read);
     self.inode().times.atime = .now();
 
@@ -176,11 +172,7 @@ pub fn pread(self: *Self, buf: []u8, pos: usize) Error![]u8 {
     if (self.inode().ftype == .directory) return Error.NotFile;
     if (!self.access.readable) return Error.BadAccess;
 
-    const num_read = try self.ops.read(
-        self,
-        buf,
-        pos,
-    );
+    const num_read = try self.readAt(buf, pos);
     self.inode().times.atime = .now();
     return buf[0..num_read];
 }
@@ -189,35 +181,25 @@ pub fn pread(self: *Self, buf: []u8, pos: usize) Error![]u8 {
 pub fn write(self: *Self, buf: []const u8) Error!usize {
     if (self.inode().ftype == .directory) return Error.NotFile;
     if (!self.access.writable) return Error.BadAccess;
+    if (self.ops.write == null) return Error.Unsupported;
 
-    if (self.ops.write) |f| {
-        if (self.status_flags.append) {
-            self.offset = self.size();
-        }
-        self.utimeUpdate();
-        const num_written = try f(
-            self,
-            buf,
-            self.offset,
-        );
-        self.offset += @intCast(num_written);
-        return num_written;
-    } else {
-        return Error.Unsupported;
+    if (self.status_flags.append) {
+        self.offset = self.size();
     }
+    self.utimeUpdate();
+    const num_written = try self.writeAt(buf, self.offset);
+    self.offset += @intCast(num_written);
+    return num_written;
 }
 
 /// Write data from the buffer into the file at the given position, without advancing File's offset.
 pub fn pwrite(self: *Self, buf: []const u8, pos: usize) Error!usize {
     if (self.inode().ftype == .directory) return Error.NotFile;
     if (!self.access.writable) return Error.BadAccess;
+    if (self.ops.write == null) return Error.Unsupported;
 
-    if (self.ops.write) |f| {
-        self.utimeUpdate();
-        return f(self, buf, pos);
-    } else {
-        return Error.Unsupported;
-    }
+    self.utimeUpdate();
+    return self.writeAt(buf, pos);
 }
 
 /// Change the size of the file.
@@ -229,7 +211,10 @@ pub fn truncate(self: *Self, new_size: usize) Error!void {
 
     if (self.ops.truncate) |f| {
         self.utimeUpdate();
-        return f(self, new_size);
+        try f(self, new_size);
+        if (self.inode().cacheable) {
+            fs.page_cache.truncate(self.inode(), new_size);
+        }
     } else {
         return Error.Unsupported;
     }
@@ -342,6 +327,31 @@ pub fn getGid(self: *const Self) u32 {
 /// Helper function to get the inode associated with this file.
 fn inode(self: *const Self) *Inode {
     return self.path.dentry.getInode();
+}
+
+/// Read data from the file at the given position through the page cache.
+///
+/// None of access mode, timestamps, or file offset is checked or updated.
+fn readAt(self: *Self, buf: []u8, pos: usize) Error!usize {
+    const node = self.inode();
+    return if (node.cacheable and node.ftype == .regular)
+        fs.page_cache.read(self, buf, pos)
+    else
+        self.ops.read(self, buf, pos);
+}
+
+/// Write data to the file at the given position through the page cache if the file is cacheable.
+///
+/// None of access mode, timestamps, or file offset is checked or updated.
+fn writeAt(self: *Self, buf: []const u8, pos: usize) Error!usize {
+    const node = self.inode();
+    if (node.cacheable and node.ftype == .regular) {
+        return fs.page_cache.write(self, buf, pos);
+    } else if (self.ops.write) |f| {
+        return f(self, buf, pos);
+    } else {
+        return Error.Unsupported;
+    }
 }
 
 /// Set the modification and status-change timestamps to the current time.
