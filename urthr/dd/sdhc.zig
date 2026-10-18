@@ -786,9 +786,9 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
                     );
 
                     const words = xfer_bsize / @sizeOf(u32);
-                    const p: [*]u32 = @ptrCast(@alignCast(&buf[off]));
                     for (0..words) |i| {
-                        p[i] = bits.fromLittleEndian(sdhc.read(BufferDataPort).value);
+                        const w = bits.fromLittleEndian(sdhc.read(BufferDataPort).value);
+                        @memcpy(buf[off + i * @sizeOf(u32) ..][0..@sizeOf(u32)], std.mem.asBytes(&w));
                     }
                 }
 
@@ -814,9 +814,10 @@ fn issueCmd(cmd: CmdIdx, arg: anytype, data: ?[]u8) CommandResponse {
                     );
 
                     const words = xfer_bsize / @sizeOf(u32);
-                    const p: [*]const u32 = @ptrCast(@alignCast(&buf[off]));
                     for (0..words) |i| {
-                        sdhc.write(BufferDataPort, .{ .value = bits.toLittleEndian(p[i]) });
+                        var w: u32 = undefined;
+                        @memcpy(std.mem.asBytes(&w), buf[off + i * @sizeOf(u32) ..][0..@sizeOf(u32)]);
+                        sdhc.write(BufferDataPort, .{ .value = bits.toLittleEndian(w) });
                     }
                 }
 
