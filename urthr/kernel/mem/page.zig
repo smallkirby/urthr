@@ -63,35 +63,12 @@ pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.Log
         rtt.expectEqual(0, avail.start & page_mask);
         rtt.expectEqual(0, avail.end & page_mask);
 
-        var cur = avail.start;
-        const end = avail.start + avail.size();
-
-        // Avoid using physical address 0.
-        if (cur == 0) {
-            cur = page_size;
-        }
-
-        for (reserveds) |r| {
-            const reserved_start = r.start;
-            const reserved_end = reserved_start + util.roundup(r.size(), page_size);
-            rtt.expectEqual(0, reserved_start & page_mask);
-            rtt.expectEqual(0, reserved_end & page_mask);
-
-            if (reserved_start >= end) break;
-            if (reserved_end <= cur) continue;
-
-            // Clamp to `cur` in case the reserved region starts before it.
-            const clamped_start = @max(reserved_start, cur);
-            const cur_size = clamped_start - cur;
-            if (cur_size != 0) {
-                arena.addRegion(cur, cur + cur_size);
-            }
-            // Clamp to `end` in case the reserved region extends past this avail region.
-            cur = @min(reserved_end, end);
-        }
-
-        if (cur < end) {
-            arena.addRegion(cur, end);
+        var cur = avail;
+        while (findFirstUsable(cur, reserveds)) |usable| : (cur = .{
+            .start = usable.end,
+            .end = avail.end,
+        }) {
+            arena.addRegion(usable.start, usable.end);
         }
     }
 
@@ -102,6 +79,35 @@ pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.Log
 
     // Runtime test.
     rttTestBuddyAllocator();
+}
+
+/// Find the first usable memory region within `avail`, excluding `reserveds` regions.
+///
+/// `reserveds` must be sorted by the starting address in ascending order.
+fn findFirstUsable(avail: Range, reserveds: []const Range) ?Range {
+    var cur = @max(page_size, avail.start); // avoid using physical address 0
+    const end = avail.start + avail.size();
+
+    for (reserveds) |r| {
+        const rstart = r.start;
+        const rend = rstart + util.roundup(r.size(), page_size);
+        rtt.expectEqual(0, rstart & page_mask);
+        rtt.expectEqual(0, rend & page_mask);
+
+        if (end <= rstart) {
+            break; // Available region end
+        }
+        if (rend <= cur) {
+            continue; // Reserved region does not overlap
+        }
+        if (cur < rstart) {
+            return .{ .start = cur, .end = rstart };
+        }
+
+        cur = @min(rend, end);
+    }
+
+    return if (cur < end) .{ .start = cur, .end = end } else null;
 }
 
 /// Manages free lists of each order for single memory zone.
