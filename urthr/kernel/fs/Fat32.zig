@@ -933,6 +933,8 @@ fn fiterate(iter: *fs.File.Iterator, allocator: Allocator) fs.Error!?fs.File.Ite
 
 /// Maximum number of sectors read by a single device request.
 const max_read_sectors = 256;
+/// Maximum number of sectors written by a single request.
+const max_write_sectors = 256;
 
 /// Read data from a regular file.
 fn fread(file: *fs.File, buf: []u8, offset: usize) fs.Error!usize {
@@ -1096,7 +1098,8 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
 
         const num_whole_sec = (total_len - written) / sector_size;
         const sec_in_clus_remain = fat32.bpb.sec_per_clus - sector_in_clus;
-        const nsectors = @min(num_whole_sec, sec_in_clus_remain);
+        var nsectors = @min(num_whole_sec, sec_in_clus_remain);
+        var extra_clus: u32 = 0;
         const num_zero_sec = if (written < zero_len)
             (zero_len - written) / sector_size
         else
@@ -1113,6 +1116,19 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
             try fat32.device.writeBlocks(lba, zero_chunk[0..chunk_len]);
             break :blk chunk_len;
         } else if (offset_in_sec == 0 and written >= zero_len and nsectors > 0) blk: {
+            // Merge physically contiguous clusters into a single request.
+            if (nsectors == sec_in_clus_remain) {
+                while (nsectors < @min(num_whole_sec, max_write_sectors)) {
+                    const last = cur_clus + extra_clus;
+                    const next =
+                        try fat32.getNextCluster(last) orelse
+                        try fat32.allocateCluster(last);
+                    if (next != last + 1) break; // not physically contiguous
+                    extra_clus += 1;
+                    nsectors += @min(num_whole_sec - nsectors, fat32.bpb.sec_per_clus);
+                }
+            }
+
             // Fast path: batch write whole sectors from the buffer
             const chunk_len = nsectors * sector_size;
             const data_off = written - zero_len;
@@ -1150,6 +1166,8 @@ fn fwrite(file: *fs.File, buf: []const u8, offset: usize) fs.Error!usize {
 
         written += to_write;
         cur_offset += to_write;
+        cur_clus += extra_clus;
+        cur_clus_file_offset += @as(u64, extra_clus) * bytes_per_cluster;
 
         // If we crossed a cluster boundary, follow or extend the FAT chain.
         if (cur_offset - cur_clus_file_offset >= bytes_per_cluster) {
