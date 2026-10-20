@@ -46,7 +46,7 @@ pub const interface = PageAllocator{
 ///
 /// All arguments are in physical addresses.
 pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.LogFn) void {
-    arena = Arena.new();
+    rtt.expect(avails.len > 0);
 
     // Sort `reserveds` by the starting address.
     {
@@ -58,17 +58,68 @@ pub fn init(avails: []const Range, reserveds: []Range, comptime log_fn: ?urd.Log
         std.mem.sort(Range, reserveds, {}, sort_fn);
     }
 
+    // Calculate the total memory range managed by the arena.
+    const total_begin = blk: {
+        var cur: usize = std.math.maxInt(usize);
+        for (avails) |avail| {
+            cur = @min(cur, avail.start);
+        }
+        break :blk cur;
+    };
+    const total_end = blk: {
+        var cur: usize = 0;
+        for (avails) |avail| {
+            cur = @max(cur, avail.end);
+        }
+        break :blk cur;
+    };
+    const total_range = Range{
+        .start = total_begin,
+        .end = total_end,
+    };
+
+    // Allocate buffer for the arena's metadata.
+    // TODO: should keep low memory available for other uses?
+    const meta_buffer_size = Arena.getRequiredMetaBuffer(total_range);
+    const meta_range = blk: {
+        for (avails) |avail| {
+            var cur = avail;
+            while (findFirstUsable(cur, reserveds)) |usable| : (cur = .{
+                .start = usable.end,
+                .end = avail.end,
+            }) {
+                if (usable.size() >= meta_buffer_size) break :blk Range{
+                    .start = usable.start,
+                    .end = usable.start + meta_buffer_size,
+                };
+            }
+        }
+        @panic("No suitable meta buffer found");
+    };
+    const meta_buffer: [*]u8 = @ptrFromInt(phys2virt(meta_range.start));
+
+    // Initialize the arena with meta buffer.
+    arena = .new(total_range, meta_buffer[0..meta_buffer_size]);
+
     // Feed the available regions to the arena,
     for (avails) |avail| {
         rtt.expectEqual(0, avail.start & page_mask);
         rtt.expectEqual(0, avail.end & page_mask);
 
-        var cur = avail;
-        while (findFirstUsable(cur, reserveds)) |usable| : (cur = .{
-            .start = usable.end,
-            .end = avail.end,
+        // Exclude reserved regions.
+        var outer = avail;
+        while (findFirstUsable(outer, reserveds)) |outer_usable| : (outer = .{
+            .start = outer_usable.end,
+            .end = outer.end,
         }) {
-            arena.addRegion(usable.start, usable.end);
+            // Exclude meta buffer region.
+            var inner = outer_usable;
+            while (findFirstUsable(inner, &[1]Range{meta_range})) |inner_usable| : (inner = .{
+                .start = inner_usable.end,
+                .end = inner.end,
+            }) {
+                arena.addRegion(inner_usable.start, inner_usable.end);
+            }
         }
     }
 
@@ -112,7 +163,6 @@ fn findFirstUsable(avail: Range, reserveds: []const Range) ?Range {
 
 /// Manages free lists of each order for single memory zone.
 ///
-/// The list must be sorted in ascending order of physical addresses.
 /// Each page is ensured to be aligned to the order.
 const FreeList = struct {
     /// Doubly linked list of free pages.
@@ -123,8 +173,6 @@ const FreeList = struct {
     num_total: usize,
     /// Number of blocks in the list.
     num_free: usize = 0,
-    /// Block most recently inserted into the list.
-    hint: ?*FreePage = null,
 
     /// Doubly linked list of free pages.
     pub const FreePageLink = DoublyLinkedList;
@@ -143,8 +191,8 @@ const FreeList = struct {
 
     /// Add a new memory region under the management of this list as a free block.
     pub fn addRegion(self: *FreeList, phys: Phys) *FreePage {
-        const new_page: *FreePage = @ptrFromInt(phys2virt(phys));
-        self.insertSorted(new_page);
+        const new_page: *FreePage = phys2page(phys);
+        self.insert(new_page);
         self.num_total += 1;
         return new_page;
     }
@@ -156,10 +204,6 @@ const FreeList = struct {
         };
         self.num_free -= 1;
 
-        if (self.hint == page) {
-            self.hint = null;
-        }
-
         return page;
     }
 
@@ -170,10 +214,6 @@ const FreeList = struct {
     pub fn detachBlock(self: *FreeList, block: *FreePage) void {
         self.link.remove(block);
         self.num_free -= 1;
-
-        if (self.hint == block) {
-            self.hint = null;
-        }
         self.num_total -= 1;
     }
 
@@ -189,59 +229,16 @@ const FreeList = struct {
     /// Add a block of pages to the free list.
     pub fn freeBlock(self: *FreeList, block: []u8) *FreePage {
         const page: *FreePage = @ptrCast(@alignCast(block));
-        self.insertSorted(page);
+        self.insert(page);
         return page;
     }
 
-    /// Insert the block to the freelist keeping list sorted in ascending order of physical addresses.
-    ///
-    /// The search starts from the head, the tail, or the last inserted block.
+    /// Insert the block to the freelist.
     ///
     /// Note that this function does not increment `num_total`.
-    ///
-    /// TODO: Use binary search.
-    fn insertSorted(self: *FreeList, new_page: *FreePage) void {
-        defer {
-            self.num_free += 1;
-            self.hint = new_page;
-        }
-
-        // Find the nearest starting point for insertion.
-        const addr = @intFromPtr(new_page);
-        var start: ?*FreePage = null;
-        var distance: usize = std.math.maxInt(usize);
-        for ([_]?*FreePage{ self.link.first, self.hint, self.link.last }) |cand| {
-            const node = cand orelse continue;
-            const p = @intFromPtr(node);
-            const dist = if (p > addr) p - addr else addr - p;
-            if (dist < distance) {
-                start = node;
-                distance = dist;
-            }
-        }
-
-        var cur = start orelse {
-            self.link.prepend(new_page);
-            return;
-        };
-
-        // Find the last block whose address is smaller than the new block.
-        if (@intFromPtr(cur) < addr) {
-            while (cur.next) |next| : (cur = next) {
-                if (@intFromPtr(next) > addr) break;
-            }
-            self.link.insertAfter(cur, new_page);
-        } else {
-            var prev: ?*FreePage = cur;
-            while (prev) |page| : (prev = page.prev) {
-                if (@intFromPtr(page) < addr) break;
-            }
-            if (prev) |p| {
-                self.link.insertAfter(p, new_page);
-            } else {
-                self.link.prepend(new_page);
-            }
-        }
+    fn insert(self: *FreeList, new_page: *FreePage) void {
+        self.link.prepend(new_page);
+        self.num_free += 1;
     }
 
     /// Check if the list does not have any free pages.
@@ -276,12 +273,44 @@ const Arena = struct {
 
     /// Free list for each order.
     lists: [avail_orders]FreeList,
+    /// Total memory range managed by this arena.
+    total_range: Range,
+    /// Metadata for each physical page.
+    meta: []align(1) PageMeta,
+    /// The first PFN managed by this arena.
+    meta_base_index: usize,
+
+    /// Page metadata.
+    ///
+    /// All physical pages have associated metadata of this type.
+    const PageMeta = struct {
+        /// If this page is a first page of free block, the order of the block.
+        /// Otherwise (in use or not the first page of free block), null.
+        order: ?SizeOrder = null,
+    };
 
     /// Create a new arena.
-    pub fn new() Arena {
-        return Arena{
+    pub fn new(total: Range, buffer: []u8) Arena {
+        rtt.expect(buffer.len >= getRequiredMetaBuffer(total));
+
+        const meta: [*]align(1) PageMeta = @ptrCast(buffer.ptr);
+        const meta_length = total.size() / page_size;
+        @memset(meta[0..meta_length], .{});
+
+        return .{
             .lists = @splat(.new()),
+            .total_range = total,
+            .meta = meta[0..meta_length],
+            .meta_base_index = total.start / page_size,
         };
+    }
+
+    /// Get the size in bytes of the meta buffer required to manage the given range.
+    pub fn getRequiredMetaBuffer(total: Range) usize {
+        return util.roundup(
+            @sizeOf(PageMeta) * (total.size() / page_size),
+            page_size,
+        );
     }
 
     /// Add a memory region to the free list.
@@ -303,7 +332,7 @@ const Arena = struct {
             remaining += orderToInt(orig_order) - orderToInt(order);
 
             // Add the region to the free list.
-            const new_page = self.getList(order).addRegion(cur_start);
+            const new_page = self.registerBlock(cur_start, order);
             self.maybeMergeRecursive(new_page, order);
 
             cur_start += orderToInt(order) * page_size;
@@ -327,6 +356,8 @@ const Arena = struct {
         };
 
         const ptr: [*]align(page_size) u8 = @ptrCast(@alignCast(block));
+        self.setMetaUsed(page2phys(block));
+
         return ptr[0 .. num_pages * page_size];
     }
 
@@ -334,14 +365,17 @@ const Arena = struct {
     pub fn freePages(self: *Arena, pages: []u8) void {
         if (pages.len == 0) return;
 
+        const phys = virt2phys(@intFromPtr(pages.ptr));
         const order = roundUpToOrder(std.math.divCeil(
             usize,
             pages.len,
             page_size,
         ) catch unreachable);
-        rtt.expectEqual(0, @intFromPtr(pages.ptr) & getOrderMask(order));
+        rtt.expectEqual(0, phys & getOrderMask(order));
+        rtt.expectEqual(null, self.meta[self.getMetaIndex(phys)].order);
 
         const new_page = self.getList(order).freeBlock(pages);
+        self.setMetaFree(phys, order);
         self.maybeMergeRecursive(new_page, order);
     }
 
@@ -368,14 +402,13 @@ const Arena = struct {
             @panic("BuddyAllocator: failed to split the free list.");
         };
 
+        const block_phys = page2phys(block);
         const block_size = orderToInt(lower_order) * page_size;
         const num_blocks = (orderToInt(order) * page_size) / block_size;
         rtt.expectEqual(2, num_blocks);
         for (0..2) |i| {
             // We dont't merge here.
-            _ = self.getList(lower_order).addRegion(
-                virt2phys(@intFromPtr(block)) + i * block_size,
-            );
+            _ = self.registerBlock(block_phys + i * block_size, lower_order);
         }
     }
 
@@ -386,52 +419,41 @@ const Arena = struct {
         // If the number of free blocks is small, we don't merge.
         if (self.getList(order).numFree() < merge_threshold) return;
 
-        const higher_order = order + 1;
-        const higher_mask = getOrderMask(higher_order);
-        const adjacent_distance = orderToInt(order) * page_size;
-
         // Find the adjacent block.
-        const t1, const t2 = if (@intFromPtr(page) & higher_mask == 0) blk: {
-            // The given block is the lower one.
-            break :blk if (page.next != null and @intFromPtr(page.next.?) == @intFromPtr(page) + adjacent_distance) .{
-                page,
-                page.next.?,
-            } else .{
-                null,
-                null,
-            };
-        } else blk: {
-            // The given block is the higher one.
-            break :blk if (page.prev != null and @intFromPtr(page.prev.?) == @intFromPtr(page) - adjacent_distance) .{
-                page.prev.?,
-                page,
-            } else .{
-                null,
-                null,
-            };
-        };
+        const higher_order = order + 1;
+        const phys = page2phys(page);
+        const buddy = phys ^ getOrderSize(order);
+        if (!self.total_range.contains(buddy)) {
+            @branchHint(.cold);
+            return;
+        }
+        if (self.meta[self.getMetaIndex(buddy)].order != order) {
+            return;
+        }
 
         // If we find the adjacent block, merge them recursively.
-        if (t1 != null and t2 != null) {
-            const lower_list = self.getList(order);
-            const higher_list = self.getList(higher_order);
+        const lower_list = self.getList(order);
+        lower_list.detachBlock(page);
+        lower_list.detachBlock(phys2page(buddy));
 
-            lower_list.detachBlock(t1.?);
-            lower_list.detachBlock(t2.?);
+        const new_page = self.registerBlock(@min(phys, buddy), higher_order);
+        self.setMetaUsed(@max(phys, buddy));
 
-            const new_page = higher_list.addRegion(virt2phys(@intFromPtr(t1.?)));
-            self.maybeMergeRecursive(new_page, higher_order);
-        }
+        self.maybeMergeRecursive(new_page, higher_order);
+    }
+
+    /// Put a new free block under the management.
+    ///
+    /// This function does not try to merge the block.
+    fn registerBlock(self: *Arena, phys: Phys, order: SizeOrder) *FreeList.FreePage {
+        const page = self.getList(order).addRegion(phys);
+        self.setMetaFree(phys, order);
+        return page;
     }
 
     /// Get the free list for the given order.
     inline fn getList(self: *Arena, order: SizeOrder) *FreeList {
         return &self.lists[order];
-    }
-
-    /// Get the address mask for the order.
-    fn getOrderMask(order: SizeOrder) u64 {
-        return ((@as(usize, 1) << page_shift) << @as(u6, @intCast(order))) - 1;
     }
 
     /// Convert the number of pages to the order.
@@ -451,15 +473,43 @@ const Arena = struct {
         return .{ @intCast(order), remaining };
     }
 
-    /// Convert the order to integer.
-    inline fn orderToInt(order: SizeOrder) usize {
+    /// Get the number of pages for the given order.
+    fn orderToInt(order: SizeOrder) usize {
         return @as(usize, 1) << @intCast(order);
+    }
+
+    /// Get the size in bytes of a single block of the order.
+    fn getOrderSize(order: SizeOrder) usize {
+        return orderToInt(order) << page_shift;
+    }
+
+    /// Get the address mask for the order.
+    fn getOrderMask(order: SizeOrder) usize {
+        return getOrderSize(order) - 1;
     }
 
     /// Align the number of pages to the order.
     inline fn roundUpToOrder(num_pages: usize) SizeOrder {
         rtt.expect(num_pages != 0);
         return std.math.log2_int_ceil(usize, num_pages);
+    }
+
+    /// Mark the physical page as a free block of the given order.
+    fn setMetaFree(self: *Arena, phys: Phys, order: SizeOrder) void {
+        const index = self.getMetaIndex(phys);
+        self.meta[index] = .{ .order = order };
+    }
+
+    /// Mark the physical page as in-use.
+    fn setMetaUsed(self: *Arena, phys: Phys) void {
+        const index = self.getMetaIndex(phys);
+        self.meta[index] = .{ .order = null };
+    }
+
+    /// Get the index of the metadata for the given physical address.
+    fn getMetaIndex(self: *const Arena, phys: Phys) usize {
+        rtt.expectEqual(0, phys & page_mask);
+        return (phys >> page_shift) - self.meta_base_index;
     }
 };
 
@@ -471,6 +521,16 @@ fn virt2phys(vaddr: usize) usize {
 /// Convert the given physical address to virtual address.
 fn phys2virt(paddr: usize) usize {
     return paddr + vmap.linear.start;
+}
+
+/// Get the physical address of the given free page.
+fn page2phys(page: *FreeList.FreePage) Phys {
+    return virt2phys(@intFromPtr(page));
+}
+
+/// Get the free page at the given physical address.
+fn phys2page(phys: Phys) *FreeList.FreePage {
+    return @ptrFromInt(phys2virt(phys));
 }
 
 /// Get current memory statistics from the buddy allocator.
@@ -573,6 +633,9 @@ fn rttTestBuddyAllocator() void {
 
     const allocator = interface;
 
+    // The metadata must be consistent right after the initialization.
+    rttCheckMeta();
+
     // Allocate 3 pages (from 2-th freelist) and check the alignment.
     {
         const page = allocator.allocPagesV(3) catch {
@@ -599,12 +662,8 @@ fn rttTestBuddyAllocator() void {
 
     // Consume all pages from 0-th freelist.
     {
-        var prev: [*]allowzero u8 = @ptrFromInt(0);
         for (0..num_free_order0) |_| {
-            const page = rttAllocatePage(&allocated_pages_order0, allocator);
-            // Blocks in the freelist must be sorted.
-            rtt.expect(@intFromPtr(prev) < @intFromPtr(page.ptr));
-            prev = page.ptr;
+            _ = rttAllocatePage(&allocated_pages_order0, allocator);
         }
         rtt.expectEqual(0, arena.lists[0].link.len());
         rtt.expectEqual(null, arena.lists[0].link.first);
@@ -617,7 +676,11 @@ fn rttTestBuddyAllocator() void {
         const page2 = rttAllocatePage(&allocated_pages_order0, allocator);
 
         // Two pages must be contiguous because they are split from the same block.
-        rtt.expectEqual(@intFromPtr(page1.ptr) + page_size, @intFromPtr(page2.ptr));
+        const distance = if (@intFromPtr(page1.ptr) < @intFromPtr(page2.ptr))
+            @intFromPtr(page2.ptr) - @intFromPtr(page1.ptr)
+        else
+            @intFromPtr(page1.ptr) - @intFromPtr(page2.ptr);
+        rtt.expectEqual(page_size, distance);
     }
 
     // Free all pages and see if they are merged.
@@ -641,15 +704,42 @@ fn rttTestBuddyAllocator() void {
         );
     }
 
-    // Check if they're still sorted.
-    {
-        var prev: *allowzero FreeList.FreePage = @ptrFromInt(0);
-        var cur = arena.lists[0].link.first;
-        while (cur) |c| : (cur = cur.?.next) {
-            rtt.expect(@intFromPtr(prev) < @intFromPtr(c));
-            prev = c;
+    // Splits and merges must keep the metadata consistent.
+    rttCheckMeta();
+}
+
+/// Check if the page metadata and the freelists are consistent.
+fn rttCheckMeta() void {
+    if (!urd.enable_rtt) return;
+
+    var num_free_blocks: usize = 0;
+    for (&arena.lists, 0..) |*list, order| {
+        const expected: SizeOrder = @intCast(order);
+
+        var count: usize = 0;
+        var cur = list.link.first;
+        while (cur) |node| : (cur = node.next) {
+            const phys = page2phys(node);
+            rtt.expectEqual(
+                0,
+                phys & Arena.getOrderMask(@intCast(order)),
+            );
+            rtt.expectEqual(
+                expected,
+                arena.meta[arena.getMetaIndex(phys)].order,
+            );
+            count += 1;
         }
+
+        rtt.expectEqual(list.numFree(), count);
+        num_free_blocks += count;
     }
+
+    var num_heads: usize = 0;
+    for (arena.meta) |meta| {
+        if (meta.order != null) num_heads += 1;
+    }
+    rtt.expectEqual(num_free_blocks, num_heads);
 }
 
 fn rttAllocatePage(list: *TestingAllocatedList, allocator: PageAllocator) []align(page_size) u8 {
