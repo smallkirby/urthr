@@ -16,6 +16,25 @@ pub const Timespec = extern struct {
     nsec: i64,
 };
 
+/// POSIX-compliant timeval structure.
+pub const Timeval = extern struct {
+    /// Seconds.
+    sec: i64,
+    /// Microseconds.
+    usec: i64,
+
+    pub fn toNs(self: Timeval) u64 {
+        return @as(u64, @intCast(self.sec)) * std.time.ns_per_s + @as(u64, @intCast(self.usec)) * std.time.ns_per_us;
+    }
+
+    pub fn fromNs(ns: u64) Timeval {
+        return .{
+            .sec = @intCast(ns / std.time.ns_per_s),
+            .usec = @intCast((ns % std.time.ns_per_s) / std.time.ns_per_us),
+        };
+    }
+};
+
 pub const ErrorEnum = enum(i64) {
     /// Operation not permitted.
     perm = -1,
@@ -88,3 +107,9 @@ pub const ErrorEnum = enum(i64) {
     /// Connection refused.
     econnrefused = -111,
 };
+
+// =============================================================
+// Imports
+// =============================================================
+
+const std = @import("std");

@@ -29,17 +29,16 @@ pub fn sysWait4(pid: i32, wstatus: ?*i32, options: WaitOptions, rusage: usize) R
         ) catch return .err(.fault);
     }
 
-    // TODO: Resource usage is not accounted yet.
     if (rusage != 0) {
-        const zero: [rusage_size]u8 = @splat(0);
-        urd.uaccess.copyToUser(rusage, &zero) catch return .err(.fault);
+        const usage = Rusage{
+            .utime = .fromNs(ticksToNs(result.cpu_times.user)),
+            .stime = .fromNs(ticksToNs(result.cpu_times.sys)),
+        };
+        urd.uaccess.copyToUser(rusage, std.mem.asBytes(&usage)) catch return .err(.fault);
     }
 
     return .success(@intCast(result.pid));
 }
-
-/// Size in bytes of rusage.
-const rusage_size = 144;
 
 const WaitOptions = packed struct(u32) {
     /// Dont't block waiting.
@@ -48,6 +47,95 @@ const WaitOptions = packed struct(u32) {
     untraced: bool,
     /// Reserved.
     _2: u30 = 0,
+};
+
+/// syscall: getrusage
+pub fn sysGetRusage(who: Rusage.Who, usage: *align(1) Rusage) ReturnType {
+    const cur = sched.getCurrent();
+    const time = switch (who) {
+        .self => cur.group.getCpuTimes(),
+        .children => cur.group.getChildrenCpuTimes(),
+        .thread => cur.cpu.times,
+        _ => return .err(.inval),
+    };
+
+    const res = Rusage{
+        .utime = .fromNs(ticksToNs(time.user)),
+        .stime = .fromNs(ticksToNs(time.sys)),
+    };
+    urd.uaccess.copyToUser(usage, std.mem.asBytes(&res)) catch return .err(.fault);
+
+    return .success(0);
+}
+
+/// Resource usage.
+const Rusage = extern struct {
+    /// User CPU time used.
+    utime: urd.posix.Timeval,
+    /// System CPU time used.
+    stime: urd.posix.Timeval,
+    /// Not implemented fields.
+    _rest: [14]i64 = @splat(0),
+
+    const Who = enum(i32) {
+        /// Calling process, sum of resources used by all threads in the process.
+        self = 0,
+        /// All children of the calling process that have terminated and been waited for.
+        children = -1,
+        /// Calling thread.
+        thread = 1,
+
+        _,
+    };
+};
+
+/// Convert raw timer ticks to nanoseconds without overflow.
+fn ticksToNs(ticks: u64) u64 {
+    const freq: u64 = arch.timer.getFreq();
+    return (ticks / freq * std.time.ns_per_s) +
+        (ticks % freq * std.time.ns_per_s / freq);
+}
+
+/// Convert raw timer ticks to userland clock ticks.
+fn ticksToUserTicks(ticks: u64) i64 {
+    const ns_per_tick = std.time.ns_per_s / clock_ticks_per_sec;
+    return @intCast(ticksToNs(ticks) / ns_per_tick);
+}
+
+/// Clock ticks per second exposed to userland.
+///
+/// Independent of the hardware timer frequency nor kernel timer implementation.
+const clock_ticks_per_sec = 100;
+
+/// syscall: times
+pub fn sysTimes(buf: ?*align(1) Tms) ReturnType {
+    const group = sched.getCurrent().group;
+    const own = group.getCpuTimes();
+    const children = group.getChildrenCpuTimes();
+
+    if (buf) |b| {
+        urd.uaccess.putUser(Tms, b, .{
+            .utime = ticksToUserTicks(own.user),
+            .stime = ticksToUserTicks(own.sys),
+            .cutime = ticksToUserTicks(children.user),
+            .cstime = ticksToUserTicks(children.sys),
+        }) catch return .err(.fault);
+    }
+
+    const ns_per_tick = std.time.ns_per_s / clock_ticks_per_sec;
+    return .success(@intCast(urd.time.getCurrentTimestamp() / ns_per_tick));
+}
+
+/// Process times.
+const Tms = extern struct {
+    /// User time.
+    utime: i64,
+    /// System time.
+    stime: i64,
+    /// User time of children.
+    cutime: i64,
+    /// System time of children.
+    cstime: i64,
 };
 
 /// syscall: clone
@@ -633,3 +721,4 @@ const uaccess = urd.uaccess;
 const arch = @import("arch").impl;
 const sig = urd.task.signal;
 const ReturnType = urd.syscall.ReturnType;
+const thread = urd.task.thread;

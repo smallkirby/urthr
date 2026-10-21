@@ -111,25 +111,6 @@ const ItimerWhich = enum(u32) {
     _,
 };
 
-/// Timer value representation.
-const TimeVal = extern struct {
-    /// Seconds.
-    sec: i64,
-    /// Microseconds.
-    usec: i64,
-
-    fn toNs(self: TimeVal) u64 {
-        return @as(u64, @intCast(self.sec)) * std.time.ns_per_s + @as(u64, @intCast(self.usec)) * std.time.ns_per_us;
-    }
-
-    fn fromNs(ns: u64) TimeVal {
-        return .{
-            .sec = @intCast(ns / std.time.ns_per_s),
-            .usec = @intCast((ns % std.time.ns_per_s) / std.time.ns_per_us),
-        };
-    }
-};
-
 /// Interval timer value representation.
 const ItimerVal = extern struct {
     /// Next expiration time.
@@ -164,3 +145,4 @@ const urd = @import("urthr");
 const sched = urd.sched;
 const ReturnType = urd.syscall.ReturnType;
 const Timespec = urd.posix.Timespec;
+const TimeVal = urd.posix.Timeval;
