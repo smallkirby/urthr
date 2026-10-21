@@ -68,7 +68,7 @@ pub fn start() !void {
     _ = try time.register(tick_interval_us, onTimerTick);
 
     // Initialize idle thread runtime accounting.
-    getCurrent().last_exec_start = arch.timer.getCount();
+    getCurrent().cpu.last_exec_start = arch.timer.getCount();
 
     sperf.recordThreadName(getCurrent().name);
 }
@@ -160,6 +160,24 @@ pub fn preemptEnable() void {
     count.* -= 1;
 }
 
+/// Mark the current thread as running in kernel.
+pub fn enterKernel() void {
+    setExecMode(.kernel);
+}
+
+/// Mark the current thread as returning to userland.
+pub fn leaveKernel() void {
+    setExecMode(.user);
+}
+
+fn setExecMode(mode: thread.ExecMode) void {
+    const ie = arch.intr.maskAll();
+    defer arch.intr.setMask(ie);
+
+    accountRuntime();
+    getCurrent().cpu.mode = mode;
+}
+
 /// Mark the currently running thread as needing rescheduling.
 pub fn markNeedResched() void {
     getCurrent().need_resched = true;
@@ -225,9 +243,6 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
     {
         // Do deferred work for the previous thread.
         onSwitchedIn(@ptrCast(@alignCast(prev)));
-
-        // Update the last switch-in timestamp.
-        updateLastExecTimestamp();
     }
 
     // Restore IRQ mask.
@@ -256,10 +271,13 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
     }
 
     // Structured perf recording.
-    if (cur.last_exec_start == 0) {
+    if (cur.cpu.last_exec_start == 0) {
         sperf.recordThreadName(cur.name);
     }
     sperf.record(.init(.sched_switch, .{}));
+
+    // Update the last switch-in timestamp.
+    updateLastExecTimestamp();
 }
 
 /// Pick the next thread from the ready queue eligible to run on this core.
@@ -317,23 +335,23 @@ const tick_interval_us: u64 = 10 * std.time.us_per_ms;
 fn onTimerTick() void {
     markNeedResched();
     accountRuntime();
-    updateLastExecTimestamp();
 }
 
-/// Account the runtime of the current thread since the last switch-in.
-///
-/// This function does not update the last switch-in timestamp.
+/// Account the runtime of the current thread since the last timestamp.
 fn accountRuntime() void {
     const cur = getCurrent();
     const now = arch.timer.getCount();
-    const delta_ticks = now - cur.last_exec_start;
-    const freq: u64 = arch.timer.getFreq();
+    const delta = now - cur.cpu.last_exec_start;
 
-    cur.runtime_us += (delta_ticks * std.time.us_per_s) / freq;
+    cur.cpu.last_exec_start = now;
+    switch (cur.cpu.mode) {
+        .user => cur.cpu.times.user += delta,
+        .kernel => cur.cpu.times.sys += delta,
+    }
 
-    if (options.idle_watchdog != 0) {
+    if (options.idle_watchdog != 0 and cur == getIdle()) {
         if (urd.smp.getLogicalCoreId() == 0 and
-            getIdle().runtime_us >= options.idle_watchdog * std.time.us_per_s)
+            cur.cpu.times.total() >= options.idle_watchdog * @as(u64, arch.timer.getFreq()))
         {
             @branchHint(.cold);
             log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
@@ -344,7 +362,7 @@ fn accountRuntime() void {
 
 /// Update the last execution timestamp for the current thread.
 fn updateLastExecTimestamp() void {
-    getCurrent().last_exec_start = arch.timer.getCount();
+    getCurrent().cpu.last_exec_start = arch.timer.getCount();
 }
 
 // =============================================================

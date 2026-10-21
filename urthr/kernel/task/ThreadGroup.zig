@@ -40,6 +40,11 @@ _credential: Credential = .{},
 /// Absolute path of the executable running as this group.
 _exe_path: ?[]const u8 = null,
 
+/// CPU time consumed by members that have already exited.
+_exited_times: thread.CpuTimes = .{},
+/// CPU time consumed by children that have been waited-for and terminated.
+_children_times: thread.CpuTimes = .{},
+
 /// List node for the process table.
 _pt_node: PTable.Node = .{},
 
@@ -146,6 +151,58 @@ pub fn deref(self: *Self, allocator: Allocator) void {
     }
 }
 
+/// Get the CPU time consumed by all threads in this group, including exited members.
+///
+/// The value does not include the time of waited-for terminated children.
+pub fn getCpuTimes(self: *Self) thread.CpuTimes {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    var total = self._exited_times;
+    var it = self._members.iter();
+    while (it.next()) |th| {
+        total.add(th.cpu.times);
+    }
+    return total;
+}
+
+/// Get the CPU time consumed by all waited-for terminated children of this group.
+pub fn getChildrenCpuTimes(self: *Self) thread.CpuTimes {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    return self._children_times;
+}
+
+/// Get the CPU time of this fully exited group.
+///
+/// This function must be called only for a fully exited group.
+/// The value includes the CPU time of all threads in this group and all waited-for terminated children.
+pub fn getFinalCpuTimes(self: *Self) thread.CpuTimes {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+
+    var total = self._exited_times;
+    total.add(self._children_times);
+    return total;
+}
+
+/// Add the CPU time of a waited-for terminated child to this group.
+pub fn accountChild(self: *Self, times: thread.CpuTimes) void {
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    self._children_times.add(times);
+}
+
+/// Account the final CPU time of an exited member thread into this group.
+///
+/// The member must have been switched out and removed from the live members.
+pub fn accountExited(self: *Self, th: *const Thread) void {
+    rtt.expect(th.state == .moribund or th.state == .dead);
+    const ie = self._lock.lockDisableIrq();
+    defer self._lock.unlockRestoreIrq(ie);
+    self._exited_times.add(th.cpu.times);
+}
+
 /// Get a thread leader whose TID is equal to this group's TGID.
 pub fn getLeader(self: *const Self) *Thread {
     return self._leader;
@@ -217,6 +274,7 @@ fn cmpKeyTgid(tgid: thread.Tgid, g: *const Self) std.math.Order {
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
+const rtt = common.rtt;
 const typing = common.typing;
 const urd = @import("urthr");
 const sched = urd.sched;

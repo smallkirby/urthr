@@ -328,6 +328,9 @@ fn invoke(nr: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: 
     sperf.record(.init(.syscall_enter, .{ .nr = nr }));
     defer sperf.record(.init(.syscall_exit, .{ .nr = nr }));
 
+    urd.sched.enterKernel();
+    defer urd.sched.leaveKernel();
+
     const ret = if (syscall_table[nr]) |handler| handler.f(
         arg1,
         arg2,

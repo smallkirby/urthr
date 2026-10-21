@@ -55,6 +55,9 @@ pub fn init() void {
 ///
 /// Backs the faulting page on demand, or delivers a signal if the access cannot be satisfied.
 fn handlePageFault(far: usize, access: common.mem.AccessType, user: bool) bool {
+    if (user) sched.enterKernel();
+    defer if (user) sched.leaveKernel();
+
     const th = sched.getCurrent();
 
     th.vmm.faultIn(far, access) catch |err| {
@@ -71,6 +74,9 @@ fn handlePageFault(far: usize, access: common.mem.AccessType, user: bool) bool {
 
 /// Handle a CPU exception taken in user mode.
 fn handleUserFault(kind: arch.exception.UserFault, addr: usize) void {
+    sched.enterKernel();
+    defer sched.leaveKernel();
+
     log.err("user fault: kind={t} addr=0x{X}", .{ kind, addr });
 
     // Terminate the thread by sending a signal.
@@ -251,6 +257,7 @@ pub fn execve(
 
     // Enter userland.
     // Kernel stack is reset to the initial state.
+    sched.leaveKernel();
     const kstack = current.stack.?;
     arch.thread.enterUserland(
         uimg.entry,
@@ -302,6 +309,7 @@ pub fn enterUser(
     arch.thread.setThreadPointer(uimg.tp);
 
     // Enter userland.
+    sched.leaveKernel();
     const kstack = current.stack.?;
     arch.thread.enterUserland(
         uimg.entry,
@@ -453,6 +461,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .vfork_done = if (flags.suspend_parent) &vforkw else null,
             .parent = if (flags.thread) null else cur.group.ref(),
             .clear_child_tid = if (flags.child_tidp) |p| p else null,
+            .cpu = .{ .mode = .user },
         };
         group.addMember(th);
         if (!flags.thread) {
@@ -521,6 +530,10 @@ pub fn exit(status: thread.ExitStatus) noreturn {
 
 /// Called on a thread has been switched out.
 pub fn onSwitchedOut(prev: *Thread) void {
+    if (prev.state == .moribund or prev.state == .dead) {
+        prev.group.accountExited(prev);
+    }
+
     switch (prev.state) {
         // When the thread was a last member of the group.
         .moribund => becomeZombie(prev),
@@ -605,6 +618,8 @@ const WaitResult = struct {
     pid: u32,
     /// Raw exit status.
     exit_status: thread.ExitStatus,
+    /// CPU time consumed by the reaped child.
+    cpu_times: thread.CpuTimes,
 };
 
 /// Wait for a child thread to exit and reap it.
@@ -627,10 +642,13 @@ pub fn waitChild(pid: i32, nowait: bool) error{NoChild}!?WaitResult {
 
             zombie_list.remove(th);
 
+            const times = th.group.getFinalCpuTimes();
             const result: WaitResult = .{
                 .pid = th.group.getTgid(),
                 .exit_status = th.exit_status,
+                .cpu_times = times,
             };
+            cur.group.accountChild(times);
             shutdownThread(th);
 
             return result;

@@ -44,10 +44,8 @@ pub const Thread = struct {
 
     /// This thread needs to be rescheduled.
     need_resched: bool = false,
-    /// Total accumulated runtime in microseconds.
-    runtime_us: u64 = 0,
-    /// Raw timer ticks when this thread last started executing.
-    last_exec_start: u64 = 0,
+    /// CPU time accounting.
+    cpu: CpuAccount = .{},
     /// CPU affinity mask.
     affinity: u64 = ~@as(u64, 0),
 
@@ -88,6 +86,43 @@ pub const Pgid = u32;
 /// Shares only one controlling terminal by threads in the same session.
 /// Cannot join a process group from a different session.
 pub const Sid = u32;
+
+/// CPU time in raw timer ticks.
+pub const CpuTimes = struct {
+    /// Time spent in userland.
+    user: u64 = 0,
+    /// Time spent in kernel.
+    sys: u64 = 0,
+
+    /// Accumulate CPU time.
+    pub fn add(self: *CpuTimes, other: CpuTimes) void {
+        self.user += other.user;
+        self.sys += other.sys;
+    }
+
+    /// Get the total CPU time.
+    pub fn total(self: CpuTimes) u64 {
+        return self.user + self.sys;
+    }
+};
+
+/// CPU time state of a thread.
+pub const CpuAccount = struct {
+    /// Accumulated CPU time.
+    times: CpuTimes = .{},
+    /// Current execution mode for CPU time accounting.
+    mode: ExecMode = .kernel,
+    /// Raw timer ticks when this thread last started executing.
+    last_exec_start: u64 = 0,
+};
+
+/// Mode in which a thread consumes CPU time.
+pub const ExecMode = enum {
+    /// Executing userland code.
+    user,
+    /// Executing in kernel.
+    kernel,
+};
 
 /// Thread state.
 pub const State = enum {
