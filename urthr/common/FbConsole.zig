@@ -34,6 +34,12 @@ const CsiParser = struct {
         esc,
         /// Inside a CSI sequence.
         csi,
+        /// Just encountered `ESC (` or `ESC )` and waiting for the charset.
+        charset,
+        /// Inside an OSC string.
+        osc,
+        /// Encountered ESC inside an OSC string.
+        osc_esc,
     };
 
     /// Parser state.
@@ -85,6 +91,10 @@ bg: u32,
 format: PixelFormat,
 /// Whether bold output is active.
 bold: bool,
+/// Currently selected character set.
+///
+/// TODO: support G0 default and G1 alternate fonts.
+charset: Charset,
 /// Whether the cursor is currently rendered on screen.
 cursor_shown: bool,
 
@@ -118,6 +128,7 @@ pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, form
         .bg = pack(format, 0x00, 0x00, 0x00),
         .format = format,
         .bold = false,
+        .charset = .ascii,
         .cursor_shown = false,
 
         .csi = .{},
@@ -169,6 +180,16 @@ fn putc(ctx: *anyopaque, c: u8) void {
         .normal => self.putcNormal(c),
         .esc => self.putcEsc(c),
         .csi => self.putcCsi(c),
+        .charset => {
+            self.charset = .from(c);
+            self.csi.state = .normal;
+        },
+        .osc => switch (c) {
+            0x07 => self.csi.state = .normal,
+            0x1B => self.csi.state = .osc_esc,
+            else => {}, // TODO: not handled
+        },
+        .osc_esc => self.csi.state = if (c == '\\') .normal else .osc,
     }
 }
 
@@ -194,7 +215,7 @@ fn putcNormal(self: *Self, c: u8) void {
         },
         '\t' => self.tab(),
         else => {
-            self.drawGlyph(self.col, self.row, c);
+            self.drawGlyph(self.col, self.row, self.charset.map(c));
             self.advance();
         },
     }
@@ -203,15 +224,55 @@ fn putcNormal(self: *Self, c: u8) void {
 /// Handle a byte right after ESC.
 fn putcEsc(self: *Self, c: u8) void {
     switch (c) {
+        // CSI
         '[' => {
             self.csi.state = .csi;
             self.csi.nparams = 0;
             self.csi.cur = 0;
             self.csi.private = false;
         },
+        // Charset
+        '(', ')' => self.csi.state = .charset,
+        // OSC
+        ']' => self.csi.state = .osc,
+        // Reverse index
+        'M' => {
+            if (self.row > 0) self.row -= 1;
+            self.csi.state = .normal;
+        },
         else => self.csi.state = .normal,
     }
 }
+
+/// Character set.
+const Charset = enum(u8) {
+    /// DEC special graphics.
+    line_drawing = '0',
+    /// US-ASCII.
+    ascii = 'B',
+
+    /// Get the charset from the designator byte.
+    ///
+    /// Unsupported designators fall back to US-ASCII.
+    fn from(designator: u8) Charset {
+        return std.enums.fromInt(Charset, designator) orelse .ascii;
+    }
+
+    /// Map a byte to the character to draw in this charset.
+    fn map(self: Charset, c: u8) u8 {
+        return switch (self) {
+            .ascii => c,
+
+            // TODO: no corresponding glyphs.
+            .line_drawing => switch (c) {
+                0x71 => '-',
+                0x78 => '|',
+                0x6A, 0x6B, 0x6C, 0x6D, 0x74, 0x75, 0x76, 0x77, 0x6E => '+',
+                else => c,
+            },
+        };
+    }
+};
 
 /// Handle a byte inside a CSI sequence.
 fn putcCsi(self: *Self, c: u8) void {
