@@ -2269,26 +2269,44 @@ const BpbInfo = struct {
 ///
 /// When the requested size equals the sector size, cached I/O is used.
 fn readBlocks(self: *Self, lba: Lba, buf: []u8) fs.Error!void {
-    return if (buf.len == sector_size)
-        self.cache.read(self, lba, buf)
-    else
-        self.device.readBlocks(lba, buf);
+    rtt.expectEqual(0, buf.len % sector_size);
+
+    if (buf.len == sector_size) {
+        // Cached read for a single sector.
+        return self.cache.read(self, lba, buf);
+    } else {
+        // Direct read for multiple sectors.
+        try self.cache.flushRange(self, lba, buf.len / sector_size);
+        return self.device.readBlocks(lba, buf);
+    }
 }
 
 /// Write blocks to the device from the given buffer.
 ///
 /// When the provided data length equals the sector size, cached I/O is used.
 fn writeBlocks(self: *Self, lba: Lba, data: []const u8) fs.Error!void {
-    return if (data.len == sector_size)
-        self.cache.write(self, lba, data)
-    else
-        self.device.writeBlocks(lba, data);
+    rtt.expectEqual(0, data.len % sector_size);
+
+    if (data.len == sector_size) {
+        // Cached write for a single sector.
+        return self.cache.write(self, lba, data);
+    } else {
+        // Direct write for multiple sectors.
+        self.cache.discard(lba, data.len / sector_size);
+        return self.device.writeBlocks(lba, data);
+    }
 }
 
-/// Flush all cached sectors to the device.
+/// Write back cached sectors to the device.
+///
+/// Do nothing when the number of dirty sectors do not reach the threshold.
 ///
 /// Failed sectors are kept dirty.
 fn flushCache(self: *Self) void {
+    if (self.cache.ndirty < SectorCache.flush_threshold) {
+        return;
+    }
+
     self.cache.flushAll(self) catch {};
 }
 
@@ -2302,6 +2320,8 @@ const SectorCache = struct {
     ///
     /// One slot caches a single sector.
     const nslots = nsets * nways;
+    /// Number of dirty slots until write-back.
+    const flush_threshold = nslots / 4;
 
     /// Cache entry slot type.
     const Slot = struct {
