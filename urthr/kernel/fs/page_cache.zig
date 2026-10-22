@@ -39,7 +39,7 @@ pub const InodeCache = struct {
 /// Maximum number of cached pages.
 const max_pages = 0x2_0000;
 /// Maximum number of dirty pages.
-const max_dirty = 0x2000;
+const max_dirty = 0x1_0000;
 /// Maximum number of pages read by a single request to the filesystem.
 const readahead_pages = 32;
 /// Number of hash buckets.
