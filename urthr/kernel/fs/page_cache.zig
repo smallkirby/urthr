@@ -448,6 +448,44 @@ fn discardPagesBeyond(inode: *Inode, new_size: usize) void {
     }
 }
 
+/// Discard the cached pages of the unlinked file without writing them back.
+///
+/// Does nothing if the file is still referenced.
+pub fn discardUnlinked(dentry: *Dentry) void {
+    const inode = dentry.getInode();
+
+    if (inode.cache.pages.isEmpty() and !inode.cache.isDirty()) {
+        return; // nothing to discard
+    }
+
+    const flusher = blk: {
+        mutex.lock();
+        defer mutex.unlock();
+
+        // Check if someone is still holding a reference.
+        const nrefs: usize = if (inode.cache.isDirty())
+            2 // flusher + caller's dentry
+        else
+            1; // caller's dentry only
+        if (dentry.refcnt.load(.acquire) != nrefs) {
+            return;
+        }
+
+        // Discard cached pages.
+        while (inode.cache.pages.first) |page| remove(page);
+        if (!inode.cache.isDirty()) return;
+
+        // Unlink from dirty list.
+        dirty_inodes.remove(&inode.cache);
+
+        const f = inode.cache.flusher.?;
+        inode.cache.flusher = null;
+        break :blk f;
+    };
+
+    flusher.unref();
+}
+
 /// Drop all the cached pages of the inode.
 ///
 /// Must be called before the inode is destroyed.
@@ -685,6 +723,7 @@ const InlineDoublyLinkedList = common.typing.InlineDoublyLinkedList;
 const urd = @import("urthr");
 const fs = urd.fs;
 const Error = fs.Error;
+const Dentry = fs.Dentry;
 const File = fs.File;
 const Inode = fs.Inode;
 const Mutex = urd.sync.Mutex;

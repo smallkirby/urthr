@@ -668,6 +668,11 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
 
     try parent_dentry.getInode().unlink(path.dentry);
     dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
+
+    // Try discarding cached pages.
+    if (path.dentry.getInode().cacheable) {
+        page_cache.discardUnlinked(path.dentry);
+    }
 }
 
 /// Remove an empty directory at the specified path.
