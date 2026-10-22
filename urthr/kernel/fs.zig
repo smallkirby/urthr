@@ -666,7 +666,7 @@ fn unlinkImpl(path: Path, s: []const u8) Error!void {
     const parent_dentry = path.dentry.parent.?;
     const basename = std.fs.path.basenamePosix(s);
 
-    try parent_dentry.getInode().unlink(path.dentry.getInode());
+    try parent_dentry.getInode().unlink(path.dentry);
     dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
 }
 
@@ -721,7 +721,7 @@ fn rmdirImpl(path: Path, s: []const u8, allocator: Allocator) Error!void {
         return Error.NotEmpty;
     }
 
-    try parent_dentry.getInode().rmdir(path.dentry.getInode());
+    try parent_dentry.getInode().rmdir(path.dentry);
     dcache.remove(parent_dentry, basename, isCaseInsensitive(path.mount));
 }
 

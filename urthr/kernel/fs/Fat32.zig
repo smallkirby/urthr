@@ -223,7 +223,8 @@ fn ideinit(inode: *fs.Inode) void {
 /// Only marks the on-disk directory entry as deleted.
 /// The cluster chain is released later in `ideinit` once `child`'s refcount reaches zero,
 /// so a file that is still open remains readable after this call.
-fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
+fn iunlink(dir: *fs.Inode, dchild: *fs.Dentry) fs.Error!void {
+    const child = dchild.getInode();
     rtt.expectEqual(.directory, dir.ftype);
     rtt.expectEqual(.regular, child.ftype);
     try markEntryDeleted(dir, child);
@@ -233,7 +234,8 @@ fn iunlink(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
 ///
 /// Only marks the on-disk directory entry as deleted.
 /// The cluster chain is released later in `ideinit` once the refcount reaches zero.
-fn irmdir(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
+fn irmdir(dir: *fs.Inode, dchild: *fs.Dentry) fs.Error!void {
+    const child = dchild.getInode();
     rtt.expectEqual(.directory, dir.ftype);
     rtt.expectEqual(.directory, child.ftype);
     try markEntryDeleted(dir, child);

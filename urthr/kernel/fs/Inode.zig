@@ -26,13 +26,13 @@ pub const Ops = struct {
     /// null if the filesystem does not support file creation.
     create: ?*const fn (dir: *Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMode, allocator: Allocator) Error!*Inode = null,
 
-    /// Remove the directory entry named `name` under `dir`.
+    /// Remove the directory entry of `child` under `dir`.
     ///
-    /// Implementation must not release the underlying storage of `child`
+    /// Implementation must not release the underlying storage of the inode of `child`
     /// until the inode is `deinit()`-ed when there's not references to it anymore.
     ///
     /// null if the filesystem does not support file removal.
-    unlink: ?*const fn (dir: *Inode, child: *Inode) Error!void = null,
+    unlink: ?*const fn (dir: *Inode, child: *Dentry) Error!void = null,
 
     /// Create a symbolic link under `dir` with the given name pointing to `target`.
     ///
@@ -71,14 +71,14 @@ pub const Ops = struct {
     /// null if the filesystem does not support renaming entries.
     rename: ?*const fn (dir: *Inode, old_name: []const u8, child: *Inode, new_dir: *Inode, new_name: []const u8, replaced: ?*Inode) Error!void = null,
 
-    /// Remove the empty subdirectory.
+    /// Remove the empty subdirectory of `dentry` under `dir`.
     ///
     /// Caller must ensure that `child` is empty.
-    /// Implementation must not release the underlying storage of `child`
+    /// Implementation must not release the underlying storage of the inode of `child`
     /// until the inode is `deinit()`-ed when there's no references to it anymore.
     ///
     /// null if the filesystem does not support directory removal.
-    rmdir: ?*const fn (dir: *Inode, child: *Inode) Error!void = null,
+    rmdir: ?*const fn (dir: *Inode, child: *Dentry) Error!void = null,
 };
 
 /// inode number type.
@@ -294,8 +294,8 @@ pub fn rename(self: *Self, old_name: []const u8, child: *Inode, new_dir: *Inode,
     }
 }
 
-/// Remove a file entry named `name` under this directory.
-pub fn unlink(self: *Self, child: *Inode) Error!void {
+/// Remove a file entry of `child` under this directory.
+pub fn unlink(self: *Self, child: *Dentry) Error!void {
     if (self.ftype != .directory) return Error.NotDirectory;
 
     if (self.iops.unlink) |f| {
@@ -307,8 +307,8 @@ pub fn unlink(self: *Self, child: *Inode) Error!void {
 
 /// Remove the empty subdirectory from this directory.
 ///
-/// Caller must ensure that `child` is empty.
-pub fn rmdir(self: *Self, child: *Inode) Error!void {
+/// Caller must ensure that the inode of `child` is empty.
+pub fn rmdir(self: *Self, child: *Dentry) Error!void {
     if (self.ftype != .directory) return Error.NotDirectory;
 
     if (self.iops.rmdir) |f| {
@@ -337,8 +337,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
-
 const urd = @import("urthr");
-const fs = urd.fs;
-const File = @import("File.zig");
 const SharedLock = urd.sync.SharedLock;
+const fs = urd.fs;
+const Dentry = @import("Dentry.zig");
+const File = @import("File.zig");
