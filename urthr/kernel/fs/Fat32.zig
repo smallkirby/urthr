@@ -19,6 +19,8 @@ allocator: Allocator,
 cache: SectorCache,
 /// Incremented whenever any file's cluster chain is shortened.
 chain_gen: u64 = 0,
+/// Indexes of the directory entries by the first cluster of the directory.
+dindexes: std.AutoHashMapUnmanaged(Cluster, *Dindex) = .empty,
 
 /// Index of a cluster.
 const Cluster = u32;
@@ -109,6 +111,153 @@ fn fsSync(ctx: *anyopaque) fs.Error!void {
 }
 
 // =============================================================
+// Directory Index
+// =============================================================
+
+/// Size of the buffer to hold an entry name in UTF-8.
+const name_buf_len = LongNameEntry.max_name_len * 3;
+
+/// Index from a lower-cased name to the position of the entry in a directory.
+///
+/// To efficiently look up directory entries by their lower-cased names
+/// without the need to scan the entire directory entries.
+const Dindex = struct {
+    /// Number of hash buckets.
+    const num_buckets = 1024;
+
+    /// Hash buckets for the entries.
+    buckets: [num_buckets]?*Entry = @splat(null),
+
+    /// Indexed entry.
+    const Entry = struct {
+        /// Next entry in the same bucket.
+        next: ?*Entry,
+        /// Position of the SFN entry.
+        pos: Position,
+        /// Lower-cased name.
+        key: Key,
+
+        /// The maximum length of the name that can be stored inline.
+        const inline_name_limit = 32;
+
+        const Key = union(enum) {
+            /// Name that is small enough to be stored inline.
+            short: struct { len: u8, buf: [inline_name_limit]u8 },
+            /// Name that is too long. Owned by the entry.
+            long: []const u8,
+        };
+
+        /// Get the name of the entry.
+        fn name(self: *const Entry) []const u8 {
+            return switch (self.key) {
+                .short => |*s| s.buf[0..s.len],
+                .long => |l| l,
+            };
+        }
+
+        /// Deinitialize the entry and free its resources.
+        fn deinit(self: *Entry, allocator: Allocator) void {
+            if (self.key == .long) allocator.free(self.key.long);
+            allocator.destroy(self);
+        }
+    };
+
+    /// Deinitialize the directory index and free its resources.
+    fn deinit(self: *Dindex, allocator: Allocator) void {
+        for (&self.buckets) |*head| {
+            while (head.*) |e| {
+                head.* = e.next;
+                e.deinit(allocator);
+            }
+        }
+    }
+
+    /// Get the position of the entry indexed by the given key.
+    ///
+    /// Returns null if the entry is not found.
+    fn get(self: *const Dindex, key: []const u8) ?Position {
+        var keybuf: [name_buf_len]u8 = undefined;
+        const lowered = std.ascii.lowerString(&keybuf, key);
+        return self.getLowered(lowered);
+    }
+
+    /// Get the position of the entry indexed by the given key.
+    ///
+    /// The key must be lower-cased.
+    ///
+    /// Returns null if the entry is not found.
+    fn getLowered(self: *const Dindex, key: []const u8) ?Position {
+        var cur = self.buckets[bucketOf(key)];
+        while (cur) |e| : (cur = e.next) {
+            if (std.mem.eql(u8, e.name(), key)) return e.pos;
+        } else return null;
+    }
+
+    /// Register the entry at `pos`.
+    ///
+    /// The key must be lower-cased.
+    ///
+    /// If the name already exists, the first one is kept.
+    fn register(self: *Dindex, allocator: Allocator, key: []const u8, pos: Position) Allocator.Error!void {
+        if (self.getLowered(key) != null) return;
+
+        const entry = try allocator.create(Entry);
+        errdefer allocator.destroy(entry);
+        entry.* = .{
+            .next = null,
+            .pos = pos,
+            .key = undefined,
+        };
+        if (key.len <= Entry.inline_name_limit) {
+            entry.key = .{ .short = .{
+                .len = @intCast(key.len),
+                .buf = undefined,
+            } };
+            @memcpy(entry.key.short.buf[0..key.len], key);
+        } else {
+            entry.key = .{ .long = try allocator.dupe(u8, key) };
+        }
+
+        const head = &self.buckets[bucketOf(key)];
+        entry.next = head.*;
+        head.* = entry;
+    }
+
+    /// Unregister the entry of the name at `pos`.
+    ///
+    /// Returns whether the entry was registered.
+    fn remove(self: *Dindex, allocator: Allocator, name: []const u8, pos: Position) bool {
+        if (name.len > name_buf_len) return false;
+
+        var keybuf: [name_buf_len]u8 = undefined;
+        const key = std.ascii.lowerString(&keybuf, name);
+
+        var link = &self.buckets[bucketOf(key)];
+        while (link.*) |e| : (link = &e.next) {
+            if (e.pos.sector != pos.sector or e.pos.offset != pos.offset) continue;
+            if (!std.mem.eql(u8, e.name(), key)) continue;
+
+            link.* = e.next;
+            e.deinit(allocator);
+            return true;
+        }
+        return false;
+    }
+
+    /// Get the hash bucket index for the given key.
+    fn bucketOf(key: []const u8) usize {
+        return std.hash.Wyhash.hash(0, key) & (num_buckets - 1);
+    }
+};
+
+/// Discard the dindex of this directory that starts at the cluster.
+fn dropDindex(self: *Self, cluster: Cluster) void {
+    const kv = self.dindexes.fetchRemove(cluster) orelse return;
+    kv.value.deinit(self.allocator);
+    self.allocator.destroy(kv.value);
+}
+
+// =============================================================
 // Inode Interface
 // =============================================================
 
@@ -141,11 +290,68 @@ const InodeImpl = struct {
     pub fn from(inode: *fs.Inode) *InodeImpl {
         return @fieldParentPtr("common", inode);
     }
+
+    /// Get the dindex for this directory.
+    ///
+    /// If the dindex is not registered, new dindex is constructed and registered.
+    fn getOrSpawnDindex(self: *InodeImpl) fs.Error!*Dindex {
+        rtt.expectEqual(.directory, self.common.ftype);
+
+        // Check if the dindex for this cluster already exists.
+        if (self.fat32.dindexes.get(self.cluster)) |didx| {
+            return didx;
+        }
+
+        // Create a new dindex.
+        const allocator = self.fat32.allocator;
+        const idx = try allocator.create(Dindex);
+        errdefer allocator.destroy(idx);
+        idx.* = .{};
+        errdefer idx.deinit(allocator);
+
+        // Collect all directory entries into the dindex.
+        var keybuf: [name_buf_len]u8 = undefined;
+        var iter = DirIterator{
+            .fat32 = self.fat32,
+            .cluster = self.cluster,
+        };
+        while (try iter.next(allocator)) |result| {
+            defer result.deinit(allocator);
+            try idx.register(
+                allocator,
+                std.ascii.lowerString(&keybuf, result.name),
+                result.pos,
+            );
+        }
+
+        // Register the dindex in the map.
+        try self.fat32.dindexes.put(allocator, self.cluster, idx);
+
+        return idx;
+    }
+
+    /// Get the dindex of the directory.
+    ///
+    /// Returns null if the dindex is not registered.
+    fn tryGetDindex(self: *InodeImpl) ?*Dindex {
+        rtt.expectEqual(.directory, self.common.ftype);
+        return self.fat32.dindexes.get(self.cluster);
+    }
+
+    /// Discard the dindex of the directory.
+    fn dropDindex(self: *InodeImpl) void {
+        rtt.expectEqual(.directory, self.common.ftype);
+        self.fat32.dropDindex(self.cluster);
+    }
 };
 
 /// Lookup an inode by its name in a directory inode.
 fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
     rtt.expect(dir.ftype == .directory);
+
+    if (name.len > name_buf_len) {
+        return null; // name too long
+    }
 
     const ctx = InodeImpl.from(dir);
     const self = ctx.fat32;
@@ -153,41 +359,40 @@ fn ilookup(dir: *fs.Inode, name: []const u8) fs.Error!?*fs.Inode {
     self.lock.lock();
     defer self.lock.unlock();
 
-    var iter = DirIterator{
+    // Get the position of the entry using dindex.
+    const didx = try ctx.getOrSpawnDindex();
+    const pos = didx.get(name) orelse return null;
+
+    // Read a whole sector to get the directory entry.
+    var buf: [sector_size]u8 = undefined;
+    try self.readBlocks(pos.sector, &buf);
+    const entry: *const DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
+
+    // Construct a new inode for the found directory entry.
+    const inode = try self.allocator.create(InodeImpl);
+    errdefer self.allocator.destroy(inode);
+
+    const mode: fs.FileMode = if (entry.attr.read_only) .{
+        .other = .rx,
+        .group = .rx,
+        .user = .rx,
+    } else .{};
+    inode.* = .{
+        .common = .{
+            .number = pos.toInodeNumber(),
+            .size = entry.file_size,
+            .ftype = if (entry.attr.directory) .directory else .regular,
+            .mode = mode,
+            .times = readTimeFields(entry),
+            .iops = inode_vtable,
+            .fops = file_vtable,
+            .cacheable = true,
+        },
         .fat32 = self,
-        .cluster = ctx.cluster,
+        .cluster = entry.clusterNumber(),
     };
 
-    while (try iter.next(self.allocator)) |result| {
-        defer result.deinit(self.allocator);
-
-        if (std.ascii.eqlIgnoreCase(result.name, name)) {
-            const inode = try self.allocator.create(InodeImpl);
-            errdefer self.allocator.destroy(inode);
-
-            const mode: fs.FileMode = if (result.entry.attr.read_only) .{
-                .other = .rx,
-                .group = .rx,
-                .user = .rx,
-            } else .{};
-            inode.* = .{
-                .common = .{
-                    .number = result.pos.toInodeNumber(),
-                    .size = result.entry.file_size,
-                    .ftype = if (result.entry.attr.directory) .directory else .regular,
-                    .mode = mode,
-                    .times = readTimeFields(result.entry),
-                    .iops = inode_vtable,
-                    .fops = file_vtable,
-                    .cacheable = true,
-                },
-                .fat32 = self,
-                .cluster = result.entry.clusterNumber(),
-            };
-
-            return &inode.common;
-        }
-    } else return null;
+    return &inode.common;
 }
 
 /// Release resources associated with an inode.
@@ -197,9 +402,7 @@ fn ideinit(inode: *fs.Inode) void {
     const ctx = InodeImpl.from(inode);
 
     if (ctx.unlinked) switch (inode.ftype) {
-        .regular,
-        .directory,
-        => {
+        .regular => {
             ctx.fat32.lock.lock();
             defer ctx.fat32.lock.unlock();
             defer ctx.fat32.flushCache();
@@ -208,11 +411,19 @@ fn ideinit(inode: *fs.Inode) void {
                 log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
             };
         },
-        .symlink,
-        .socket,
-        => {
-            unreachable;
+
+        .directory => {
+            ctx.fat32.lock.lock();
+            defer ctx.fat32.lock.unlock();
+            defer ctx.fat32.flushCache();
+
+            ctx.dropDindex();
+            ctx.fat32.freeCluster(ctx.cluster) catch |err| {
+                log.err("Failed to free cluster chain of unlinked file: {t}", .{err});
+            };
         },
+
+        .symlink, .socket => unreachable,
     };
 
     ctx.fat32.allocator.destroy(ctx);
@@ -227,7 +438,7 @@ fn iunlink(dir: *fs.Inode, dchild: *fs.Dentry) fs.Error!void {
     const child = dchild.getInode();
     rtt.expectEqual(.directory, dir.ftype);
     rtt.expectEqual(.regular, child.ftype);
-    try markEntryDeleted(dir, child);
+    try markEntryDeleted(dir, child, dchild.name);
 }
 
 /// Remove the directory entry for the empty subdirectory.
@@ -238,11 +449,11 @@ fn irmdir(dir: *fs.Inode, dchild: *fs.Dentry) fs.Error!void {
     const child = dchild.getInode();
     rtt.expectEqual(.directory, dir.ftype);
     rtt.expectEqual(.directory, child.ftype);
-    try markEntryDeleted(dir, child);
+    try markEntryDeleted(dir, child, dchild.name);
 }
 
 /// Mark the on-disk directory entry as deleted along with any LFN entries preceding it.
-fn markEntryDeleted(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
+fn markEntryDeleted(dir: *fs.Inode, child: *fs.Inode, name: []const u8) fs.Error!void {
     const ctx = InodeImpl.from(child);
     const self = ctx.fat32;
 
@@ -256,10 +467,21 @@ fn markEntryDeleted(dir: *fs.Inode, child: *fs.Inode) fs.Error!void {
 
     const ent: *DirEntry = @ptrCast(@alignCast(&buf[pos.offset]));
     const sfn = ent.name;
+
+    // Mark the directory entry as deleted on disk.
     ent.markDeleted();
     try self.writeBlocks(pos.sector, &buf);
 
+    // Remove the entry from the dindex.
     const dir_inode = InodeImpl.from(dir);
+    if (dir_inode.tryGetDindex()) |didx| {
+        if (!didx.remove(self.allocator, name, pos)) {
+            log.warn("Failed to remove entry from dindex: {s}", .{name});
+            dir_inode.dropDindex();
+        }
+    }
+
+    // Delete any preceding LFN entries.
     try self.deletePrecedingLfnEntries(dir_inode.cluster, pos, &sfn);
 
     ctx.unlinked = true;
@@ -333,6 +555,9 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         for (0..self.bpb.sec_per_clus) |sec| {
             try self.writeBlocks(lba + sec, &zero_buf);
         }
+
+        // Discard dindex in case the cluster is reused before the old entry is deinit-ed.
+        self.dropDindex(clus);
     }
 
     // Determine the short name converting from UTF-8 to UTF-16.
@@ -396,6 +621,21 @@ fn icreate(dir: *fs.Inode, name: []const u8, ftype: fs.FileType, mode: fs.FileMo
         rawents[0 .. lfn_count + 1],
     );
 
+    // Add this entry to the dindex if exists.
+    if (ctx.tryGetDindex()) |idx| {
+        var keybuf: [name_buf_len]u8 = undefined;
+        const key = if (use_lfn)
+            std.ascii.lowerString(&keybuf, name)
+        else
+            formatSfn(&dent, keybuf[0..sfn_name_buf_len]);
+
+        idx.register(
+            self.allocator,
+            key,
+            sfn_pos,
+        ) catch ctx.dropDindex(); // out of memory
+    }
+
     // Initialize the new inode.
     const inode = try self.allocator.create(InodeImpl);
     errdefer self.allocator.destroy(inode);
@@ -430,6 +670,10 @@ fn irename(old_dir: *fs.Inode, _: []const u8, child: *fs.Inode, new_dir: *fs.Ino
     self.lock.lock();
     defer self.lock.unlock();
     defer self.flushCache();
+
+    // TODO: should not discard entire indexes.
+    InodeImpl.from(old_dir).dropDindex();
+    InodeImpl.from(new_dir).dropDindex();
 
     // Snapshot the existing directory entry.
     const old_pos = Position.fromInodeNumber(child.number);
@@ -737,33 +981,40 @@ const DirIterator = struct {
 
     /// Parse name field to construct the file name.
     fn parseName(entry: *const DirEntry, allocator: Allocator) Allocator.Error![]const u8 {
-        var len: usize = 0;
-        var buf: [14]u8 = undefined;
+        var buf: [sfn_name_buf_len]u8 = undefined;
+        return allocator.dupe(u8, formatSfn(entry, &buf));
+    }
+};
 
-        // Copy name part (8 bytes).
-        for (entry.name[0 .. DirEntry.sfn_len - 3]) |c| {
+/// Maximum length of the formatted SFN.
+const sfn_name_buf_len = 12; // name (8) + dot (1) + extension (3)
+
+/// Format the SFN of the entry in lower-case into the buffer.
+fn formatSfn(entry: *const DirEntry, buf: *[sfn_name_buf_len]u8) []const u8 {
+    var len: usize = 0;
+
+    // Copy name part (8 bytes).
+    for (entry.name[0 .. DirEntry.sfn_len - 3]) |c| {
+        if (c == ' ') break;
+        buf[len] = c;
+        len += 1;
+    }
+
+    // Check if extension exists.
+    if (entry.name[DirEntry.sfn_len - 3] != ' ') {
+        buf[len] = '.';
+        len += 1;
+
+        // Copy extension part (3 bytes).
+        for (entry.name[DirEntry.sfn_len - 3 .. DirEntry.sfn_len]) |c| {
             if (c == ' ') break;
             buf[len] = c;
             len += 1;
         }
-
-        // Check if extension exists.
-        if (entry.name[DirEntry.sfn_len - 3] != ' ') {
-            buf[len] = '.';
-            len += 1;
-
-            // Copy extension part (3 bytes).
-            for (entry.name[DirEntry.sfn_len - 3 .. DirEntry.sfn_len]) |c| {
-                if (c == ' ') break;
-                buf[len] = c;
-                len += 1;
-            }
-        }
-
-        const name = try allocator.alloc(u8, len);
-        return std.ascii.lowerString(name, buf[0..len]);
     }
-};
+
+    return std.ascii.lowerString(buf[0..len], buf[0..len]);
+}
 
 // =============================================================
 // File Interface
