@@ -190,6 +190,18 @@ const PfErrorCode = packed struct(u32) {
     _u5: u27,
 };
 
+/// Get the state of the thread interrupted by an IRQ.
+///
+/// Available only while handling an IRQ.
+pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
+    const ctx = getIrqContext() orelse return null;
+    return .{
+        .pc = ctx.rip,
+        .fp = ctx.rbp,
+        .user = ctx.isFromUserMode(),
+    };
+}
+
 inline fn getIrqContext() ?*const Context {
     return percpu(&irq_ctx).*;
 }

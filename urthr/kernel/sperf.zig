@@ -44,14 +44,36 @@ pub fn record(payload: EventPayload) void {
     if (c.count < buffer_len) c.count += 1;
 }
 
-/// Record the name of the current thread.
-pub fn recordThreadName(name: []const u8) void {
+/// Record the call stack of the current thead interrupted by IRQ.
+///
+/// Does nothing if not called in a hard IRQ context.
+pub fn recordStack() void {
     if (!options.enable_sperf) return;
 
-    var buf: [perf.ThreadName.max_len]u8 = @splat(0);
-    const n = @min(name.len, buf.len);
-    @memcpy(buf[0..n], name[0..n]);
-    record(.init(.thread_name, .{ .name = buf }));
+    const info = arch.exception.getInterruptedInfo() orelse return;
+    var sample: perf.StackSample = .{
+        .depth = 1,
+        .flags = .{ .user = info.user },
+        .frames = @splat(0),
+    };
+    sample.frames[0] = info.pc;
+
+    // Record only kernel frames.
+    if (!info.user) {
+        var it = arch.StackIterator.init(info.fp);
+        while (sample.depth < perf.StackSample.max_depth) {
+            const prev = it.fp;
+            sample.frames[sample.depth] = it.next() orelse break;
+            sample.depth += 1;
+
+            // Stop when the next frame is out of the kernel stack.
+            if (it.fp <= prev or it.fp - info.fp >= max_stack_span) {
+                break;
+            }
+        }
+    }
+
+    record(.init(.stack_sample, sample));
 }
 
 /// Write the buffered records to a file mounted on the root filesystem.
@@ -84,7 +106,7 @@ pub fn dump() fs.Error!void {
     var lens: [board.num_cpus]usize = undefined;
     for (0..board.num_cpus) |core| lens[core] = len(core);
 
-    var wbuf: [256]Record = undefined;
+    var wbuf: [64]Record = undefined;
     var wlen: usize = 0;
 
     while (true) {
@@ -120,11 +142,17 @@ pub fn dump() fs.Error!void {
     if (wlen > 0) {
         _ = try file.write(std.mem.sliceAsBytes(wbuf[0..wlen]));
     }
+
+    // Make the dump visible to the host.
+    try fs.syncAll();
 }
 
 // =============================================================
 // Internals
 // =============================================================
+
+/// Maximum distance in bytes between the first and the last frame of a kernel stack.
+const max_stack_span: usize = urd.task.thread.default_stack_size;
 
 /// Number of records each core's ring buffer can hold.
 const buffer_len: usize = 8192;

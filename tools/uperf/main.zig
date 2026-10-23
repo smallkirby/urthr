@@ -106,13 +106,13 @@ pub fn main(init: std.process.Init) !void {
     {
         thread_names = std.AutoHashMap(
             ThreadKey,
-            [perf.ThreadName.max_len]u8,
+            perf.ThreadName,
         ).init(allocator);
         for (records) |rec| {
-            if (rec.payload.event() != .thread_name) continue;
+            if (rec.payload.event() != .sched_switch) continue;
             try thread_names.put(
                 .{ .core = rec.core, .tid = rec.tid },
-                rec.payload.data.thread_name.name,
+                rec.payload.data.sched_switch.name,
             );
         }
     }
@@ -121,12 +121,10 @@ pub fn main(init: std.process.Init) !void {
     {
         var iter = thread_names.iterator();
         while (iter.next()) |entry| {
-            const name = entry.value_ptr.*;
-            const len = std.mem.indexOfScalar(u8, &name, 0) orelse name.len;
             try s.write(ThreadNameEvent{
                 .pid = entry.key_ptr.core,
                 .tid = entry.key_ptr.tid,
-                .args = .{ .name = name[0..len] },
+                .args = .{ .name = entry.value_ptr.slice() },
             });
         }
     }
@@ -136,8 +134,8 @@ pub fn main(init: std.process.Init) !void {
     defer pending.deinit();
     for (records) |rec| {
         switch (rec.payload.event()) {
-            .thread_name,
             .sched_switch,
+            .stack_sample,
             => {
                 // Handled later.
             },
@@ -248,7 +246,7 @@ const ThreadKey = struct {
 };
 
 /// Known name for each core and thread pair.
-var thread_names: std.AutoHashMap(ThreadKey, [perf.ThreadName.max_len]u8) = undefined;
+var thread_names: std.AutoHashMap(ThreadKey, perf.ThreadName) = undefined;
 /// Process ID base for the per-core scheduling process.
 var cpu_pid_base: u32 = undefined;
 
@@ -256,7 +254,7 @@ var cpu_pid_base: u32 = undefined;
 fn writeSchedEvent(s: *std.json.Stringify, event: perf.Record, duration_ns: u64) !void {
     var name_buf: [32]u8 = undefined;
     const name = blk: {
-        const raw = thread_names.get(.{
+        const tn = thread_names.get(.{
             .core = event.core,
             .tid = event.tid,
         }) orelse break :blk try std.fmt.bufPrint(
@@ -264,9 +262,9 @@ fn writeSchedEvent(s: *std.json.Stringify, event: perf.Record, duration_ns: u64)
             "#{d}",
             .{event.tid},
         );
-        const len = std.mem.indexOfScalar(u8, &raw, 0) orelse raw.len;
-        @memcpy(name_buf[0..len], raw[0..len]);
-        break :blk name_buf[0..len];
+        const raw = tn.slice();
+        @memcpy(name_buf[0..raw.len], raw);
+        break :blk name_buf[0..raw.len];
     };
 
     try s.write(TraceEvent{

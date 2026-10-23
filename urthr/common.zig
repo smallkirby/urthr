@@ -1,5 +1,6 @@
 //! Common library code that can be used in every module.
 
+pub const arch = @import("common/arch.zig");
 pub const bits = @import("common/bits.zig");
 pub const block = @import("common/block.zig");
 pub const mem = @import("common/mem.zig");

@@ -69,8 +69,6 @@ pub fn start() !void {
 
     // Initialize idle thread runtime accounting.
     getCurrent().cpu.last_exec_start = arch.timer.getCount();
-
-    sperf.recordThreadName(getCurrent().name);
 }
 
 /// Add a thread to the ready queue.
@@ -271,10 +269,11 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
     }
 
     // Structured perf recording.
-    if (cur.cpu.last_exec_start == 0) {
-        sperf.recordThreadName(cur.name);
+    if (options.enable_sperf) {
+        sperf.record(.init(.sched_switch, .{
+            .name = .init(cur.name),
+        }));
     }
-    sperf.record(.init(.sched_switch, .{}));
 
     // Update the last switch-in timestamp.
     updateLastExecTimestamp();
@@ -333,6 +332,8 @@ const tick_interval_us: u64 = 10 * std.time.us_per_ms;
 
 /// Scheduler preemption callback.
 fn onTimerTick() void {
+    sperf.recordStack(); // TODO: use PMU or other timer
+
     markNeedResched();
     accountRuntime();
 }

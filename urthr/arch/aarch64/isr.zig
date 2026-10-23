@@ -434,6 +434,18 @@ export fn serrorLowerElA32(ctx: *Context) callconv(.c) void {
     return defaultHandler(ctx, "SError, Lower EL, A32");
 }
 
+/// Get the state of the thread interrupted by an IRQ.
+///
+/// Available only while handling an IRQ.
+pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
+    const ctx = getIrqContext() orelse return null;
+    return .{
+        .pc = ctx.pc,
+        .fp = ctx.x29,
+        .user = (ctx.pstate & 0xF) == 0,
+    };
+}
+
 inline fn getIrqContext() ?*const Context {
     return percpu(&irq_ctx).*;
 }
