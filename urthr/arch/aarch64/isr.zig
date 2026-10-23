@@ -4,6 +4,9 @@ extern const exception_table: *void;
 /// Whether we are currently handling an exception.
 var in_handling: bool linksection(common.pcpu.section) = false;
 
+/// Context of the interrupt being handled on this core.
+var irq_ctx: ?*const Context linksection(common.pcpu.section) = null;
+
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
 
@@ -233,6 +236,9 @@ export fn syncCurElSpx(ctx: *Context) callconv(.c) void {
 }
 
 export fn irqCurElSpx(ctx: *Context) callconv(.c) void {
+    const prev = setIrqContext(ctx);
+    defer _ = setIrqContext(prev);
+
     if (handler) |f| {
         if (f()) |_| {
             return;
@@ -392,6 +398,9 @@ fn isTranslationFault(fsc: regs.Esr.Dfsc) bool {
 }
 
 export fn irqLowerElA64(ctx: *Context) callconv(.c) void {
+    const prev = setIrqContext(ctx);
+    defer _ = setIrqContext(prev);
+
     if (handler) |f| {
         if (f()) |_| {
             callEreturnHook(ctx);
@@ -423,6 +432,16 @@ export fn fiqLowerElA32(ctx: *Context) callconv(.c) void {
 
 export fn serrorLowerElA32(ctx: *Context) callconv(.c) void {
     return defaultHandler(ctx, "SError, Lower EL, A32");
+}
+
+inline fn getIrqContext() ?*const Context {
+    return percpu(&irq_ctx).*;
+}
+
+inline fn setIrqContext(ctx: ?*const Context) ?*const Context {
+    const prev = getIrqContext();
+    percpu(&irq_ctx).* = ctx;
+    return prev;
 }
 
 /// Register context.

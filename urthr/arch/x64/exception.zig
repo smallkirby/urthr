@@ -55,6 +55,8 @@ var userfault_handler: ?UserFaultHandler = null;
 
 /// Whether we are currently handling an exception.
 var in_handling: bool linksection(common.pcpu.section) = false;
+/// Context of the interrupt or exception being handled on this core.
+var irq_ctx: ?*const Context linksection(common.pcpu.section) = null;
 /// Whether the shared IDT has been initialized.
 var initialized: std.atomic.Value(bool) = .init(false);
 
@@ -113,6 +115,9 @@ pub fn callEreturnHook(ctx: *Context) void {
 ///
 /// Called from the ISR common stub.
 pub fn dispatch(ctx: *Context) void {
+    const prev = setIrqContext(ctx);
+    defer _ = setIrqContext(prev);
+
     // Handle page fault exceptions specially.
     if (ctx.vector == @backingInt(Exception.pf)) blk: {
         const ec: PfErrorCode = @bitCast(@as(u32, @truncate(ctx.ec)));
@@ -184,6 +189,16 @@ const PfErrorCode = packed struct(u32) {
     /// Reserved.
     _u5: u27,
 };
+
+inline fn getIrqContext() ?*const Context {
+    return percpu(&irq_ctx).*;
+}
+
+inline fn setIrqContext(ctx: ?*const Context) ?*const Context {
+    const prev = getIrqContext();
+    percpu(&irq_ctx).* = ctx;
+    return prev;
+}
 
 // =============================================================
 // Default handler
