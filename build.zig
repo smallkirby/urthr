@@ -386,6 +386,15 @@ pub fn build(b: *std.Build) !void {
     };
     iu.installArtifact(uperf, .host, .bin);
 
+    const fsync = b.addExecutable(.{
+        .name = "fsync",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/fsync/main.zig"),
+            .target = tools_target,
+            .optimize = optimize,
+        }),
+    });
+
     // =============================================================
     // Preprocess
     // =============================================================
@@ -787,12 +796,19 @@ pub fn build(b: *std.Build) !void {
             run.step.dependOn(&merge_rootfs.step);
         }
 
-        bootfs.dependOn(&iu.createInstallFile(
+        const install_img = iu.createInstallFile(
             img,
             "bootfs.img",
             .target,
             .root,
-        ).step);
+        );
+
+        // Flush dirty pages of the installed image
+        // so that the guest's first flush doesn't have to wait for them.
+        const sync_img = b.addRunArtifact(fsync);
+        sync_img.addFileArg(iu.getInstallPath(.target, .root).path(b, "bootfs.img"));
+        sync_img.step.dependOn(&install_img.step);
+        bootfs.dependOn(&sync_img.step);
 
         if (sdcreate) {
             b.getInstallStep().dependOn(bootfs);
@@ -841,6 +857,13 @@ pub fn build(b: *std.Build) !void {
         run.addFileArg(iu.getInstallPath(.target, .root).path(b, "esp.img"));
         run.step.dependOn(&cp_remote.step);
         b.getInstallStep().dependOn(&run.step);
+
+        // Flush dirty pages of the installed image
+        // so that the guest's first flush doesn't have to wait for them.
+        const sync_esp = b.addRunArtifact(fsync);
+        sync_esp.addFileArg(iu.getInstallPath(.target, .root).path(b, "esp.img"));
+        sync_esp.step.dependOn(&run.step);
+        b.getInstallStep().dependOn(&sync_esp.step);
 
         // Copy apps.
         var app_artifact_steps: [apps.len]*std.Build.Step = undefined;
