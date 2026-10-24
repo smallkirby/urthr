@@ -121,11 +121,10 @@ pub fn enable() void {
     }
 }
 
-/// Disable the local APIC timer and mask interrupts.
-pub fn disable() void {
-    lapic.setTimerLvt(ppi_intid, true, mode);
+/// Cancel the timer deadline and stop the local APIC timer.
+pub fn cancelDeadline() void {
     switch (mode) {
-        .tsc_deadline => am.wrmsr(.tsc_deadline, 0),
+        .tsc_deadline => am.wrmsri(.tsc_deadline, 0),
         .one_shot => lapic.setInitialCount(0),
         .periodic => unreachable,
     }

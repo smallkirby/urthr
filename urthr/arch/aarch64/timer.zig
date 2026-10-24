@@ -44,6 +44,7 @@ pub fn setDeadline(ticks: u32) void {
     am.msr(.cntp_tval_el0, regs.CntpTval{
         .value = ticks,
     });
+    enable();
 }
 
 /// Enable the physical timer and unmask interrupts.
@@ -55,11 +56,11 @@ pub fn enable() void {
     });
 }
 
-/// Disable the physical timer and mask interrupts.
-pub fn disable() void {
+/// Cancel the timer deadline and stop the physical timer.
+pub fn cancelDeadline() void {
     am.msr(.cntp_ctl_el0, regs.CntpCtl{
         .enable = false,
-        .imask = true,
+        .imask = false,
         .istatus = false,
     });
 }

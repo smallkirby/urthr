@@ -181,9 +181,6 @@ const CoreTimer = struct {
 /// Timer state of all cores.
 var core_timers: [board.num_cpus]CoreTimer = @splat(.{});
 
-/// Interval of the timer interrupt in nanoseconds when no deadline is queued.
-const idle_interval_ns: u64 = 1 * std.time.ns_per_s;
-
 /// Get the timer state of the calling core.
 ///
 /// IRQ must be disabled.
@@ -206,18 +203,32 @@ fn scheduleLocked(timer: *CoreTimer, entry: *Timer) void {
 ///
 /// Must be called with IRQ disabled and the lock of the timer held.
 fn armTimerLocked(timer: *CoreTimer) void {
-    const now = getCurrentTimestamp();
-    var next = now + idle_interval_ns;
-
     // TODO: should use tree to efficiently find the earliest timer.
+    var next: ?u64 = null;
     var it = timer.queue.iter();
     while (it.next()) |entry| {
-        next = @min(next, entry.deadline_ns);
+        next = @min(next orelse entry.deadline_ns, entry.deadline_ns);
     }
 
-    const delta = next -| now;
-    const ticks = @max(1, delta * arch.timer.getFreq() / std.time.ns_per_s);
-    arch.timer.setDeadline(@intCast(@min(ticks, std.math.maxInt(u32))));
+    // Stop periodic timer if no timers are pending.
+    const deadline = next orelse return arch.timer.cancelDeadline();
+
+    // Re-arm the timer for the next expiration.
+    const ticks = nsToTicks(deadline -| getCurrentTimestamp());
+    arch.timer.setDeadline(@intCast(
+        std.math.clamp(ticks, 1, std.math.maxInt(u32)),
+    ));
+}
+
+/// Convert nanoseconds to ticks of the timer without overflow.
+inline fn nsToTicks(ns: u64) u64 {
+    const freq: u64 = arch.timer.getFreq();
+    const sec = ns / std.time.ns_per_s;
+    const sub_sec = ns % std.time.ns_per_s;
+    const ticks_sec = sec *| freq;
+    const ticks_sub_sec = sub_sec * freq / std.time.ns_per_s;
+
+    return ticks_sec +| ticks_sub_sec;
 }
 
 /// Timer interrupt handler called in IRQ context.

@@ -63,12 +63,9 @@ pub fn initLocal() Allocator.Error!void {
     setCurrent(th);
 }
 
-/// Start the preemptive scheduling timer of this core.
+/// Start the scheduler of this core.
 pub fn start() !void {
     rtt.expectEqual(getIdle(), getCurrent());
-
-    // Register scheduler timer callback.
-    try time.schedulePeriodic(tick_interval_us, onTimerTick);
 
     // Start sampling the call stack for profiling.
     try sperf.startSampling();
@@ -322,6 +319,9 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
     // Do deferred work for the previous thread.
     urd.task.onSwitchedOut(prev);
 
+    // Re-arm scheduling tick if necessary.
+    updateTick();
+
     // Restore FPU state.
     const cur = getCurrent();
     if (cur.fpu) |f| {
@@ -389,6 +389,34 @@ fn getIdle() *Thread {
 
 /// Scheduler preemption interval in microseconds.
 const tick_interval_us: u64 = 10 * std.time.us_per_ms;
+
+/// Per-CPU preemption tick timer.
+///
+/// This is queued only while a non-idle thread is running.
+var tick_timer: time.Timer linksection(pcpu.section) = .{
+    .deadline_ns = 0,
+    .callback = onTimerTick,
+    .interval_ns = tick_interval_us * std.time.ns_per_us,
+    .fired = true,
+};
+
+/// Update the tick timer state based on the current thread.
+///
+/// When a non-idle thread is running, the preemption timer is armed.
+/// Otherwise, the preemption timer is disarmed.
+fn updateTick() void {
+    const timer = pcpu.ptr(&tick_timer);
+    const need_tick =
+        getCurrent() != getIdle() or
+        (options.idle_watchdog != 0 and urd.smp.getLogicalCoreId() == 0);
+
+    if (need_tick and timer.fired) {
+        timer.deadline_ns = time.getCurrentTimestamp() + timer.interval_ns;
+        time.scheduleTimer(timer);
+    } else if (!need_tick and !timer.fired) {
+        _ = time.cancelTimer(timer);
+    }
+}
 
 /// Scheduler preemption callback.
 fn onTimerTick(_: *time.Timer) void {
