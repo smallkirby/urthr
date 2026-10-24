@@ -24,6 +24,8 @@ dma: DmaAllocator,
 lock: Mutex = .{},
 /// Event for signaling completion of I/O operations.
 event: Event = .{},
+/// Number of IRQs handled. Used for diagnostics.
+irq_count: std.atomic.Value(usize) = .init(0),
 
 /// Persistent DMA buffers.
 bufs: struct {
@@ -158,6 +160,7 @@ pub fn interface(self: *Self) block.Device {
 fn handleIrq(_: urd.exception.Vector, ctx: ?*anyopaque) void {
     if (ctx) |c| {
         const self: *Self = @ptrCast(@alignCast(c));
+        _ = self.irq_count.fetchAdd(1, .monotonic);
 
         // Reclaim completed descriptor chains from the used ring.
         if (self.dev.getQueue(queue_index)) |vq| {
@@ -433,8 +436,19 @@ fn flushCache(self: *Self) Error!void {
     self.dev.notifyQueue(queue_index);
 
     // Wait for completion.
-    if (!self.event.wait(urd.time.getCurrentTimestamp() + 5 * std.time.ns_per_s)) {
-        log.err("flush timeout", .{});
+    const irq_before = self.irq_count.load(.monotonic);
+    const start_ns = urd.time.getCurrentTimestamp();
+    if (!self.event.wait(start_ns + 5 * std.time.ns_per_s)) {
+        const used_idx: *volatile u16 = @ptrFromInt(vq.used_base + 2);
+        const avail_idx: *volatile u16 = @ptrFromInt(vq.avail_base + 2);
+        log.err("flush timeout: elapsed={d}ms irqs={d} used_idx={d} last_used_idx={d} avail_idx={d} num_free={d}", .{
+            (urd.time.getCurrentTimestamp() - start_ns) / std.time.ns_per_ms,
+            self.irq_count.load(.monotonic) - irq_before,
+            used_idx.*,
+            vq.last_used_idx,
+            avail_idx.*,
+            vq.num_free,
+        });
         return Error.IoError;
     }
 
