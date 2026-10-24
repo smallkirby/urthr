@@ -11,6 +11,9 @@ var pending_unlock: ?*SpinLock linksection(pcpu.section) = null;
 /// Counter of disabled preemption on this core.
 var preempt_disable_count: usize linksection(pcpu.section) = 0;
 
+/// Bitmask of cores running their idle thread.
+var idle_cores: CpuMask = 0;
+
 /// Spin lock for scheduler and thread management.
 var lock: SpinLock = .{};
 /// Thread ID assigned to the next created thread.
@@ -72,6 +75,11 @@ pub fn start() !void {
 
     // Initialize idle thread runtime accounting.
     getCurrent().cpu.last_exec_start = arch.timer.getCount();
+
+    // The idle thread is running at this point.
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+    setIdle(true);
 }
 
 /// Add a thread to the ready queue.
@@ -81,12 +89,44 @@ pub fn enqueue(th: *Thread) void {
 
     th.state = .running;
     qready.append(th);
+
+    kickIdleCore(th);
+}
+
+/// Record whether this core is running its idle thread.
+fn setIdle(is_idle: bool) void {
+    rtt.expect(lock.isLocked());
+
+    if (is_idle)
+        idle_cores |= getCurrentCoreBit()
+    else
+        idle_cores &= ~getCurrentCoreBit();
+}
+
+/// Wake up an idle core eligible to run the thread.
+///
+/// Does nothing if no other core is idle.
+fn kickIdleCore(th: *Thread) void {
+    rtt.expect(lock.isLocked());
+
+    const self_bit = getCurrentCoreBit();
+    const candidates = idle_cores & th.affinity & ~self_bit;
+    if (candidates == 0) return;
+
+    const cpu = @ctz(candidates);
+    idle_cores &= ~(@as(CpuMask, 1) << @intCast(cpu));
+    urd.ipi.sendReschedule(cpu);
+}
+
+/// Get the logical core ID bit of the current core.
+inline fn getCurrentCoreBit() CpuMask {
+    return @as(CpuMask, 1) << @intCast(urd.smp.getLogicalCoreId());
 }
 
 /// Set the CPU affinity mask of a thread.
 ///
 /// Marks the thread as needing rescheduling so that it's immediately migrated to eligible cores.
-pub fn setAffinity(th: *Thread, mask: u64) void {
+pub fn setAffinity(th: *Thread, mask: CpuMask) void {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
@@ -105,6 +145,7 @@ pub fn wake(th: *Thread) void {
         th.state = .running;
         qready.append(th);
         markNeedResched();
+        kickIdleCore(th);
     }
 }
 
@@ -203,12 +244,13 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
     };
 
     // Get the next thread from the ready queue eligible to run on this core.
-    const core_bit = @as(u64, 1) << @intCast(urd.smp.getLogicalCoreId());
+    const core_bit = getCurrentCoreBit();
     const next = pickNext();
     if (next == getIdle() and
         next_state == .running and
         getCurrent().affinity & core_bit != 0)
     {
+        setIdle(getCurrent() == getIdle());
         return lock.unlockRestoreIrq(ie);
     }
 
@@ -224,6 +266,7 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
             qready.append(cur);
         }
         setCurrent(next);
+        setIdle(next == getIdle());
 
         // Switch user-space page table if needed.
         arch.mmu.switchAddressSpace(next.vmm.as, urd.mem.page);
@@ -288,7 +331,7 @@ export fn onSwitchedIn(prev: *Thread) callconv(.c) void {
 fn pickNext() *Thread {
     rtt.expect(lock.isLocked());
 
-    const core_bit = @as(u64, 1) << @intCast(urd.smp.getLogicalCoreId());
+    const core_bit = getCurrentCoreBit();
 
     var it = qready.iter();
     while (it.next()) |th| {
@@ -384,6 +427,7 @@ const pcpu = urd.pcpu;
 const sperf = urd.sperf;
 const SpinLock = urd.sync.SpinLock;
 const thread = urd.task.thread;
+const CpuMask = urd.task.CpuMask;
 const Thread = thread.Thread;
 const ThreadList = thread.ThreadList;
 const time = @import("time.zig");

@@ -35,6 +35,8 @@ const virtio_net_vector: u8 = 0x41;
 const virtio_blk_vector: u8 = 0x42;
 /// IDT vector assigned to the TLB shootdown IPI.
 pub const tlb_shootdown_vector: u8 = 0x60;
+/// IDT vector assigned to the reschedule IPI.
+pub const resched_vector: u8 = 0x61;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -738,6 +740,14 @@ pub fn enableIrq(_: usize) void {}
 /// Send an IPI to all cores except the caller.
 pub fn sendIpiAll(vector: u64) void {
     arch.lapic.sendIpiAllExclSelf(@intCast(vector));
+}
+
+/// Send an IPI to the core of the given logical CPU ID.
+pub fn sendIpi(cpu: usize, vector: u64) void {
+    arch.lapic.sendIpi(
+        @intCast(urd.smp.archCoreIdOf(cpu)),
+        @intCast(vector),
+    );
 }
 
 /// IRQ handler function.

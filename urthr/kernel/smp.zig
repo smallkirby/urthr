@@ -47,6 +47,11 @@ pub fn getLogicalCoreId() usize {
     return pcpu.get(&logical_id);
 }
 
+/// Get the architecture-specific core ID of the given logical CPU.
+pub fn archCoreIdOf(logical_core: usize) u64 {
+    return idmap[logical_core];
+}
+
 /// Counter indicating how many cores have been waked up.
 var waked: std.atomic.Value(u8) = .init(0);
 

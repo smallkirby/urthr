@@ -8,11 +8,19 @@ pub fn initGlobal() void {
     }) catch {
         @panic("Failed to register TLB shootdown IPI handler.");
     };
+
+    urd.exception.setHandler(board.resched_vector, .{
+        .function = handleReschedule,
+        .ctx = null,
+    }) catch {
+        @panic("Failed to register reschedule IPI handler.");
+    };
 }
 
 /// Enable IPI infrastructure on the calling core.
 pub fn initLocal() void {
     board.enableIrq(board.tlb_shootdown_vector);
+    board.enableIrq(board.resched_vector);
 }
 
 // =============================================================
@@ -86,6 +94,19 @@ fn handleTlbShootdown(_: urd.exception.Vector, _: ?*anyopaque) void {
 
     // Acknowledge the request.
     _ = tlb_shootdown_pending.fetchAnd(~bit, .release);
+}
+
+// =============================================================
+// Reschedule
+
+/// Send a reschedule IPI to the given core.
+pub fn sendReschedule(cpu: usize) void {
+    board.sendIpi(cpu, board.resched_vector);
+}
+
+/// Handler invoked when a core receives a reschedule IPI.
+fn handleReschedule(_: urd.exception.Vector, _: ?*anyopaque) void {
+    urd.sched.markNeedResched();
 }
 
 // =============================================================

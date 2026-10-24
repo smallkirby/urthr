@@ -147,6 +147,20 @@ pub fn sendIpiAllExclSelf(vector: u8) void {
     lapic.waitFor(IcrLow, .{ .delivery_status = .idle }, null);
 }
 
+/// Send a fixed-vector IPI to the CPU with the given APIC ID.
+pub fn sendIpi(dest_apic_id: u8, vector: u8) void {
+    lapic.writez(IcrHigh, .{
+        .dest = dest_apic_id,
+    });
+    lapic.writez(IcrLow, .{
+        .vector = vector,
+        .delivery_mode = .fixed,
+        .level = .assert,
+        .trigger_mode = .edge,
+    });
+    lapic.waitFor(IcrLow, .{ .delivery_status = .idle }, null);
+}
+
 /// Clear the Error Status Register without reading it.
 fn clearErrors() void {
     lapic.writez(Esr, .{});

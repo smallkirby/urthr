@@ -16,6 +16,14 @@ pub const Vmm = @import("task/Vmm.zig");
 pub const ThreadGroup = @import("task/ThreadGroup.zig");
 pub const Credential = @import("task/Credential.zig");
 
+/// Bitmask of logical CPU cores.
+pub const CpuMask = u64;
+comptime {
+    if (board.num_cpus > @bitSizeOf(CpuMask)) {
+        @compileError("CpuMask is too small to represent all cores.");
+    }
+}
+
 pub const Error = error{
     /// Invalid argument provided.
     InvalidArgument,
@@ -955,6 +963,7 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
 const arch = @import("arch").impl;
+const board = @import("board").impl;
 const urd = @import("urthr");
 const SpinLock = urd.sync.SpinLock;
 const mem = urd.mem;

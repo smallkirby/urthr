@@ -11,6 +11,8 @@ pub const num_cpus = 4;
 
 /// SGI ID used for the TLB shootdown IPI.
 pub const tlb_shootdown_vector = 0;
+/// SGI ID used for the reschedule IPI.
+pub const resched_vector = 1;
 
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?ExceptionHandler = null;
@@ -298,6 +300,13 @@ pub fn enableIrq(id: usize) void {
 /// Send an IPI to all cores except the caller.
 pub fn sendIpiAll(id: u64) void {
     arch.gicv2.sendSgi(@intCast(id), .all);
+}
+
+/// Send an IPI to the core of the given logical CPU ID.
+pub fn sendIpi(cpu: usize, id: u64) void {
+    arch.gicv2.sendSgi(@intCast(id), .{
+        .target = &.{@intCast(cpu)},
+    });
 }
 
 /// IRQ handler function.

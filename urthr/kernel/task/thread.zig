@@ -49,7 +49,7 @@ pub const Thread = struct {
     /// CPU time accounting.
     cpu: CpuAccount = .{},
     /// CPU affinity mask.
-    affinity: u64 = ~@as(u64, 0),
+    affinity: task.CpuMask = std.math.maxInt(task.CpuMask),
 
     /// Memory manager.
     vmm: *task.Vmm,
@@ -58,12 +58,6 @@ pub const Thread = struct {
 
     /// Thread list node.
     head: ThreadList.Head = .{},
-
-    comptime {
-        if (board.num_cpus > @bitSizeOf(@FieldType(Thread, "affinity"))) {
-            @compileError("Affinity mask is too small to represent all cores.");
-        }
-    }
 };
 
 /// Default stack size for threads.
@@ -291,7 +285,6 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const typing = common.typing;
 const arch = @import("arch").impl;
-const board = @import("board").impl;
 const urd = @import("urthr");
 const task = urd.task;
 const sync = urd.sync;
