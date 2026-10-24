@@ -182,6 +182,19 @@ pub fn exitCurrent(state: thread.State) noreturn {
     unreachable;
 }
 
+/// Halt this core until the next interrupt.
+///
+/// Returns immediately if the current thread is being requested to be rescheduled.
+pub fn halt() void {
+    // Needs IRQ disabled to atomically check the reschedule flag.
+    const ie = arch.intr.maskAll();
+    defer arch.intr.setMask(ie);
+
+    if (!getCurrent().need_resched) {
+        arch.wfi();
+    }
+}
+
 /// Check if the current thread needs to be rescheduled and yield if possible.
 pub fn shouldReschedule() bool {
     if (pcpu.get(&preempt_disable_count) != 0) return false;
@@ -250,6 +263,7 @@ fn rescheduleImpl(caller_lock: ?*SpinLock, next_state: thread.State, skip: ?*con
         next_state == .running and
         getCurrent().affinity & core_bit != 0)
     {
+        getCurrent().need_resched = false;
         setIdle(getCurrent() == getIdle());
         return lock.unlockRestoreIrq(ie);
     }

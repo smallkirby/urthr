@@ -130,7 +130,7 @@ fn zmain() !void {
     if (options.idle_watchdog != 0) {
         while (true) {
             urd.sched.reschedule();
-            arch.halt();
+            urd.sched.halt();
         }
     }
 }

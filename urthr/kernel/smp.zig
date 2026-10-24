@@ -107,7 +107,7 @@ fn zsubmain() !void {
     // Start the scheduler.
     while (true) {
         urd.sched.reschedule();
-        arch.halt();
+        urd.sched.halt();
     }
 }
 

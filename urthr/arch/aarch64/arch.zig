@@ -21,6 +21,13 @@ pub fn halt() void {
     asm volatile ("wfi");
 }
 
+/// Wait until an interrupt becomes pending.
+///
+/// Must be called with IRQ disabled.
+pub fn wfi() void {
+    asm volatile ("wfi");
+}
+
 /// Memory barrier domain.
 pub const BarrierDomain = enum {
     /// Full system.
