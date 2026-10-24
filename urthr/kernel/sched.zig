@@ -60,12 +60,15 @@ pub fn initLocal() Allocator.Error!void {
     setCurrent(th);
 }
 
-/// Start the preemptive scheduling timer.
+/// Start the preemptive scheduling timer of this core.
 pub fn start() !void {
     rtt.expectEqual(getIdle(), getCurrent());
 
     // Register scheduler timer callback.
-    _ = try time.register(tick_interval_us, onTimerTick);
+    try time.register(tick_interval_us, onTimerTick);
+
+    // Start sampling the call stack for profiling.
+    try sperf.startSampling();
 
     // Initialize idle thread runtime accounting.
     getCurrent().cpu.last_exec_start = arch.timer.getCount();
@@ -332,8 +335,6 @@ const tick_interval_us: u64 = 10 * std.time.us_per_ms;
 
 /// Scheduler preemption callback.
 fn onTimerTick() void {
-    sperf.recordStack(); // TODO: use PMU or other timer
-
     markNeedResched();
     accountRuntime();
 }

@@ -52,7 +52,7 @@ const tick_interval_us = 500 * std.time.us_per_ms;
 
 /// Start the console tick timer.
 pub fn initTimer() void {
-    _ = urd.time.register(tick_interval_us, &tick) catch {
+    urd.time.register(tick_interval_us, &tick) catch {
         @panic("Failed to register console tick timer callback.");
     };
 }

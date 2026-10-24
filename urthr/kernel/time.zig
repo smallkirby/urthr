@@ -1,14 +1,6 @@
 /// Type of kernel timestamp.
 pub const Ktimestamp = u64;
 
-/// Timer callback ID.
-///
-/// Used to unregister a callback.
-pub const Id = u32;
-
-/// Lock to protect the event list.
-var lock: SpinLock = .{};
-
 /// Initialize the timer subsystem.
 pub fn initGlobal() void {
     urd.exception.setHandler(arch.timer.ppi_intid, .{
@@ -19,17 +11,17 @@ pub fn initGlobal() void {
     };
 
     // Register sleep checker as a timer callback.
-    _ = register(sleep_checker_interval_us, &checkSleepers) catch {
+    register(sleep_checker_interval_us, &checkSleepers) catch {
         @panic("Failed to register sleep checker timer callback.");
     };
 
     // Register itimer checker as a timer callback.
-    _ = register(sleep_checker_interval_us, &checkItimers) catch {
+    register(sleep_checker_interval_us, &checkItimers) catch {
         @panic("Failed to register itimer checker timer callback.");
     };
 
     // Register deadline checker as a timer callback.
-    _ = register(deadline_check_interval_us, &checkDeadlines) catch {
+    register(deadline_check_interval_us, &checkDeadlines) catch {
         @panic("Failed to register deadline checker timer callback.");
     };
 }
@@ -43,45 +35,28 @@ pub fn initLocal() void {
     board.enableIrq(arch.timer.ppi_intid);
 }
 
-/// Register a periodic timer callback.
+/// Register a periodic timer callback on the calling core.
 ///
-/// The callback will be invoked approximately every `interval_us` microseconds.
+/// The callback will be invoked approximately every `interval_us` microseconds in IRQ context of the calling core.
+/// If `interval_us` is zero, the callback is invoked only once at the next timer interrupt.
+///
 /// No guarantee is made about the exact timing, and callbacks may be delayed if the system is busy.
-///
-/// Returns an ID that can be used to unregister the callback.
-pub fn register(interval_us: u64, callback: *const fn () void) Allocator.Error!Id {
-    const allocator = urd.mem.bin;
-    const entry = try allocator.create(Entry);
-    errdefer allocator.destroy(entry);
+pub fn register(interval_us: u64, callback: *const fn () void) Allocator.Error!void {
+    const entry = try urd.mem.bin.create(Entry);
+    errdefer urd.mem.bin.destroy(entry);
 
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
+    const ie = arch.intr.maskAll();
+    defer arch.intr.setMask(ie);
 
     entry.* = .{
-        .id = allocateId(),
         .interval_us = interval_us,
         .next_us = getCurrentTimestampUs() + interval_us,
         .callback = callback,
     };
-    entries.append(entry);
+    getEntries().append(entry);
 
-    return entry.id;
-}
-
-/// Unregister a previously registered timer callback.
-pub fn unregister(id: Id) void {
-    const allocator = urd.mem.bin;
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
-
-    var it = entries.iter();
-    while (it.next()) |entry| {
-        if (entry.id == id) {
-            entries.remove(entry);
-            allocator.destroy(entry);
-            return;
-        }
-    }
+    // The new entry may expire earlier than the currently armed deadline.
+    armTimer();
 }
 
 /// Get the current kernel timestamp in nanoseconds.
@@ -353,8 +328,6 @@ fn checkDeadlines() void {
 
 /// Timer callback entry.
 const Entry = struct {
-    /// Unique ID of the timer callback.
-    id: Id,
     /// Interval of the timer callback in microseconds.
     interval_us: u64,
     /// Next scheduled time for the timer callback in microseconds.
@@ -367,19 +340,15 @@ const Entry = struct {
 
 /// List type for timer callback entries.
 const EntryList = common.typing.InlineDoublyLinkedList(Entry, "head");
-/// List of timer callbacks.
-var entries: EntryList = .{};
-/// Next unique ID to assign to a timer callback.
-var id_next: Id = 1;
+/// List of timer callbacks of this core.
+var local_entries: EntryList linksection(pcpu.section) = .{};
 
-/// Base timer tick interval in microseconds.
-const tick_interval_us: u64 = 5 * std.time.us_per_ms;
+/// Interval of the timer interrupt in microseconds when no callback is registered.
+const idle_interval_us: u64 = 1 * std.time.us_per_s;
 
-/// Allocate a new unique ID for a timer entries.
-fn allocateId() Id {
-    const id = id_next;
-    id_next +%= 1;
-    return id;
+/// Get the list of timer callbacks of this core.
+inline fn getEntries() *EntryList {
+    return pcpu.ptr(&local_entries);
 }
 
 /// Get the current kernel timestamp in microseconds.
@@ -393,27 +362,44 @@ fn getCurrentTimestampUs() Ktimestamp {
 ///
 /// Called in IRQ context.
 ///
-/// Re-arms the timer and dispatches all due callbacks.
+/// Dispatches all expired callbacks and arms the timer for the earliest next expiration.
 fn timerHandler(_: urd.exception.Vector, _: ?*anyopaque) void {
-    armTimer();
-
-    const ie = lock.lockDisableIrq();
-    defer lock.unlockRestoreIrq(ie);
-
-    const now_us = getCurrentTimestampUs();
-    var it = entries.iter();
+    const now = getCurrentTimestampUs();
+    var it = getEntries().iter();
     while (it.next()) |entry| {
-        if (now_us >= entry.next_us) {
+        if (now >= entry.next_us) {
             entry.callback();
-            entry.next_us += entry.interval_us;
+
+            if (entry.interval_us == 0) {
+                getEntries().remove(entry);
+                urd.mem.bin.destroy(entry);
+                continue;
+            }
+
+            entry.next_us = @max(entry.next_us + entry.interval_us, now + 1);
         }
     }
+
+    armTimer();
 }
 
-/// Re-arm the timer for the next tick.
+/// Arm the timer for the earliest expiration of the callbacks.
+///
+/// Must be called with IRQ disabled.
 fn armTimer() void {
-    const ticks = (tick_interval_us * arch.timer.getFreq()) / std.time.us_per_s;
-    arch.timer.setDeadline(@intCast(ticks));
+    const now = getCurrentTimestampUs();
+    var next = now + idle_interval_us;
+
+    var it = getEntries().iter();
+    var first = true;
+    while (it.next()) |entry| {
+        next = if (first) entry.next_us else @min(next, entry.next_us);
+        first = false;
+    }
+
+    const delta_us = next -| now;
+    const ticks = @max(1, (delta_us * arch.timer.getFreq()) / std.time.us_per_s);
+    arch.timer.setDeadline(@intCast(@min(ticks, std.math.maxInt(u32))));
 }
 
 // =============================================================
@@ -427,5 +413,6 @@ const board = @import("board").impl;
 const common = @import("common");
 const rtt = common.rtt;
 const urd = @import("urthr");
+const pcpu = urd.pcpu;
 const SpinLock = urd.sync.SpinLock;
 const Thread = urd.task.thread.Thread;

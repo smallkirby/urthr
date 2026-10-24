@@ -429,7 +429,7 @@ const Endpoint = struct {
 
 /// Initialize TCP protocol stack.
 pub fn init() Allocator.Error!void {
-    _ = try urd.time.register(retransmit_interval_us, timerFn);
+    try urd.time.register(retransmit_interval_us, timerFn);
 }
 
 /// Open a TCP socket.

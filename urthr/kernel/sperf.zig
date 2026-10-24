@@ -44,6 +44,13 @@ pub fn record(payload: EventPayload) void {
     if (c.count < buffer_len) c.count += 1;
 }
 
+/// Start sampling the call stack of this core periodically.
+pub fn startSampling() !void {
+    if (!options.enable_sperf) return;
+
+    try urd.time.register(sample_interval_us, recordStack);
+}
+
 /// Record the call stack of the current thead interrupted by IRQ.
 ///
 /// Does nothing if not called in a hard IRQ context.
@@ -150,6 +157,9 @@ pub fn dump() fs.Error!void {
 // =============================================================
 // Internals
 // =============================================================
+
+/// Interval of stack sampling in microseconds.
+const sample_interval_us: u64 = 1 * std.time.us_per_ms;
 
 /// Maximum distance in bytes between the first and the last frame of a kernel stack.
 const max_stack_span: usize = urd.task.thread.default_stack_size;

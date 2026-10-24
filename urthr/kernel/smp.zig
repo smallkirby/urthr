@@ -90,6 +90,9 @@ fn zsubmain() !void {
     // Enable IPI infrastructure.
     urd.ipi.initLocal();
 
+    // Start the preemption timer.
+    try urd.sched.start();
+
     // Enable system call subsystem for this core.
     arch.initSyscall();
 

@@ -210,7 +210,7 @@ pub const cache = struct {
         _allocator = allocator;
 
         // Register ARP cache cleanup timer.
-        _ = try urd.time.register(cleanup_interval_us, cleanupIrq);
+        try urd.time.register(cleanup_interval_us, cleanupIrq);
     }
 
     /// Find the cache entry for the given IP address.
