@@ -17,6 +17,12 @@ var logical_id: usize linksection(pcpu.section) = 0;
 pub fn init() urd.mem.Error!void {
     const allocator = urd.mem.page;
 
+    // Pin this thread to the primary core.
+    const current = urd.sched.getCurrent();
+    const orig_affinity = current.affinity;
+    urd.sched.setAffinity(current, 1);
+    defer urd.sched.setAffinity(current, orig_affinity);
+
     // Initialize the CPU ID mapping.
     idmap[0] = arch.getCoreId();
 
