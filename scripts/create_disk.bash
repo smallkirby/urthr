@@ -60,5 +60,7 @@ mkfs.vfat \
 
 echo_normal "Setting up contents"
 copy "$cpsrc/*" /
+echo_normal "Syncing $out"
+sync "$out"
 
 echo_normal "Done"
