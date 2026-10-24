@@ -84,7 +84,6 @@ zig build install --summary all \
   -Dboard=rpi5 \
   -Drestart \
   -Drtt \
-  -Didle_watchdog=5 \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
@@ -98,7 +97,6 @@ zig build install --summary all \
   -Dserial_boot \
   -Drestart \
   -Drtt \
-  -Didle_watchdog=5 \
   -Dsdcard=<path-to-your-sdcard-device>
 ```
 
@@ -172,5 +170,4 @@ zig build test --summary all -Doptimize=Debug
 | `qemu_log` | String (Comma-separated): `sd`, `usb`, `gic` | Enable specified QEMU verbose log outputs. Comma-separated list. | - |
 | `restart` | Flag | Restart the CPU instead of halting on EOL. | `false` |
 | `graphic` | Flag | Enable graphical display window in QEMU. | `false` |
-| `idle_watchdog` | Integer | Terminate if the idle thread's execution time exceeds this threshold in seconds. | `0` (disabled) |
 | `allow_init_exit` | Flag | Allow the init process to exit. When run on QEMU, the exit code is propagated. | `false` |

@@ -6,7 +6,6 @@
     "-Dboard=rpi5",
     "-Dserial_boot",
     "-Drtt",
-    "-Drestart",
-    "-Didle_watchdog=5"
+    "-Drestart"
   ]
 }

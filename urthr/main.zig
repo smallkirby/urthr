@@ -126,12 +126,10 @@ fn zmain() !void {
     // Start the scheduler.
     urd.sched.reschedule();
 
-    // If the idle watchdog is enabled, monitor the idle thread's execution time.
-    if (options.idle_watchdog != 0) {
-        while (true) {
-            urd.sched.reschedule();
-            urd.sched.halt();
-        }
+    // Idle loop.
+    while (true) {
+        urd.sched.reschedule();
+        urd.sched.halt();
     }
 }
 

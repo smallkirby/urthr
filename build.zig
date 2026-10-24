@@ -111,12 +111,6 @@ pub fn build(b: *std.Build) !void {
         "Restart the CPU instead of halting on panic.",
     ) orelse false;
 
-    const idle_watchdog = b.option(
-        u64,
-        "idle_watchdog",
-        "Watchdog timeout in second for the idle thread. 0 to disable.",
-    ) orelse 0;
-
     const qemu_log = b.option(
         []const u8,
         "qemu_log",
@@ -154,7 +148,6 @@ pub fn build(b: *std.Build) !void {
     options.addOption(bool, "enable_aperf", enable_aperf);
     options.addOption([]const u8, "init", init_path);
     options.addOption(bool, "restart_on_panic", restart);
-    options.addOption(u64, "idle_watchdog", idle_watchdog);
     options.addOption([]const u8, "version", version);
     options.addOption(bool, "allow_init_exit", allow_init_exit);
     options.addOption([]const u8, "fwcfg_filename", fwcfg_name);

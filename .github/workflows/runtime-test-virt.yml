@@ -60,7 +60,6 @@ jobs:
             -Drtt \
             -Drestart \
             -Dsdcreate \
-            -Didle_watchdog=300 \
             -Dinit=/bin/utest \
             -Dinit_args="!bench" \
             -Dallow_init_exit

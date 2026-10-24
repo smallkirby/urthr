@@ -406,9 +406,7 @@ var tick_timer: time.Timer linksection(pcpu.section) = .{
 /// Otherwise, the preemption timer is disarmed.
 fn updateTick() void {
     const timer = pcpu.ptr(&tick_timer);
-    const need_tick =
-        getCurrent() != getIdle() or
-        (options.idle_watchdog != 0 and urd.smp.getLogicalCoreId() == 0);
+    const need_tick = getCurrent() != getIdle();
 
     if (need_tick and timer.fired) {
         timer.deadline_ns = time.getCurrentTimestamp() + timer.interval_ns;
@@ -435,16 +433,6 @@ fn accountRuntime() void {
         .user => cur.cpu.times.user += delta,
         .kernel => cur.cpu.times.sys += delta,
     }
-
-    if (options.idle_watchdog != 0 and cur == getIdle()) {
-        if (urd.smp.getLogicalCoreId() == 0 and
-            cur.cpu.times.total() >= options.idle_watchdog * @as(u64, arch.timer.getFreq()))
-        {
-            @branchHint(.cold);
-            log.warn("Idle thread exceeded pre-defined runtime limit.", .{});
-            urd.eol(0);
-        }
-    }
 }
 
 /// Update the last execution timestamp for the current thread.
@@ -457,7 +445,6 @@ fn updateLastExecTimestamp() void {
 // =============================================================
 
 const std = @import("std");
-const log = std.log.scoped(.sched);
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const options = @import("options");
