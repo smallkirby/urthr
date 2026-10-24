@@ -9,6 +9,7 @@
 //! - moribund -> zombie: Thread is switched out and becomes a zombie.
 //! - zombie -> (deinit): Thread is reaped by the parent and freed.
 
+pub const Itimer = @import("task/Itimer.zig");
 pub const signal = @import("task/signal.zig");
 pub const thread = @import("task/thread.zig");
 pub const Vmm = @import("task/Vmm.zig");
@@ -577,7 +578,7 @@ fn becomeZombie(th: *Thread) void {
 /// Release the resources of a thread.
 fn releaseThread(th: *thread.Thread) void {
     // Disarm any interval timer.
-    urd.time.cancelItimer(th);
+    th.itimer.cancel();
 
     // Release the fd table.
     th.fs.fdtbl.deinit(mem.bin);

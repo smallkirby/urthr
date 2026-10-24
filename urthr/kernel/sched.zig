@@ -65,7 +65,7 @@ pub fn start() !void {
     rtt.expectEqual(getIdle(), getCurrent());
 
     // Register scheduler timer callback.
-    try time.register(tick_interval_us, onTimerTick);
+    try time.schedulePeriodic(tick_interval_us, onTimerTick);
 
     // Start sampling the call stack for profiling.
     try sperf.startSampling();
@@ -334,7 +334,7 @@ fn getIdle() *Thread {
 const tick_interval_us: u64 = 10 * std.time.us_per_ms;
 
 /// Scheduler preemption callback.
-fn onTimerTick() void {
+fn onTimerTick(_: *time.Timer) void {
     markNeedResched();
     accountRuntime();
 }

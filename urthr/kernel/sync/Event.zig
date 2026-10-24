@@ -45,8 +45,8 @@ pub fn waitAny(events: []const *Self, deadline_ns: ?u64) ?*Self {
             .deadline_ns = dl,
             .callback = wakeTimerEvent,
         } };
-        time.scheduleDeadline(&timer.deadline);
-        defer time.cancelDeadline(&timer.deadline);
+        time.scheduleTimer(&timer.deadline);
+        defer _ = time.cancelTimer(&timer.deadline);
 
         var all_events: [max_multiwait]*Self = undefined;
         @memcpy(all_events[0..events.len], events);
@@ -62,11 +62,11 @@ pub fn waitAny(events: []const *Self, deadline_ns: ?u64) ?*Self {
 /// Event paired with its deadline.
 const TimerEvent = struct {
     event: Self = .{},
-    deadline: time.Deadline = undefined,
+    deadline: time.Timer = undefined,
 };
 
 /// Wake the timer event paired with the given deadline.
-fn wakeTimerEvent(entry: *time.Deadline) void {
+fn wakeTimerEvent(entry: *time.Timer) void {
     const timer: *TimerEvent = @fieldParentPtr("deadline", entry);
     _ = timer.event.wake();
 }

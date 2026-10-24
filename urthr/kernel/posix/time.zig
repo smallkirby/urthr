@@ -83,8 +83,7 @@ pub fn sysSetItimer(which: ItimerWhich, new_value: *const ItimerVal, old_value: 
         new_value,
     ) catch return .err(.fault);
     const th = sched.getCurrent();
-    const old = urd.time.setItimer(
-        th,
+    const old = th.itimer.set(
         knew_value.it_value.toNs(),
         knew_value.it_interval.toNs(),
     );

@@ -50,13 +50,13 @@ pub fn wait(addr: FutexAddress, expected: usize, vmm: *Vmm, deadline_ns: ?u64) E
             .deadline_ns = dl,
             .callback = wakeOnTimeout,
         };
-        time.scheduleDeadline(&waiter.deadline);
+        time.scheduleTimer(&waiter.deadline);
     }
 
     // Wait for the futex to be woken up.
     sched.blockCurrent(&eptr.lock);
     if (deadline_ns != null) {
-        time.cancelDeadline(&waiter.deadline);
+        _ = time.cancelTimer(&waiter.deadline);
     }
 
     // Remove the waiter from the list.
@@ -153,7 +153,7 @@ const FutexWaiter = struct {
     /// Whether this waiter has been removed due to its deadline expired.
     timed_out: bool = false,
     /// Deadline used to time out the wait. Only valid if a deadline was given.
-    deadline: time.Deadline = undefined,
+    deadline: time.Timer = undefined,
     /// List head.
     head: List.Head = .{},
 
@@ -189,7 +189,7 @@ const KeyList = struct {
 /// Removes the waiter paired with the given deadline from its key's waiters list to wake it up.
 ///
 /// Runs in a hard IRQ context.
-fn wakeOnTimeout(entry: *time.Deadline) void {
+fn wakeOnTimeout(entry: *time.Timer) void {
     const waiter: *FutexWaiter = @fieldParentPtr("deadline", entry);
 
     const eptr = map.get(@intFromPtr(waiter.key.addr));

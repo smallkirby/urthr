@@ -210,7 +210,10 @@ pub const cache = struct {
         _allocator = allocator;
 
         // Register ARP cache cleanup timer.
-        try urd.time.register(cleanup_interval_us, cleanupIrq);
+        try urd.time.schedulePeriodic(
+            cleanup_interval_us,
+            cleanupIrq,
+        );
     }
 
     /// Find the cache entry for the given IP address.
@@ -306,7 +309,7 @@ pub const cache = struct {
     /// Cleanup stale cache entries.
     ///
     /// Called from IRQ context.
-    fn cleanupIrq() void {
+    fn cleanupIrq(_: *urd.time.Timer) void {
         const max_stale_count = 16;
         var stale: [max_stale_count]IpAddr = undefined;
         var stale_count: usize = 0;

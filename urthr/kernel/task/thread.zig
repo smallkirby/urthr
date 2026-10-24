@@ -44,6 +44,8 @@ pub const Thread = struct {
 
     /// This thread needs to be rescheduled.
     need_resched: bool = false,
+    /// Real-time interval timer.
+    itimer: urd.task.Itimer = .{},
     /// CPU time accounting.
     cpu: CpuAccount = .{},
     /// CPU affinity mask.

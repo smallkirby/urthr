@@ -429,7 +429,7 @@ const Endpoint = struct {
 
 /// Initialize TCP protocol stack.
 pub fn init() Allocator.Error!void {
-    try urd.time.register(retransmit_interval_us, timerFn);
+    try urd.time.schedulePeriodic(retransmit_interval_us, timerFn);
 }
 
 /// Open a TCP socket.
@@ -1067,7 +1067,7 @@ const RetransmitEntry = struct {
 };
 
 /// Called periodically to check retransmission queue.
-fn timerFn() void {
+fn timerFn(_: *urd.time.Timer) void {
     for (&sock_table.sockets) |*sock| {
         if (sock.state == .free) continue;
 

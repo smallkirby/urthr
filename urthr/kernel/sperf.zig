@@ -48,13 +48,16 @@ pub fn record(payload: EventPayload) void {
 pub fn startSampling() !void {
     if (!options.enable_sperf) return;
 
-    try urd.time.register(sample_interval_us, recordStack);
+    try urd.time.schedulePeriodic(
+        sample_interval_us,
+        recordStack,
+    );
 }
 
 /// Record the call stack of the current thead interrupted by IRQ.
 ///
 /// Does nothing if not called in a hard IRQ context.
-pub fn recordStack() void {
+pub fn recordStack(_: *urd.time.Timer) void {
     if (!options.enable_sperf) return;
 
     const info = arch.exception.getInterruptedInfo() orelse return;

@@ -38,7 +38,7 @@ pub fn writeUnsafe(s: []const u8) void {
 }
 
 /// Run periodic housekeeping on every registered backend.
-pub fn tick() void {
+pub fn tick(_: *urd.time.Timer) void {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
@@ -52,7 +52,7 @@ const tick_interval_us = 500 * std.time.us_per_ms;
 
 /// Start the console tick timer.
 pub fn initTimer() void {
-    urd.time.register(tick_interval_us, &tick) catch {
+    urd.time.schedulePeriodic(tick_interval_us, &tick) catch {
         @panic("Failed to register console tick timer callback.");
     };
 }
