@@ -1,0 +1,11 @@
+[global]
+directory=/root/fio
+ioengine=psync
+thread
+bs=4k
+size=64m
+
+[randrw]
+rw=randrw
+rwmixread=70
+randseed=1

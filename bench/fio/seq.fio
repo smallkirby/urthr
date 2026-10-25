@@ -1,0 +1,14 @@
+[global]
+directory=/root/fio
+ioengine=psync
+thread
+bs=4k
+size=64m
+
+[write]
+rw=write
+end_fsync=1
+
+[read]
+stonewall
+rw=read

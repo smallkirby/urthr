@@ -1,0 +1,11 @@
+[global]
+directory=/root/fio
+ioengine=psync
+thread
+bs=4k
+size=16m
+
+[fsync-write]
+rw=write
+fsync=16
+end_fsync=1
