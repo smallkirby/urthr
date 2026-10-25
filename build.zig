@@ -64,6 +64,12 @@ pub fn build(b: *std.Build) !void {
         "QEMU waits for GDB connection.",
     ) orelse false;
 
+    const gdb = b.option(
+        u32,
+        "gdb",
+        "Port of GDB server for QEMU.",
+    ) orelse 1234;
+
     const kvm = b.option(
         bool,
         "kvm",
@@ -907,6 +913,7 @@ pub fn build(b: *std.Build) !void {
             .drive = drive,
             .verbose_logs = qemu_log,
             .wait_gdb = wait_qemu,
+            .gdb_port = gdb,
             .append = init_args,
             .kvm = kvm,
         };
@@ -1200,6 +1207,8 @@ const Qemu = struct {
     verbose_logs: []const u8,
     /// Wait for GDB connection on startup.
     wait_gdb: bool,
+    /// GDB server port.
+    gdb_port: u32,
     /// Command line arguments passed to the init process via semihosting.
     append: ?[]const u8,
     /// Enable KVM acceleration.
@@ -1290,7 +1299,8 @@ const Qemu = struct {
             "-no-reboot",
         });
         try appendStrings(&args, allocator, &.{
-            "-s",
+            "-gdb",
+            try std.fmt.allocPrint(allocator, "tcp::{d}", .{self.gdb_port}),
             "-d",
             "guest_errors",
         });
