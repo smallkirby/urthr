@@ -2323,6 +2323,10 @@ const SectorCache = struct {
     /// Number of dirty slots until write-back.
     const flush_threshold = nslots / 4;
 
+    comptime {
+        urd.comptimeAssert(std.math.isPowerOfTwo(nsets), "Invalid nsets: {d}", .{nsets});
+    }
+
     /// Cache entry slot type.
     const Slot = struct {
         /// Cached sector LBA.
@@ -2473,7 +2477,13 @@ const SectorCache = struct {
 
     /// Get the index of the first slot in the set that the given LBA maps to.
     fn getBaseOfSet(lba: Lba) usize {
-        return (lba % nsets) * nways;
+        // Number of bits to index a set.
+        const set_bits = std.math.log2(nsets);
+        // Multiplier of the Fibonacci hashing.
+        const hash_multiplier = 0x9E3779B97F4A7C15;
+
+        const set = (lba *% hash_multiplier) >> (64 - set_bits);
+        return set * nways;
     }
 
     /// Update the access timestamp for the given cache slot.
