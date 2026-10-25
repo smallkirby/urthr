@@ -299,9 +299,23 @@ const Whence = enum(i32) {
 
 /// syscall: write
 pub fn sysWrite(fd: usize, buf: usize, count: usize) ReturnType {
+    return writeFd(fd, buf, count, null);
+}
+
+/// syscall: pwrite64
+pub fn sysPwrite64(fd: usize, buf: usize, count: usize, pos: i64) ReturnType {
+    if (pos < 0) {
+        return .err(.inval);
+    }
+
+    return writeFd(fd, buf, count, @intCast(pos));
+}
+
+/// Write to the file, at `pos` if provided.
+fn writeFd(fd: usize, buf: usize, count: usize, pos: ?usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     defer file.unref();
-    return switch (writeFrom(file, buf, count, null)) {
+    return switch (writeFrom(file, buf, count, pos)) {
         .full, .partial => |n| .success(@bitCast(n)),
         .fault => .err(.fault),
         .io => |e| writeError(e),
@@ -341,9 +355,23 @@ pub fn sysFtruncate(fd: usize, length: i64) ReturnType {
 
 /// syscall: read
 pub fn sysRead(fd: usize, buf: usize, count: usize) ReturnType {
+    return readFd(fd, buf, count, null);
+}
+
+/// syscall: pread64
+pub fn sysPread64(fd: usize, buf: usize, count: usize, pos: i64) ReturnType {
+    if (pos < 0) {
+        return .err(.inval);
+    }
+
+    return readFd(fd, buf, count, @intCast(pos));
+}
+
+/// Read from the file, at `pos` if provided.
+fn readFd(fd: usize, buf: usize, count: usize, pos: ?usize) ReturnType {
     const file = getFile(fd) catch return .err(.badf);
     defer file.unref();
-    return switch (readInto(file, buf, count, null)) {
+    return switch (readInto(file, buf, count, pos)) {
         .full, .partial => |n| .success(@bitCast(n)),
         .fault => .err(.fault),
         .io => |e| mapError(e),
