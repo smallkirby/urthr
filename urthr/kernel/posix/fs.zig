@@ -171,6 +171,55 @@ pub fn sysPipe2(pipefd: [*]i32, flags: OpenFlags) ReturnType {
     return .success(0);
 }
 
+/// syscall: fadvise64
+pub fn sysFadvise64(fd: usize, offset: i64, len: i64, advice: Advice) ReturnType {
+    if (offset < 0 or len < 0) {
+        return .err(.inval);
+    }
+    // Only DONTNEED is supported.
+    switch (advice) {
+        .normal, .random, .sequential, .willneed, .dontneed, .noreuse => {},
+        _ => return .err(.inval),
+    }
+
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+    if (!file.seekable) {
+        return .err(.spipe);
+    }
+
+    switch (advice) {
+        .dontneed => file.dropCache(
+            @intCast(offset),
+            @intCast(len),
+        ) catch |e| {
+            return mapError(e);
+        },
+
+        else => {},
+    }
+
+    return .success(0);
+}
+
+/// Access pattern advice of fadvise64.
+const Advice = enum(u32) {
+    /// No advice to give.
+    normal = 0,
+    /// Expect to be accessed in random order.
+    random = 1,
+    /// Expect to be accessed sequentially.
+    sequential = 2,
+    /// Will be accessed in the near future.
+    willneed = 3,
+    /// Will not be accessed in the near future.
+    dontneed = 4,
+    /// Will be accessed only once.
+    noreuse = 5,
+
+    _,
+};
+
 /// syscall: close
 pub fn sysClose(fd: usize) ReturnType {
     sched.getCurrent().fs.fdtbl.close(fd) catch {

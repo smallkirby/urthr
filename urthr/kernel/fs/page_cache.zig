@@ -486,6 +486,31 @@ pub fn discardUnlinked(dentry: *Dentry) void {
     flusher.unref();
 }
 
+/// Drop the clean cached pages that overlap with the byte range of the inode.
+///
+/// Zero length means until the end of the file.
+pub fn invalidate(inode: *Inode, offset: usize, len: usize) Error!void {
+    // Flush dirty pages to the storage.
+    try flush(inode);
+
+    // Remove cached pages.
+    mutex.lock();
+    defer mutex.unlock();
+
+    const first = offset / page_size;
+    const end = if (len == 0)
+        std.math.maxInt(usize)
+    else
+        @divCeil(offset +| len, page_size);
+
+    var iter = inode.cache.pages.iter();
+    while (iter.next()) |page| {
+        if (!page.dirty and page.index >= first and page.index < end) {
+            remove(page);
+        }
+    }
+}
+
 /// Drop all the cached pages of the inode.
 ///
 /// Must be called before the inode is destroyed.

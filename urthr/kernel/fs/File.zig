@@ -241,6 +241,16 @@ pub fn seek(self: *Self, offset: i64, whence: Whence) Error!usize {
     return self.offset;
 }
 
+/// Drop the cached data in the byte range from the page cache.
+///
+/// Zero-length means until the end of the file.
+pub fn dropCache(self: *Self, offset: usize, len: usize) Error!void {
+    const node = self.inode();
+    if (node.cacheable and node.ftype == .regular) {
+        try fs.page_cache.invalidate(node, offset, len);
+    }
+}
+
 /// Perform a device-specific control operation.
 ///
 /// Returns Error.Unsupported if the file does not support ioctl.
