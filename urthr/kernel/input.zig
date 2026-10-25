@@ -120,20 +120,20 @@ fn pushCanonical(c: u8) void {
         // Newline.
         '\n' => {
             flushLine('\n');
-            if (echo) console.writeUnsafe("\r\n");
+            if (echo) console.write("\r\n");
             notifyReaders();
         },
         // Backspace or DEL.
         0x08, 0x7F => {
             if (state.line_len > 0) {
                 state.line_len -= 1;
-                if (echoe) console.writeUnsafe("\x08 \x08");
+                if (echoe) console.write("\x08 \x08");
             }
         },
         // Ctrl+C
         0x03 => {
             state.line_len = 0;
-            if (echo) console.writeUnsafe("^C\r\n");
+            if (echo) console.write("^C\r\n");
         },
         // Ctrl+D
         0x04 => {
@@ -145,7 +145,7 @@ fn pushCanonical(c: u8) void {
             if (c >= 0x20 and state.line_len < size_line_buf - 1) {
                 state.line[state.line_len] = c;
                 state.line_len += 1;
-                if (echo) console.writeUnsafe(state.line[state.line_len - 1 .. state.line_len]);
+                if (echo) console.write(state.line[state.line_len - 1 .. state.line_len]);
             }
         },
     }

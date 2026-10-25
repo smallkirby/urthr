@@ -40,6 +40,8 @@ pub const fwcfg_filename = options.fwcfg_filename;
 ///
 /// `status` argument is used only if the board supports reset with status code.
 pub fn eol(status: u8) noreturn {
+    _ = arch.intr.maskAll();
+
     if (options.restart_on_panic) {
         console.writeUnsafe("Restarting CPU...\r\n");
         board.reset(status);
@@ -55,6 +57,8 @@ pub fn eol(status: u8) noreturn {
 /// - `msg`: Message to print.
 pub fn unimplemented(comptime msg: []const u8) noreturn {
     @branchHint(.cold);
+
+    _ = arch.intr.maskAll();
 
     console.writeUnsafe("UNIMPLEMENTED: ");
     console.writeUnsafe(msg);
