@@ -90,6 +90,11 @@ pub const Cache = struct {
     /// Hash map that uses parent dentry and name as key.
     const DcacheMap = std.HashMap(Key, *Dentry, Context, 80);
 
+    /// Heuritic rehash threshold.
+    ///
+    /// The map is rehashed when the removal count reaches the capacity divided by this divisor.
+    const rehash_divisor = 8;
+
     /// Key of the hash map.
     const Key = struct {
         /// Parent dentry this key belongs to.
@@ -131,6 +136,8 @@ pub const Cache = struct {
     _map: DcacheMap,
     /// Spin lock to protect the map.
     _lock: SpinLock = .{},
+    /// Number of removals since the last rehash.
+    _nremovals: usize = 0,
 
     /// Create a new dentry store.
     pub fn new(allocator: Allocator) Cache {
@@ -180,11 +187,14 @@ pub const Cache = struct {
             self._lock.lock();
             defer self._lock.unlock();
 
-            break :blk self._map.fetchRemove(.{
+            const kv = self._map.fetchRemove(.{
                 .parent = parent,
                 .name = name,
                 .case_insensitive = case_insensitive,
             });
+            if (kv != null) self.mayRehash();
+
+            break :blk kv;
         };
 
         if (removed) |kv| {
@@ -227,6 +237,7 @@ pub const Cache = struct {
             for (keys.items) |key| {
                 const kv = self._map.fetchRemove(key) orelse continue;
                 removed.appendAssumeCapacity(kv.value);
+                self.mayRehash();
             }
         }
 
@@ -268,6 +279,19 @@ pub const Cache = struct {
         cached.ref(); // +1 for the caller
 
         return cached;
+    }
+
+    /// Clean up tombstones of the map.
+    ///
+    /// Caller must hold the lock.
+    fn mayRehash(self: *Cache) void {
+        rtt.expect(self._lock.isLocked());
+
+        self._nremovals += 1;
+        if (self._nremovals >= self._map.capacity() / rehash_divisor) {
+            self._map.rehash();
+            self._nremovals = 0;
+        }
     }
 };
 
