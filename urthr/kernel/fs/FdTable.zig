@@ -22,7 +22,7 @@ pub const FdFlags = packed struct(u32) {
     /// Close this fd on exec.
     cloexec: bool = false,
     /// Reserved.
-    _1: u31 = 0,
+    _reserved: u31 = 0,
 
     const none = FdFlags{};
 };

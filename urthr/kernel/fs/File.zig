@@ -105,6 +105,12 @@ pub const StatusFlags = struct {
     nonblock: bool = false,
     /// Before each writes, the file offset is positioned at the end of the file.
     append: bool = false,
+
+    pub fn set(self: *StatusFlags, values: anytype) void {
+        inline for (@typeInfo(@TypeOf(values)).@"struct".field_names) |name| {
+            @field(self, name) = @field(values, name);
+        }
+    }
 };
 
 /// Path this file is associated with.

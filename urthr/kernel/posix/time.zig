@@ -81,11 +81,10 @@ pub fn sysSetItimer(which: ItimerWhich, new_value: *const ItimerVal, old_value: 
     const knew_value = uaccess.getUser(ItimerVal, new_value) catch {
         return .err(.fault);
     };
+    const value_ns = knew_value.it_value.toNs() orelse return .err(.inval);
+    const interval_ns = knew_value.it_interval.toNs() orelse return .err(.inval);
     const th = sched.getCurrent();
-    const old = th.itimer.set(
-        knew_value.it_value.toNs(),
-        knew_value.it_interval.toNs(),
-    );
+    const old = th.itimer.set(value_ns, interval_ns);
 
     if (old_value) |out| {
         uaccess.putUser(ItimerVal, out, .{

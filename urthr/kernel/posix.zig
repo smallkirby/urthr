@@ -44,8 +44,18 @@ pub const Timeval = extern struct {
     /// Microseconds.
     usec: i64,
 
-    pub fn toNs(self: Timeval) u64 {
-        return @as(u64, @intCast(self.sec)) * std.time.ns_per_s + @as(u64, @intCast(self.usec)) * std.time.ns_per_us;
+    /// Convert to nanoseconds.
+    ///
+    /// Returns null if the value is invalid.
+    pub fn toNs(self: Timeval) ?u64 {
+        if (self.usec < 0 or self.usec >= std.time.us_per_s) {
+            return null;
+        }
+        const ts = Timespec{
+            .sec = self.sec,
+            .nsec = self.usec * std.time.ns_per_us,
+        };
+        return ts.toNs();
     }
 
     pub fn fromNs(ns: u64) Timeval {
