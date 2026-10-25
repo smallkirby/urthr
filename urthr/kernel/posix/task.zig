@@ -704,6 +704,60 @@ pub fn sysPrlimit64(pid: i32, resource: i32, new_rlim: usize, old_rlim: usize) R
     return .success(0);
 }
 
+/// syscall: getpriority
+pub fn sysGetPriority(which: PriorityWhich, who: u32) ReturnType {
+    if (checkPrioError(which, who)) |err| {
+        return err;
+    }
+
+    return .success(@as(i64, thread.nice_max) + 1 - sched.getCurrent().nice);
+}
+
+/// syscall: setpriority
+pub fn sysSetPriority(which: PriorityWhich, who: u32, prio: i32) ReturnType {
+    if (checkPrioError(which, who)) |err| {
+        return err;
+    }
+
+    const cur = sched.getCurrent();
+    const nice: thread.Nice = @intCast(std.math.clamp(prio, thread.nice_min, thread.nice_max));
+    if (nice < cur.nice and !cur.group.getCredential().isPrivileged()) {
+        return .err(.nacces);
+    }
+    cur.nice = nice;
+
+    return .success(0);
+}
+
+/// Check the target of of priority operations.
+fn checkPrioError(which: PriorityWhich, who: u32) ?ReturnType {
+    switch (which) {
+        .process => {},
+        .pgrp, .user => {
+            log.warn("Only PRIO_PROCESS is supported.", .{});
+            return .err(.nosys);
+        },
+        _ => return .err(.inval),
+    }
+
+    const cur = sched.getCurrent();
+    return if (who == 0 or who == cur.id or who == cur.group.getTgid())
+        null
+    else
+        .err(.srch);
+}
+
+const PriorityWhich = enum(u32) {
+    /// A process.
+    process = 0,
+    /// A process group.
+    pgrp = 1,
+    /// All processes of a user.
+    user = 2,
+
+    _,
+};
+
 // =============================================================
 // Imports
 // =============================================================

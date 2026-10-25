@@ -470,6 +470,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
             .vfork_done = if (flags.suspend_parent) &vforkw else null,
             .parent = if (flags.thread) null else cur.group.ref(),
             .clear_child_tid = if (flags.child_tidp) |p| p else null,
+            .nice = cur.nice,
             .cpu = .{ .mode = .user },
         };
         group.addMember(th);

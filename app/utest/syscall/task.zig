@@ -34,6 +34,7 @@ comptime {
     _ = @import("task/getresgid.zig");
     _ = @import("task/getpgid.zig");
     _ = @import("task/getsid.zig");
+    _ = @import("task/priority.zig");
     _ = @import("task/prlimit64.zig");
     _ = @import("task/reboot.zig");
     _ = @import("task/setpgid.zig");

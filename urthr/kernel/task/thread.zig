@@ -50,6 +50,9 @@ pub const Thread = struct {
     cpu: CpuAccount = .{},
     /// CPU affinity mask.
     affinity: task.CpuMask = std.math.maxInt(task.CpuMask),
+    /// Nice value.
+    /// TODO: not used.
+    nice: Nice = 0,
 
     /// Memory manager.
     vmm: *task.Vmm,
@@ -142,6 +145,15 @@ pub const ExitStatus = union(enum) {
     /// Signal that terminated this thread.
     signal: Signal,
 };
+
+/// Nice value.
+///
+/// Larger value means lower priority.
+pub const Nice = i8;
+/// Minimum (highest priority) nice value.
+pub const nice_min: Nice = -20;
+/// Maximum (lowest priority) nice value.
+pub const nice_max: Nice = 19;
 
 /// Wait-queue used by a parent to wait for a vfork-cloned child.
 pub const VforkWaiter = struct {
