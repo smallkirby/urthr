@@ -101,7 +101,7 @@ pub fn initStackFork(stack: []u8, parent_ctx: *const IsrContext, user_sp: usize,
     ic.* = parent_ctx.*;
     ic.x0 = 0; // return value for the child.
     ic.sp_el0 = user_sp;
-    ic.tpidr_el0 = tls orelse am.mrsi(.tpidr_el0);
+    ic.tpidr_el0 = tls orelse parent_ctx.tpidr_el0;
 
     // Construct initial switch context for the child.
     sc.* = std.mem.zeroInit(SwitchContext, .{
