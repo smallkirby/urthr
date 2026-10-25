@@ -21,6 +21,7 @@ comptime {
     _ = @import("fs/readv.zig");
     _ = @import("fs/rename.zig");
     _ = @import("fs/rmdir.zig");
+    _ = @import("fs/select.zig");
     _ = @import("fs/sendfile.zig");
     _ = @import("fs/stat.zig");
     _ = @import("fs/symlink.zig");

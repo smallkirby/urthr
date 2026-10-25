@@ -47,6 +47,7 @@ if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("preadv",              69,     posix.fs.sysPreadv),
     .new("pwritev",             70,     posix.fs.sysPwritev),
     .new("sendfile",            71,     posix.fs.sysSendfile),
+    .new("pselect6",            72,     posix.fs.sysPselect6),
     .new("ppoll",               73,     posix.fs.sysPpoll),
     .new("readlinkat",          78,     posix.fs.sysReadLinkAt),
     .new("newfstatat",          79,     posix.fs.sysNewFstatAt),
@@ -160,6 +161,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("writev",               20,    posix.fs.sysWritev),
     .new("access",               21,    posix.fs.sysAccess),
     .new("pipe",                 22,    posix.fs.sysPipe),
+    .new("select",               23,    posix.fs.sysSelect),
     .new("sched_yield",          24,    posix.sched.sysSchedYield),
     .new("mremap",               25,    posix.mem.sysMremap),
     .new("dup",                  32,    posix.fs.sysDup),
@@ -256,6 +258,7 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("readlinkat",           267,   posix.fs.sysReadLinkAt),
     .new("fchmodat",             268,   posix.fs.sysFchmodAt),
     .new("faccessat",            269,   posix.fs.sysFaccessAt),
+    .new("pselect6",             270,   posix.fs.sysPselect6),
     .new("ppoll",                271,   posix.fs.sysPpoll),
     .new("utimensat",            280,   posix.fs.sysUtimensAt),
     .new("timerfd_create",       283,   posix.time.sysTimerfdCreate),
@@ -316,6 +319,14 @@ pub const ReturnType = union(enum) {
             ._s => |v| v,
             ._e => |e| @backingInt(e),
             ._nop => null,
+        };
+    }
+
+    pub fn isSuccess(self: ReturnType) bool {
+        return switch (self) {
+            ._s => true,
+            ._e => false,
+            ._nop => false,
         };
     }
 };

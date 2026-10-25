@@ -2119,13 +2119,229 @@ fn pollImpl(fds: ?[*]PollFd, nfds: usize, ns: ?u64) ReturnType {
         fds.?,
     ) catch return .err(.fault);
 
+    const done = pollFiles(kfds, ns);
+
+    if (nfds > 0) uaccess.copySliceToUser(
+        PollFd,
+        fds.?,
+        kfds,
+    ) catch return .err(.fault);
+
+    return .success(@intCast(done));
+}
+
+const UserFdSet = ?*align(1) FdSet;
+
+/// syscall: select
+pub fn sysSelect(
+    nfds: usize,
+    readfds: UserFdSet,
+    writefds: UserFdSet,
+    exceptfds: UserFdSet,
+    timeout: ?*align(1) posix.Timeval,
+) ReturnType {
+    const ns: ?u64 = if (timeout) |t| blk: {
+        const tv = uaccess.getUser(posix.Timeval, t) catch {
+            return .err(.fault);
+        };
+        if (tv.usec < 0 or tv.usec >= std.time.us_per_s) {
+            return .err(.inval);
+        }
+        const ts = posix.Timespec{
+            .sec = tv.sec,
+            .nsec = tv.usec * std.time.ns_per_us,
+        };
+        break :blk ts.toNs() orelse return .err(.inval);
+    } else null;
+
+    const start = urd.time.getCurrentTimestamp();
+    const ret = selectImpl(
+        nfds,
+        readfds,
+        writefds,
+        exceptfds,
+        ns,
+    );
+
+    if (timeout) |t| if (ret.isSuccess()) {
+        uaccess.putUser(
+            posix.Timeval,
+            t,
+            .fromNs(remainingNs(ns.?, start)),
+        ) catch return .err(.fault);
+    };
+
+    return ret;
+}
+
+/// syscall: pselect6
+///
+/// - `sigmask`: TODO: Unused.
+pub fn sysPselect6(
+    nfds: usize,
+    readfds: UserFdSet,
+    writefds: UserFdSet,
+    exceptfds: UserFdSet,
+    timeout: ?*align(1) posix.Timespec,
+    _: ?*const anyopaque,
+) ReturnType {
+    const ns: ?u64 = if (timeout) |t| blk: {
+        const ts = uaccess.getUser(posix.Timespec, t) catch {
+            return .err(.fault);
+        };
+        break :blk ts.toNs() orelse return .err(.inval);
+    } else null;
+
+    const start = urd.time.getCurrentTimestamp();
+    const ret = selectImpl(
+        nfds,
+        readfds,
+        writefds,
+        exceptfds,
+        ns,
+    );
+
+    if (timeout) |t| if (ret.isSuccess()) {
+        uaccess.putUser(
+            posix.Timespec,
+            t,
+            .fromNs(remainingNs(ns.?, start)),
+        ) catch return .err(.fault);
+    };
+
+    return ret;
+}
+
+/// Get the remaining time of the timeout that started at `start`.
+fn remainingNs(ns: u64, start: u64) u64 {
+    return ns -| (urd.time.getCurrentTimestamp() - start);
+}
+
+/// Shared implementation of select.
+fn selectImpl(
+    nfds: usize,
+    readfds: UserFdSet,
+    writefds: UserFdSet,
+    exceptfds: UserFdSet,
+    ns: ?u64,
+) ReturnType {
+    if (nfds > FdSet.max_fds) {
+        return .err(.inval);
+    }
+
+    // Copy user fdsets into kernel.
+    const nwords = FdSet.numWords(nfds);
+    var rset: FdSet = .{};
+    var wset: FdSet = .{};
+    var eset: FdSet = .{};
+    inline for (.{
+        .{ &rset, readfds },
+        .{ &wset, writefds },
+        .{ &eset, exceptfds },
+    }) |pair| {
+        if (pair[1]) |user| uaccess.copySliceFromUser(
+            u64,
+            pair[0].bits[0..nwords],
+            user,
+        ) catch return .err(.fault);
+    }
+
+    // Build the poll list from the fds in the sets.
+    var kfds: [Event.max_multiwait - 1]PollFd = undefined;
+    var n: usize = 0;
+    for (0..nfds) |fd| {
+        const events = std.mem.zeroInit(PollEvents, .{
+            .in = rset.isSet(fd),
+            .out = wset.isSet(fd),
+            .pri = eset.isSet(fd),
+        });
+        if (events == PollEvents.empty) continue;
+        if (n == kfds.len) return .err(.inval);
+
+        kfds[n] = .{
+            .fd = @intCast(fd),
+            .events = events,
+            .revents = .empty,
+        };
+        n += 1;
+    }
+
+    // Do polling.
+    _ = pollFiles(kfds[0..n], ns);
+
+    // Collect the results.
+    rset = .{};
+    wset = .{};
+    eset = .{};
+    var count: i64 = 0;
+    for (kfds[0..n]) |pfd| {
+        if (pfd.revents.nval) return .err(.badf);
+
+        const fd: usize = @intCast(pfd.fd);
+        inline for (.{
+            .{ &rset, pfd.revents.in },
+            .{ &wset, pfd.revents.out },
+            .{ &eset, pfd.revents.pri },
+        }) |pair| {
+            if (pair[1]) {
+                pair[0].set(fd);
+                count += 1;
+            }
+        }
+    }
+
+    // Copy the fdsets back to user space.
+    inline for (.{
+        .{ &rset, readfds },
+        .{ &wset, writefds },
+        .{ &eset, exceptfds },
+    }) |pair| {
+        if (pair[1]) |user| uaccess.copySliceToUser(
+            u64,
+            user,
+            pair[0].bits[0..nwords],
+        ) catch return .err(.fault);
+    }
+
+    return .success(count);
+}
+
+/// POSIX-compliant fd_set structure.
+const FdSet = extern struct {
+    const Word = u64;
+
+    bits: [max_fds / @bitSizeOf(Word)]Word = @splat(0),
+
+    /// Maximum number of file descriptors.
+    const max_fds = 1024;
+
+    /// Number of words to hold the given number of fds.
+    fn numWords(nfds: usize) usize {
+        return @divCeil(nfds, @bitSizeOf(Word));
+    }
+
+    /// Check if the given file descriptor is set.
+    fn isSet(self: *const FdSet, fd: usize) bool {
+        return self.bits[fd / @bitSizeOf(Word)] >> @intCast(fd % @bitSizeOf(Word)) & 1 != 0;
+    }
+
+    /// Set the given file descriptor.
+    fn set(self: *FdSet, fd: usize) void {
+        self.bits[fd / @bitSizeOf(Word)] |= @as(Word, 1) << @intCast(fd % @bitSizeOf(Word));
+    }
+};
+
+/// Poll the files until at least one is ready or the timeout expires.
+///
+/// Returns the number of ready files.
+fn pollFiles(kfds: []PollFd, ns: ?u64) usize {
     // Calculate deadline for blocking.
     const deadline_ns = if (ns) |d|
-        urd.time.getCurrentTimestamp() + d
+        urd.time.getCurrentTimestamp() +| d
     else
         null;
 
-    const done: usize = while (true) {
+    return while (true) {
         var n_ready: usize = 0;
         var wait_events: [Event.max_multiwait - 1]*Event = undefined;
         var n_events: usize = 0;
@@ -2182,13 +2398,6 @@ fn pollImpl(fds: ?[*]PollFd, nfds: usize, ns: ?u64) ReturnType {
         else
             sched.reschedule();
     };
-
-    if (nfds > 0) urd.uaccess.copySliceToUser(
-        PollFd,
-        fds.?,
-        kfds,
-    ) catch return .err(.fault);
-    return .success(@intCast(done));
 }
 
 /// POSIX-compliant pollfd structure.
@@ -2562,6 +2771,7 @@ const fs = urd.fs;
 const mem = urd.mem;
 const posix = urd.posix;
 const sched = urd.sched;
+const uaccess = urd.uaccess;
 const Event = urd.sync.Event;
 const SharedLock = urd.sync.SharedLock;
 const FdFlags = fs.FdTable.FdFlags;
