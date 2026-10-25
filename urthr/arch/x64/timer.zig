@@ -96,9 +96,11 @@ pub fn setDeadline(ticks: u32) void {
         .tsc_deadline => am.wrmsri(.tsc_deadline, getCount() + ticks),
         .one_shot => {
             // Translate the TSC-tick deadline into local APIC countdown ticks.
-            const ns = (@as(u64, ticks) * std.time.ns_per_s) / getFreq();
-            const apic_ticks: u32 = @intCast((ns * apic_freq) / std.time.ns_per_s);
-            lapic.setInitialCount(apic_ticks);
+            const ns = @divCeil(@as(u64, ticks) * std.time.ns_per_s, getFreq());
+            const apic_ticks = @divCeil(ns * apic_freq, std.time.ns_per_s);
+            lapic.setInitialCount(@intCast(
+                std.math.clamp(apic_ticks, 1, std.math.maxInt(u32)),
+            ));
         },
         .periodic => @panic("Local APIC timer periodic mode is not supported"),
     }
