@@ -171,6 +171,7 @@ pub fn read(self: *Self, buf: []u8) Error![]u8 {
 pub fn pread(self: *Self, buf: []u8, pos: usize) Error![]u8 {
     if (self.inode().ftype == .directory) return Error.NotFile;
     if (!self.access.readable) return Error.BadAccess;
+    if (!self.seekable) return Error.IllegalSeek;
 
     const num_read = try self.readAt(buf, pos);
     self.inode().times.atime = .now();
@@ -196,6 +197,7 @@ pub fn write(self: *Self, buf: []const u8) Error!usize {
 pub fn pwrite(self: *Self, buf: []const u8, pos: usize) Error!usize {
     if (self.inode().ftype == .directory) return Error.NotFile;
     if (!self.access.writable) return Error.BadAccess;
+    if (!self.seekable) return Error.IllegalSeek;
     if (self.ops.write == null) return Error.Unsupported;
 
     self.utimeUpdate();
