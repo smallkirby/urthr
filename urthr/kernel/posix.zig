@@ -14,6 +14,27 @@ pub const Timespec = extern struct {
     sec: i64,
     /// Nanoseconds.
     nsec: i64,
+
+    /// Convert to nanoseconds.
+    ///
+    /// Returns null if the value is invalid.
+    pub fn toNs(self: Timespec) ?u64 {
+        if (self.sec < 0 or self.nsec < 0 or self.nsec >= std.time.ns_per_s) {
+            return null;
+        }
+        const mul = std.math.mul(u64, @intCast(self.sec), std.time.ns_per_s) catch {
+            return null;
+        };
+        return std.math.add(u64, mul, @intCast(self.nsec)) catch null;
+    }
+
+    /// Convert nanoseconds to a Timespec.
+    pub fn fromNs(ns: u64) Timespec {
+        return .{
+            .sec = @intCast(ns / std.time.ns_per_s),
+            .nsec = @intCast(ns % std.time.ns_per_s),
+        };
+    }
 };
 
 /// POSIX-compliant timeval structure.

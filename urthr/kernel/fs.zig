@@ -9,6 +9,7 @@ pub const Fat32 = @import("fs/Fat32.zig");
 pub const RootFs = @import("fs/RootFs.zig");
 pub const DevFs = @import("fs/DevFs.zig");
 pub const PipeFs = @import("fs/PipeFs.zig");
+pub const TimerFs = @import("fs/TimerFs.zig");
 pub const SocketFs = @import("fs/SocketFs.zig");
 pub const ProcFs = @import("fs/ProcFs.zig");
 pub const FdTable = @import("fs/FdTable.zig");
@@ -295,6 +296,8 @@ pub fn init(allocator: Allocator) Error!void {
     dcache = Dentry.Cache.new(allocator);
     // Initialize the pipe filesystem.
     pipefs = try PipeFs.init(allocator);
+    // Initialize the timerfd filesystem.
+    timerfs = try TimerFs.init(allocator);
     // Initialize the socket filesystem.
     socketfs = try SocketFs.init(allocator);
 }
@@ -302,6 +305,11 @@ pub fn init(allocator: Allocator) Error!void {
 /// Create a new pipe and return its read and write file objects.
 pub fn createPipe() Error!PipeFs.PipePair {
     return pipefs.createPipe();
+}
+
+/// Create a new timerfd and return its file object.
+pub fn createTimer() Error!*File {
+    return timerfs.createTimer();
 }
 
 /// Create a new socket file wrapping the given protocol-specific descriptor.
@@ -1116,6 +1124,9 @@ var mounts: Mount.Table = .{};
 
 /// pipefs instance.
 var pipefs: *PipeFs = undefined;
+
+/// timerfs instance.
+var timerfs: *TimerFs = undefined;
 
 /// socketfs instance.
 var socketfs: *SocketFs = undefined;

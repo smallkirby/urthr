@@ -251,7 +251,7 @@ fn timerHandler(_: urd.exception.Vector, _: ?*anyopaque) void {
         entry.callback(entry);
 
         if (interval != 0) {
-            entry.deadline_ns = now + interval;
+            entry.deadline_ns = now +| interval;
             entry.fired = false;
             timer.queue.append(entry);
         }

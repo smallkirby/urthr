@@ -180,7 +180,7 @@ pub fn sysClose(fd: usize) ReturnType {
     return .success(0);
 }
 
-const OpenFlags = switch (builtin.cpu.arch) {
+pub const OpenFlags = switch (builtin.cpu.arch) {
     .x86_64 => packed struct(i32) {
         /// Write-only.
         wo: bool = false,
@@ -212,6 +212,11 @@ const OpenFlags = switch (builtin.cpu.arch) {
         cloexec: bool = false,
         /// Reserved.
         _20: u12 = 0,
+
+        /// Check if the current flags fit within the allowed flags.
+        pub fn isFit(self: OpenFlags, allowed: OpenFlags) bool {
+            return @backingInt(self) & ~@backingInt(allowed) == 0;
+        }
     },
     else => packed struct(i32) {
         /// Write-only.
@@ -244,6 +249,11 @@ const OpenFlags = switch (builtin.cpu.arch) {
         cloexec: bool = false,
         /// Reserved.
         _20: u12 = 0,
+
+        /// Check if the current flags fit within the allowed flags.
+        pub fn isFit(self: OpenFlags, allowed: OpenFlags) bool {
+            return @backingInt(self) & ~@backingInt(allowed) == 0;
+        }
     },
 };
 

@@ -3,6 +3,7 @@ comptime {
     _ = @import("time/clock_nanosleep.zig");
     _ = @import("time/nanosleep.zig");
     _ = @import("time/setitimer.zig");
+    _ = @import("time/timerfd.zig");
 }
 
 // Clock kind.
