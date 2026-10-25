@@ -71,6 +71,9 @@ export fn svc(ctx: *Context) callconv(.c) void {
     exception.callEreturnHook(ctx);
 }
 
+/// User RSP scratch at the SYSCALL entry.
+export var _scratch_sp: usize linksection(common.pcpu.section) = 0;
+
 /// SYSCALL entry point.
 ///
 /// On entry, interrupts are disabled since IA32_FMASK masks IF bit.
@@ -98,34 +101,18 @@ export fn syscallEntry() callconv(.naked) noreturn {
     asm volatile (
         \\
         \\cli
-        \\stac
-        \\
-        // Spill a part of callee-saved registers onto the user stack.
-        \\pushq %%r13
-        \\pushq %%r14
-        \\pushq %%r15
-        \\
-        // Reconstruct the user RSP as it was at SYSCALL entry .
-        //   R13: Original usen RSP
-        //   R14: Per-CPU variable base -> ksp_top
-        //   R15: Link address of ksp_top.
-        \\leaq 24(%%rsp), %%r13
-        \\rdgsbase %%r14
-        \\leaq ksp_top(%%rip), %%r15
-        \\addq %%r15, %%r14
-        \\movq (%%r14), %%r14
-        \\
         // Switch onto the kernel stack.
-        \\movq %%r14, %%rsp
+        \\movq %%rsp, %%gs:_scratch_sp(%%rip)
+        \\movq %%gs:ksp_top(%%rip), %%rsp
         \\
         // Build a CPU context as if a normal interrupt had been taken from Ring-3.
         \\pushq %[user_ss]
-        \\pushq %%r13    // User RSP
-        \\pushq %%r11    // User RFLAGS
-        \\pushq %[user_cs]
-        \\pushq %%rcx    // User RIP
-        \\pushq $0       // No error code
-        \\pushq $0       // No vector
+        \\pushq %%gs:_scratch_sp(%%rip)   // User RSP
+        \\pushq %%r11                   // User RFLAGS
+        \\pushq %[user_cs]              // User CS
+        \\pushq %%rcx                   // User RIP
+        \\pushq $0                      // No error code
+        \\pushq $0                      // No vector
         \\
         \\pushq %%rdi
         \\pushq %%rsi
@@ -139,9 +126,9 @@ export fn syscallEntry() callconv(.naked) noreturn {
         \\pushq %%rbx
         \\pushq %%rbp
         \\pushq %%r12
-        \\pushq -8(%%r13)  // Spilled R13
-        \\pushq -16(%%r13) // Spilled R14
-        \\pushq -24(%%r13) // Spilled R15
+        \\pushq %%r13
+        \\pushq %%r14
+        \\pushq %%r15
         \\
         // SS is set to NULL if there's privilege change. Reload kernel DS.
         \\mov %[kernel_ds], %%ax
@@ -194,6 +181,7 @@ export fn syscallEntry() callconv(.naked) noreturn {
 // =============================================================
 
 const std = @import("std");
+const common = @import("common");
 const am = @import("asm.zig");
 const gdt = @import("gdt.zig");
 const regs = @import("register.zig");
