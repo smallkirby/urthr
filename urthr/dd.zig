@@ -12,6 +12,7 @@ pub const uart16550 = @import("dd/uart16550.zig");
 pub const usb = @import("dd/usb.zig");
 pub const virtio = @import("dd/virtio.zig");
 pub const VirtioBlk = @import("dd/VirtioBlk.zig");
+pub const VirtioGpu = @import("dd/VirtioGpu.zig");
 pub const VirtioRng = @import("dd/VirtioRng.zig");
 
 // =============================================================

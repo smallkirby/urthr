@@ -1396,6 +1396,8 @@ const Qemu = struct {
                 "nec-usb-xhci,id=xhci",
                 "-device",
                 "usb-kbd",
+                "-device",
+                "virtio-gpu-pci",
             }),
             .q35 => try appendStrings(&args, allocator, &.{
                 "-device",
@@ -1406,6 +1408,8 @@ const Qemu = struct {
                 "user,id=net0",
                 "-device",
                 "virtio-net-pci,netdev=net0",
+                "-device",
+                "virtio-gpu-pci",
             }),
             else => {},
         }
