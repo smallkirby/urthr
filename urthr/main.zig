@@ -70,6 +70,10 @@ fn zmain() !void {
     try urd.pcpu.globalInit(urd.mem.page);
     urd.pcpu.localInit(0);
 
+    // Create devfs so that drivers can register their devices.
+    log.debug("Creating devfs.", .{});
+    try urd.dev.create();
+
     // Initialize networking stack.
     log.debug("Initializing networking stack.", .{});
     try urd.net.init();
@@ -193,9 +197,9 @@ fn initialTask() !void {
         };
     }
 
-    // Mount devfs at /dev and register devices.
+    // Mount devfs at /dev.
     log.info("Mounting devfs.", .{});
-    try urd.dev.init();
+    try urd.dev.mount();
 
     // Mount procfs at /proc.
     log.info("Mounting procfs.", .{});

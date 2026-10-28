@@ -51,7 +51,7 @@ pub fn filesystem(self: *Self) fs.FileSystem {
 }
 
 /// Register a device with the given name and file operations.
-pub fn registerDevice(self: *Self, name: []const u8, fops: fs.File.Ops) fs.Error!void {
+pub fn registerDevice(self: *Self, name: []const u8, fops: fs.File.Ops, ctx: ?*anyopaque) fs.Error!void {
     rtt.expect(self.entry_count < max_entries);
 
     const inode = try self.allocator.create(InodeImpl);
@@ -68,6 +68,7 @@ pub fn registerDevice(self: *Self, name: []const u8, fops: fs.File.Ops) fs.Error
             .fops = fops,
         },
         .devfs = self,
+        .ctx = ctx,
     };
 
     self.entries[self.entry_count] = .{
@@ -98,6 +99,8 @@ pub const InodeImpl = struct {
     common: fs.Inode,
     /// Pointer back to the devfs instance.
     devfs: *Self,
+    /// Device-specific context.
+    ctx: ?*anyopaque = null,
 
     pub fn from(inode: *fs.Inode) *InodeImpl {
         return @fieldParentPtr("common", inode);

@@ -15,20 +15,32 @@ const staticdevs = StaticDevices(&.{
 // API
 // =============================================================
 
-/// Initialize devfs.
-pub fn init() fs.Error!void {
+/// Devfs instance.
+var instance: *fs.DevFs = undefined;
+
+/// Create devfs and register static devices.
+///
+/// The filesystem is not visible until mounted.
+pub fn create() fs.Error!void {
+    const devfs = try fs.DevFs.init(urd.mem.bin);
+    try staticdevs.register(devfs);
+    instance = devfs;
+}
+
+/// Mount devfs at /dev.
+pub fn mount() fs.Error!void {
     const allocator = urd.mem.bin;
     const cur = sched.getCurrent();
     rtt.expectEqual(1, cur.id);
 
-    // Mount devfs at /dev.
-    const devfs = try fs.DevFs.init(allocator);
     const mntpnt = try fs.resolve("/dev", allocator, true);
     defer mntpnt.put();
-    try fs.mount(mntpnt, devfs.filesystem(), allocator);
+    try fs.mount(mntpnt, instance.filesystem(), allocator);
+}
 
-    // Register devices.
-    try staticdevs.register(devfs);
+/// Register a device under /dev.
+pub fn register(name: []const u8, fops: fs.File.Ops, ctx: ?*anyopaque) fs.Error!void {
+    return instance.registerDevice(name, fops, ctx);
 }
 
 // =============================================================
@@ -58,7 +70,7 @@ fn StaticDevices(comptime devices: []const type) type {
 
         pub fn register(devfs: *fs.DevFs) fs.Error!void {
             for (modules) |module| {
-                try devfs.registerDevice(module.name, module.fops);
+                try devfs.registerDevice(module.name, module.fops, null);
             }
         }
     };
