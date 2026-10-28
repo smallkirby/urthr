@@ -160,6 +160,11 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             return console.interface();
         }
 
+        /// Get the framebuffer backing the console.
+        pub fn getFramebuffer() Framebuffer {
+            return console.fb;
+        }
+
         // =============================================================
         // Property message layout
         // =============================================================

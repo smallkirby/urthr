@@ -2,6 +2,7 @@ pub const aperf = @import("kernel/aperf.zig");
 pub const console = @import("kernel/console.zig");
 pub const dev = @import("kernel/dev.zig");
 pub const exception = @import("kernel/exception.zig");
+pub const fb = @import("kernel/fb.zig");
 pub const fs = @import("kernel/fs.zig");
 pub const input = @import("kernel/input.zig");
 pub const ipi = @import("kernel/ipi.zig");

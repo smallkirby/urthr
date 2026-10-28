@@ -326,6 +326,9 @@ pub fn initPeripherals1() common.mem.Error!void {
         urd.console.addBackend(fb_console.interface()) catch |err| {
             log.warn("failed to add console backend: {t}", .{err});
         };
+        urd.fb.addBackend(fb_console.fb) catch |err| {
+            log.warn("failed to add framebuffer backend: {t}", .{err});
+        };
     } else {
         log.warn("No GOP framebuffer available.", .{});
     }

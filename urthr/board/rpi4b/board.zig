@@ -169,6 +169,9 @@ pub fn initPeripherals1() urd.mem.Error!void {
         urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
             log.warn("failed to add console backend: {}", .{err});
         };
+        urd.fb.addBackend(rdd.FrameBuffer.getFramebuffer()) catch |err| {
+            log.warn("failed to add framebuffer backend: {}", .{err});
+        };
     }
 }
 
@@ -412,7 +415,7 @@ const console = struct {
 const memcpy_dma_chan = 0;
 
 /// DMA-accelerated memcpy.
-fn dmaMemcpy(dst: usize, src: usize, len: usize) void {
+fn dmaMemcpy(_: *anyopaque, dst: usize, src: usize, len: usize) void {
     rdd.dma.memcpy(memcpy_dma_chan, src, dst, len);
 }
 

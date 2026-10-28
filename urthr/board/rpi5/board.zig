@@ -207,6 +207,9 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
         urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
             log.warn("failed to add console backend: {t}", .{err});
         };
+        urd.fb.addBackend(rdd.FrameBuffer.getFramebuffer()) catch |err| {
+            log.warn("failed to add framebuffer backend: {t}", .{err});
+        };
     }
 }
 
