@@ -4,24 +4,6 @@
 
 const Self = @This();
 
-/// Optional functions for framebuffer implementations.
-pub const VTable = struct {
-    /// DMA-accelerated memcpy.
-    ///
-    /// - `dst`: Destination physical address.
-    /// - `src`: Source physical address.
-    /// - `len`: Length in bytes.
-    memcpy: ?*const fn (dst: usize, src: usize, len: usize) void,
-};
-
-/// Byte order of pixel color components in memory.
-pub const PixelFormat = enum {
-    /// RGBX.
-    rgbx8888,
-    /// BGRX.
-    bgrx8888,
-};
-
 /// State of the ANSI/VT100 escape sequence parser.
 const CsiParser = struct {
     /// Maximum number of `;`-separated parameters tracked in a CSI sequence.
@@ -63,16 +45,8 @@ const CsiParser = struct {
     }
 };
 
-/// Virtual base address of the pixel buffer.
-base: usize,
-/// Physical base address of the pixel buffer.
-phys_base: usize,
-/// Bytes per scanline.
-pitch: u32,
-/// Framebuffer width in pixels.
-width: u32,
-/// Framebuffer height in pixels.
-height: u32,
+/// Framebuffer to render on.
+fb: Framebuffer,
 
 /// Cursor column in glyph units.
 col: u32,
@@ -87,8 +61,6 @@ rows: u32,
 fg: u32,
 /// Background color packed as a raw pixel word.
 bg: u32,
-/// Byte order of pixel color components in memory.
-format: PixelFormat,
 /// Whether bold output is active.
 bold: bool,
 /// Currently selected character set.
@@ -101,40 +73,23 @@ cursor_shown: bool,
 /// ANSI/VT100 escape sequence parser state.
 csi: CsiParser,
 
-/// VTable.
-fbvtable: VTable,
-
 /// Initialize the framebuffer console.
-///
-/// - `base`: Base virtual address of the pixel buffer.
-/// - `phys`: Base physical address of the pixel buffer.
-/// - `pitch`: Bytes per scanline.
-/// - `width`: Framebuffer width in pixels.
-/// - `height`: Framebuffer height in pixels.
-/// - `format`: Byte order of pixel color components in memory.
-pub fn init(base: usize, phys: ?usize, pitch: u32, width: u32, height: u32, format: PixelFormat, vt: VTable) Self {
+pub fn init(fb: Framebuffer) Self {
     var self = Self{
-        .base = base,
-        .pitch = pitch,
-        .width = width,
-        .height = height,
+        .fb = fb,
 
         .col = 0,
         .row = 0,
-        .cols = width / font.glyph_width,
-        .rows = height / font.glyph_height,
+        .cols = @intCast(fb.width / font.glyph_width),
+        .rows = @intCast(fb.height / font.glyph_height),
 
-        .fg = pack(format, 0xFF, 0xFF, 0xFF),
-        .bg = pack(format, 0x00, 0x00, 0x00),
-        .format = format,
+        .fg = pack(fb.format, 0xFF, 0xFF, 0xFF),
+        .bg = pack(fb.format, 0x00, 0x00, 0x00),
         .bold = false,
         .charset = .ascii,
         .cursor_shown = false,
 
         .csi = .{},
-
-        .fbvtable = vt,
-        .phys_base = phys orelse 0,
     };
 
     self.clear();
@@ -378,9 +333,9 @@ fn applySgr(self: *Self) void {
             1 => self.bold = true,
             22 => self.bold = false,
             30...37 => self.fg = self.ansiColor(@intCast(p - 30), self.bold),
-            39 => self.fg = pack(self.format, 0xFF, 0xFF, 0xFF),
+            39 => self.fg = pack(self.fb.format, 0xFF, 0xFF, 0xFF),
             40...47 => self.bg = self.ansiColor(@intCast(p - 40), false),
-            49 => self.bg = pack(self.format, 0x00, 0x00, 0x00),
+            49 => self.bg = pack(self.fb.format, 0x00, 0x00, 0x00),
             90...97 => self.fg = self.ansiColor(@intCast(p - 90), true),
             100...107 => self.bg = self.ansiColor(@intCast(p - 100), true),
             else => {},
@@ -391,14 +346,14 @@ fn applySgr(self: *Self) void {
 /// Pack an ANSI palette entry into a raw pixel word.
 fn ansiColor(self: *Self, idx: u3, bright: bool) u32 {
     const rgb = if (bright) ansi_palette_bright[idx] else ansi_palette[idx];
-    return pack(self.format, rgb[0], rgb[1], rgb[2]);
+    return pack(self.fb.format, rgb[0], rgb[1], rgb[2]);
 }
 
 /// Reset colors and attributes to initial state.
 fn resetColors(self: *Self) void {
     self.bold = false;
-    self.fg = pack(self.format, 0xFF, 0xFF, 0xFF);
-    self.bg = pack(self.format, 0x00, 0x00, 0x00);
+    self.fg = pack(self.fb.format, 0xFF, 0xFF, 0xFF);
+    self.bg = pack(self.fb.format, 0x00, 0x00, 0x00);
 }
 
 /// Erase part of the current line.
@@ -450,8 +405,8 @@ fn drawGlyph(self: *Self, col: u32, row: u32, ch: u8) void {
 
     const x0 = col * font.glyph_width;
     const y0 = row * font.glyph_height;
-    const stride = self.pitch / @sizeOf(u32);
-    const pixels: [*]u32 = @ptrFromInt(self.base);
+    const stride = self.fb.pitch / @sizeOf(u32);
+    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
 
     for (glyph, 0..) |row_bytes, dy| {
         var mask: u8 = 0x80;
@@ -474,10 +429,10 @@ fn setCursorVisible(self: *Self, visible: bool) void {
 
 /// XOR-invert the pixel cell at the current cursor position.
 fn xorCursorCell(self: *Self) void {
-    const stride = self.pitch / @sizeOf(u32);
+    const stride = self.fb.pitch / @sizeOf(u32);
     const x0 = self.col * font.glyph_width;
     const y0 = self.row * font.glyph_height;
-    const pixels: [*]u32 = @ptrFromInt(self.base);
+    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
 
     for (0..font.glyph_height) |dy| {
         for (0..font.glyph_width) |dx| {
@@ -507,24 +462,16 @@ fn advanceRow(self: *Self) void {
 
 /// Scroll the framebuffer up by one text row, clearing the new bottom row.
 fn scrollUp(self: *Self) void {
-    const stride = self.pitch / @sizeOf(u32);
+    const stride = self.fb.pitch / @sizeOf(u32);
     const row_pixels = stride * font.glyph_height;
-    const total_pixels = stride * self.height;
+    const total_pixels = stride * self.fb.height;
     const copy_count = total_pixels - row_pixels;
 
-    if (self.fbvtable.memcpy) |memcpy| {
-        const len = copy_count * @sizeOf(u32);
-        const src = self.phys_base + row_pixels * @sizeOf(u32);
-        memcpy(self.phys_base, src, len);
-    } else {
-        const p: [*]u32 = @ptrFromInt(self.base);
-        std.mem.copyForwards(
-            u32,
-            p[0..copy_count],
-            p[row_pixels .. row_pixels + copy_count],
-        );
-    }
-
+    self.fb.copyWithin(
+        0,
+        row_pixels * @sizeOf(u32),
+        copy_count * @sizeOf(u32),
+    );
     self.clearRow(self.rows - 1);
 }
 
@@ -537,11 +484,11 @@ fn clearRow(self: *Self, text_row: u32) void {
 fn clearRowRange(self: *Self, text_row: u32, col_start: u32, col_end: u32) void {
     if (col_start >= col_end) return;
 
-    const stride = self.pitch / @sizeOf(u32);
+    const stride = self.fb.pitch / @sizeOf(u32);
     const y0 = text_row * font.glyph_height;
-    const x_start = col_start * font.glyph_width;
-    const x_end = @min(col_end * font.glyph_width, self.width);
-    const pixels: [*]u32 = @ptrFromInt(self.base);
+    const x_start: usize = col_start * font.glyph_width;
+    const x_end: usize = @min(col_end * font.glyph_width, self.fb.width);
+    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
     for (0..font.glyph_height) |dy| {
         for (x_start..x_end) |dx| {
             pixels[(y0 + dy) * stride + dx] = self.bg;
@@ -551,8 +498,8 @@ fn clearRowRange(self: *Self, text_row: u32, col_start: u32, col_end: u32) void 
 
 /// Clear the entire framebuffer by filling it with background color.
 fn clear(self: *Self) void {
-    const total = (self.pitch / @sizeOf(u32)) * self.height;
-    const pixels: [*]u32 = @ptrFromInt(self.base);
+    const total = (self.fb.pitch / @sizeOf(u32)) * self.fb.height;
+    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
     for (0..total) |i| {
         pixels[i] = self.bg;
     }
@@ -583,3 +530,5 @@ const std = @import("std");
 const font = @import("font8x16");
 const util = @import("util.zig");
 const Console = @import("Console.zig");
+const Framebuffer = @import("Framebuffer.zig");
+const PixelFormat = Framebuffer.PixelFormat;

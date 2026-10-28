@@ -32,7 +32,7 @@ pub fn FrameBuffer(width: usize, height: usize) type {
         // =============================================================
 
         /// Initialize the framebuffer.
-        pub fn init(io: IoAllocator, page: PageAllocator, vt: FbConsole.VTable) Error!void {
+        pub fn init(io: IoAllocator, page: PageAllocator, vt: Framebuffer.VTable) Error!void {
             const buf = try page.allocPagesV(1);
             defer page.freePagesV(buf);
 
@@ -142,15 +142,17 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             fb.pitch = pitch;
 
             // Create a framebuffer console.
-            console = FbConsole.init(
-                fb.base,
-                fb.phys,
-                fb.pitch,
-                fb.width,
-                fb.height,
-                .rgbx8888,
-                vt,
-            );
+            console = FbConsole.init(.{
+                .ctx = &console,
+                .vtable = vt,
+                .base = fb.base,
+                .phys = fb.phys,
+                .size = fb_size,
+                .width = fb.width,
+                .height = fb.height,
+                .pitch = fb.pitch,
+                .format = .rgbx8888,
+            });
         }
 
         /// Get a Console wrapping the framebuffer.
@@ -224,6 +226,7 @@ const rtt = common.rtt;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const FbConsole = common.FbConsole;
+const Framebuffer = common.Framebuffer;
 const urd = @import("urthr");
 const sync = @import("../sync.zig");
 const vcmbox = @import("vcmbox.zig");

@@ -516,7 +516,7 @@ const console = struct {
 const memcpy_dma_chan = 6;
 
 /// DMA-accelerated memcpy.
-fn dmaMemcpy(dst: usize, src: usize, len: usize) void {
+fn dmaMemcpy(_: *anyopaque, dst: usize, src: usize, len: usize) void {
     rdd.dma.memcpy(memcpy_dma_chan, src, dst, len);
 }
 

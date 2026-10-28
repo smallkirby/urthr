@@ -15,6 +15,7 @@ pub const util = @import("common/util.zig");
 
 pub const Console = @import("common/Console.zig");
 pub const FbConsole = @import("common/FbConsole.zig");
+pub const Framebuffer = @import("common/Framebuffer.zig");
 pub const RbTree = @import("common/RbTree.zig").RbTree;
 pub const Timer = @import("common/Timer.zig");
 pub const UnsafeWriter = @import("common/UnsafeWriter.zig");

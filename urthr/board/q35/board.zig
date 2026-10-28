@@ -309,18 +309,20 @@ pub fn initPeripherals1() common.mem.Error!void {
             .wc,
         );
 
-        fb_console = .init(
-            base,
-            fb.base,
-            fb.pitch,
-            fb.width,
-            fb.height,
-            switch (fb.format) {
+        fb_console = .init(.{
+            .ctx = &fb_console,
+            .vtable = .{},
+            .base = base,
+            .phys = fb.base,
+            .size = fb.size,
+            .width = fb.width,
+            .height = fb.height,
+            .pitch = fb.pitch,
+            .format = switch (fb.format) {
                 .rgbx => .rgbx8888,
                 .bgrx => .bgrx8888,
             },
-            .{ .memcpy = null },
-        );
+        });
         urd.console.addBackend(fb_console.interface()) catch |err| {
             log.warn("failed to add console backend: {t}", .{err});
         };
