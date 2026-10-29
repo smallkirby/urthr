@@ -17,7 +17,7 @@ fn open(inode: *fs.Inode, _: Allocator) fs.Error!*anyopaque {
 }
 
 fn read(file: *fs.File, buf: []u8, pos: usize) fs.Error!usize {
-    const fb = ctx(file);
+    const fb = &ctx(file).fb;
     if (pos >= fb.size) return 0;
 
     const len = @min(buf.len, fb.size - pos);
@@ -28,19 +28,19 @@ fn read(file: *fs.File, buf: []u8, pos: usize) fs.Error!usize {
 }
 
 fn write(file: *fs.File, buf: []const u8, pos: usize) fs.Error!usize {
-    const fb = ctx(file);
+    const backend = ctx(file);
 
-    const written = fb.write(pos, buf);
+    const written = backend.fb.write(pos, buf);
     if (written == 0 and buf.len != 0) {
         return fs.Error.NoSpace;
     }
-    fb.flush();
+    urd.fb.markDirty(backend);
 
     return written;
 }
 
 fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
-    const fb = ctx(file);
+    const fb = &ctx(file).fb;
 
     switch (@as(Request, @fromBackingInt(@intCast(request)))) {
         .fbioget_vscreeninfo => {
@@ -79,7 +79,7 @@ fn close(_: *anyopaque, _: Allocator) void {}
 // Helpers
 // =============================================================
 
-inline fn ctx(file: *fs.File) *Framebuffer {
+inline fn ctx(file: *fs.File) *urd.fb.Backend {
     return @ptrCast(@alignCast(file.ctx));
 }
 

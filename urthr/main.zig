@@ -141,6 +141,10 @@ fn zmain() !void {
 fn initialTask() !void {
     log.info("Initial task started.", .{});
 
+    // Start framebuffer subsystem.
+    log.debug("Starting framebuffer subsystem..", .{});
+    try urd.fb.init();
+
     // Initialize peripherals phase 3.
     log.info("Initializing peripherals phase 3.", .{});
     try board.initPeripherals3();
