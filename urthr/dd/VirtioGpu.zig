@@ -31,10 +31,16 @@ bufs: struct {
     res: DmaMemory,
 },
 
+/// Resource ID to be assigned to the next framebuffer.
+next_resource_id: u32 = 1,
+
 /// Device ID of virtio GPU device.
 pub const device_id = 16;
 /// PCI device ID of virtio GPU device.
 pub const pci_device_id = 0x1050;
+
+/// Bytes per pixel.
+pub const bytes_per_pixel = 4;
 
 /// Index of the request queue.
 const queue_index = 0;
@@ -169,8 +175,101 @@ pub fn getDisplayInfo(self: *Self, allocator: Allocator) Error![]DisplayInfo {
     return result.toOwnedSlice(allocator);
 }
 
+/// State of a framebuffer bound to a scanout.
+const Scanout = struct {
+    /// GPU device.
+    gpu: *Self,
+    /// Resource ID.
+    resource_id: u32,
+    /// Backing memory of the resource.
+    buf: DmaMemory,
+    /// Area of the resource on the scanout.
+    rect: GpuRect,
+};
+
+/// Setup a framebuffer and bind it to the scanout display.
+///
+/// This GPU device (`self`) must outlive the returned framebuffer.
+pub fn setupFramebuffer(self: *Self, display: DisplayInfo) Error!Framebuffer {
+    const rect = GpuRect{
+        .x = 0,
+        .y = 0,
+        .width = display.rect.width,
+        .height = display.rect.height,
+    };
+    const pitch = rect.width * bytes_per_pixel;
+    const size = pitch * rect.height;
+
+    const scanout = try self.allocator.create(Scanout);
+    errdefer self.allocator.destroy(scanout);
+    const buf = try self.dma.allocBytes(size, .wc);
+    errdefer self.dma.freeBytes(buf);
+
+    const resource_id = self.next_resource_id;
+    self.next_resource_id += 1;
+    scanout.* = .{
+        .gpu = self,
+        .resource_id = resource_id,
+        .buf = buf,
+        .rect = rect,
+    };
+
+    try self.createResource2d(
+        resource_id,
+        .b8g8r8x8_unorm,
+        rect.width,
+        rect.height,
+    );
+    try self.attachBacking(resource_id, &.{.{
+        .addr = buf.bus,
+        .length = @intCast(buf.size),
+    }});
+    try self.setScanout(
+        display.id,
+        resource_id,
+        rect,
+    );
+
+    return .{
+        .ctx = scanout,
+        .vtable = .{ .flush = flushFramebuffer },
+        .base = buf.cpu,
+        .size = size,
+        .width = rect.width,
+        .height = rect.height,
+        .pitch = pitch,
+        .format = .bgrx8888,
+    };
+}
+
+/// Send the whole framebuffer to the host to update the screen.
+fn flushFramebuffer(ctx: *anyopaque) void {
+    const scanout: *Scanout = @ptrCast(@alignCast(ctx));
+    const gpu = scanout.gpu;
+    gpu.dma.syncForDevice(scanout.buf.cpu, scanout.buf.size);
+
+    gpu.transferToHost2d(
+        scanout.resource_id,
+        scanout.rect,
+        0,
+    ) catch |err| {
+        log.warn("Failed to transfer to host: {t}", .{err});
+        return;
+    };
+    gpu.flushResource(
+        scanout.resource_id,
+        scanout.rect,
+    ) catch |err| {
+        log.warn("Failed to flush resource: {t}", .{err});
+    };
+}
+
+// =============================================================
+// Command wrappers
+// =============================================================
+
 /// Create a 2D resource with the specified ID, format, width, and height.
-pub fn createResource2d(self: *Self, id: u32, format: GpuFormat, width: u32, height: u32) Error!void {
+fn createResource2d(self: *Self, id: u32, format: GpuFormat, width: u32, height: u32) Error!void {
     self.lock.lock();
     defer self.lock.unlock();
 
@@ -195,7 +294,7 @@ pub fn createResource2d(self: *Self, id: u32, format: GpuFormat, width: u32, hei
 }
 
 /// Attach backing memory to the specified 2D resource.
-pub fn attachBacking(self: *Self, id: u32, entries: []const MemEntry) Error!void {
+fn attachBacking(self: *Self, id: u32, entries: []const MemEntry) Error!void {
     rtt.expect(@sizeOf(ResourceAttachBackingReq) + @sizeOf(MemEntry) * entries.len <= len_reqres_buf);
 
     self.lock.lock();
@@ -223,7 +322,7 @@ pub fn attachBacking(self: *Self, id: u32, entries: []const MemEntry) Error!void
 }
 
 /// Associate a scanout with a 2D resource and specify the rectangle to display.
-pub fn setScanout(self: *Self, scanout_id: u32, resource_id: u32, rect: GpuRect) Error!void {
+fn setScanout(self: *Self, scanout_id: u32, resource_id: u32, rect: GpuRect) Error!void {
     self.lock.lock();
     defer self.lock.unlock();
 
@@ -247,7 +346,7 @@ pub fn setScanout(self: *Self, scanout_id: u32, resource_id: u32, rect: GpuRect)
 }
 
 /// Transfer the specified rectangle of a resource to the host.
-pub fn transferToHost2d(self: *Self, id: u32, rect: GpuRect, offset: u64) Error!void {
+fn transferToHost2d(self: *Self, id: u32, rect: GpuRect, offset: u64) Error!void {
     self.lock.lock();
     defer self.lock.unlock();
 
@@ -271,7 +370,7 @@ pub fn transferToHost2d(self: *Self, id: u32, rect: GpuRect, offset: u64) Error!
 }
 
 /// Flush the specified resource within the given rectangle.
-pub fn flushResource(self: *Self, id: u32, rect: GpuRect) Error!void {
+fn flushResource(self: *Self, id: u32, rect: GpuRect) Error!void {
     self.lock.lock();
     defer self.lock.unlock();
 
@@ -566,6 +665,7 @@ const log = std.log.scoped(.vgpu);
 const common = @import("common");
 const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;
+const Framebuffer = common.Framebuffer;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const Event = urd.sync.Event;

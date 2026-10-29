@@ -20,6 +20,8 @@ var ecam: ?dd.pci.EcamHost = null;
 
 /// Virtio block device instance.
 var virtio_blk_dev: ?dd.VirtioBlk = null;
+/// Virtio GPU device instance.
+var virtio_gpu_dev: ?dd.VirtioGpu = null;
 
 /// GOP framebuffer console instance.
 var fb_console: FbConsole = undefined;
@@ -33,6 +35,8 @@ const xhci_vector: u8 = 0x40;
 const virtio_net_vector: u8 = 0x41;
 /// IDT vector assigned to the virtio-blk interrupt.
 const virtio_blk_vector: u8 = 0x42;
+/// IDT vector assigned to the virtio-gpu interrupt.
+const virtio_gpu_vector: u8 = 0x43;
 /// IDT vector assigned to the TLB shootdown IPI.
 pub const tlb_shootdown_vector: u8 = 0x60;
 /// IDT vector assigned to the reschedule IPI.
@@ -549,6 +553,69 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
             urd.mem.bin,
         );
         try netdev.appendInterface(iface);
+    }
+
+    // virtio-gpu
+    if (ecam) |*e| outer: {
+        // Scan for a virtio-gpu device.
+        const hc = e.interface();
+        const result = (try bringUpVirtioPci(
+            hc,
+            &.{dd.VirtioGpu.pci_device_id},
+            0,
+        )) orelse break :outer;
+
+        // Initialize virtio-gpu device.
+        virtio_gpu_dev = dd.VirtioGpu.init(
+            result.dev.interface(),
+            mem.dma.interface(0),
+            urd.mem.bin,
+        ) catch |err| {
+            log.warn("Failed to initialize virtio-gpu: {t}", .{err});
+            break :outer;
+        };
+        const gpu = &virtio_gpu_dev.?;
+
+        // Register MSI-X.
+        const msix = result.msix;
+        const msg = arch.msi.buildMessage(
+            virtio_gpu_vector,
+            arch.lapic.getId(),
+        );
+        const table = dd.pci.MsixTable{
+            .base = result.barmap.get(msix.table_bar) + msix.table_offset,
+        };
+        table.setEntry(0, msg.addr, msg.data);
+        table.maskEntry(0, false);
+        dd.pci.enableMsix(hc, result.addr, msix.cap_offset);
+
+        // Bind the request queue to MSI-X table entry #0.
+        result.dev.setQueueVector(0, 0) catch |err| {
+            log.warn("Failed to bind virtio-gpu queue to MSI-X: {t}", .{err});
+            break :outer;
+        };
+
+        // Register IRQ.
+        gpu.registerIrq(virtio_gpu_vector);
+
+        // Setup the framebuffer and expose it as /dev/fbN.
+        const displays = gpu.getDisplayInfo(urd.mem.bin) catch |err| {
+            log.warn("Failed to get display info: {t}", .{err});
+            break :outer;
+        };
+        defer urd.mem.bin.free(displays);
+        if (displays.len == 0) {
+            log.warn("No enabled display found.", .{});
+            break :outer;
+        }
+
+        const fb = gpu.setupFramebuffer(displays[0]) catch |err| {
+            log.warn("Failed to setup framebuffer: {t}", .{err});
+            break :outer;
+        };
+        urd.fb.addBackend(fb) catch |err| {
+            log.warn("failed to add framebuffer backend: {t}", .{err});
+        };
     }
 
     // xHC

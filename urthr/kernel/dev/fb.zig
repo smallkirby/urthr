@@ -116,9 +116,9 @@ const VarScreenInfo = extern struct {
     xres_virtual: u32,
     /// Virtual vertical resolution.
     yres_virtual: u32,
-    /// Vertical offset from virtual to visible.
-    xoffset: u32 = 0,
     /// Horizontal offset from virtual to visible.
+    xoffset: u32 = 0,
+    /// Vertical offset from virtual to visible.
     yoffset: u32 = 0,
     /// Bits per pixel.
     bits_per_pixel: u32,
@@ -197,7 +197,7 @@ const VarScreenInfo = extern struct {
 
 /// Device independent unchangeable information.
 const FixScreenInfo = extern struct {
-    /// Identification  string.
+    /// Identification string.
     id: [16]u8,
     /// Start of framebuffer memory.
     smem_start: u64,
@@ -221,7 +221,7 @@ const FixScreenInfo = extern struct {
     mmio_start: u64 = 0,
     /// Length of MMIO region.
     mmio_len: u32 = 0,
-    //// Indicate to driver which specific chip or card we have.
+    // Indicate to driver which specific chip or card we have.
     accel: u32 = 0,
     ///
     capabilities: u16 = 0,
