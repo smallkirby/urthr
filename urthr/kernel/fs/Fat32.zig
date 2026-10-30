@@ -1737,6 +1737,9 @@ fn allocateCluster(self: *Self, prev: ?Cluster) fs.Error!Cluster {
 
 /// Free the cluster chain starting from the given cluster.
 fn freeCluster(self: *Self, clus: Cluster) fs.Error!void {
+    // An empty file has no cluster chain.
+    if (clus < self.bpb.root_clus) return;
+
     if (clus < self.free_clus_hint) {
         self.free_clus_hint = clus;
     }
