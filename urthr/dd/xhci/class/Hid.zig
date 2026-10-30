@@ -227,52 +227,6 @@ const Keyboard = struct {
             }
         }
     };
-
-    /// Maximum length in bytes of a single character representation of a key code.
-    const max_chars_len = 3;
-
-    /// Convert USB HID key code to ASCII character.
-    ///
-    /// The result is copied into the given buffer and returned as a slice.
-    fn codeToChars(key_code: u8, shifted: bool, buf: *[max_chars_len]u8) []const u8 {
-        const chars: []const u8 = switch (key_code) {
-            0x04...0x1D => &.{if (shifted) key_code - 0x04 + 'A' else key_code - 0x04 + 'a'},
-            0x1E => if (shifted) "!" else "1",
-            0x1F => if (shifted) "@" else "2",
-            0x20 => if (shifted) "#" else "3",
-            0x21 => if (shifted) "$" else "4",
-            0x22 => if (shifted) "%" else "5",
-            0x23 => if (shifted) "^" else "6",
-            0x24 => if (shifted) "&" else "7",
-            0x25 => if (shifted) "*" else "8",
-            0x26 => if (shifted) "(" else "9",
-            0x27 => if (shifted) ")" else "0",
-            0x28 => "\n",
-            0x29 => &.{0x1B},
-            0x2A => &.{0x7F}, // Backspace to DEL
-            0x2B => "\t",
-            0x2C => " ",
-            0x2D => if (shifted) "_" else "-",
-            0x2E => if (shifted) "+" else "=",
-            0x2F => if (shifted) "{" else "[",
-            0x30 => if (shifted) "}" else "]",
-            0x31 => if (shifted) "|" else "\\",
-            0x33 => if (shifted) ":" else ";",
-            0x34 => if (shifted) "\"" else "'",
-            0x35 => if (shifted) "~" else "`",
-            0x36 => if (shifted) "<" else ",",
-            0x37 => if (shifted) ">" else ".",
-            0x38 => if (shifted) "?" else "/",
-            0x4F => "\x1B[C", // Right arrow
-            0x50 => "\x1B[D", // Left arrow
-            0x51 => "\x1B[B", // Down arrow
-            0x52 => "\x1B[A", // Up arrow
-            else => &.{},
-        };
-
-        @memcpy(buf[0..chars.len], chars);
-        return buf[0..chars.len];
-    }
 };
 
 /// Handle a received keyboard input report.
@@ -283,23 +237,16 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
     };
     const kbd = &self.instance.keyboard;
     const last = kbd.last_report;
-    const mods = report.modifiers;
-    const shifted = mods.left_shift or mods.right_shift;
-    const ctrled = mods.left_ctrl or mods.right_ctrl;
+    const mods = keymap.Modifiers{
+        .shift = report.modifiers.left_shift or report.modifiers.right_shift,
+        .ctrl = report.modifiers.left_ctrl or report.modifiers.right_ctrl,
+    };
 
-    for (report.keys()) |key| {
-        if (key == 0 or last.contains(key)) continue;
+    for (report.keys()) |usage| {
+        if (usage == 0 or last.contains(usage)) continue;
 
-        if (ctrled) {
-            // Ctrl + <letter> -> control character (0x01–0x1A)
-            if (key >= 0x04 and key <= 0x1D) {
-                urd.input.ldisc.push(key - 0x04 + 1);
-            }
-            continue;
-        }
-
-        var char_buf: [Keyboard.max_chars_len]u8 = undefined;
-        for (Keyboard.codeToChars(key, shifted, &char_buf)) |c| {
+        const key = hid_usage.keyboard(usage) orelse continue;
+        for (keymap.toChars(key, mods)) |c| {
             urd.input.ldisc.push(c);
         }
     }
@@ -314,6 +261,7 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
 const std = @import("std");
 const log = std.log.scoped(.hid);
 const urd = @import("urthr");
+const keymap = urd.input.keymap;
 const mem = urd.mem;
 const DmaMemory = @import("common").mem.DmaAllocator.DmaMemory;
 
@@ -324,3 +272,4 @@ const Endpoint = Device.Endpoint;
 const trbs = @import("../trb.zig");
 const class = @import("../class.zig");
 const Driver = class.Driver;
+const hid_usage = @import("hid_usage.zig");

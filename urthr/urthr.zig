@@ -84,6 +84,7 @@ pub fn comptimeAssert(comptime cond: bool, comptime msg: ?[]const u8, args: anyt
 // =============================================================
 
 test {
+    _ = input;
     _ = mem;
 }
 

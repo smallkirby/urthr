@@ -3,6 +3,7 @@
 pub const arch = @import("common/arch.zig");
 pub const bits = @import("common/bits.zig");
 pub const block = @import("common/block.zig");
+pub const input_codes = @import("common/input_codes.zig");
 pub const mem = @import("common/mem.zig");
 pub const mmio = @import("common/mmio.zig");
 pub const pcpu = @import("common/pcpu.zig");
