@@ -39,6 +39,8 @@ pub fn mount() fs.Error!void {
 }
 
 /// Register a device under /dev.
+///
+/// When the `name` contains multiple path components, missing intermediate directories are created.
 pub fn register(name: []const u8, fops: fs.File.Ops, ctx: ?*anyopaque) fs.Error!void {
     return instance.registerDevice(name, fops, ctx);
 }
