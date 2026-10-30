@@ -81,6 +81,13 @@ pub fn init(device: *Device, iface: *const Device.Interface) Error!Driver {
         .instance = instance,
     };
 
+    // Expose the keyboard as an input device.
+    if (self.instance == .keyboard) {
+        self.instance.keyboard.input.register() catch |err| {
+            log.warn("Failed to register the input device: {t}", .{err});
+        };
+    }
+
     // Switch to Boot Protocol.
     if (iface.desc.subclass == 1) {
         try self.changeProtocol(.boot);
@@ -278,6 +285,9 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
             reportUsage(&kbd.input, usage, .press);
         }
     }
+
+    // Report the end of events.
+    kbd.input.sync();
 
     kbd.last_report = report.*;
 }

@@ -13,6 +13,12 @@ pub const Error = error{
 ///
 /// Can be called from IRQ context.
 onKey: *const fn (dev: *Device, key: Key, state: Device.KeyState) void,
+/// Handle the end of a packet of events reported by the device.
+///
+/// Can be called from IRQ context.
+onSync: ?*const fn (dev: *Device) void = null,
+/// Called when a device is registered.
+connect: ?*const fn (dev: *Device) fs.Error!void = null,
 
 /// The number of handlers that can be registered.
 const max_handlers = 4;
@@ -45,6 +51,20 @@ pub fn dispatchKey(dev: *Device, key: Key, state: Device.KeyState) void {
     }
 }
 
+/// Dispatch the end of a packet to the registered handlers.
+pub fn dispatchSync(dev: *Device) void {
+    for (handlers[0..count.load(.acquire)]) |handler| {
+        if (handler.onSync) |onSync| onSync(dev);
+    }
+}
+
+/// Notify the registered handlers of a new device.
+pub fn connectDevice(dev: *Device) fs.Error!void {
+    for (handlers[0..count.load(.acquire)]) |handler| {
+        if (handler.connect) |connect| try connect(dev);
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
@@ -53,5 +73,6 @@ const std = @import("std");
 const common = @import("common");
 const Key = common.input_codes.Key;
 const urd = @import("urthr");
+const fs = urd.fs;
 const SpinLock = urd.sync.SpinLock;
 const Device = @import("Device.zig");
