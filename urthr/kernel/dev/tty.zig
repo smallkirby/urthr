@@ -36,7 +36,7 @@ fn write(_: *fs.File, buf: []const u8, _: usize) fs.Error!usize {
 }
 
 fn read(_: *fs.File, buf: []u8, _: usize) fs.Error!usize {
-    return urd.input.read(buf);
+    return urd.input.ldisc.read(buf);
 }
 
 fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
@@ -45,17 +45,17 @@ fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
     switch (@as(Request, @fromBackingInt(@intCast(request)))) {
         .tcgets => {
             urd.uaccess.putUser(
-                urd.input.Termios,
+                urd.input.ldisc.Termios,
                 arg,
-                urd.input.getTermios(),
+                urd.input.ldisc.getTermios(),
             ) catch return fs.Error.InvalidArgument;
         },
         .tcsets, .tcsetsw, .tcsetsf => {
             const t = urd.uaccess.getUser(
-                urd.input.Termios,
+                urd.input.ldisc.Termios,
                 arg,
             ) catch return fs.Error.InvalidArgument;
-            urd.input.setTermios(t);
+            urd.input.ldisc.setTermios(t);
         },
         .tiocgwinsz => {
             urd.uaccess.putUser(WinSize, arg, .{
@@ -89,10 +89,10 @@ fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
 fn poll(_: *fs.File) fs.Error!fs.PollResult {
     return .{
         .events = .{
-            .in = urd.input.available(),
+            .in = urd.input.ldisc.available(),
             .out = true,
         },
-        .wait = &urd.input.event,
+        .wait = &urd.input.ldisc.event,
     };
 }
 

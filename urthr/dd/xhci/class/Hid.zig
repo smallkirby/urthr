@@ -293,14 +293,14 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
         if (ctrled) {
             // Ctrl + <letter> -> control character (0x01–0x1A)
             if (key >= 0x04 and key <= 0x1D) {
-                urd.input.push(key - 0x04 + 1);
+                urd.input.ldisc.push(key - 0x04 + 1);
             }
             continue;
         }
 
         var char_buf: [Keyboard.max_chars_len]u8 = undefined;
         for (Keyboard.codeToChars(key, shifted, &char_buf)) |c| {
-            urd.input.push(c);
+            urd.input.ldisc.push(c);
         }
     }
 
