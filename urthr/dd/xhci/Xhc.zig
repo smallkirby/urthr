@@ -384,6 +384,15 @@ fn irqHandler(_: urd.exception.Vector, ctx: ?*anyopaque) void {
         const self = controller.controller;
         if (!self.ready) return;
 
+        // Acknowledge the interrupt.
+        self.op.writez(regs.StatusRegister, .{
+            .eint = true,
+        });
+        self.getIrsAt(0).writez(regs.Iman, .{
+            .ip = true,
+            .ie = true,
+        });
+
         while (self.ering.next()) |trb| {
             self.eq.push(trb.*);
         }
