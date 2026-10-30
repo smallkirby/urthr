@@ -433,13 +433,13 @@ fn handleIrq() ?void {
     const iar = arch.gicv2.readIar();
     const intid = iar.interrupt_id;
 
+    if (rdd.rp1.tryGetMsix(intid)) |msix| {
+        rdd.rp1.ackMsix(msix);
+    }
+
     if (exception_handler) |handler| {
         if (handler(intid)) |_| {
             arch.gicv2.eoi(iar);
-
-            if (rdd.rp1.tryGetMsix(intid)) |msix| {
-                rdd.rp1.ackMsix(msix);
-            }
 
             if (urd.sched.shouldReschedule()) {
                 urd.sched.reschedule();
