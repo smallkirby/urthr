@@ -14,8 +14,41 @@ pub const KeyState = enum(i32) {
     repeat = 2,
 };
 
+/// Bus type of the device, compatible with Linux.
+pub const Bus = enum(u16) {
+    /// Unknown input device
+    unknown = 0x00,
+    /// USB
+    usb = 0x03,
+    /// Virtual input
+    virtual = 0x06,
+
+    _,
+};
+
+/// Identifier of the device.
+pub const Id = struct {
+    /// Bus the device is connected to.
+    bustype: Bus = .unknown,
+    /// Vendor ID.
+    vendor: u16 = 0,
+    /// Product ID.
+    product: u16 = 0,
+    /// Product version.
+    version: u16 = 0,
+};
+
+/// Set of key codes.
+pub const KeySet = std.bit_set.Static(key_capacity);
+
+/// Name of the device.
+name: []const u8 = "",
+/// Identifier of the device.
+id: Id = .{},
+/// Keys that the device can report.
+keybit: KeySet = .empty,
 /// Keys that are currently pressed.
-keys: std.bit_set.Static(key_capacity) = .empty,
+keys: KeySet = .empty,
 /// Whether events have been reported since the last sync.
 dirty: bool = false,
 /// Lock protecting the device state.
@@ -68,6 +101,14 @@ pub fn sync(self: *Self) void {
     if (!self.dirty) return;
     self.dirty = false;
     Handler.dispatchSync(self);
+}
+
+/// Get the keys that are currently pressed.
+pub fn getKeys(self: *Self) KeySet {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
+    return self.keys;
 }
 
 /// Check if the key is pressed.

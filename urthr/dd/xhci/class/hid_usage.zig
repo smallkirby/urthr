@@ -10,6 +10,16 @@ pub fn keyboard(id: u8) ?Key {
     return if (key == .reserved) null else key;
 }
 
+/// Key codes that can be reported by a keyboard.
+pub const keyboard_keys = blk: {
+    var keys = std.bit_set.Static(256).empty;
+    for (keyboard_table) |key| {
+        if (key != .reserved) keys.set(@backingInt(key));
+    }
+
+    break :blk keys;
+};
+
 /// Key codes indexed by the usage ID of the Keyboard/Keypad page.
 const keyboard_table = blk: {
     var t: [256]Key = @splat(.reserved);

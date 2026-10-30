@@ -68,7 +68,18 @@ pub fn init(device: *Device, iface: *const Device.Interface) Error!Driver {
 
     // Instantiate the interface instance.
     const instance = switch (detectDeviceType(iface)) {
-        .keyboard => Instance{ .keyboard = Keyboard{} },
+        .keyboard => Instance{ .keyboard = Keyboard{
+            .input = .{
+                .name = "USB HID Keyboard",
+                .id = .{
+                    .bustype = .usb,
+                    .vendor = device.desc.vendor,
+                    .product = device.desc.product,
+                    .version = device.desc.device,
+                },
+                .keybit = hid_usage.keyboard_keys,
+            },
+        } },
         .mouse => Instance{ .mouse = {} },
         .other => Instance{ .other = {} },
     };
