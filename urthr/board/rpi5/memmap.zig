@@ -4,10 +4,10 @@
 
 /// Available DRAM regions.
 pub const drams = [_]Range{
-    // 1016 MiB
+    // 1008 MiB
     .{
         .start = 0x0008_0000, // [0, 0x8_0000) is reserved for ATF.
-        .end = 0x3F80_0000,
+        .end = 0x3F00_0000,
     },
     // 7168 MiB
     .{
