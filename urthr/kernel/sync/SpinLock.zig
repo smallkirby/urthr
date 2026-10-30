@@ -50,7 +50,7 @@ pub fn unlockRestoreIrq(self: *SpinLock, ie: u64) void {
 }
 
 /// Check if the spin lock is locked.
-pub fn isLocked(self: *Self) bool {
+pub fn isLocked(self: *const Self) bool {
     return self._state.load(.acquire);
 }
 

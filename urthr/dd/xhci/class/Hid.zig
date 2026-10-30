@@ -179,6 +179,8 @@ fn arm(self: *Self) void {
 
 /// Keyboard with boot protocol.
 const Keyboard = struct {
+    /// Input device to report key events to.
+    input: InputDevice = .{},
     /// Last received input report
     last_report: BootReport = std.mem.zeroes(BootReport),
 
@@ -205,6 +207,10 @@ const Keyboard = struct {
             right_shift: bool,
             right_alt: bool,
             right_gui: bool,
+
+            fn toSet(self: Modifiers) std.bit_set.Static(@bitSizeOf(Modifiers)) {
+                return .{ .mask = @bitCast(self) };
+            }
         };
 
         /// Create a BootReport from raw data.
@@ -229,6 +235,11 @@ const Keyboard = struct {
     };
 };
 
+/// Usage ID of ErrorRollOver.
+const usage_error_roll_over = 0x01;
+/// Usage ID of the first modifier key.
+const modifier_usage_base = 0xE0;
+
 /// Handle a received keyboard input report.
 fn handleKbdInput(self: *Self, buf: DmaMemory) void {
     const report = Keyboard.BootReport.from(buf.slice(u8)) orelse {
@@ -237,21 +248,44 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
     };
     const kbd = &self.instance.keyboard;
     const last = kbd.last_report;
-    const mods = keymap.Modifiers{
-        .shift = report.modifiers.left_shift or report.modifiers.right_shift,
-        .ctrl = report.modifiers.left_ctrl or report.modifiers.right_ctrl,
-    };
 
+    // Too many keys are pressed.
+    if (report.contains(usage_error_roll_over)) {
+        return;
+    }
+
+    // Report key releases.
+    for (last.keys()) |usage| {
+        if (usage != 0 and !report.contains(usage)) {
+            reportUsage(&kbd.input, usage, .release);
+        }
+    }
+
+    // Report modifier key changes.
+    const last_mods = last.modifiers.toSet();
+    const mods = report.modifiers.toSet();
+    const changed = last_mods.xorWith(mods);
+    var iter = changed.iterator(.{});
+    while (iter.next()) |bit| reportUsage(
+        &kbd.input,
+        modifier_usage_base + @as(u8, @intCast(bit)),
+        if (mods.isSet(bit)) .press else .release,
+    );
+
+    // Report key presses.
     for (report.keys()) |usage| {
-        if (usage == 0 or last.contains(usage)) continue;
-
-        const key = hid_usage.keyboard(usage) orelse continue;
-        for (keymap.toChars(key, mods)) |c| {
-            urd.input.ldisc.push(c);
+        if (usage != 0 and !last.contains(usage)) {
+            reportUsage(&kbd.input, usage, .press);
         }
     }
 
     kbd.last_report = report.*;
+}
+
+/// Report a key usage to input device.
+fn reportUsage(dev: *InputDevice, usage: u8, state: InputDevice.KeyState) void {
+    const key = hid_usage.keyboard(usage) orelse return;
+    dev.reportKey(key, state);
 }
 
 // =============================================================
@@ -261,8 +295,8 @@ fn handleKbdInput(self: *Self, buf: DmaMemory) void {
 const std = @import("std");
 const log = std.log.scoped(.hid);
 const urd = @import("urthr");
-const keymap = urd.input.keymap;
 const mem = urd.mem;
+const InputDevice = urd.input.Device;
 const DmaMemory = @import("common").mem.DmaAllocator.DmaMemory;
 
 const Xhc = @import("../Xhc.zig");

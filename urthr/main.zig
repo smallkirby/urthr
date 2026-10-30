@@ -74,6 +74,10 @@ fn zmain() !void {
     log.debug("Creating devfs.", .{});
     try urd.dev.create();
 
+    // Initialize input subsystem.
+    log.debug("Initializing input subsystem.", .{});
+    try urd.input.init();
+
     // Initialize networking stack.
     log.debug("Initializing networking stack.", .{});
     try urd.net.init();
