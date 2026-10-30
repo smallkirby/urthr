@@ -546,7 +546,7 @@ fn setupTransaction(base_freq: ?u64) void {
         .sdhc_sdxc => 50 * 1000 * 1000, // 50MHz
     };
     updateClock(base_freq, clock);
-    arch.timer.spinWaitMicro(10);
+    arch.timer.spinWaitMilli(10);
 
     // Check status.
     {
