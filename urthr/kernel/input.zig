@@ -8,8 +8,8 @@ pub const ldisc = @import("input/ldisc.zig");
 
 /// Initialize the input subsystem and register the built-in handlers.
 pub fn init() Handler.Error!void {
-    try Handler.register(ttyhandler.handler);
-    try Handler.register(evdev.handler);
+    try Handler.register(&ttyhandler.handler);
+    try Handler.register(&evdev.handler);
 }
 
 test {

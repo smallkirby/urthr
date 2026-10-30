@@ -102,6 +102,8 @@ const Nr = enum(u8) {
     name = 0x06,
     /// EVIOCGKEY: Get the state of the keys.
     key = 0x18,
+    /// EVIOCGRAB: Grab or release the device.
+    grab = 0x90,
 
     _,
 
@@ -185,6 +187,16 @@ fn ioctl(file: *fs.File, request: u64, arg: usize) fs.Error!usize {
         .key => {
             const keys = dev.getKeys();
             return copyBytes(arg, req.size, std.mem.asBytes(&keys));
+        },
+
+        .grab => {
+            const client = ctx(file);
+            if (arg != 0) {
+                try client.evdev.grab(client);
+            } else {
+                try client.evdev.ungrab(client);
+            }
+            return 0;
         },
 
         _ => {

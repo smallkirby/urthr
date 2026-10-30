@@ -38,6 +38,14 @@ pub const Id = struct {
     version: u16 = 0,
 };
 
+/// Exclusive receiver of the events of a device.
+pub const Grab = struct {
+    /// Handler that receives the events.
+    handler: *const Handler,
+    /// Owner of the grab.
+    owner: *anyopaque,
+};
+
 /// Set of key codes.
 pub const KeySet = std.bit_set.Static(key_capacity);
 
@@ -49,6 +57,8 @@ id: Id = .{},
 keybit: KeySet = .empty,
 /// Keys that are currently pressed.
 keys: KeySet = .empty,
+/// Handler that exclusively receives the events of the device.
+grabber: ?Grab = null,
 /// Whether events have been reported since the last sync.
 dirty: bool = false,
 /// Lock protecting the device state.
@@ -109,6 +119,32 @@ pub fn getKeys(self: *Self) KeySet {
     defer self.lock.unlockRestoreIrq(ie);
 
     return self.keys;
+}
+
+/// Grab the device.
+///
+/// While the device is grabbed, only the handler receives its events.
+pub fn grab(self: *Self, handler: *const Handler, owner: *anyopaque) fs.Error!void {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
+    if (self.grabber != null) return fs.Error.Busy;
+    self.grabber = .{ .handler = handler, .owner = owner };
+}
+
+/// Release the grab of the device.
+///
+/// Returns error if the device is not grabbed by the handler and the owner.
+pub fn ungrab(self: *Self, handler: *const Handler, owner: *anyopaque) fs.Error!void {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
+    const grabber = self.grabber orelse return fs.Error.InvalidArgument;
+    if (grabber.handler != handler or grabber.owner != owner) {
+        return fs.Error.InvalidArgument;
+    }
+
+    self.grabber = null;
 }
 
 /// Check if the key is pressed.

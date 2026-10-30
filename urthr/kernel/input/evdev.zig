@@ -38,10 +38,31 @@ pub const Evdev = struct {
         return client;
     }
 
+    /// Grab the device for the client.
+    ///
+    /// While the device is grabbed, only the client receives the events.
+    pub fn grab(self: *Evdev, client: *Client) fs.Error!void {
+        try self.dev.grab(&handler, client);
+    }
+
+    /// Release the grab of the client.
+    pub fn ungrab(self: *Evdev, client: *Client) fs.Error!void {
+        try self.dev.ungrab(&handler, client);
+    }
+
     /// Queue the event to all clients.
+    ///
+    /// If the device is grabbed, only the grabbing client receives the event.
     fn push(self: *Evdev, record: Record) void {
+        rtt.expect(self.dev.lock.isLocked());
+
         const ie = self.lock.lockDisableIrq();
         defer self.lock.unlockRestoreIrq(ie);
+
+        if (self.dev.grabber) |grabber| {
+            const client: *Client = @ptrCast(@alignCast(grabber.owner));
+            return client.push(record);
+        }
 
         var iter = self.clients.iter();
         while (iter.next()) |client| {
@@ -75,6 +96,8 @@ pub const Client = struct {
 
     /// Destroy the client.
     pub fn close(self: *Client, allocator: Allocator) void {
+        self.evdev.ungrab(self) catch {};
+
         {
             const ie = self.evdev.lock.lockDisableIrq();
             defer self.evdev.lock.unlockRestoreIrq(ie);

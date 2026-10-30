@@ -24,7 +24,7 @@ connect: ?*const fn (dev: *Device) fs.Error!void = null,
 const max_handlers = 4;
 
 /// Registered handlers.
-var handlers: [max_handlers]Self = undefined;
+var handlers: [max_handlers]*const Self = undefined;
 /// The number of registered handlers.
 var count: std.atomic.Value(usize) = .init(0);
 /// Lock to serialize registrations.
@@ -33,7 +33,7 @@ var lock: SpinLock = .{};
 /// Register a handler.
 ///
 /// Registered handlers receive the events of all devices.
-pub fn register(handler: Self) Error!void {
+pub fn register(handler: *const Self) Error!void {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
@@ -45,14 +45,27 @@ pub fn register(handler: Self) Error!void {
 }
 
 /// Dispatch a key event to the registered handlers.
+///
+/// If the device is grabbed, only the grabber receives the event.
 pub fn dispatchKey(dev: *Device, key: Key, state: Device.KeyState) void {
+    if (dev.grabber) |grabber| {
+        return grabber.handler.onKey(dev, key, state);
+    }
+
     for (handlers[0..count.load(.acquire)]) |handler| {
         handler.onKey(dev, key, state);
     }
 }
 
 /// Dispatch the end of a packet to the registered handlers.
+///
+/// If the device is grabbed, only the grabber receives the event.
 pub fn dispatchSync(dev: *Device) void {
+    if (dev.grabber) |grabber| {
+        if (grabber.handler.onSync) |onSync| onSync(dev);
+        return;
+    }
+
     for (handlers[0..count.load(.acquire)]) |handler| {
         if (handler.onSync) |onSync| onSync(dev);
     }
