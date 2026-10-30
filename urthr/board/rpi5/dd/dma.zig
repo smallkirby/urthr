@@ -223,8 +223,8 @@ pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
             dma.writez(ndma.Cs, .{
                 .active = true,
                 .wait_for_outstanding_writes = true,
-                .priority = 15,
-                .panic_priority = 15,
+                .priority = 0,
+                .panic_priority = 0,
             });
         },
         inline else => |*dma| {
@@ -234,8 +234,8 @@ pub fn memcpy(chan: usize, from: usize, to: usize, len: usize) void {
             dma.writez(dma4.Cs, .{
                 .active = true,
                 .wait_for_outstanding_writes = true,
-                .qos = 15,
-                .panic_qos = 15,
+                .qos = 0,
+                .panic_qos = 0,
             });
         },
     }
