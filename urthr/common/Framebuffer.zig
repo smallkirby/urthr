@@ -15,12 +15,22 @@ pub const VTable = struct {
     memcpy: ?*const fn (ctx: *anyopaque, dst: usize, src: usize, len: usize) void = null,
 };
 
-/// Byte order of pixel color components in memory.
+/// Layout of pixel color components in memory.
 pub const PixelFormat = enum {
     /// RGBX.
     rgbx8888,
     /// BGRX.
     bgrx8888,
+    /// 16 bits RGB.
+    rgb565,
+
+    /// Get the number of bytes per pixel.
+    pub fn bytesPerPixel(self: PixelFormat) usize {
+        return switch (self) {
+            .rgbx8888, .bgrx8888 => 4,
+            .rgb565 => 2,
+        };
+    }
 };
 
 /// Pointer to the framebuffer implementation.

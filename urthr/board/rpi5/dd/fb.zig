@@ -76,14 +76,14 @@ pub fn FrameBuffer(width: usize, height: usize) type {
                 b.push(tags.set_depth);
                 b.push(4); // size
                 b.push(0); // request
-                b.push(32); // req: depth (RGBX8888)
+                b.push(32); // req: depth (BGRX8888)
                 rtt.expectEqual(21, b.index);
 
                 // Set pixel order.
                 b.push(tags.set_pixel_order);
                 b.push(4); // size
                 b.push(0); // request
-                b.push(1); // req: RGB
+                b.push(0); // req: BGR
                 rtt.expectEqual(25, b.index);
 
                 // Allocate buffer.
@@ -141,6 +141,18 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             ) + aligned_offset;
             fb.pitch = pitch;
 
+            // The firmware seems to ignore the requested depth and just use config.txt setting.
+            // ref. https://github.com/raspberrypi/firmware/issues/1904
+            const bpp = pitch / fb.width;
+            const format: Framebuffer.PixelFormat = switch (bpp) {
+                2 => .rgb565,
+                4 => .bgrx8888,
+                else => {
+                    log.err("unsupported framebuffer pitch: {d}", .{pitch});
+                    return Error.MailboxError;
+                },
+            };
+
             // Create a framebuffer console.
             console = FbConsole.init(.{
                 .ctx = &console,
@@ -151,8 +163,13 @@ pub fn FrameBuffer(width: usize, height: usize) type {
                 .width = fb.width,
                 .height = fb.height,
                 .pitch = fb.pitch,
-                .format = .rgbx8888,
+                .format = format,
             });
+
+            log.info(
+                "phys=0x{X} size=0x{X} pitch={d} {d}x{d} {d}bpp",
+                .{ fb_phys, fb_size, pitch, fb.width, fb.height, bpp * 8 },
+            );
         }
 
         /// Get a Console wrapping the framebuffer.

@@ -100,8 +100,9 @@ pub fn init(fb: Framebuffer) Self {
 /// Pack a logical RGB color into a raw pixel word.
 fn pack(format: PixelFormat, r: u8, g: u8, b: u8) u32 {
     return switch (format) {
-        .rgbx8888 => (@as(u32, b) << 16) | (@as(u32, g) << 8) | @as(u32, r),
-        .bgrx8888 => (@as(u32, r) << 16) | (@as(u32, g) << 8) | @as(u32, b),
+        .rgbx8888 => (@as(u32, 0xFF) << 24) | (@as(u32, b) << 16) | (@as(u32, g) << 8) | @as(u32, r << 0),
+        .bgrx8888 => (@as(u32, 0xFF) << 24) | (@as(u32, r) << 16) | (@as(u32, g) << 8) | @as(u32, b << 0),
+        .rgb565 => (@as(u32, r >> 3) << 11) | (@as(u32, g >> 2) << 5) | @as(u32, b >> 3),
     };
 }
 
@@ -399,20 +400,44 @@ fn flush(_: *anyopaque) void {
 // Internals
 // =============================================================
 
+/// Mask to invert all color bits of a pixel.
+inline fn invertMask(format: PixelFormat) u32 {
+    return switch (format) {
+        .rgbx8888, .bgrx8888 => 0x00FFFFFF,
+        .rgb565 => 0xFFFF,
+    };
+}
+
+/// Store a raw pixel word at the pixel index.
+inline fn storePixel(self: *const Self, idx: usize, color: u32) void {
+    switch (self.fb.format.bytesPerPixel()) {
+        2 => @as([*]u16, @ptrFromInt(self.fb.base))[idx] = @intCast(color),
+        else => @as([*]u32, @ptrFromInt(self.fb.base))[idx] = color,
+    }
+}
+
+/// Invert the pixel at the pixel index.
+inline fn invertPixel(self: *const Self, idx: usize) void {
+    const mask = invertMask(self.fb.format);
+    switch (self.fb.format.bytesPerPixel()) {
+        2 => @as([*]u16, @ptrFromInt(self.fb.base))[idx] ^= @intCast(mask),
+        else => @as([*]u32, @ptrFromInt(self.fb.base))[idx] ^= mask,
+    }
+}
+
 /// Draws a single character glyph at the given text position.
 fn drawGlyph(self: *Self, col: u32, row: u32, ch: u8) void {
     const glyph = font.glyphs[ch];
 
     const x0 = col * font.glyph_width;
     const y0 = row * font.glyph_height;
-    const stride = self.fb.pitch / @sizeOf(u32);
-    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
+    const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
 
     for (glyph, 0..) |row_bytes, dy| {
         var mask: u8 = 0x80;
         for (0..font.glyph_width) |dx| {
             const color = if (row_bytes[0] & mask != 0) self.fg else self.bg;
-            pixels[(y0 + dy) * stride + (x0 + dx)] = color;
+            self.storePixel((y0 + dy) * stride + (x0 + dx), color);
             mask >>= 1;
         }
     }
@@ -429,15 +454,14 @@ fn setCursorVisible(self: *Self, visible: bool) void {
 
 /// XOR-invert the pixel cell at the current cursor position.
 fn xorCursorCell(self: *Self) void {
-    const stride = self.fb.pitch / @sizeOf(u32);
+    const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
     const x0 = self.col * font.glyph_width;
     const y0 = self.row * font.glyph_height;
-    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
 
     for (0..font.glyph_height) |dy| {
         for (0..font.glyph_width) |dx| {
             const idx = (y0 + dy) * stride + (x0 + dx);
-            pixels[idx] ^= 0x00FFFFFF;
+            self.invertPixel(idx);
         }
     }
 }
@@ -462,15 +486,16 @@ fn advanceRow(self: *Self) void {
 
 /// Scroll the framebuffer up by one text row, clearing the new bottom row.
 fn scrollUp(self: *Self) void {
-    const stride = self.fb.pitch / @sizeOf(u32);
+    const bpp = self.fb.format.bytesPerPixel();
+    const stride = self.fb.pitch / bpp;
     const row_pixels = stride * font.glyph_height;
     const total_pixels = stride * self.fb.height;
     const copy_count = total_pixels - row_pixels;
 
     self.fb.copyWithin(
         0,
-        row_pixels * @sizeOf(u32),
-        copy_count * @sizeOf(u32),
+        row_pixels * bpp,
+        copy_count * bpp,
     );
     self.clearRow(self.rows - 1);
 }
@@ -484,24 +509,22 @@ fn clearRow(self: *Self, text_row: u32) void {
 fn clearRowRange(self: *Self, text_row: u32, col_start: u32, col_end: u32) void {
     if (col_start >= col_end) return;
 
-    const stride = self.fb.pitch / @sizeOf(u32);
+    const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
     const y0 = text_row * font.glyph_height;
     const x_start: usize = col_start * font.glyph_width;
     const x_end: usize = @min(col_end * font.glyph_width, self.fb.width);
-    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
     for (0..font.glyph_height) |dy| {
         for (x_start..x_end) |dx| {
-            pixels[(y0 + dy) * stride + dx] = self.bg;
+            self.storePixel((y0 + dy) * stride + dx, self.bg);
         }
     }
 }
 
 /// Clear the entire framebuffer by filling it with background color.
 fn clear(self: *Self) void {
-    const total = (self.fb.pitch / @sizeOf(u32)) * self.fb.height;
-    const pixels: [*]u32 = @ptrFromInt(self.fb.base);
+    const total = (self.fb.pitch / self.fb.format.bytesPerPixel()) * self.fb.height;
     for (0..total) |i| {
-        pixels[i] = self.bg;
+        self.storePixel(i, self.bg);
     }
 }
 
@@ -510,16 +533,20 @@ fn clear(self: *Self) void {
 // =============================================================
 
 test "pack" {
-    try std.testing.expectEqual(0x00FFFFFF, pack(.rgbx8888, 0xFF, 0xFF, 0xFF));
-    try std.testing.expectEqual(0x00FFFFFF, pack(.bgrx8888, 0xFF, 0xFF, 0xFF));
-    try std.testing.expectEqual(0x00000000, pack(.rgbx8888, 0x00, 0x00, 0x00));
-    try std.testing.expectEqual(0x00000000, pack(.bgrx8888, 0x00, 0x00, 0x00));
+    try std.testing.expectEqual(0xFFFFFFFF, pack(.rgbx8888, 0xFF, 0xFF, 0xFF));
+    try std.testing.expectEqual(0xFFFFFFFF, pack(.bgrx8888, 0xFF, 0xFF, 0xFF));
+    try std.testing.expectEqual(0xFF000000, pack(.rgbx8888, 0x00, 0x00, 0x00));
+    try std.testing.expectEqual(0xFF000000, pack(.bgrx8888, 0x00, 0x00, 0x00));
 
-    try std.testing.expectEqual(0x000000FF, pack(.rgbx8888, 0xFF, 0x00, 0x00));
-    try std.testing.expectEqual(0x00FF0000, pack(.bgrx8888, 0xFF, 0x00, 0x00));
+    try std.testing.expectEqual(0xFF0000FF, pack(.rgbx8888, 0xFF, 0x00, 0x00));
+    try std.testing.expectEqual(0xFFFF0000, pack(.bgrx8888, 0xFF, 0x00, 0x00));
 
-    try std.testing.expectEqual(0x00FF0000, pack(.rgbx8888, 0x00, 0x00, 0xFF));
-    try std.testing.expectEqual(0x000000FF, pack(.bgrx8888, 0x00, 0x00, 0xFF));
+    try std.testing.expectEqual(0xFFFF0000, pack(.rgbx8888, 0x00, 0x00, 0xFF));
+    try std.testing.expectEqual(0xFF0000FF, pack(.bgrx8888, 0x00, 0x00, 0xFF));
+
+    try std.testing.expectEqual(0xFFFF, pack(.rgb565, 0xFF, 0xFF, 0xFF));
+    try std.testing.expectEqual(0xF800, pack(.rgb565, 0xFF, 0x00, 0x00));
+    try std.testing.expectEqual(0x001F, pack(.rgb565, 0x00, 0x00, 0xFF));
 }
 
 // =============================================================

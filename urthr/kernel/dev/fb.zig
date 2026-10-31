@@ -179,18 +179,27 @@ const VarScreenInfo = extern struct {
                 .{ .offset = 8, .length = 8 },
                 .{ .offset = 0, .length = 8 },
             },
+            .rgb565 => .{
+                .{ .offset = 11, .length = 5 },
+                .{ .offset = 5, .length = 6 },
+                .{ .offset = 0, .length = 5 },
+            },
         };
+        const transp: Bitfield = if (fb.format == .rgb565)
+            .{ .offset = 0, .length = 0 }
+        else
+            .{ .offset = 24, .length = 8 };
 
         return .{
             .xres = @intCast(fb.width),
             .yres = @intCast(fb.height),
             .xres_virtual = @intCast(fb.width),
             .yres_virtual = @intCast(fb.height),
-            .bits_per_pixel = 32,
+            .bits_per_pixel = @intCast(fb.format.bytesPerPixel() * 8),
             .red = rgb[0],
             .green = rgb[1],
             .blue = rgb[2],
-            .transp = .{ .offset = 24, .length = 0 },
+            .transp = transp,
         };
     }
 };
