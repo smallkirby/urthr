@@ -160,7 +160,7 @@ pub fn initPeripherals1() urd.mem.Error!void {
 
         rdd.FrameBuffer.init(
             urd.mem.phys,
-            urd.mem.page,
+            urd.mem.dma.interface(0),
             .{ .memcpy = dmaMemcpy },
         ) catch |err| {
             log.err("framebuffer initialization failed: {t}", .{err});
