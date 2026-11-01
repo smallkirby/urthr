@@ -2,7 +2,7 @@
 
 pub fn FrameBuffer(width: usize, height: usize) type {
     return struct {
-        pub const Error = IoAllocator.Error || PageAllocator.Error || error{MailboxError};
+        pub const Error = IoAllocator.Error || props.Error || error{MailboxError};
 
         const Self = @This();
 
@@ -32,98 +32,29 @@ pub fn FrameBuffer(width: usize, height: usize) type {
         // =============================================================
 
         /// Initialize the framebuffer.
-        pub fn init(io: IoAllocator, page: PageAllocator, vt: Framebuffer.VTable) Error!void {
-            const buf = try page.allocPagesV(1);
-            defer page.freePagesV(buf);
-
-            const msg: []u32 = @as([*]u32, @ptrCast(@alignCast(buf.ptr)))[0 .. buf.len / 4];
-            const msg_phys: u32 = @truncate(@intFromPtr(page.translateP(buf.ptr)));
-
-            // Build mailbox messages.
-            //
+        pub fn init(io: IoAllocator, dma: DmaAllocator, vt: Framebuffer.VTable) Error!void {
             // ref. https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
-            const idx_alloc_res = 28;
-            const idx_pitch_res = 33;
-            {
-                var b = props.MessageBuilder.init(msg);
-
+            const res = try props.properties(dma, .{
                 // Set physical (display) width / height
-                b.push(tags.set_phys_wh);
-                b.push(8); // size
-                b.push(0); // request
-                b.push(fb.width); // req: width
-                b.push(fb.height); // req: height
-                rtt.expectEqual(7, b.index);
-
+                .phys_wh = req(.set_phys_wh, .{ fb.width, fb.height }),
                 // Set virtual (buffer) width / height
-                b.push(tags.set_virt_wh);
-                b.push(8); // size
-                b.push(0); // request
-                b.push(fb.width); // req: width
-                b.push(fb.height); // req: height
-                rtt.expectEqual(12, b.index);
-
+                .virt_wh = req(.set_virt_wh, .{ fb.width, fb.height }),
                 // Set virtual offset.
-                b.push(tags.set_virt_off);
-                b.push(8); // size
-                b.push(0); // request
-                b.push(0); // req: x offset
-                b.push(0); // req: y offset
-                rtt.expectEqual(17, b.index);
-
+                .virt_off = req(.set_virt_off, .{ 0, 0 }),
                 // Set depth.
-                // Depth is the number of bits per pixel.
-                b.push(tags.set_depth);
-                b.push(4); // size
-                b.push(0); // request
-                b.push(32); // req: depth (BGRX8888)
-                rtt.expectEqual(21, b.index);
-
+                .depth = req(.set_depth, .{32}),
                 // Set pixel order.
-                b.push(tags.set_pixel_order);
-                b.push(4); // size
-                b.push(0); // request
-                b.push(0); // req: BGR
-                rtt.expectEqual(25, b.index);
-
+                .pixel_order = req(.set_pixel_order, .{0}),
                 // Allocate buffer.
-                b.push(tags.alloc_buf);
-                b.push(8); // size
-                b.push(0); // request
-                rtt.expectEqual(idx_alloc_res, b.index);
-                b.push(4096); // req: alignment, res: base address
-                b.push(0); // res: size
-                rtt.expectEqual(30, b.index);
-
+                .alloc = req(.alloc_buf, .{ 4096, 0 }), // req: alignment, res: base address and size
                 // Get pitch.
-                b.push(tags.get_pitch);
-                b.push(4); // size
-                b.push(0); // request
-                rtt.expectEqual(idx_pitch_res, b.index);
-                b.push(0); // res: pitch
-                rtt.expectEqual(34, b.index);
-
-                b.finalize();
-            }
-
-            // Flush the message buffer.
-            sync.cleanData(buf);
-
-            // Send the message to VideoCore and wait for the response.
-            vcmbox.call(.prop2vc, msg_phys);
-
-            // Invalidate cache lines.
-            sync.invalidateData(buf);
-
-            if (msg[1] != 0x8000_0000) {
-                log.err("mailbox call failed: response=0x{X}", .{msg[1]});
-                return Error.MailboxError;
-            }
+                .pitch = req(.get_pitch, .{0}),
+            });
 
             // Set the allocated framebuffer.
-            const fb_phys: usize = msg[idx_alloc_res];
-            const fb_size: usize = msg[idx_alloc_res + 1];
-            const pitch = msg[idx_pitch_res];
+            const fb_phys: usize = res.alloc[0];
+            const fb_size: usize = res.alloc[1];
+            const pitch = res.pitch[0];
 
             if (fb_phys == 0 or fb_size == 0) {
                 log.err("framebuffer allocation failed: addr=0x{X} size=0x{X}", .{ fb_phys, fb_size });
@@ -191,13 +122,11 @@ pub fn FrameBuffer(width: usize, height: usize) type {
 const std = @import("std");
 const log = std.log.scoped(.fb);
 const common = @import("common");
-const rtt = common.rtt;
+const DmaAllocator = common.mem.DmaAllocator;
 const IoAllocator = common.mem.IoAllocator;
-const PageAllocator = common.mem.PageAllocator;
 const FbConsole = common.FbConsole;
 const Framebuffer = common.Framebuffer;
 const urd = @import("urthr");
-const sync = @import("../sync.zig");
 const vcmbox = @import("vcmbox.zig");
 const props = vcmbox.props;
-const tags = props.tags;
+const req = props.req;
