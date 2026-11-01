@@ -45,7 +45,7 @@ pub fn FrameBuffer(width: usize, height: usize) type {
             const idx_alloc_res = 28;
             const idx_pitch_res = 33;
             {
-                var b = MessageBuilder.init(msg);
+                var b = props.MessageBuilder.init(msg);
 
                 // Set physical (display) width / height
                 b.push(tags.set_phys_wh);
@@ -181,59 +181,6 @@ pub fn FrameBuffer(width: usize, height: usize) type {
         pub fn getFramebuffer() Framebuffer {
             return console.fb;
         }
-
-        // =============================================================
-        // Property message layout
-        // =============================================================
-
-        // Tag IDs.
-        const tags = struct {
-            /// End tag.
-            const end: u32 = 0x0000_0000;
-            /// Allocate buffer.
-            const alloc_buf: u32 = 0x0004_0001;
-            /// Get pitch.
-            const get_pitch: u32 = 0x0004_0008;
-            /// Set physical (display) width / height
-            const set_phys_wh: u32 = 0x0004_8003;
-            /// Set virtual (buffer) width / height
-            const set_virt_wh: u32 = 0x0004_8004;
-            /// Set depth.
-            const set_depth: u32 = 0x0004_8005;
-            /// Set pixel order.
-            const set_pixel_order: u32 = 0x0004_8006;
-            /// Set virtual offset.
-            const set_virt_off: u32 = 0x0004_8009;
-        };
-
-        /// Utility struct to build mailbox messages.
-        const MessageBuilder = struct {
-            /// Message buffer.
-            buf: []u32,
-            /// Current index in the message buffer.
-            index: usize,
-
-            pub fn init(buf: []u32) MessageBuilder {
-                @memset(buf, 0);
-
-                return .{
-                    .buf = buf,
-                    .index = 2,
-                };
-            }
-
-            pub fn push(self: *MessageBuilder, value: u32) void {
-                self.buf[self.index] = value;
-                self.index += 1;
-            }
-
-            pub fn finalize(self: *MessageBuilder) void {
-                self.push(tags.end);
-
-                self.buf[0] = @intCast(self.index * @sizeOf(u32));
-                self.buf[1] = 0x0000_0000; // process request
-            }
-        };
     };
 }
 
@@ -252,3 +199,5 @@ const Framebuffer = common.Framebuffer;
 const urd = @import("urthr");
 const sync = @import("../sync.zig");
 const vcmbox = @import("vcmbox.zig");
+const props = vcmbox.props;
+const tags = props.tags;
