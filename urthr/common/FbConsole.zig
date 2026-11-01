@@ -47,6 +47,8 @@ const CsiParser = struct {
 
 /// Framebuffer to render on.
 fb: Framebuffer,
+/// Index of the line of the buffer shown at the top of the screen.
+origin: u32,
 
 /// Cursor column in glyph units.
 col: u32,
@@ -77,6 +79,7 @@ csi: CsiParser,
 pub fn init(fb: Framebuffer) Self {
     var self = Self{
         .fb = fb,
+        .origin = 0,
 
         .col = 0,
         .row = 0,
@@ -92,7 +95,8 @@ pub fn init(fb: Framebuffer) Self {
         .csi = .{},
     };
 
-    self.clear();
+    // Clear the whole buffer.
+    self.fillLines(0, self.getBufferHeight());
 
     return self;
 }
@@ -430,7 +434,7 @@ fn drawGlyph(self: *Self, col: u32, row: u32, ch: u8) void {
     const glyph = font.glyphs[ch];
 
     const x0 = col * font.glyph_width;
-    const y0 = row * font.glyph_height;
+    const y0 = self.origin + row * font.glyph_height;
     const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
 
     for (glyph, 0..) |row_bytes, dy| {
@@ -456,7 +460,7 @@ fn setCursorVisible(self: *Self, visible: bool) void {
 fn xorCursorCell(self: *Self) void {
     const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
     const x0 = self.col * font.glyph_width;
-    const y0 = self.row * font.glyph_height;
+    const y0 = self.origin + self.row * font.glyph_height;
 
     for (0..font.glyph_height) |dy| {
         for (0..font.glyph_width) |dx| {
@@ -486,18 +490,63 @@ fn advanceRow(self: *Self) void {
 
 /// Scroll the framebuffer up by one text row, clearing the new bottom row.
 fn scrollUp(self: *Self) void {
-    const bpp = self.fb.format.bytesPerPixel();
-    const stride = self.fb.pitch / bpp;
-    const row_pixels = stride * font.glyph_height;
-    const total_pixels = stride * self.fb.height;
-    const copy_count = total_pixels - row_pixels;
+    // If hardware scrolling is not supported, copy the pixels up by one row.
+    if (self.fb.vtable.setOrigin == null) {
+        const bpp = self.fb.format.bytesPerPixel();
+        const stride = self.fb.pitch / bpp;
+        const row_pixels = stride * font.glyph_height;
+        const total_pixels = stride * self.fb.height;
+        const copy_count = total_pixels - row_pixels;
 
-    self.fb.copyWithin(
-        0,
-        row_pixels * bpp,
-        copy_count * bpp,
-    );
-    self.clearRow(self.rows - 1);
+        self.fb.copyWithin(
+            0,
+            row_pixels * bpp,
+            copy_count * bpp,
+        );
+        self.clearRow(self.rows - 1);
+        return;
+    }
+
+    // If hardware scrolling is supported, move the origin.
+
+    // Rewind the buffer if the new origin exceeds its height.
+    if (self.origin + font.glyph_height + self.fb.height > self.getBufferHeight()) {
+        self.rewind();
+    }
+
+    // Scroll up and clear the last new line.
+    self.origin += font.glyph_height;
+    self.fillLines((self.rows - 1) * font.glyph_height, self.fb.height);
+    self.fb.setOrigin(self.origin);
+}
+
+/// Move the visible lines to the top of the buffer and reset the origin.
+fn rewind(self: *Self) void {
+    const pitch = self.fb.pitch;
+    const text_lines = self.rows * font.glyph_height;
+
+    self.fb.copyWithin(0, self.origin * pitch, text_lines * pitch);
+    self.origin = 0;
+}
+
+/// Get the number of lines of the buffer.
+///
+/// When a hardware scroll is available, return value can be larger than the screen height.
+fn getBufferHeight(self: *const Self) usize {
+    return if (self.fb.vtable.setOrigin != null)
+        self.fb.getBufferHeight()
+    else
+        self.fb.height;
+}
+
+/// Fill the lines relative to the origin with the background color.
+fn fillLines(self: *Self, y_start: usize, y_end: usize) void {
+    const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
+    var i = (self.origin + y_start) * stride;
+    const end = (self.origin + y_end) * stride;
+    while (i < end) : (i += 1) {
+        self.storePixel(i, self.bg);
+    }
 }
 
 /// Clear the given text row by filling it with background color.
@@ -510,7 +559,7 @@ fn clearRowRange(self: *Self, text_row: u32, col_start: u32, col_end: u32) void 
     if (col_start >= col_end) return;
 
     const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
-    const y0 = text_row * font.glyph_height;
+    const y0 = self.origin + text_row * font.glyph_height;
     const x_start: usize = col_start * font.glyph_width;
     const x_end: usize = @min(col_end * font.glyph_width, self.fb.width);
     for (0..font.glyph_height) |dy| {
@@ -520,12 +569,9 @@ fn clearRowRange(self: *Self, text_row: u32, col_start: u32, col_end: u32) void 
     }
 }
 
-/// Clear the entire framebuffer by filling it with background color.
+/// Clear the screen by filling it with background color.
 fn clear(self: *Self) void {
-    const total = (self.fb.pitch / self.fb.format.bytesPerPixel()) * self.fb.height;
-    for (0..total) |i| {
-        self.storePixel(i, self.bg);
-    }
+    self.fillLines(0, self.fb.height);
 }
 
 // =============================================================

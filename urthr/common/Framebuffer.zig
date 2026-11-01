@@ -13,6 +13,11 @@ pub const VTable = struct {
     /// - `src`: Source physical address.
     /// - `len`: Length in bytes.
     memcpy: ?*const fn (ctx: *anyopaque, dst: usize, src: usize, len: usize) void = null,
+
+    /// Set the first line of the buffer shown on the screen.
+    ///
+    /// If this operation is provided, the buffer can be taller than the screen.
+    setOrigin: ?*const fn (ctx: *anyopaque, y: usize) void = null,
 };
 
 /// Layout of pixel color components in memory.
@@ -48,12 +53,23 @@ phys: ?usize = null,
 size: usize,
 /// Width of the framebuffer.
 width: usize,
-/// Height of the framebuffer.
+/// Height of the screen.
 height: usize,
 /// Bytes per scanline.
 pitch: usize,
 /// Pixel format.
 format: PixelFormat,
+
+/// Get the number of lines in the buffer.
+pub fn getBufferHeight(self: *const Self) usize {
+    return self.size / self.pitch;
+}
+
+/// Set the first line of the buffer shown on the screen.
+pub fn setOrigin(self: *const Self, y: usize) void {
+    rtt.expect(y + self.height <= self.getBufferHeight());
+    self.vtable.setOrigin.?(self.ctx, y);
+}
 
 /// Make the written pixels visible on screen.
 pub fn flush(self: *const Self) void {
