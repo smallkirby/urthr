@@ -44,3 +44,5 @@ ACCES = "ACCES"
 controllen = "controllen"
 # Write-only
 WRONLY = "WRONLY"
+# RPi5 HVS
+heade = "heade"

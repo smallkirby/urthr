@@ -325,6 +325,24 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
             break :outer;
         };
     }
+
+    // HVS
+    log.info("Initializing HVS.", .{});
+    outer: {
+        const hvsbase = try urd.mem.phys.reserveAndRemap(
+            "HVS",
+            memmap.hvs.start,
+            memmap.hvs.size(),
+            null,
+            .device,
+        );
+
+        rdd.hvs.setBase(hvsbase, urd.mem.dma.interface(0));
+        rdd.hvs.init() catch |err| {
+            log.err("HVS initialization failed: {t}", .{err});
+            break :outer;
+        };
+    }
 }
 
 /// Prepare for waking up secondary cores.
