@@ -82,6 +82,15 @@ pub fn Marker(comptime name: @EnumLiteral()) type {
     };
 }
 
+/// Defines an array of identical submodules.
+pub fn Array(comptime M: type, comptime count: usize, comptime stride: usize) type {
+    return struct {
+        pub const Element = M;
+        pub const len = count;
+        pub const step = stride;
+    };
+}
+
 /// Defines a module consisting of multiple MMIO registers.
 ///
 /// `fields` is a list of MMIO registers that belong to this module.
@@ -149,6 +158,15 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
                 }
             }
             @compileError("Marker not found in Module: " ++ @typeName(name));
+        }
+
+        /// Get the submodule at the given index of the array.
+        ///
+        /// The submodule inherits the timer of this module.
+        pub fn sub(self: Self, comptime A: type, index: usize) A.Element {
+            var m = A.Element.new(self.base + self.getRegisterOffset(A) + index * A.step);
+            m._timer = self._timer;
+            return m;
         }
 
         /// Get the register field information.
@@ -476,6 +494,35 @@ test Module {
             .y = true,
         }, rawb.*);
     }
+}
+
+test "Module: submodule array" {
+    const A = packed struct {
+        a: u16,
+        b: u16,
+    };
+    const B = packed struct {
+        x: u32,
+    };
+    const Sub = Module(.{ .size = u32 }, &.{
+        .{ 0x00, A },
+        .{ 0x04, B },
+    });
+    const S = Array(Sub, 3, 0x10);
+    const M = Module(.{ .size = u32 }, &.{
+        .{ 0x08, S },
+    });
+
+    var raw: [16]u32 align(8) = @splat(0);
+    var module: M = .{};
+    module.setBase(@intFromPtr(&raw));
+
+    module.sub(S, 1).write(A, .{ .a = 0x1111, .b = 0x2222 });
+    module.sub(S, 2).write(B, .{ .x = 0x3333 });
+
+    try testing.expectEqual(0x2222_1111, raw[0x18 / 4]);
+    try testing.expectEqual(0x3333, raw[0x2C / 4]);
+    try testing.expectEqual(0x3333, module.sub(S, 2).read(B).x);
 }
 
 // =============================================================
