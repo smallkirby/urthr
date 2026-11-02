@@ -195,20 +195,33 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
     }
 
     // Framebuffer.
-    blk: {
-        rdd.FrameBuffer.init(
-            urd.mem.phys,
-            urd.mem.dma.interface(0),
-            .{ .memcpy = dmaMemcpy },
-        ) catch |err| {
-            log.err("framebuffer initialization failed: {t}", .{err});
-            break :blk;
+    log.info("Initializing HVS.", .{});
+    outer: {
+        const hvsbase = try urd.mem.phys.reserveAndRemap(
+            "HVS",
+            memmap.hvs.start,
+            memmap.hvs.size(),
+            null,
+            .device,
+        );
+        rdd.hvs.setBase(hvsbase, urd.mem.dma.interface(0));
+
+        rdd.hvs.init() catch |err| {
+            log.err("HVS initialization failed: {t}", .{err});
+            break :outer;
         };
-        urd.console.addBackend(rdd.FrameBuffer.getConsole()) catch |err| {
+
+        const fb = rdd.hvs.takeOverFramebuffer(urd.mem.bin, .{
+            .memcpy = dmaMemcpy,
+        }) catch |err| {
+            log.err("HVS framebuffer takeover failed: {t}", .{err});
+            break :outer;
+        };
+
+        const fbcon = urd.mem.bin.create(FbConsole) catch unreachable;
+        fbcon.* = FbConsole.init(fb);
+        urd.console.addBackend(fbcon.interface()) catch |err| {
             log.warn("failed to add console backend: {t}", .{err});
-        };
-        urd.fb.addBackend(rdd.FrameBuffer.getFramebuffer()) catch |err| {
-            log.warn("failed to add framebuffer backend: {t}", .{err});
         };
     }
 }
@@ -322,24 +335,6 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
 
         x.scan() catch |err| {
             log.err("xHC scan failed: {t}", .{err});
-            break :outer;
-        };
-    }
-
-    // HVS
-    log.info("Initializing HVS.", .{});
-    outer: {
-        const hvsbase = try urd.mem.phys.reserveAndRemap(
-            "HVS",
-            memmap.hvs.start,
-            memmap.hvs.size(),
-            null,
-            .device,
-        );
-
-        rdd.hvs.setBase(hvsbase, urd.mem.dma.interface(0));
-        rdd.hvs.init() catch |err| {
-            log.err("HVS initialization failed: {t}", .{err});
             break :outer;
         };
     }
@@ -551,6 +546,7 @@ const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
 const Console = common.Console;
+const FbConsole = common.FbConsole;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const dd = @import("dd");
