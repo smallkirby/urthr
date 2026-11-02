@@ -420,6 +420,14 @@ inline fn storePixel(self: *const Self, idx: usize, color: u32) void {
     }
 }
 
+/// Store pixel words starting from the pixel index.
+inline fn fillPixels(self: *const Self, idx: usize, count: usize, color: u32) void {
+    switch (self.fb.format.bytesPerPixel()) {
+        2 => @memset(@as([*]u16, @ptrFromInt(self.fb.base))[idx..][0..count], @intCast(color)),
+        else => @memset(@as([*]u32, @ptrFromInt(self.fb.base))[idx..][0..count], color),
+    }
+}
+
 /// Invert the pixel at the pixel index.
 inline fn invertPixel(self: *const Self, idx: usize) void {
     const mask = invertMask(self.fb.format);
@@ -542,11 +550,9 @@ fn getBufferHeight(self: *const Self) usize {
 /// Fill the lines relative to the origin with the background color.
 fn fillLines(self: *Self, y_start: usize, y_end: usize) void {
     const stride = self.fb.pitch / self.fb.format.bytesPerPixel();
-    var i = (self.origin + y_start) * stride;
+    const start = (self.origin + y_start) * stride;
     const end = (self.origin + y_end) * stride;
-    while (i < end) : (i += 1) {
-        self.storePixel(i, self.bg);
-    }
+    self.fillPixels(start, end - start, self.bg);
 }
 
 /// Clear the given text row by filling it with background color.
@@ -563,9 +569,7 @@ fn clearRowRange(self: *Self, text_row: u32, col_start: u32, col_end: u32) void 
     const x_start: usize = col_start * font.glyph_width;
     const x_end: usize = @min(col_end * font.glyph_width, self.fb.width);
     for (0..font.glyph_height) |dy| {
-        for (x_start..x_end) |dx| {
-            self.storePixel((y0 + dy) * stride + dx, self.bg);
-        }
+        self.fillPixels((y0 + dy) * stride + x_start, x_end - x_start, self.bg);
     }
 }
 
