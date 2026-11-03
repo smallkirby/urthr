@@ -223,7 +223,7 @@ const Screen = struct {
 };
 
 /// Display channel information.
-const Channel = struct {
+pub const Channel = struct {
     /// Index of the display channel.
     index: usize,
     /// Width of the channel in pixels.
@@ -235,12 +235,7 @@ const Channel = struct {
 /// Create a new framebuffer and show it on the screen.
 ///
 /// TODO: the existing framebuffer created by the FW leaks.
-pub fn createFramebuffer(allocator: std.mem.Allocator, vt: Framebuffer.VTable) Error!Framebuffer {
-    // Select a usable display channel.
-    const chan = selectChannel() orelse {
-        log.err("No enabled display channel found", .{});
-        return Error.NotSupported;
-    };
+pub fn createFramebuffer(allocator: Allocator, chan: Channel, vt: Framebuffer.VTable) Error!Framebuffer {
     const pitch = chan.width * fb_format.bytesPerPixel();
     log.info("Display channel: DISP{d} {d}x{d}", .{
         chan.index, chan.width, chan.height,
@@ -293,7 +288,7 @@ pub fn createFramebuffer(allocator: std.mem.Allocator, vt: Framebuffer.VTable) E
 /// Select the enabled usable display channel.
 ///
 /// The display with the largest resolution is selected.
-fn selectChannel() ?Channel {
+pub fn selectChannel() ?Channel {
     var selected: ?Channel = null;
     for (0..Disps.len) |i| {
         const disp = hvs.sub(Disps, i);
@@ -801,6 +796,7 @@ const DlistPtr2 = packed struct(u32) {
 
 const std = @import("std");
 const log = std.log.scoped(.hvs);
+const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
 const rtt = common.rtt;

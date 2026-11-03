@@ -5,6 +5,7 @@ pub const gpio = @import("dd/gpio.zig");
 pub const hvs = @import("dd/hvs.zig");
 pub const pcie = @import("dd/pcie.zig");
 pub const pm = @import("dd/pm.zig");
+pub const pv = @import("dd/pv.zig");
 pub const rng = @import("dd/rng.zig");
 pub const rp1 = @import("dd/rp1.zig");
 pub const vcmbox = @import("dd/vcmbox.zig");

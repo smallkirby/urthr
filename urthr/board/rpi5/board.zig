@@ -211,7 +211,33 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             break :outer;
         };
 
-        const fb = rdd.hvs.createFramebuffer(urd.mem.bin, .{
+        const chan = rdd.hvs.selectChannel() orelse {
+            log.err("No enabled display channel found", .{});
+            break :outer;
+        };
+
+        // Pixel Valve.
+        pv: {
+            const pvbase = try urd.mem.phys.reserveAndRemap(
+                "PV",
+                memmap.pv.start,
+                memmap.pv.size(),
+                null,
+                .device,
+            );
+            rdd.pv.setBase(pvbase);
+
+            const mode = rdd.pv.findMode(chan.width, chan.height) orelse {
+                log.warn("PV: no supported mode for {d}x{d}", .{ chan.width, chan.height });
+                break :pv;
+            };
+            rdd.pv.configure(chan.index, .hdmi1, mode) catch |err| {
+                log.err("PV configuration failed: {t}", .{err});
+                break :pv;
+            };
+        }
+
+        const fb = rdd.hvs.createFramebuffer(urd.mem.bin, chan, .{
             .memcpy = dmaMemcpy,
         }) catch |err| {
             log.err("HVS framebuffer creation failed: {t}", .{err});
