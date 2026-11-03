@@ -8,6 +8,9 @@
 
 var hvs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Version },
+    .{ 0x0004, CxmSize },
+    .{ 0x0008, LbmSize },
+    .{ 0x000C, UbmSize },
     .{ 0x0010, CobaSize },
     .{ 0x0014, CobSize },
     .{ 0x0020, Control },
@@ -20,13 +23,31 @@ var hvs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0100, Disps },
     .{ 0x4000, mmio.Marker(.dlist) },
 }){};
+
+const DispRegs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x00, DispControl0 },
+    .{ 0x04, DispControl1 },
+    .{ 0x08, DispBgnd0 },
+    .{ 0x0C, DispBgnd1 },
+    .{ 0x10, DispLptrs },
+    .{ 0x14, DispCob },
+    .{ 0x18, DispStatus },
+    .{ 0x1C, DispDl },
+    .{ 0x20, DispRun },
+});
 const Disps = mmio.Array(DispRegs, 3, 0x40);
 
 /// Size in bytes of dlist region.
 const dlist_size = 0x4000;
+/// Number of words at the beginning of dlist memory owned by FW.
+const dlist_reserved_words = 32;
+/// Unit size in bytes of UPM.
+const upm_unit = 256;
 
-/// DMA allocator.
-var dma: DmaAllocator = undefined;
+/// UPM handle type.
+const UpmHandle = u5;
+/// Address type of UPM.
+const UpmAddress = u13;
 
 /// Set the base address of the HVS.
 pub fn setBase(base: usize, dmaallocator: DmaAllocator) void {
@@ -42,6 +63,24 @@ const Error = error{
     /// The device reported an error.
     DeviceError,
 } || mem.Error;
+
+/// Resources of the HVS.
+const Resources = struct {
+    /// dlist memory in words.
+    dlist: RangeAllocator(dlist_size / @sizeOf(u32)),
+    /// Unified Pre-Fetcher memory in `upm_unit` bytes.
+    upm: RangeAllocator(1 << @bitSizeOf(UpmAddress)),
+    /// UPM handles.
+    upm_handles: RangeAllocator(upm_handles_capacity),
+
+    /// The number of available UPM handles.
+    const upm_handles_capacity = 1 << @bitSizeOf(UpmHandle);
+};
+
+/// Resources of the HVS.
+var resources: Resources = undefined;
+/// DMA allocator.
+var dma: DmaAllocator = undefined;
 
 /// Initialize HVS.
 pub fn init() Error!void {
@@ -85,6 +124,50 @@ pub fn init() Error!void {
             state.on,
         });
     }
+
+    // Record available resources.
+    initResources();
+}
+
+/// Initialize the allocators of the HVS resources.
+///
+/// The dlist words used by the FW are marked as used.
+fn initResources() void {
+    resources = .{
+        .dlist = .init(hvs.read(CxmSize).value),
+        .upm = .init(hvs.read(UbmSize).value),
+        .upm_handles = .init(Resources.upm_handles_capacity),
+    };
+
+    // Reserve the first words of dlist memory for FW.
+    resources.dlist.reserve(0, dlist_reserved_words) catch unreachable;
+    // Reserve the dlist words used by existing dlist entries.
+    for (0..Disps.len) |i| {
+        reserveDispResources(i);
+    }
+
+    log.debug("dlist: {d}/{d} words used, UPM: {d}/{d} units used", .{
+        resources.dlist.countUsed(), resources.dlist.limit,
+        resources.upm.countUsed(),   resources.upm.limit,
+    });
+}
+
+/// Mark the dlist words used by the given display as used.
+fn reserveDispResources(disp_idx: usize) void {
+    const limit = resources.dlist.limit;
+    const head: usize = hvs.sub(Disps, disp_idx).read(DispDl).lact;
+    if (head >= limit) return;
+
+    var didx = head;
+    while (didx < limit) {
+        const ctrl = getDlistAtAs(didx, DlistCtrl0);
+        if (ctrl.end) break;
+        if (ctrl.next == 0) break;
+        didx += ctrl.next;
+    }
+
+    const end = @min(didx + 1, limit);
+    resources.dlist.reserve(head, end - head) catch unreachable;
 }
 
 // =============================================================
@@ -92,6 +175,10 @@ pub fn init() Error!void {
 
 /// Scale of the framebuffer height to the screen height.
 const buffer_height_scale = 2;
+/// Pixel format of the framebuffer.
+const fb_format: Framebuffer.PixelFormat = .bgrx8888;
+/// Number of lines that UPM prefetches for a plane.
+const upm_buff_size: UpmLines = .size2lines;
 
 /// Screen information.
 const Screen = struct {
@@ -101,26 +188,35 @@ const Screen = struct {
     mem: DmaAllocator.DmaMemory,
 };
 
-/// Create a new framebuffer and take over the plane of the FW.
+/// Display channel information.
+const Channel = struct {
+    /// Index of the display channel.
+    index: usize,
+    /// Width of the channel in pixels.
+    width: usize,
+    /// Height of the channel in pixels.
+    height: usize,
+};
+
+/// Create a new framebuffer and show it on the screen.
 ///
 /// TODO: the existing framebuffer created by the FW leaks.
-pub fn takeOverFramebuffer(allocator: std.mem.Allocator, vt: Framebuffer.VTable) Error!Framebuffer {
-    const found = findPlane() orelse {
-        log.err("No supported plane found", .{});
+pub fn createFramebuffer(allocator: std.mem.Allocator, vt: Framebuffer.VTable) Error!Framebuffer {
+    // Select a usable display channel.
+    const chan = selectChannel() orelse {
+        log.err("No enabled display channel found", .{});
         return Error.NotSupported;
     };
-    const width = found.width;
-    const height = found.height;
-    const pitch = found.pitch;
-    log.info("Plane found on DISP{d}: {d}x{d} pitch={d} {t}", .{
-        found.disp, width, height, pitch, found.format,
+    const pitch = chan.width * fb_format.bytesPerPixel();
+    log.info("Display channel: DISP{d} {d}x{d}", .{
+        chan.index, chan.width, chan.height,
     });
 
     const screen = try allocator.create(Screen);
     errdefer allocator.destroy(screen);
 
     // Allocate the buffer for framebuffer.
-    const fb_size = pitch * height * buffer_height_scale;
+    const fb_size = pitch * chan.height * buffer_height_scale;
     const buf = try dma.allocBytes(fb_size, .wc);
     errdefer dma.freeBytes(buf);
     if ((buf.bus + buf.size - 1) >> 40 != 0) {
@@ -137,37 +233,61 @@ pub fn takeOverFramebuffer(allocator: std.mem.Allocator, vt: Framebuffer.VTable)
         .base = buf.cpu,
         .phys = buf.bus,
         .size = buf.size,
-        .width = width,
-        .height = height,
+        .width = chan.width,
+        .height = chan.height,
         .pitch = pitch,
-        .format = found.format,
+        .format = fb_format,
     };
 
     // Clear the whole buffer.
-    @memset(buf.slice(u32), 0xFF00_0000); // black
+    @memset(buf.slice(u32), 0xFF00_0000);
     dma.syncForDevice(buf.cpu, buf.size);
-    arch.barrier(.full, .release);
 
-    // Switch to the new framebuffer.
-    screen.* = .{ .plane = found, .mem = buf };
-    screen.plane.setAddress(buf.bus);
+    // Create a plane and install it to the channel.
+    screen.* = .{
+        .plane = try Plane.create(chan, pitch, buf.bus),
+        .mem = buf,
+    };
+    screen.plane.install();
 
     log.info("Framebuffer: bus=0x{X} size=0x{X} pitch={d} {d}x{d}", .{
-        buf.bus, buf.size, pitch, width, height,
+        buf.bus, buf.size, pitch, chan.width, chan.height,
     });
     return framebuffer;
 }
 
-/// Information of a display plane.
+/// Select the enabled usable display channel.
+///
+/// The display with the largest resolution is selected.
+fn selectChannel() ?Channel {
+    var selected: ?Channel = null;
+    for (0..Disps.len) |i| {
+        const disp = hvs.sub(Disps, i);
+        const ctrl0 = disp.read(DispControl0);
+        if (!ctrl0.enb) continue;
+
+        const chan = Channel{
+            .index = i,
+            .width = @as(usize, ctrl0.fwidth) + 1,
+            .height = @as(usize, ctrl0.lines) + 1,
+        };
+        if (selected) |s| {
+            if (chan.width * chan.height <= s.width * s.height) {
+                continue;
+            }
+        }
+        selected = chan;
+    }
+
+    return selected;
+}
+
+/// Display plane information.
 const Plane = struct {
-    /// Index of the display channel.
-    disp: usize,
-    /// Pixel format.
-    format: Framebuffer.PixelFormat,
-    /// Width of the plane.
-    width: usize,
-    /// Height of the plane.
-    height: usize,
+    /// Display channel that shows this plane.
+    channel: Channel,
+    /// Index of the first word of the dlist entry.
+    dlist_head: usize,
     /// Bytes per scanline.
     pitch: usize,
     /// Upper bits of the bus address of the current buffer.
@@ -177,6 +297,94 @@ const Plane = struct {
     ptr0: *volatile u32,
     /// PTR1 word of the plane entry.
     ptr1: *volatile u32,
+
+    /// Number of words of the plane entry.
+    const nentry_words = 8;
+    /// Number of words of dlist consumed by the plane entry.
+    const dlist_words = nentry_words + 1; // +1 for END word
+    /// Value of the END word.
+    const end_word: u32 = 0x8000_0000;
+
+    /// Create a plane entry in the dlist memory.
+    ///
+    /// `addr` is the bus address of the framebuffer.
+    fn create(channel: Channel, pitch: usize, addr: usize) Error!Plane {
+        // Allocate the resources.
+        const dhead = try resources.dlist.alloc(dlist_words);
+        errdefer resources.dlist.free(dhead, dlist_words);
+        const upm_size = calcUpmSize(pitch, upm_buff_size.nlines());
+        const upm_base = try resources.upm.alloc(upm_size);
+        errdefer resources.upm.free(upm_base, upm_size);
+        const uhandle = try resources.upm_handles.alloc(1);
+        errdefer resources.upm_handles.free(uhandle, 1);
+
+        // Construct dlist entry words.
+        const ptr0 = DlistPtr0{
+            .upper_addr = @intCast(addr >> 32),
+            .upm_buff_size = upm_buff_size,
+            .upm_handle = @intCast(uhandle),
+            .upm_base = @intCast(upm_base),
+            .vflip = false,
+        };
+        const entry = [nentry_words]u32{
+            // CTL0
+            @bitCast(DlistCtrl0{
+                .pixel_format = .rgba8888,
+                .scl0_mode = 0,
+                .scl1_mode = 0,
+                .order_rgba = .argb,
+                .unity = true,
+                .alpha = .none,
+                .addr_mode = .linear,
+                .rgb_trans = false,
+                .next = nentry_words,
+                .valid = true,
+                .end = false,
+            }),
+            // POS0: Destination position.
+            0,
+            // CTL2: Alpha settings.
+            @bitCast(DlistCtl2{
+                .alpha = 0xFFF,
+                .alpha_mode = .fixed,
+            }),
+            // POS2: Source dimensions.
+            @bitCast(DlistPos2{
+                .src_width = @intCast(channel.width - 1),
+                .src_height = @intCast(channel.height - 1),
+            }),
+            // POS3: Context. Written by FW.
+            0xC0C0_C0C0,
+            // PTR0: UPM information.
+            @bitCast(ptr0),
+            // PTR1: Lower address of framebuffer.
+            @truncate(addr),
+            // PTR2: Pitch information.
+            @bitCast(DlistPtr2{ .pitch = @intCast(pitch) }),
+        };
+
+        // Write the dlist entry to memory.
+        const words: [*]volatile u32 = @ptrCast(getDlistPtr(dhead));
+        for (entry, 0..) |w, i| words[i] = w;
+        words[nentry_words] = end_word;
+
+        return .{
+            .channel = channel,
+            .dlist_head = dhead,
+            .pitch = pitch,
+            .upper = ptr0.upper_addr,
+            .ptr0 = &words[5],
+            .ptr1 = &words[6],
+        };
+    }
+
+    /// Install the plane entry to dlist.
+    fn install(self: *const Plane) void {
+        arch.barrier(.full, .release);
+        hvs.sub(Disps, self.channel.index).write(DispLptrs, .{
+            .heade = @intCast(self.dlist_head),
+        });
+    }
 
     /// Set the address of the pixels that the plane reads.
     ///
@@ -191,97 +399,22 @@ const Plane = struct {
         }
         self.ptr1.* = @truncate(addr);
     }
+
+    /// Get the number of UPM units that a linear plane requires.
+    ///
+    /// ref. https://github.com/raspberrypi/linux/blob/5bd564aaa8dc4b1b8ed11733c19ec8ece63a72cc/drivers/gpu/drm/vc4/vc4_plane.c#L897
+    fn calcUpmSize(pitch: usize, lines: usize) usize {
+        const words_per_line = (pitch + 62) / 32;
+        const fetch_region_size = words_per_line * 32;
+        const buffer_size = fetch_region_size * lines;
+
+        return std.mem.alignForward(usize, buffer_size, upm_unit) / upm_unit;
+    }
 };
-
-/// Find the available plane of the FW by walking the dlist of enabled display channels.
-///
-/// Returns the first available plane that meets our requirement.
-fn findPlane() ?Plane {
-    for (0..Disps.len) |i| {
-        if (!isDispEnabled(i)) continue;
-
-        var didx: usize = getDlistIndex(i);
-        while (didx < dlist_size / @sizeOf(u32)) {
-            const dctrl = getDlistAtAs(didx, DlistCtrl0);
-            if (dctrl.end) break;
-            if (dctrl.valid) {
-                if (parsePlane(i, didx, dctrl)) |plane| {
-                    return plane;
-                }
-            }
-
-            if (dctrl.next == 0) break;
-            didx += dctrl.next;
-        }
-    }
-
-    return null;
-}
-
-/// Parse a plane entry that starts at the given index.
-///
-/// Returns null if the entry is not a plane that we can take over.
-fn parsePlane(disp: usize, didx: usize, ctrl: DlistCtrl0) ?Plane {
-    // Pixels must be in the raster scan order.
-    if (ctrl.addr_mode != .linear) {
-        return null;
-    }
-    // Must be supported pixel format.
-    const format: Framebuffer.PixelFormat = switch (ctrl.pixel_format) {
-        .rgba8888 => switch (ctrl.order_rgba) {
-            .argb => .bgrx8888,
-            .abgr => .rgbx8888,
-            else => return null,
-        },
-        else => return null,
-    };
-
-    var r = DlistReader.init(didx);
-    r.skip(1); // CTL0
-    r.skip(1); // POS0
-    r.skip(1); // CTL2
-    if (!ctrl.unity) r.skip(1); // POS1
-    const pos2 = r.next(DlistPos2) orelse return null;
-    r.skip(1); // POS3: Context
-    const ptr0 = r.nextPtr() orelse return null;
-    const ptr1 = r.nextPtr() orelse return null;
-    const ptr2 = r.next(DlistPtr2) orelse return null;
-
-    const width = @as(usize, pos2.src_width) + 1;
-    const height = @as(usize, pos2.src_height) + 1;
-    const pitch = ptr2.pitch;
-    if (pitch < width * format.bytesPerPixel()) {
-        return null;
-    }
-
-    return .{
-        .disp = disp,
-        .format = format,
-        .width = width,
-        .height = height,
-        .pitch = pitch,
-        .ptr0 = ptr0,
-        .ptr1 = ptr1,
-        .upper = @as(DlistPtr0, @bitCast(ptr0.*)).upper_addr,
-    };
-}
-
-/// Check if the given display channel is enabled.
-fn isDispEnabled(disp_idx: usize) bool {
-    rtt.expect(disp_idx < Disps.len);
-    const disp = hvs.sub(Disps, disp_idx);
-    return disp.read(DispControl0).enb;
-}
-
-/// Get the index of active dlist for the given display channel.
-fn getDlistIndex(disp_idx: usize) usize {
-    rtt.expect(disp_idx < Disps.len);
-    const disp = hvs.sub(Disps, disp_idx);
-    return disp.read(DispDl).lact;
-}
 
 /// Get the pointer to the dlist word at the given index.
 fn getDlistPtr(didx: usize) *volatile u32 {
+    rtt.expect(didx < dlist_size / @sizeOf(u32));
     return @ptrFromInt(hvs.getMarkerAddress(.dlist) + didx * @sizeOf(u32));
 }
 
@@ -371,6 +504,12 @@ const Version = packed struct(u32) {
     };
 };
 
+/// Size in words of dlist memory.
+const CxmSize = packed struct(u32) { value: u32 };
+/// Size of line buffer memory.
+const LbmSize = packed struct(u32) { value: u32 };
+/// Total size in 256 byte units of UPM memory.
+const UbmSize = packed struct(u32) { value: u32 };
 const CobaSize = packed struct(u32) { value: u32 };
 const CobSize = packed struct(u32) { value: u32 };
 
@@ -399,24 +538,18 @@ const HvsId = packed struct(u32) { value: u32 };
 // =============================================================
 // Displays
 
-const DispRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, DispControl0 },
-    .{ 0x04, DispControl1 },
-    .{ 0x08, DispBgnd0 },
-    .{ 0x0C, DispBgnd1 },
-    .{ 0x10, DispLptrs },
-    .{ 0x14, DispCob },
-    .{ 0x18, DispStatus },
-    .{ 0x1C, DispDl },
-    .{ 0x20, DispRun },
-});
-
 const DispControl0 = packed struct(u32) {
+    /// Height of the channel in pixels - 1.
     lines: u13,
+    ///
     onectx: u2,
+    /// One-shot mode.
     oneshot: bool,
+    /// Width of the channel in pixels - 1.
     fwidth: u13,
+    /// Not used.
     _29: u1 = 0,
+    /// Reset the display.
     reset: bool,
     /// Display channel is enabled.
     enb: bool,
@@ -433,7 +566,9 @@ const DispBgnd0 = packed struct(u32) { value: u32 };
 const DispBgnd1 = packed struct(u32) { value: u32 };
 
 const DispLptrs = packed struct(u32) {
+    /// Driver writes the dlist entry index to install dlist.
     heade: u12,
+    /// Not used.
     _12: u20 = 0,
 };
 
@@ -467,38 +602,6 @@ const DispRun = packed struct(u32) { value: u32 };
 
 // =============================================================
 // dlist
-
-/// Sequential reader of the words in a dlist entry.
-const DlistReader = struct {
-    /// Index of the next word.
-    index: usize,
-
-    fn init(didx: usize) DlistReader {
-        return .{ .index = didx };
-    }
-
-    /// Skip `n` words.
-    fn skip(self: *DlistReader, n: usize) void {
-        self.index += n;
-    }
-
-    /// Read the next word as `T`.
-    ///
-    /// Returns null if the word is out of the dlist entry.
-    fn next(self: *DlistReader, T: type) ?T {
-        const ptr = self.nextPtr() orelse return null;
-        return @bitCast(ptr.*);
-    }
-
-    /// Get the pointer to the next word.
-    ///
-    /// Returns null if the word is out of the dlist entry.
-    fn nextPtr(self: *DlistReader) ?*volatile u32 {
-        if (self.index >= dlist_size / @sizeOf(u32)) return null;
-        defer self.index += 1;
-        return getDlistPtr(self.index);
-    }
-};
 
 const PixelFormat = enum(u5) {
     // 8 bpp
@@ -575,6 +678,35 @@ const DlistCtrl0 = packed struct(u32) {
     end: bool,
 };
 
+/// Third word of dlist entry.
+const DlistCtl2 = packed struct(u32) {
+    /// Not used.
+    _0: u4 = 0,
+    /// Fixed alpha value.
+    alpha: u12,
+    /// Not used.
+    _16: u10 = 0,
+    ///
+    bfg: bool = false,
+    ///
+    _27: u1 = 0,
+    ///
+    alpha_mix: bool = false,
+    ///
+    alpha_premult: bool = false,
+    /// Alpha mode.
+    alpha_mode: enum(u2) {
+        /// Use the pixel alpha value.
+        pipeline = 0,
+        /// Use the fixed alpha value defined in CTL2.
+        fixed = 1,
+        ///
+        fixed_nonzero = 2,
+        ///
+        fixed_over_0x07 = 3,
+    },
+};
+
 /// Source image size.
 const DlistPos2 = packed struct(u32) {
     /// Width of the source image minus one.
@@ -587,22 +719,33 @@ const DlistPos2 = packed struct(u32) {
     _29: u3 = 0,
 };
 
+/// The number of lines that UPM prefetches.
+const UpmLines = enum(u2) {
+    /// 2 lines.
+    size2lines = 0,
+    /// 4 lines.
+    size4lines = 1,
+    /// 8 lines.
+    size8lines = 2,
+    /// 16 lines.
+    size16lines = 3,
+
+    pub fn nlines(self: UpmLines) usize {
+        return @as(usize, 2) << @backingInt(self);
+    }
+};
+
 const DlistPtr0 = packed struct(u32) {
     /// Upper 8 bits of the address of pixels.
     upper_addr: u8,
-    ///
-    upm_buff_size: enum(u2) {
-        size2lines = 0,
-        size4lines = 1,
-        size8lines = 2,
-        size16lines = 3,
-    },
-    ///
-    upm_handle: u5,
+    /// Prefetch line size.
+    upm_buff_size: UpmLines,
+    /// UPM handle.
+    upm_handle: UpmHandle,
     /// Not used.
     _15: u1 = 0,
-    ///
-    upm_base: u13,
+    /// Base address in `upm_unit` bytes of UPM memory.
+    upm_base: UpmAddress,
     /// Not used.
     _29: u2 = 0,
     ///
@@ -626,6 +769,7 @@ const arch = @import("arch").impl;
 const common = @import("common");
 const rtt = common.rtt;
 const DmaAllocator = common.mem.DmaAllocator;
+const RangeAllocator = common.mem.RangeAllocator;
 const Framebuffer = common.Framebuffer;
 const mmio = common.mmio;
 const urd = @import("urthr");

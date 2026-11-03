@@ -211,10 +211,10 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             break :outer;
         };
 
-        const fb = rdd.hvs.takeOverFramebuffer(urd.mem.bin, .{
+        const fb = rdd.hvs.createFramebuffer(urd.mem.bin, .{
             .memcpy = dmaMemcpy,
         }) catch |err| {
-            log.err("HVS framebuffer takeover failed: {t}", .{err});
+            log.err("HVS framebuffer creation failed: {t}", .{err});
             break :outer;
         };
 
