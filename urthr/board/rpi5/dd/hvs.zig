@@ -125,6 +125,40 @@ pub fn init() Error!void {
         });
     }
 
+    // Meaning of most of fields are unknown...
+    hvs.write(Control, .{
+        .max_reqs = 15,
+        .dsp1_target = 0,
+        .abort_on_empty = false,
+        .pf_lines = 8,
+        .hvs_en = true,
+    });
+
+    // Set the arbiter priority to max.
+    hvs.write(PriMap0, .{ .value = 0xFFFF_FFFF });
+    hvs.write(PriMap1, .{ .value = 0xFFFF_FFFF });
+
+    // Assign Composite Output Buffer regions to each display channel.
+    {
+        const line_width = 3840; // line width of COB
+        const gap = 16; // gap between COB regions
+        const num_lines = 4;
+
+        // DISP2 gets 1 line, DISP0 and DISP1 get 4 lines (don't know why).
+        var base: u16 = 0;
+        var top: u16 = line_width;
+        var disp_idx: usize = Disps.len - 1;
+        while (true) : (disp_idx -= 1) {
+            const cob = DispCob{ .base = base, .top = top };
+            hvs.sub(Disps, disp_idx).write(DispCob, cob);
+
+            base = top + gap;
+            top += line_width * num_lines;
+
+            if (disp_idx == 0) break;
+        }
+    }
+
     // Record available resources.
     initResources();
 }
@@ -573,7 +607,9 @@ const DispLptrs = packed struct(u32) {
 };
 
 const DispCob = packed struct(u32) {
+    /// Start of COB region this display channel uses.
     base: u16,
+    /// End of COB region.
     top: u16,
 };
 
