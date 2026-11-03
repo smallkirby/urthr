@@ -16,6 +16,7 @@ pub const Error = error{
 pub const DmaAllocator = @import("mem/DmaAllocator.zig");
 pub const IoAllocator = @import("mem/IoAllocator.zig");
 pub const PageAllocator = @import("mem/PageAllocator.zig");
+pub const RangeAllocator = @import("mem/range_allocator.zig").RangeAllocator;
 
 /// Size in bytes of 4KiB.
 pub const size_4kib = 4 * units.kib;
@@ -119,6 +120,14 @@ pub const Attribute = enum {
     /// Normal memory, non-cacheable.
     nc,
 };
+
+// =============================================================
+// Tests
+// =============================================================
+
+test {
+    _ = @import("mem/range_allocator.zig");
+}
 
 // =============================================================
 // Imports

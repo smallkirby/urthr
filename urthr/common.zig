@@ -110,6 +110,7 @@ pub fn comptimeAssert(comptime condition: bool, comptime message: ?[]const u8) v
 
 test {
     _ = bits;
+    _ = mem;
     _ = mmio;
     _ = regex;
     _ = typing;
