@@ -44,6 +44,7 @@ const PhyRegs = mmio.Module(.{ .size = u32 }, &.{
 const Phys = mmio.Array(PhyRegs, num_hdmi, 0x5000);
 
 const CoreRegs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x07C, FifoCtl },
     .{ 0x0E8, SchedulerControl },
     .{ 0x0EC, HorzA },
     .{ 0x0F0, HorzB },
@@ -72,6 +73,12 @@ pub fn setBase(base: usize) void {
     phys.setBase(base + 0x1D00);
     cores.setBase(base + 0x1400);
     rms.setBase(base + 0x2000);
+
+    timer = arch.timer.createTimer();
+    dvps.provideTimer(timer);
+    phys.provideTimer(timer);
+    cores.provideTimer(timer);
+    rms.provideTimer(timer);
 }
 
 // =============================================================
@@ -79,7 +86,38 @@ pub fn setBase(base: usize) void {
 pub const Error = error{
     /// The TMDS character rate is not supported.
     UnsupportedRate,
+    /// Timeout while waiting for HW response.
+    Timeout,
 };
+
+/// Global timer.
+var timer: common.Timer = undefined;
+
+/// Configure the FIFO of the HDMI core.
+pub fn initFifo(index: usize) void {
+    const core = cores.sub(Cores, index);
+    core.writez(FifoCtl, .{ .master_slave_n = true });
+}
+
+/// Recenter the FIFO of the HDMI core.
+pub fn recenterFifo(index: usize) Error!void {
+    var core = cores.sub(Cores, index);
+
+    const valid_write_mask = 0xEFFF;
+    var drift: FifoCtl = @bitCast(core.readi(FifoCtl) & valid_write_mask);
+    for (0..2) |i| {
+        drift.recenter = false;
+        core.write(FifoCtl, drift);
+        drift.recenter = true;
+        core.write(FifoCtl, drift);
+
+        if (i == 0) arch.timer.spinWaitMilli(1);
+    }
+
+    if (!core.tryWaitFor(FifoCtl, .{ .recenter_done = true }, .ms(1))) {
+        return Error.Timeout;
+    }
+}
 
 /// Configure the scheduler of the HDMI core.
 pub fn initScheduler(index: usize) void {
@@ -467,6 +505,33 @@ const PllPowerupCtl = packed struct(u32) {
 // =============================================================
 // CORE
 
+const FifoCtl = packed struct(u32) {
+    ///
+    master_slave_n: bool,
+    ///
+    use_full: bool,
+    ///
+    capture_ptr: bool,
+    ///
+    inv_clk_xfr: bool,
+    ///
+    use_pll_lock: bool,
+    ///
+    fifo_reset: bool,
+    ///
+    recenter: bool,
+    ///
+    on_vb: bool,
+    /// Not used.
+    _8: u5 = 0,
+    ///
+    use_empty: bool,
+    /// Recentering is done.
+    recenter_done: bool,
+    /// Not used.
+    _15: u17 = 0,
+};
+
 const SchedulerControl = packed struct(u32) {
     /// HDMI mode is selected.
     mode_hdmi: bool,
@@ -590,6 +655,7 @@ const RmOffset = packed struct(u32) {
 // =============================================================
 
 const std = @import("std");
+const arch = @import("arch").impl;
 const log = std.log.scoped(.hdmi);
 const common = @import("common");
 const mmio = common.mmio;

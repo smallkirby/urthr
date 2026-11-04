@@ -202,6 +202,12 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
             return MT.read(self.base + offset);
         }
 
+        /// Read the specified field as an integer.
+        pub fn readi(self: Self, T: type) @Int(.unsigned, @bitSizeOf(T)) {
+            const offset, const MT = getRegister(T);
+            return @bitCast(MT.read(self.base + offset));
+        }
+
         /// Read the specified indexed field.
         pub fn readIndexed(self: Self, T: type, index: usize, stride: usize) T {
             const offset, const MT = getRegister(T);
@@ -264,7 +270,7 @@ pub fn Module(Width: Align, comptime fields: []const struct { usize, type }) typ
         pub fn tryWaitFor(self: *Self, T: type, value: anytype, duration: ?TimeSlice) bool {
             const use_timer = duration != null;
             if (duration) |d| {
-                if (self._timer) |timer|
+                if (self._timer) |*timer|
                     timer.start(d)
                 else
                     @panic("tryWaitFor: timer is not provided");
