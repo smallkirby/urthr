@@ -241,8 +241,6 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 };
                 rdd.hdmi.initScheduler(chan.index);
                 rdd.hdmi.setTimings(chan.index, mode);
-                // Pre CRTC enable.
-                rdd.hdmi.initFifo(chan.index);
             }
         }
 
@@ -265,8 +263,20 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 log.err("PV configuration failed: {t}", .{err});
                 break :pv;
             };
+            // Pre CRTC enable.
+            rdd.hdmi.initFifo(chan.index);
+
+            // CRTC enable.
+            rdd.pv.enableVideo(chan.index) catch |err| {
+                log.err("PV video enabling failed: {t}", .{err});
+                break :pv;
+            };
+
             // Post CRTC enable.
             rdd.hdmi.enableVideo(chan.index, mode);
+            rdd.hdmi.enableHdmiMode(chan.index) catch |err| {
+                log.err("HDMI mode activation failed: {t}", .{err});
+            };
             rdd.hdmi.recenterFifo(chan.index) catch |err| {
                 log.err("HDMI FIFO recentering failed: {t}", .{err});
             };

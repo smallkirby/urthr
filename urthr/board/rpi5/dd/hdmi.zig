@@ -143,6 +143,16 @@ pub fn enableVideo(index: usize, mode: pv.Mode) void {
     });
 }
 
+/// Switch the HDMI core to the HDMI mode.
+pub fn enableHdmiMode(index: usize) Error!void {
+    var core = cores.sub(Cores, index);
+
+    core.modify(SchedulerControl, .{ .mode_hdmi = true });
+    if (!core.tryWaitFor(SchedulerControl, .{ .hdmi_active = true }, .ms(1000))) {
+        return Error.Timeout;
+    }
+}
+
 /// Configure the scheduler of the HDMI core.
 pub fn initScheduler(index: usize) void {
     const core = cores.sub(Cores, index);

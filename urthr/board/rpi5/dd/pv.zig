@@ -154,7 +154,7 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
         .hfp = scale(ppc, mode.hsync_start - mode.hdisplay),
     });
     pv.write(VControl, .{
-        .viden = true,
+        .viden = false,
         .continuous = true,
         .command = false,
         .dsi = false,
@@ -198,6 +198,12 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
         .format = .@"24", // RGB888
         .fifo_level_high = @truncate(fifo_level >> 6),
     });
+}
+
+/// Start the video output of the PV fed by the given HVS channel.
+pub fn enableVideo(chan: usize) Error!void {
+    const index = findPv(chan) orelse return Error.NoPixelValve;
+    pvs.sub(Pvs, index).modify(VControl, .{ .viden = true });
 }
 
 /// Find the index of the PV fed by the HVS channel.
