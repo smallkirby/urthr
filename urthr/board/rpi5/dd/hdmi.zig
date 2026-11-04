@@ -20,6 +20,10 @@ var rms = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Rms },
 }){};
 
+var hd = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x044, VidCtl },
+}){};
+
 const DvpRegs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0BC, ClockStop },
 });
@@ -68,17 +72,19 @@ const Rms = mmio.Array(RmRegs, num_hdmi, 0x5000);
 const num_hdmi = 2;
 
 /// Set the base address of the register blocks of HDMI0 and HDMI1.
-pub fn setBase(base: usize) void {
+pub fn setBase(base: usize, hd_base: usize) void {
     dvps.setBase(base + 0x1000);
     phys.setBase(base + 0x1D00);
     cores.setBase(base + 0x1400);
     rms.setBase(base + 0x2000);
+    hd.setBase(hd_base + 0x0000);
 
     timer = arch.timer.createTimer();
     dvps.provideTimer(timer);
     phys.provideTimer(timer);
     cores.provideTimer(timer);
     rms.provideTimer(timer);
+    hd.provideTimer(timer);
 }
 
 // =============================================================
@@ -117,6 +123,24 @@ pub fn recenterFifo(index: usize) Error!void {
     if (!core.tryWaitFor(FifoCtl, .{ .recenter_done = true }, .ms(1))) {
         return Error.Timeout;
     }
+}
+
+/// Enable the video output of HD block?
+pub fn enableVideo(index: usize, mode: pv.Mode) void {
+    const stride = 4;
+
+    hd.modifyIndexed(VidCtl, index, stride, .{
+        .enable = true,
+        .underflow_enable = true,
+        .frame_counter_reset = true,
+        .vsync_low = !mode.vsync_pos,
+        .hsync_low = !mode.hsync_pos,
+        .clrrgb = true,
+        .blank_insert_en = true,
+    });
+    hd.modifyIndexed(VidCtl, index, stride, .{
+        .blankpix = false,
+    });
 }
 
 /// Configure the scheduler of the HDMI core.
@@ -648,6 +672,38 @@ const VertB1 = packed struct(u32) { value: u32 };
 const RmOffset = packed struct(u32) {
     offset: u31,
     only: bool,
+};
+
+// =============================================================
+// HD
+
+const VidCtl = packed struct(u32) {
+    /// Not used.
+    _0: u16 = 0,
+    ///
+    blank_insert_en: bool,
+    /// Not used.
+    _17: u1 = 0,
+    ///
+    blankpix: bool,
+    /// Not used.
+    _19: u4 = 0,
+    ///
+    clrrgb: bool,
+    ///
+    clrsync: bool,
+    /// Not used.
+    _25: u2 = 0,
+    /// Polarity of the horizontal sync is negative.
+    hsync_low: bool,
+    /// Polarity of the vertical sync is negative.
+    vsync_low: bool,
+    ///
+    frame_counter_reset: bool,
+    ///
+    underflow_enable: bool,
+    ///
+    enable: bool,
 };
 
 // =============================================================

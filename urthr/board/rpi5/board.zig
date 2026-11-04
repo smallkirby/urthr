@@ -225,7 +225,14 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 null,
                 .device,
             );
-            rdd.hdmi.setBase(hdmibase);
+            const hdbase = try urd.mem.phys.reserveAndRemap(
+                "HDMI HD",
+                memmap.hdmi_hd.start,
+                memmap.hdmi_hd.size(),
+                null,
+                .device,
+            );
+            rdd.hdmi.setBase(hdmibase, hdbase);
 
             if (rdd.pv.findMode(chan.width, chan.height)) |mode| {
                 // Pre CRTC configure.
@@ -259,6 +266,7 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 break :pv;
             };
             // Post CRTC enable.
+            rdd.hdmi.enableVideo(chan.index, mode);
             rdd.hdmi.recenterFifo(chan.index) catch |err| {
                 log.err("HDMI FIFO recentering failed: {t}", .{err});
             };
