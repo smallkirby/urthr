@@ -38,6 +38,9 @@ pub const Error = error{
 const modes = [_]Mode{
     // CEA-861 1920x1080@60Hz
     .{
+        .clock = 148_500,
+        .hsync_pos = true,
+        .vsync_pos = true,
         .hdisplay = 1920,
         .hsync_start = 2008,
         .hsync_end = 2052,
@@ -47,8 +50,11 @@ const modes = [_]Mode{
         .vsync_end = 1089,
         .vtotal = 1125,
     },
-    // VESA DMT 640x480@60Hz
+    // VESA DMT / CEA-861 640x480@60Hz
     .{
+        .clock = 25_175,
+        .hsync_pos = false,
+        .vsync_pos = false,
         .hdisplay = 640,
         .hsync_start = 656,
         .hsync_end = 752,
@@ -95,7 +101,12 @@ const PvData = struct {
 };
 
 /// Display mode.
+///
+/// Signal order: active, front porch, sync, back porch.
 pub const Mode = struct {
+    /// Pixel clock in kHz.
+    clock: u32,
+
     /// Horizontal display size.
     hdisplay: u16,
     /// Horizontal sync start.
@@ -104,6 +115,9 @@ pub const Mode = struct {
     hsync_end: u16,
     /// Horizontal total size, including horizontal border.
     htotal: u16,
+    /// Polarity of the horizontal sync is positive.
+    hsync_pos: bool,
+
     /// Vertical display size.
     vdisplay: u16,
     /// Vertical sync start.
@@ -112,6 +126,8 @@ pub const Mode = struct {
     vsync_end: u16,
     /// Vertical total size, including vertical border.
     vtotal: u16,
+    /// Polarity of the vertical sync is positive.
+    vsync_pos: bool,
 };
 
 /// Find the supported mode for the given resolution.

@@ -216,6 +216,25 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             break :outer;
         };
 
+        // HDMI.
+        {
+            const hdmibase = try urd.mem.phys.reserveAndRemap(
+                "HDMI",
+                memmap.hdmi.start,
+                memmap.hdmi.size(),
+                null,
+                .device,
+            );
+            rdd.hdmi.setBase(hdmibase);
+
+            if (rdd.pv.findMode(chan.width, chan.height)) |mode| {
+                rdd.hdmi.initPhy(chan.index, mode) catch |err| {
+                    log.err("HDMI PHY configuration failed: {t}", .{err});
+                };
+                rdd.hdmi.setTimings(chan.index, mode);
+            }
+        }
+
         // Pixel Valve.
         pv: {
             const pvbase = try urd.mem.phys.reserveAndRemap(

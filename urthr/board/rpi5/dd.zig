@@ -2,6 +2,7 @@ pub const clk = @import("dd/clk.zig");
 pub const dma = @import("dd/dma.zig");
 pub const ether = @import("dd/ether.zig");
 pub const gpio = @import("dd/gpio.zig");
+pub const hdmi = @import("dd/hdmi.zig");
 pub const hvs = @import("dd/hvs.zig");
 pub const pcie = @import("dd/pcie.zig");
 pub const pm = @import("dd/pm.zig");
