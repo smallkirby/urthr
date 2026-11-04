@@ -4,6 +4,10 @@
 //! ref. https://github.com/raspberrypi/linux/blob/5bd564aaa8dc4b1b8ed11733c19ec8ece63a72cc/drivers/gpu/drm/vc4/vc4_hdmi_phy.c
 //! ref. https://github.com/raspberrypi/linux/blob/5bd564aaa8dc4b1b8ed11733c19ec8ece63a72cc/drivers/gpu/drm/vc4/vc4_hdmi_regs.h
 
+var dvps = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x0000, Dvps },
+}){};
+
 var phys = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Phys },
 }){};
@@ -15,6 +19,11 @@ var cores = mmio.Module(.{ .size = u32 }, &.{
 var rms = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Rms },
 }){};
+
+const DvpRegs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x0BC, ClockStop },
+});
+const Dvps = mmio.Array(DvpRegs, num_hdmi, 0x5000);
 
 const PhyRegs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x000, ResetCtl },
@@ -35,12 +44,17 @@ const PhyRegs = mmio.Module(.{ .size = u32 }, &.{
 const Phys = mmio.Array(PhyRegs, num_hdmi, 0x5000);
 
 const CoreRegs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x0E8, SchedulerControl },
     .{ 0x0EC, HorzA },
     .{ 0x0F0, HorzB },
     .{ 0x0F4, VertA0 },
     .{ 0x0F8, VertB0 },
     .{ 0x100, VertA1 },
     .{ 0x104, VertB1 },
+    .{ 0x114, MiscControl },
+    .{ 0x18C, DeepColorConfig1 },
+    .{ 0x194, GcpConfig },
+    .{ 0x198, GcpWord1 },
 });
 const Cores = mmio.Array(CoreRegs, num_hdmi, 0x5000);
 
@@ -54,6 +68,7 @@ const num_hdmi = 2;
 
 /// Set the base address of the register blocks of HDMI0 and HDMI1.
 pub fn setBase(base: usize) void {
+    dvps.setBase(base + 0x1000);
     phys.setBase(base + 0x1D00);
     cores.setBase(base + 0x1400);
     rms.setBase(base + 0x2000);
@@ -66,9 +81,20 @@ pub const Error = error{
     UnsupportedRate,
 };
 
+/// Configure the scheduler of the HDMI core.
+pub fn initScheduler(index: usize) void {
+    const core = cores.sub(Cores, index);
+
+    core.modify(SchedulerControl, .{
+        .manual_format = true,
+        .ignore_vsync_predicts = true,
+    });
+}
+
 /// Set the timings of the HDMI core based on the given mode.
 pub fn setTimings(index: usize, mode: pv.Mode) void {
     const core = cores.sub(Cores, index);
+    const dvp = dvps.sub(Dvps, index);
 
     core.write(HorzA, .{
         .hap = @intCast(mode.hdisplay),
@@ -94,6 +120,25 @@ pub fn setTimings(index: usize, mode: pv.Mode) void {
     core.write(VertA1, .{ .value = @bitCast(verta) });
     core.write(VertB0, .{ .value = @bitCast(vertb0) });
     core.write(VertB1, .{ .value = @bitCast(vertb1) });
+
+    core.modify(DeepColorConfig1, .{
+        .color_depth = 0,
+        .init_pack_phase = 2,
+    });
+    core.modify(GcpWord1, .{
+        .subpacket_byte_0 = 1 << 4, // clear AVMUTE
+        .subpacket_byte_1 = 0,
+    });
+    core.modify(GcpConfig, .{
+        .gcp_enable = true,
+    });
+    core.modify(MiscControl, .{
+        .pixel_rep = 0,
+    });
+
+    dvp.write(ClockStop, .{
+        .pixel = false,
+    });
 }
 
 /// Initialize and power up the PHY and PLL.
@@ -317,6 +362,18 @@ fn getRmOffset(vco_freq: u64) u31 {
 // =============================================================
 
 // =============================================================
+// DVP
+
+const ClockStop = packed struct(u32) {
+    /// Not used.
+    _0: u1 = 0,
+    /// Stop the pixel clock.
+    pixel: bool,
+    /// Not used.
+    _2: u30 = 0,
+};
+
+// =============================================================
 // PHYS
 
 const ResetCtl = packed struct(u32) { value: u32 };
@@ -410,6 +467,27 @@ const PllPowerupCtl = packed struct(u32) {
 // =============================================================
 // CORE
 
+const SchedulerControl = packed struct(u32) {
+    /// HDMI mode is selected.
+    mode_hdmi: bool,
+    /// HDMI mode is active.
+    hdmi_active: bool,
+    /// Not used.
+    _2: u1 = 0,
+    ///
+    vert_always_keepout: bool,
+    /// Not used.
+    _4: u1 = 0,
+    ///
+    ignore_vsync_predicts: bool,
+    /// Not used.
+    _6: u9 = 0,
+    ///
+    manual_format: bool,
+    /// Not used.
+    _16: u16 = 0,
+};
+
 const HorzA = packed struct(u32) {
     /// Horizontal active pixels.
     hap: u14,
@@ -458,6 +536,40 @@ const VertB = packed struct(u32) {
     vspo: u14,
     /// Not used.
     _30: u2 = 0,
+};
+
+const MiscControl = packed struct(u32) {
+    /// Pixel repetition - 1.
+    pixel_rep: u4,
+    /// Not used.
+    _4: u28 = 0,
+};
+
+const DeepColorConfig1 = packed struct(u32) {
+    /// Color depth signaled in GCP.
+    color_depth: u4,
+    /// Not used.
+    _4: u4 = 0,
+    ///
+    init_pack_phase: u3,
+    /// Not used.
+    _11: u21 = 0,
+};
+
+const GcpConfig = packed struct(u32) {
+    /// Not used.
+    _0: u31 = 0,
+    /// Send GCP.
+    gcp_enable: bool,
+};
+
+const GcpWord1 = packed struct(u32) {
+    /// Byte 0 of the GCP subpacket.
+    subpacket_byte_0: u8,
+    /// Byte 1 of the GCP subpacket.
+    subpacket_byte_1: u8,
+    /// Not used.
+    _16: u16 = 0,
 };
 
 const VertA0 = packed struct(u32) { value: u32 };

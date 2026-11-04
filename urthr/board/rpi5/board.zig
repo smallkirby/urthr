@@ -231,6 +231,7 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 rdd.hdmi.initPhy(chan.index, mode) catch |err| {
                     log.err("HDMI PHY configuration failed: {t}", .{err});
                 };
+                rdd.hdmi.initScheduler(chan.index);
                 rdd.hdmi.setTimings(chan.index, mode);
             }
         }
