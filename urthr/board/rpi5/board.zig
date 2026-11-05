@@ -282,6 +282,9 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             rdd.hdmi.setAviPacket(chan.index, mode) catch |err| {
                 log.err("HDMI AVI InfoFrame transmission failed: {t}", .{err});
             };
+            rdd.hdmi.setSpdPacket(chan.index) catch |err| {
+                log.err("HDMI SPD InfoFrame transmission failed: {t}", .{err});
+            };
             rdd.hdmi.recenterFifo(chan.index) catch |err| {
                 log.err("HDMI FIFO recentering failed: {t}", .{err});
             };

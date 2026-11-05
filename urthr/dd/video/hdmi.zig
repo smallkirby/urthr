@@ -205,6 +205,91 @@ pub const Avi = struct {
     }
 };
 
+/// Source device information.
+pub const SpdSdi = enum(u8) {
+    /// Unknown.
+    unknown = 0,
+    /// Digital STB
+    dstb = 1,
+    /// DVD player
+    dvdp = 2,
+    /// D-VHS
+    dvhs = 3,
+    /// HDD videorecorder
+    hddvr = 4,
+    /// DVC
+    dvc = 5,
+    /// DSC
+    dsc = 6,
+    /// Video CD
+    vcd = 7,
+    /// Game
+    game = 8,
+    /// PC general
+    pc = 9,
+    /// Blu-Ray disc
+    bd = 10,
+    /// Super Audio CD
+    sacd = 11,
+    /// HD DVD
+    hddvd = 12,
+    /// Portable Media Player.
+    pmp = 13,
+};
+
+/// SPD InfoFrame version 1.
+pub const Spd = struct {
+    /// Size of the InfoFrame including the header.
+    pub const size = header_size + data_length;
+    /// Version of the InfoFrame.
+    const version = 1;
+    /// Length of the data bytes.
+    const data_length = 25;
+
+    /// Vendor name. Zero-padded.
+    vendor: [8]u8,
+    /// Product name. Zero-padded.
+    product: [16]u8,
+    /// Source device information.
+    sdi: SpdSdi,
+
+    /// Create the InfoFrame.
+    ///
+    /// Names longer than the field are truncated.
+    pub fn init(vendor: []const u8, product: []const u8, sdi: SpdSdi) Spd {
+        var spd = Spd{
+            .vendor = @splat(0),
+            .product = @splat(0),
+            .sdi = sdi,
+        };
+        @memcpy(spd.vendor[0..@min(vendor.len, spd.vendor.len)], vendor);
+        @memcpy(spd.product[0..@min(product.len, spd.product.len)], product);
+
+        return spd;
+    }
+
+    /// Pack the InfoFrame into the binary representation with the header and the checksum.
+    pub fn pack(self: Spd) [size]u8 {
+        var buffer = std.mem.zeroes([size]u8);
+
+        // Header bytes.
+        buffer[0] = @backingInt(InfoFrameType.spd);
+        buffer[1] = version;
+        buffer[2] = data_length;
+
+        // Data bytes.
+        const data = buffer[header_size..];
+        @memcpy(data[0..8], &self.vendor);
+        @memcpy(data[8..24], &self.product);
+        data[24] = @backingInt(self.sdi);
+
+        // Checksum.
+        buffer[3] = checksum(&buffer);
+
+        return buffer;
+    }
+};
+
 /// Calculate the checksum of the InfoFrame.
 ///
 /// The checksum field must be zero in `buffer`.

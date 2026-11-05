@@ -243,43 +243,63 @@ pub fn enableHdmiMode(index: usize) Error!void {
     if (!core.tryWaitFor(SchedulerControl, .{ .hdmi_active = true }, .ms(1000))) {
         return Error.Timeout;
     }
-}
-
-/// Set the AVI InfoFrame in the packet RAM.
-pub fn setAviPacket(index: usize, mode: pv.Mode) Error!void {
-    var core = cores.sub(Cores, index);
-    const packet = packets.sub(Packets, index);
 
     // Enable the packet RAM.
     core.writez(RamPacketConfig, .{
         .enable = true,
     });
+}
 
-    // Stop AVI packet.
-    core.modify(RamPacketConfig, .{
-        .avi = false,
-    });
-    if (!core.tryWaitFor(RamPacketStatus, .{ .avi = false }, .ms(100))) {
-        return Error.Timeout;
-    }
-
-    // Set AVI packet.
+/// Set the AVI InfoFrame in the packet RAM.
+pub fn setAviPacket(index: usize, mode: pv.Mode) Error!void {
     const avi = video.Avi{
         .scan_mode = .underscan,
         .picture_aspect = mode.aspect,
         .active_aspect = .picture,
         .video_code = @intCast(mode.vic),
     };
-    const avi_packet_id = calcPacketId(.avi);
-    writePacketRam(packet, avi_packet_id, &avi.pack());
+    try sendPacket(index, .avi, &avi.pack());
+}
 
-    // Enable AVI packet transmission.
-    core.modify(RamPacketConfig, .{
-        .avi = true,
-    });
-    if (!core.tryWaitFor(RamPacketStatus, .{ .avi = true }, .ms(100))) {
-        return Error.Timeout;
+/// Set the SPD InfoFrame in the packet RAM.
+pub fn setSpdPacket(index: usize) Error!void {
+    const spd = video.Spd.init("Broadcom", "Videocore", .pc);
+    try sendPacket(index, .spd, &spd.pack());
+}
+
+/// Send the InfoFrame via the packet RAM.
+fn sendPacket(index: usize, comptime kind: video.InfoFrameType, data: []const u8) Error!void {
+    var core = cores.sub(Cores, index);
+    const packet = packets.sub(Packets, index);
+
+    // Stop the packet.
+    switch (kind) {
+        .avi => core.modify(RamPacketConfig, .{ .avi = false }),
+        .spd => core.modify(RamPacketConfig, .{ .spd = false }),
+        else => @compileError("unsupported InfoFrame type"),
     }
+    const stopped = switch (kind) {
+        .avi => core.tryWaitFor(RamPacketStatus, .{ .avi = false }, .ms(100)),
+        .spd => core.tryWaitFor(RamPacketStatus, .{ .spd = false }, .ms(100)),
+        else => @compileError("unsupported InfoFrame type"),
+    };
+    if (!stopped) return Error.Timeout;
+
+    // Set the packet.
+    writePacketRam(packet, calcPacketId(kind), data);
+
+    // Enable the packet transmission.
+    switch (kind) {
+        .avi => core.modify(RamPacketConfig, .{ .avi = true }),
+        .spd => core.modify(RamPacketConfig, .{ .spd = true }),
+        else => @compileError("unsupported InfoFrame type"),
+    }
+    const started = switch (kind) {
+        .avi => core.tryWaitFor(RamPacketStatus, .{ .avi = true }, .ms(100)),
+        .spd => core.tryWaitFor(RamPacketStatus, .{ .spd = true }, .ms(100)),
+        else => @compileError("unsupported InfoFrame type"),
+    };
+    if (!started) return Error.Timeout;
 }
 
 /// Write the InfoFrame to the slot of the packet RAM.
@@ -747,8 +767,10 @@ const RamPacketConfig = packed struct(u32) {
     _0: u2 = 0,
     /// Send the AVI InfoFrame.
     avi: bool,
+    /// Send the SPD InfoFrame.
+    spd: bool,
     ///
-    _3: u13 = 0,
+    _4: u12 = 0,
     /// Enable the packet RAM.
     enable: bool,
     /// Not used.
@@ -760,8 +782,10 @@ const RamPacketStatus = packed struct(u32) {
     _0: u2 = 0,
     /// The AVI InfoFrame is being sent.
     avi: bool,
+    /// The SPD InfoFrame is being sent.
+    spd: bool,
     ///
-    _3: u29 = 0,
+    _4: u28 = 0,
 };
 
 const SchedulerControl = packed struct(u32) {
