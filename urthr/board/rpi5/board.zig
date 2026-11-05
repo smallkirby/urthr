@@ -279,6 +279,11 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 log.err("PV configuration failed: {t}", .{err});
                 break :pv;
             };
+            rdd.pv.enable(chan.index) catch |err| {
+                log.err("PV enabling failed: {t}", .{err});
+                break :pv;
+            };
+
             // Pre CRTC enable.
             rdd.hdmi.setupCsc(chan.index, mode);
             rdd.hdmi.initFifo(chan.index);

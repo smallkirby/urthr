@@ -159,6 +159,10 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
     const ppc = data.pixels_per_clock;
     const pv = pvs.sub(Pvs, index);
 
+    // Reset the PV. It needs to be disabled before the FIFO is flushed.
+    pv.modify(Control, .{ .en = false });
+    pv.modify(Control, .{ .fifo_clr = true });
+
     pv.write(HorzA, .{
         .hsync = scale(ppc, mode.hsync_end - mode.hsync_start),
         .hbp = scale(ppc, mode.htotal - mode.hsync_end),
@@ -193,7 +197,7 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
     });
     pv.write(PipeInitCtrl, .{
         .en = true,
-        .idle = 0,
+        .idle = 1,
         .width = 1,
     });
 
@@ -201,17 +205,23 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
     const pixel_size = 3; // size of a pixel in bytes
     const fifo_level = data.fifo_depth - pixel_size * fifo_latency_pixel; // threshold for fill-request
     pv.write(Control, .{
-        .en = true,
-        .fifo_clr = false,
+        .en = false,
+        .fifo_clr = true,
         .clk_select = enc_select,
         .pixel_rep = 0,
-        .wait_hstart = false,
-        .trigger_underflow = false,
+        .wait_hstart = true,
+        .trigger_underflow = true,
         .clr_at_start = true,
         .fifo_level = @truncate(fifo_level >> 0),
         .format = .@"24", // RGB888
         .fifo_level_high = @truncate(fifo_level >> 6),
     });
+}
+
+/// Enable the PV fed by the given HVS channel.
+pub fn enable(chan: usize) Error!void {
+    const index = findPv(chan) orelse return Error.NoPixelValve;
+    pvs.sub(Pvs, index).modify(Control, .{ .en = true });
 }
 
 /// Start the video output of the PV fed by the given HVS channel.
