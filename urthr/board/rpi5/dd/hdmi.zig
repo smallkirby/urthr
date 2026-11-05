@@ -97,7 +97,9 @@ const Cscs = mmio.Array(CscRegs, num_hdmi, 0x80);
 const num_hdmi = 2;
 
 /// Set the base address of the register blocks of HDMI0 and HDMI1.
-pub fn setBase(base: usize, hd_base: usize) void {
+pub fn setBase(base: usize, hd_base: usize, dmaallocator: DmaAllocator) void {
+    dma = dmaallocator;
+
     cscs.setBase(base + 0x0100);
     dvps.setBase(base + 0x1000);
     phys.setBase(base + 0x1D00);
@@ -121,16 +123,51 @@ pub const Error = error{
     UnsupportedRate,
     /// Timeout while waiting for HW response.
     Timeout,
-};
+} || props.Error;
 
 /// Global timer.
 var timer: common.Timer = undefined;
+/// DMA allocator.
+var dma: DmaAllocator = undefined;
 
 /// Reset the HDMI pipeline.
 pub fn reset(index: usize) void {
     const dvp = dvps.sub(Dvps, index);
     hd.write(DvpCtl, DvpCtl{ .value = 0 });
     dvp.modify(ClockStop, .{ .pixel = true });
+}
+
+/// Set the rate of the clocks used by the HDMI.
+pub fn initClocks(mode: pv.Mode) Error!void {
+    const tmds_rate: u32 = mode.clock * 1000; // to kHz
+    // Minimum frequency of the HSM clock in Hz.
+    const hsm_min_clock_freq = 120_000_000;
+
+    // The HDMI state machine (HSM) clock must be faster than the pixel clock.
+    const hsm_freq = @max(hsm_min_clock_freq, tmds_rate / 100 * 101);
+    const bvb_freq: u32 = if (tmds_rate > 297_000_000)
+        300_000_000
+    else if (tmds_rate > 148_500_000)
+        150_000_000
+    else
+        75_000_000;
+
+    inline for (.{
+        .{ "HSM", props.ClockId.m2mc, hsm_freq, hsm_min_clock_freq },
+        .{ "BVB", props.ClockId.pixel_bvb, bvb_freq, 0 },
+    }) |c| {
+        // Clamp the requested frequency within the FW-supported range.
+        const name, const id, const freq, const min_freq = c;
+        const fw_min = try props.getClockMinRate(dma, id);
+        const fw_max = try props.getClockMaxRate(dma, id);
+        const clamped = std.math.clamp(freq, @max(min_freq, fw_min), fw_max);
+
+        // Set clock frequency.
+        _ = try props.setClockRate(dma, id, clamped);
+        log.info("{s} clock: requested {d} Hz, set to {d} Hz", .{
+            name, clamped, try props.getClockRate(dma, id),
+        });
+    }
 }
 
 /// Configure the color space converter for the RGB output.
@@ -995,5 +1032,7 @@ const common = @import("common");
 const dd = @import("dd");
 const mmio = common.mmio;
 const rtt = common.rtt;
+const DmaAllocator = common.mem.DmaAllocator;
+const props = @import("vcmbox.zig").props;
 const pv = @import("pv.zig");
 const video = dd.video.hdmi;

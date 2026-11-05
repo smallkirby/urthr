@@ -232,11 +232,14 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 null,
                 .device,
             );
-            rdd.hdmi.setBase(hdmibase, hdbase);
+            rdd.hdmi.setBase(hdmibase, hdbase, urd.mem.dma.interface(0));
             rdd.hdmi.reset(chan.index);
 
             if (rdd.pv.findMode(chan.width, chan.height)) |mode| {
                 // Pre CRTC configure.
+                rdd.hdmi.initClocks(mode) catch |err| {
+                    log.err("HDMI clock configuration failed: {t}", .{err});
+                };
                 rdd.hdmi.initPhy(chan.index, mode) catch |err| {
                     log.err("HDMI PHY configuration failed: {t}", .{err});
                 };
