@@ -24,12 +24,18 @@ var packets = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Packets },
 }){};
 
+var cscs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x0000, Cscs },
+}){};
+
 var hd = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x044, VidCtl },
 }){};
 
 const DvpRegs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0BC, ClockStop },
+    .{ 0x0F0, VecInterfaceCfg },
+    .{ 0x0F4, VecInterfaceXbar },
 });
 const Dvps = mmio.Array(DvpRegs, num_hdmi, 0x5000);
 
@@ -79,11 +85,19 @@ const PacketRegs = mmio.Module(.{ .size = u32 }, &.{
 });
 const Packets = mmio.Array(PacketRegs, num_hdmi, 0x5000);
 
+const CscRegs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x000, CscCtl },
+    .{ 0x004, CscCoeff }, // 0-5
+    .{ 0x02C, CscChannelCtl },
+});
+const Cscs = mmio.Array(CscRegs, num_hdmi, 0x80);
+
 /// Number of supported HDMI interfaces.
 const num_hdmi = 2;
 
 /// Set the base address of the register blocks of HDMI0 and HDMI1.
 pub fn setBase(base: usize, hd_base: usize) void {
+    cscs.setBase(base + 0x0100);
     dvps.setBase(base + 0x1000);
     phys.setBase(base + 0x1D00);
     cores.setBase(base + 0x1400);
@@ -110,6 +124,64 @@ pub const Error = error{
 
 /// Global timer.
 var timer: common.Timer = undefined;
+
+/// Configure the color space converter for the RGB output.
+pub fn setupCsc(index: usize, mode: pv.Mode) void {
+    const dvp = dvps.sub(Dvps, index);
+    const csc = cscs.sub(Cscs, index);
+
+    // CSC matrix for the full range RGB output, unity.
+    const csc_rgb_full = [3][4]u16{
+        .{ 0x2000, 0x0000, 0x0000, 0x0000 },
+        .{ 0x0000, 0x2000, 0x0000, 0x0000 },
+        .{ 0x0000, 0x0000, 0x2000, 0x0000 },
+    };
+    // CSC matrix for the limited range RGB output, squash 0-255 down to 16-235.
+    const csc_rgb_limited = [3][4]u16{
+        .{ 0x1B80, 0x0000, 0x0000, 0x0400 },
+        .{ 0x0000, 0x1B80, 0x0000, 0x0400 },
+        .{ 0x0000, 0x0000, 0x1B80, 0x0400 },
+    };
+    // Value of the VEC interface crossbar for the RGB output.
+    const xbar_rgb = 0x354021;
+
+    // Set conversion matrix value.
+    const wsize = @sizeOf(CscCoeff);
+    const matrix = if (isLimitedRange(mode)) csc_rgb_limited else csc_rgb_full;
+    for (matrix, 0..) |row, i| {
+        csc.writeIndexed(CscCoeff, i * 2 + 0, wsize, CscCoeff{
+            .lo = row[0],
+            .hi = row[1],
+        });
+        csc.writeIndexed(CscCoeff, i * 2 + 1, wsize, CscCoeff{
+            .lo = row[2],
+            .hi = row[3],
+        });
+    }
+
+    // Enable CSC.
+    dvp.writez(VecInterfaceCfg, .{
+        .sel_422 = 0,
+    });
+    dvp.write(VecInterfaceXbar, .{
+        .value = xbar_rgb,
+    });
+    csc.writez(CscChannelCtl, .{
+        .output_remap = 0,
+    });
+    csc.writez(CscCtl, .{
+        .mode = .custom,
+        .enable = true,
+        .rng_suppression = false,
+        .filter_422 = 0,
+        .use_444_to_422 = false,
+    });
+}
+
+/// Get whether the RGB output of the mode is limited range.
+inline fn isLimitedRange(mode: pv.Mode) bool {
+    return mode.vic > 1;
+}
 
 /// Configure the FIFO of the HDMI core.
 pub fn initFifo(index: usize) void {
@@ -530,6 +602,17 @@ const ClockStop = packed struct(u32) {
     _2: u30 = 0,
 };
 
+const VecInterfaceCfg = packed struct(u32) {
+    /// Not used.
+    _0: u2 = 0,
+    /// YUV422 format selection.
+    sel_422: u2,
+    /// Not used.
+    _4: u28 = 0,
+};
+
+const VecInterfaceXbar = packed struct(u32) { value: u32 };
+
 // =============================================================
 // PHYS
 
@@ -795,6 +878,45 @@ const RmOffset = packed struct(u32) {
 // Packet RAM
 
 const PacketWord = packed struct(u32) { value: u32 };
+
+// =============================================================
+// CSC: Color Space Conversion
+
+const CscCtl = packed struct(u32) {
+    /// Conversion mode.
+    mode: enum(u2) {
+        rgb2sd_yprpb = 0,
+        rgb2hd_yprpb = 1,
+        custom = 3,
+        _,
+    },
+    /// Enable CSC.
+    enable: bool,
+    ///
+    rng_suppression: bool,
+    ///
+    filter_422: u2,
+    ///
+    use_444_to_422: bool,
+    /// Not used.
+    _7: u25 = 0,
+};
+
+const CscCoeff = packed struct(u32) {
+    /// Low 16-bits of CSC coefficient.
+    lo: u16,
+    /// High 16-bits of CSC coefficient.
+    hi: u16,
+};
+
+const CscChannelCtl = packed struct(u32) {
+    /// Not used.
+    _0: u6 = 0,
+    ///
+    output_remap: u2,
+    /// Not used.
+    _8: u24 = 0,
+};
 
 // =============================================================
 // HD

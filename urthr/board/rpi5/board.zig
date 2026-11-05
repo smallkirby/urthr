@@ -264,6 +264,7 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 break :pv;
             };
             // Pre CRTC enable.
+            rdd.hdmi.setupCsc(chan.index, mode);
             rdd.hdmi.initFifo(chan.index);
 
             // CRTC enable.
