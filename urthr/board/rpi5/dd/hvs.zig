@@ -243,7 +243,7 @@ pub fn initChannel(index: usize, width: usize, height: usize) void {
     const disp = hvs.sub(Disps, index);
 
     disp.writez(DispControl0, .{ .reset = true });
-    disp.modify(DispControl1, .{ .intlace = false });
+    disp.modify(DispControl1, .{ .intlace = false, .bgenb = false });
     disp.writez(DispControl0, .{
         .enb = true,
         .fwidth = @as(u13, @intCast(width - 1)),
