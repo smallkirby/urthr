@@ -214,6 +214,85 @@ pub const props = struct {
     fn isValidCode(code: u32) bool {
         return code & 0x8000_0000 != 0;
     }
+
+    // =============================================================
+    // Clock
+
+    /// Firmware clock IDs.
+    ///
+    /// ref. https://github.com/raspberrypi/linux/blob/2569533d6c33c15231fbc21704c87fcebc67173c/include/soc/bcm2835/raspberrypi-firmware.h#L165
+    pub const ClockId = enum(u32) {
+        emmc = 1,
+        uart = 2,
+        arm = 3,
+        core = 4,
+        v3d = 5,
+        h264 = 6,
+        isp = 7,
+        sdram = 8,
+        pixel = 9,
+        pwm = 10,
+        hevc = 11,
+        emmc2 = 12,
+        m2mc = 13,
+        pixel_bvb = 14,
+        vec = 15,
+        disp = 16,
+    };
+
+    /// Property value for clock state.
+    pub const ClockState = packed struct(u32) {
+        /// Clock is on.
+        on: bool,
+        /// Clock does not exist.
+        not_exist: bool,
+        /// Not used.
+        _2: u30 = 0,
+    };
+
+    /// Get the maximum supported rate for the given clock.
+    pub fn getClockMaxRate(dma: DmaAllocator, id: ClockId) Error!u32 {
+        return clockProperty(dma, .get_max_clock_rate, .{ @backingInt(id), 0 });
+    }
+
+    /// Get the minimum supported rate for the given clock.
+    pub fn getClockMinRate(dma: DmaAllocator, id: ClockId) Error!u32 {
+        return clockProperty(dma, .get_min_clock_rate, .{ @backingInt(id), 0 });
+    }
+
+    /// Get the current rate for the given clock.
+    pub fn getClockRate(dma: DmaAllocator, id: ClockId) Error!u32 {
+        return clockProperty(dma, .get_clock_rate, .{ @backingInt(id), 0 });
+    }
+
+    /// Set the rate in Hz for the given clock.
+    pub fn setClockRate(dma: DmaAllocator, id: ClockId, rate: u32) Error!u32 {
+        return clockProperty(dma, .set_clock_rate, .{
+            @backingInt(id), // clock id
+            rate, // rate in Hz
+            0, // skip setting turbo
+        });
+    }
+
+    /// Get the current state for the given clock.
+    pub fn getClockState(dma: DmaAllocator, id: ClockId) Error!ClockState {
+        return @bitCast(try clockProperty(dma, .get_clock_state, .{ @backingInt(id), 0 }));
+    }
+
+    /// Set the clock state for the given clock.
+    pub fn setClockState(dma: DmaAllocator, id: ClockId, state: ClockState) Error!ClockState {
+        return @bitCast(try clockProperty(dma, .set_clock_state, .{
+            @backingInt(id),
+            @as(u32, @bitCast(state)),
+        }));
+    }
+
+    /// Request a clock property to VC mailbox.
+    fn clockProperty(dma: DmaAllocator, tag: Tag, values: anytype) Error!u32 {
+        const res = try property(dma, tag, values);
+        rtt.expectEqual(values[0], res[0]);
+        return res[1];
+    }
 };
 
 // =============================================================

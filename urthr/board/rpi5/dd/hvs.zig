@@ -89,38 +89,38 @@ pub fn init() Error!void {
     }
 
     // Enable the clocks.
-    for ([_]u32{ clock_core, clock_disp }) |id| {
-        _ = try setClockState(id, .{
+    for ([_]ClockId{ .core, .disp }) |id| {
+        _ = try props.setClockState(dma, id, .{
             .on = true,
             .not_exist = false,
         });
     }
 
-    // Set clock rate to minimum.
+    // Set clock rate to maximum.
     {
-        const rate = try getClockMaxRate(clock_disp);
+        const rate = try props.getClockMaxRate(dma, .disp);
         log.info("Set disp clock to {d} Hz: VC reported {d} Hz", .{
             rate,
-            try setClockRate(clock_disp, rate),
+            try props.setClockRate(dma, .disp, rate),
         });
     }
 
     // Check clock states.
     {
-        const state = try getClockState(clock_core);
+        const state = try props.getClockState(dma, .core);
         log.info("Clock core: rate {d} Hz ({d} - {d} Hz), on={}", .{
-            try getClockRate(clock_core),
-            try getClockMinRate(clock_core),
-            try getClockMaxRate(clock_core),
+            try props.getClockRate(dma, .core),
+            try props.getClockMinRate(dma, .core),
+            try props.getClockMaxRate(dma, .core),
             state.on,
         });
     }
     {
-        const state = try getClockState(clock_disp);
+        const state = try props.getClockState(dma, .disp);
         log.info("Clock disp: rate {d} Hz ({d} - {d} Hz), on={}", .{
-            try getClockRate(clock_disp),
-            try getClockMinRate(clock_disp),
-            try getClockMaxRate(clock_disp),
+            try props.getClockRate(dma, .disp),
+            try props.getClockMinRate(dma, .disp),
+            try props.getClockMaxRate(dma, .disp),
             state.on,
         });
     }
@@ -460,65 +460,6 @@ fn setOrigin(ctx: *anyopaque, y: usize) void {
 }
 
 // =============================================================
-// Clock
-
-/// Firmware clock ID of the HVS core clock.
-const clock_core = 0x04;
-/// Firmware clock ID of the HVS display clock.
-const clock_disp = 0x10;
-
-/// Get the maximum supported rate for the given clock.
-fn getClockMaxRate(clock_id: u32) Error!u32 {
-    return clockProperty(.get_max_clock_rate, .{ clock_id, 0 });
-}
-
-/// Get the minimum supported rate for the given clock.
-fn getClockMinRate(clock_id: u32) Error!u32 {
-    return clockProperty(.get_min_clock_rate, .{ clock_id, 0 });
-}
-
-/// Get the current rate for the given clock.
-fn getClockRate(clock_id: u32) Error!u32 {
-    return clockProperty(.get_clock_rate, .{ clock_id, 0 });
-}
-
-/// Set the rate in Hz for the given clock.
-fn setClockRate(clock_id: u32, rate: u32) Error!u32 {
-    return clockProperty(.set_clock_rate, .{
-        clock_id, // clock id
-        rate, // rate in Hz
-        0, // skip setting turbo
-    });
-}
-
-/// Get the current state for the given clock.
-fn getClockState(clock_id: u32) Error!ClockState {
-    return @bitCast(try clockProperty(.get_clock_state, .{ clock_id, 0 }));
-}
-
-/// Set the clock state for the given clock.
-fn setClockState(clock_id: u32, state: ClockState) Error!ClockState {
-    return @bitCast(try clockProperty(.set_clock_state, .{
-        clock_id,
-        @as(u32, @bitCast(state)),
-    }));
-}
-
-/// Property value for clock state.
-const ClockState = packed struct(u32) {
-    on: bool,
-    not_exist: bool,
-    _2: u30 = 0,
-};
-
-/// Request a clock property to VC mailbox.
-fn clockProperty(tag: vcmbox.props.Tag, req: anytype) Error!u32 {
-    const res = try vcmbox.props.property(dma, tag, req);
-    rtt.expectEqual(req[0], res[0]);
-    return res[1];
-}
-
-// =============================================================
 // Module Definition
 // =============================================================
 
@@ -807,3 +748,5 @@ const mmio = common.mmio;
 const urd = @import("urthr");
 const mem = urd.mem;
 const vcmbox = @import("vcmbox.zig");
+const props = vcmbox.props;
+const ClockId = props.ClockId;
