@@ -233,6 +233,7 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 .device,
             );
             rdd.hdmi.setBase(hdmibase, hdbase);
+            rdd.hdmi.reset(chan.index);
 
             if (rdd.pv.findMode(chan.width, chan.height)) |mode| {
                 // Pre CRTC configure.

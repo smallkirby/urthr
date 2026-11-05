@@ -29,6 +29,7 @@ var cscs = mmio.Module(.{ .size = u32 }, &.{
 }){};
 
 var hd = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x000, DvpCtl },
     .{ 0x044, VidCtl },
 }){};
 
@@ -124,6 +125,13 @@ pub const Error = error{
 
 /// Global timer.
 var timer: common.Timer = undefined;
+
+/// Reset the HDMI pipeline.
+pub fn reset(index: usize) void {
+    const dvp = dvps.sub(Dvps, index);
+    hd.write(DvpCtl, DvpCtl{ .value = 0 });
+    dvp.modify(ClockStop, .{ .pixel = true });
+}
 
 /// Configure the color space converter for the RGB output.
 pub fn setupCsc(index: usize, mode: pv.Mode) void {
@@ -920,6 +928,8 @@ const CscChannelCtl = packed struct(u32) {
 
 // =============================================================
 // HD
+
+const DvpCtl = packed struct(u32) { value: u32 };
 
 const VidCtl = packed struct(u32) {
     /// Not used.
