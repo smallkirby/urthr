@@ -238,6 +238,19 @@ pub const Channel = struct {
     height: usize,
 };
 
+/// Reset and enable the display channel with the given size.
+pub fn initChannel(index: usize, width: usize, height: usize) void {
+    const disp = hvs.sub(Disps, index);
+
+    disp.writez(DispControl0, .{ .reset = true });
+    disp.modify(DispControl1, .{ .intlace = false });
+    disp.writez(DispControl0, .{
+        .enb = true,
+        .fwidth = @as(u13, @intCast(width - 1)),
+        .lines = @as(u13, @intCast(height - 1)),
+    });
+}
+
 /// Create a new framebuffer and show it on the screen.
 ///
 /// TODO: the existing framebuffer created by the FW leaks.
@@ -289,32 +302,6 @@ pub fn createFramebuffer(allocator: Allocator, chan: Channel, vt: Framebuffer.VT
         buf.bus, buf.size, pitch, chan.width, chan.height,
     });
     return framebuffer;
-}
-
-/// Select the enabled usable display channel.
-///
-/// The display with the largest resolution is selected.
-pub fn selectChannel() ?Channel {
-    var selected: ?Channel = null;
-    for (0..Disps.len) |i| {
-        const disp = hvs.sub(Disps, i);
-        const ctrl0 = disp.read(DispControl0);
-        if (!ctrl0.enb) continue;
-
-        const chan = Channel{
-            .index = i,
-            .width = @as(usize, ctrl0.fwidth) + 1,
-            .height = @as(usize, ctrl0.lines) + 1,
-        };
-        if (selected) |s| {
-            if (chan.width * chan.height <= s.width * s.height) {
-                continue;
-            }
-        }
-        selected = chan;
-    }
-
-    return selected;
 }
 
 /// Display plane information.

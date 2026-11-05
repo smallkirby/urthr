@@ -211,9 +211,15 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             break :outer;
         };
 
-        const chan = rdd.hvs.selectChannel() orelse {
-            log.err("No enabled display channel found", .{});
+        // TODO: The output is fixed to 1920x1080 on HDMI1.
+        const mode = rdd.pv.findMode(1920, 1080) orelse {
+            log.err("No supported display mode", .{});
             break :outer;
+        };
+        const chan = rdd.hvs.Channel{
+            .index = 1,
+            .width = mode.hdisplay,
+            .height = mode.vdisplay,
         };
 
         // HDMI.
@@ -234,18 +240,28 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             );
             rdd.hdmi.setBase(hdmibase, hdbase, urd.mem.dma.interface(0));
             rdd.hdmi.reset(chan.index);
+        }
 
-            if (rdd.pv.findMode(chan.width, chan.height)) |mode| {
-                // Pre CRTC configure.
-                rdd.hdmi.initClocks(mode) catch |err| {
-                    log.err("HDMI clock configuration failed: {t}", .{err});
-                };
-                rdd.hdmi.initPhy(chan.index, mode) catch |err| {
-                    log.err("HDMI PHY configuration failed: {t}", .{err});
-                };
-                rdd.hdmi.initScheduler(chan.index);
-                rdd.hdmi.setTimings(chan.index, mode);
-            }
+        // Install the display list of the framebuffer.
+        const fb = rdd.hvs.createFramebuffer(urd.mem.bin, chan, .{
+            .memcpy = dmaMemcpy,
+        }) catch |err| {
+            log.err("HVS framebuffer creation failed: {t}", .{err});
+            break :outer;
+        };
+        // HVS channel enable.
+        rdd.hvs.initChannel(chan.index, mode.hdisplay, mode.vdisplay);
+
+        // Pre CRTC configure.
+        {
+            rdd.hdmi.initClocks(mode) catch |err| {
+                log.err("HDMI clock configuration failed: {t}", .{err});
+            };
+            rdd.hdmi.initPhy(chan.index, mode) catch |err| {
+                log.err("HDMI PHY configuration failed: {t}", .{err});
+            };
+            rdd.hdmi.initScheduler(chan.index);
+            rdd.hdmi.setTimings(chan.index, mode);
         }
 
         // Pixel Valve.
@@ -259,10 +275,6 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             );
             rdd.pv.setBase(pvbase);
 
-            const mode = rdd.pv.findMode(chan.width, chan.height) orelse {
-                log.warn("PV: no supported mode for {d}x{d}", .{ chan.width, chan.height });
-                break :pv;
-            };
             rdd.pv.configure(chan.index, .hdmi1, mode) catch |err| {
                 log.err("PV configuration failed: {t}", .{err});
                 break :pv;
@@ -292,13 +304,6 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
                 log.err("HDMI FIFO recentering failed: {t}", .{err});
             };
         }
-
-        const fb = rdd.hvs.createFramebuffer(urd.mem.bin, chan, .{
-            .memcpy = dmaMemcpy,
-        }) catch |err| {
-            log.err("HVS framebuffer creation failed: {t}", .{err});
-            break :outer;
-        };
 
         const fbcon = urd.mem.bin.create(FbConsole) catch unreachable;
         fbcon.* = FbConsole.init(fb);
