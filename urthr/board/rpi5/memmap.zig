@@ -105,6 +105,16 @@ pub const sd = Range{
     .end = 0x0010_0100_0000,
 };
 
+/// BSC I2C controllers for DDC of HDMI0 and HDMI1.
+pub const hdmi_ddc = Range{
+    .start = 0x0010_7D50_8000,
+    .end = 0x0010_7D50_9000,
+};
+/// Offset of the DDC controller of HDMI0.
+pub const hdmi0_ddc_offset = 0x200;
+/// Offset of the DDC controller of HDMI1.
+pub const hdmi1_ddc_offset = 0x280;
+
 /// Hardware Video Scaler.
 pub const hvs = Range{
     .start = 0x0010_7C58_0000,

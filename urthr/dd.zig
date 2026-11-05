@@ -4,6 +4,7 @@
 
 pub const fake_rng = @import("dd/fake_rng.zig");
 pub const FwCfg = @import("dd/FwCfg.zig");
+pub const i2c = @import("dd/i2c.zig");
 pub const net = @import("dd/net.zig");
 pub const pci = @import("dd/pci.zig");
 pub const pl011 = @import("dd/pl011.zig");
