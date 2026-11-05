@@ -20,6 +20,10 @@ var rms = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Rms },
 }){};
 
+var packets = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x0000, Packets },
+}){};
+
 var hd = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x044, VidCtl },
 }){};
@@ -49,6 +53,8 @@ const Phys = mmio.Array(PhyRegs, num_hdmi, 0x5000);
 
 const CoreRegs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x07C, FifoCtl },
+    .{ 0x0C4, RamPacketConfig },
+    .{ 0x0CC, RamPacketStatus },
     .{ 0x0E8, SchedulerControl },
     .{ 0x0EC, HorzA },
     .{ 0x0F0, HorzB },
@@ -68,6 +74,11 @@ const RmRegs = mmio.Module(.{ .size = u32 }, &.{
 });
 const Rms = mmio.Array(RmRegs, num_hdmi, 0x5000);
 
+const PacketRegs = mmio.Module(.{ .size = u32 }, &.{
+    .{ 0x000, PacketWord },
+});
+const Packets = mmio.Array(PacketRegs, num_hdmi, 0x5000);
+
 /// Number of supported HDMI interfaces.
 const num_hdmi = 2;
 
@@ -77,6 +88,7 @@ pub fn setBase(base: usize, hd_base: usize) void {
     phys.setBase(base + 0x1D00);
     cores.setBase(base + 0x1400);
     rms.setBase(base + 0x2000);
+    packets.setBase(base + 0x3800);
     hd.setBase(hd_base + 0x0000);
 
     timer = arch.timer.createTimer();
@@ -151,6 +163,79 @@ pub fn enableHdmiMode(index: usize) Error!void {
     if (!core.tryWaitFor(SchedulerControl, .{ .hdmi_active = true }, .ms(1000))) {
         return Error.Timeout;
     }
+}
+
+/// Set the AVI InfoFrame in the packet RAM.
+pub fn setAviPacket(index: usize, mode: pv.Mode) Error!void {
+    var core = cores.sub(Cores, index);
+    const packet = packets.sub(Packets, index);
+
+    // Enable the packet RAM.
+    core.writez(RamPacketConfig, .{
+        .enable = true,
+    });
+
+    // Stop AVI packet.
+    core.modify(RamPacketConfig, .{
+        .avi = false,
+    });
+    if (!core.tryWaitFor(RamPacketStatus, .{ .avi = false }, .ms(100))) {
+        return Error.Timeout;
+    }
+
+    // Set AVI packet.
+    const avi = video.Avi{
+        .scan_mode = .underscan,
+        .picture_aspect = mode.aspect,
+        .active_aspect = .picture,
+        .video_code = @intCast(mode.vic),
+    };
+    const avi_packet_id = calcPacketId(.avi);
+    writePacketRam(packet, avi_packet_id, &avi.pack());
+
+    // Enable AVI packet transmission.
+    core.modify(RamPacketConfig, .{
+        .avi = true,
+    });
+    if (!core.tryWaitFor(RamPacketStatus, .{ .avi = true }, .ms(100))) {
+        return Error.Timeout;
+    }
+}
+
+/// Write the InfoFrame to the slot of the packet RAM.
+fn writePacketRam(ram: Packets.Element, packet_id: usize, data: []const u8) void {
+    const packet_words = 9; // number of 32-bit words in a packet slot.
+    const one_write_size = 7; // number of bytes written at a time
+    const base = packet_id * packet_words;
+    rtt.expect(data.len <= one_write_size * packet_words);
+
+    // Use larger and zero-cleared buffer since the one write is 7 bytes at a time
+    // and may overrun the given data length.
+    const wsize = @sizeOf(PacketWord);
+    var buffer = std.mem.zeroes([packet_words * @sizeOf(u32)]u8);
+    @memcpy(buffer[0..data.len], data);
+
+    // Write packet data 7 bytes at a time.
+    var word: usize = 0;
+    var i: usize = 0;
+    while (i < data.len) : ({
+        i += one_write_size;
+        word += 2;
+    }) {
+        const word0: u32 = std.mem.readInt(u24, buffer[i + 0 ..][0..3], .little);
+        const word1: u32 = std.mem.readInt(u32, buffer[i + 3 ..][0..4], .little);
+        ram.writeIndexed(PacketWord, base + word + 0, wsize, word0);
+        ram.writeIndexed(PacketWord, base + word + 1, wsize, word1);
+    }
+    // Clear remainder of packet RAM.
+    while (word < packet_words) : (word += 1) {
+        ram.writeIndexed(PacketWord, base + word, wsize, 0);
+    }
+}
+
+/// Calculate the packet ID for the given InfoFrame type.
+inline fn calcPacketId(packet_type: video.InfoFrameType) usize {
+    return @backingInt(packet_type) - 0x80;
 }
 
 /// Configure the scheduler of the HDMI core.
@@ -566,6 +651,28 @@ const FifoCtl = packed struct(u32) {
     _15: u17 = 0,
 };
 
+const RamPacketConfig = packed struct(u32) {
+    /// Not used.
+    _0: u2 = 0,
+    /// Send the AVI InfoFrame.
+    avi: bool,
+    ///
+    _3: u13 = 0,
+    /// Enable the packet RAM.
+    enable: bool,
+    /// Not used.
+    _17: u15 = 0,
+};
+
+const RamPacketStatus = packed struct(u32) {
+    /// Not used.
+    _0: u2 = 0,
+    /// The AVI InfoFrame is being sent.
+    avi: bool,
+    ///
+    _3: u29 = 0,
+};
+
 const SchedulerControl = packed struct(u32) {
     /// HDMI mode is selected.
     mode_hdmi: bool,
@@ -685,6 +792,11 @@ const RmOffset = packed struct(u32) {
 };
 
 // =============================================================
+// Packet RAM
+
+const PacketWord = packed struct(u32) { value: u32 };
+
+// =============================================================
 // HD
 
 const VidCtl = packed struct(u32) {
@@ -724,6 +836,8 @@ const std = @import("std");
 const arch = @import("arch").impl;
 const log = std.log.scoped(.hdmi);
 const common = @import("common");
+const dd = @import("dd");
 const mmio = common.mmio;
 const rtt = common.rtt;
 const pv = @import("pv.zig");
+const video = dd.video.hdmi;

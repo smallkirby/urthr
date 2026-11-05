@@ -39,6 +39,8 @@ const modes = [_]Mode{
     // CEA-861 1920x1080@60Hz
     .{
         .clock = 148_500,
+        .vic = 16,
+        .aspect = .@"16:9",
         .hsync_pos = true,
         .vsync_pos = true,
         .hdisplay = 1920,
@@ -53,6 +55,8 @@ const modes = [_]Mode{
     // VESA DMT / CEA-861 640x480@60Hz
     .{
         .clock = 25_175,
+        .vic = 1,
+        .aspect = .@"4:3",
         .hsync_pos = false,
         .vsync_pos = false,
         .hdisplay = 640,
@@ -106,6 +110,10 @@ const PvData = struct {
 pub const Mode = struct {
     /// Pixel clock in kHz.
     clock: u32,
+    /// Video Identification Code defined in CTA-861.
+    vic: u8,
+    /// Picture aspect ratio.
+    aspect: video.hdmi.PictureAspect,
 
     /// Horizontal display size.
     hdisplay: u16,
@@ -354,5 +362,7 @@ const PipeInitCtrl = packed struct(u32) {
 const std = @import("std");
 const log = std.log.scoped(.pv);
 const common = @import("common");
+const dd = @import("dd");
+const video = dd.video;
 const rtt = common.rtt;
 const mmio = common.mmio;

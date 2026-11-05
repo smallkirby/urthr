@@ -10,6 +10,7 @@ pub const pl011 = @import("dd/pl011.zig");
 pub const sdhc = @import("dd/sdhc.zig");
 pub const uart16550 = @import("dd/uart16550.zig");
 pub const usb = @import("dd/usb.zig");
+pub const video = @import("dd/video.zig");
 pub const virtio = @import("dd/virtio.zig");
 pub const VirtioBlk = @import("dd/VirtioBlk.zig");
 pub const VirtioGpu = @import("dd/VirtioGpu.zig");
