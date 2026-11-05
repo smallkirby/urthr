@@ -3,6 +3,15 @@
 //! ref. https://github.com/raspberrypi/linux/blob/5bd564aaa8dc4b1b8ed11733c19ec8ece63a72cc/drivers/gpu/drm/vc4/vc4_hdmi.c
 //! ref. https://github.com/raspberrypi/linux/blob/5bd564aaa8dc4b1b8ed11733c19ec8ece63a72cc/drivers/gpu/drm/vc4/vc4_hdmi_phy.c
 //! ref. https://github.com/raspberrypi/linux/blob/5bd564aaa8dc4b1b8ed11733c19ec8ece63a72cc/drivers/gpu/drm/vc4/vc4_hdmi_regs.h
+//!
+//!
+//! SPDX-License-Identifier: GPL-2.0-only
+//!
+//! Copyright (C) 2015 Broadcom
+//! Copyright (c) 2014 The Linux Foundation. All rights reserved.
+//! Copyright (C) 2013 Red Hat
+//! Author: Rob Clark <robdclark@gmail.com>
+//!
 
 var dvps = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x0000, Dvps },
