@@ -24,4 +24,5 @@ pub const VirtioRng = @import("dd/VirtioRng.zig");
 test {
     _ = pl011;
     _ = usb;
+    _ = video;
 }
