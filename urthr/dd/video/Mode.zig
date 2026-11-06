@@ -39,23 +39,6 @@ vsync_pos: bool,
 
 /// Modes defined in CTA-861.
 pub const cta_modes = [_]Self{
-    // CEA-861 1920x1080@60Hz
-    .{
-        .clock = 148_500,
-        .vic = 16,
-        .aspect = .@"16:9",
-        .interlaced = false,
-        .hsync_pos = true,
-        .vsync_pos = true,
-        .hdisplay = 1920,
-        .hsync_start = 2008,
-        .hsync_end = 2052,
-        .htotal = 2200,
-        .vdisplay = 1080,
-        .vsync_start = 1084,
-        .vsync_end = 1089,
-        .vtotal = 1125,
-    },
     // VESA DMT / CEA-861 640x480@60Hz
     .{
         .clock = 25_175,
@@ -72,6 +55,40 @@ pub const cta_modes = [_]Self{
         .vsync_start = 490,
         .vsync_end = 492,
         .vtotal = 525,
+    },
+    // CEA-861 1280x720@60Hz
+    .{
+        .clock = 74_250,
+        .vic = 4,
+        .aspect = .@"16:9",
+        .interlaced = false,
+        .hsync_pos = true,
+        .vsync_pos = true,
+        .hdisplay = 1280,
+        .hsync_start = 1390,
+        .hsync_end = 1430,
+        .htotal = 1650,
+        .vdisplay = 720,
+        .vsync_start = 725,
+        .vsync_end = 730,
+        .vtotal = 750,
+    },
+    // CEA-861 1920x1080@60Hz
+    .{
+        .clock = 148_500,
+        .vic = 16,
+        .aspect = .@"16:9",
+        .interlaced = false,
+        .hsync_pos = true,
+        .vsync_pos = true,
+        .hdisplay = 1920,
+        .hsync_start = 2008,
+        .hsync_end = 2052,
+        .htotal = 2200,
+        .vdisplay = 1080,
+        .vsync_start = 1084,
+        .vsync_end = 1089,
+        .vtotal = 1125,
     },
 };
 
