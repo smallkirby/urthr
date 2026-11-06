@@ -147,7 +147,7 @@ pub fn reset(index: usize) void {
 }
 
 /// Set the rate of the clocks used by the HDMI.
-pub fn initClocks(mode: pv.Mode) Error!void {
+pub fn initClocks(mode: Mode) Error!void {
     const tmds_rate: u32 = mode.clock * 1000; // to kHz
     // Minimum frequency of the HSM clock in Hz.
     const hsm_min_clock_freq = 120_000_000;
@@ -180,7 +180,7 @@ pub fn initClocks(mode: pv.Mode) Error!void {
 }
 
 /// Configure the color space converter for the RGB output.
-pub fn setupCsc(index: usize, mode: pv.Mode) void {
+pub fn setupCsc(index: usize, mode: Mode) void {
     const dvp = dvps.sub(Dvps, index);
     const csc = cscs.sub(Cscs, index);
 
@@ -233,7 +233,7 @@ pub fn setupCsc(index: usize, mode: pv.Mode) void {
 }
 
 /// Get whether the RGB output of the mode is limited range.
-inline fn isLimitedRange(mode: pv.Mode) bool {
+inline fn isLimitedRange(mode: Mode) bool {
     return mode.vic > 1;
 }
 
@@ -264,7 +264,7 @@ pub fn recenterFifo(index: usize) Error!void {
 }
 
 /// Enable the video output of HD block?
-pub fn enableVideo(index: usize, mode: pv.Mode) void {
+pub fn enableVideo(index: usize, mode: Mode) void {
     const stride = 4;
 
     hd.modifyIndexed(VidCtl, index, stride, .{
@@ -297,8 +297,8 @@ pub fn enableHdmiMode(index: usize) Error!void {
 }
 
 /// Set the AVI InfoFrame in the packet RAM.
-pub fn setAviPacket(index: usize, mode: pv.Mode) Error!void {
-    const avi = video.Avi{
+pub fn setAviPacket(index: usize, mode: Mode) Error!void {
+    const avi = hdmi.Avi{
         .scan_mode = .underscan,
         .picture_aspect = mode.aspect,
         .active_aspect = .picture,
@@ -309,12 +309,12 @@ pub fn setAviPacket(index: usize, mode: pv.Mode) Error!void {
 
 /// Set the SPD InfoFrame in the packet RAM.
 pub fn setSpdPacket(index: usize) Error!void {
-    const spd = video.Spd.init("Broadcom", "Videocore", .pc);
+    const spd = hdmi.Spd.init("Broadcom", "Videocore", .pc);
     try sendPacket(index, .spd, &spd.pack());
 }
 
 /// Send the InfoFrame via the packet RAM.
-fn sendPacket(index: usize, comptime kind: video.InfoFrameType, data: []const u8) Error!void {
+fn sendPacket(index: usize, comptime kind: hdmi.InfoFrameType, data: []const u8) Error!void {
     var core = cores.sub(Cores, index);
     const packet = packets.sub(Packets, index);
 
@@ -380,7 +380,7 @@ fn writePacketRam(ram: Packets.Element, packet_id: usize, data: []const u8) void
 }
 
 /// Calculate the packet ID for the given InfoFrame type.
-inline fn calcPacketId(packet_type: video.InfoFrameType) usize {
+inline fn calcPacketId(packet_type: hdmi.InfoFrameType) usize {
     return @backingInt(packet_type) - 0x80;
 }
 
@@ -395,7 +395,7 @@ pub fn initScheduler(index: usize) void {
 }
 
 /// Set the timings of the HDMI core based on the given mode.
-pub fn setTimings(index: usize, mode: pv.Mode) void {
+pub fn setTimings(index: usize, mode: Mode) void {
     const core = cores.sub(Cores, index);
     const dvp = dvps.sub(Dvps, index);
 
@@ -445,7 +445,7 @@ pub fn setTimings(index: usize, mode: pv.Mode) void {
 }
 
 /// Initialize and power up the PHY and PLL.
-pub fn initPhy(index: usize, mode: pv.Mode) Error!void {
+pub fn initPhy(index: usize, mode: Mode) Error!void {
     const tmds_rate = @as(u64, mode.clock) * 1000; // to Hz
     const settings = getPhySettings(tmds_rate) orelse return Error.UnsupportedRate;
     const vco = getVco(tmds_rate);
@@ -1044,4 +1044,5 @@ const rtt = common.rtt;
 const DmaAllocator = common.mem.DmaAllocator;
 const props = @import("vcmbox.zig").props;
 const pv = @import("pv.zig");
-const video = dd.video.hdmi;
+const hdmi = dd.video.hdmi;
+const Mode = dd.video.Mode;

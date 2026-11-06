@@ -40,42 +40,6 @@ pub const Error = error{
     NoEncoder,
 };
 
-/// Supported modes.
-const modes = [_]Mode{
-    // CEA-861 1920x1080@60Hz
-    .{
-        .clock = 148_500,
-        .vic = 16,
-        .aspect = .@"16:9",
-        .hsync_pos = true,
-        .vsync_pos = true,
-        .hdisplay = 1920,
-        .hsync_start = 2008,
-        .hsync_end = 2052,
-        .htotal = 2200,
-        .vdisplay = 1080,
-        .vsync_start = 1084,
-        .vsync_end = 1089,
-        .vtotal = 1125,
-    },
-    // VESA DMT / CEA-861 640x480@60Hz
-    .{
-        .clock = 25_175,
-        .vic = 1,
-        .aspect = .@"4:3",
-        .hsync_pos = false,
-        .vsync_pos = false,
-        .hdisplay = 640,
-        .hsync_start = 656,
-        .hsync_end = 752,
-        .htotal = 800,
-        .vdisplay = 480,
-        .vsync_start = 490,
-        .vsync_end = 492,
-        .vtotal = 525,
-    },
-};
-
 /// HW constants of PV0 and PV1.
 const pv_data = [Pvs.len]PvData{
     .{
@@ -110,45 +74,17 @@ const PvData = struct {
     encoder_types: [4]?Encoder,
 };
 
-/// Display mode.
-///
-/// Signal order: active, front porch, sync, back porch.
-pub const Mode = struct {
-    /// Pixel clock in kHz.
-    clock: u32,
-    /// Video Identification Code defined in CTA-861.
-    vic: u8,
-    /// Picture aspect ratio.
-    aspect: video.hdmi.PictureAspect,
+/// Check if the PV fed by the HVS channel can output the mode.
+pub fn supports(chan: usize, mode: Mode) bool {
+    const index = findPv(chan) orelse return false;
+    const ppc = pv_data[index].pixels_per_clock;
 
-    /// Horizontal display size.
-    hdisplay: u16,
-    /// Horizontal sync start.
-    hsync_start: u16,
-    /// Horizontal sync end.
-    hsync_end: u16,
-    /// Horizontal total size, including horizontal border.
-    htotal: u16,
-    /// Polarity of the horizontal sync is positive.
-    hsync_pos: bool,
-
-    /// Vertical display size.
-    vdisplay: u16,
-    /// Vertical sync start.
-    vsync_start: u16,
-    /// Vertical sync end.
-    vsync_end: u16,
-    /// Vertical total size, including vertical border.
-    vtotal: u16,
-    /// Polarity of the vertical sync is positive.
-    vsync_pos: bool,
-};
-
-/// Find the supported mode for the given resolution.
-pub fn findMode(width: usize, height: usize) ?Mode {
-    for (modes) |m| {
-        if (m.hdisplay == width and m.vdisplay == height) return m;
-    } else return null;
+    return mode.isValid() and
+        !mode.interlaced and
+        mode.hdisplay % ppc == 0 and
+        (mode.hsync_start - mode.hdisplay) % ppc == 0 and // front porch
+        (mode.hsync_end - mode.hsync_start) % ppc == 0 and // sync pulse width
+        (mode.htotal - mode.hsync_end) % ppc == 0; // back porch
 }
 
 /// Configure the PV fed by the given HVS channel to output to the encoder.
@@ -379,6 +315,6 @@ const std = @import("std");
 const log = std.log.scoped(.pv);
 const common = @import("common");
 const dd = @import("dd");
-const video = dd.video;
+const Mode = dd.video.Mode;
 const rtt = common.rtt;
 const mmio = common.mmio;

@@ -76,8 +76,8 @@ pub const Base = struct {
         return self.layout.extension_count;
     }
 
-    /// Get the detailed timings iterator.
-    pub fn timings(self: Base) TimingIterator {
+    /// Get the modes of the detailed timings.
+    pub fn modes(self: Base) ModeIterator {
         return .{ .bytes = std.mem.asBytes(&self.layout.descriptors) };
     }
 };
@@ -128,70 +128,42 @@ const BaseLayout = extern struct {
     }
 };
 
-/// Detailed timing descriptor representation.
+/// Parse the DTD to construct a video mode.
 ///
-/// Signal order: active, front porch, sync, back porch.
-pub const Timing = struct {
-    /// Pixel clock in kHz.
-    clock: u32,
-    /// Horizontal display size.
-    hdisplay: u16,
-    /// Horizontal sync start.
-    hsync_start: u16,
-    /// Horizontal sync end.
-    hsync_end: u16,
-    /// Horizontal total size.
-    htotal: u16,
-    /// Polarity of the horizontal sync is positive.
-    hsync_pos: bool,
-    /// Vertical display size.
-    vdisplay: u16,
-    /// Vertical sync start.
-    vsync_start: u16,
-    /// Vertical sync end.
-    vsync_end: u16,
-    /// Vertical total size.
-    vtotal: u16,
-    /// Polarity of the vertical sync is positive.
-    vsync_pos: bool,
-    /// Interlaced.
-    interlaced: bool,
+/// Returns null if the descriptor is not a DTD.
+fn parseDtd(bytes: *const [DtdLayout.size]u8) ?Mode {
+    const d: *align(1) const DtdLayout = @ptrCast(bytes);
+    if (d.pixel_clock == 0) return null;
 
-    /// Parse the DTD to construct a timing representation.
-    ///
-    /// Returns null if the descriptor is not a DTD.
-    fn parse(bytes: *const [DtdLayout.size]u8) ?Timing {
-        const d: *align(1) const DtdLayout = @ptrCast(bytes);
-        if (d.pixel_clock == 0) return null;
+    const hactive = join(d.hactive_hi, d.hactive_lo);
+    const hsync_offset = join(d.hsync_offset_hi, d.hsync_offset_lo);
+    const hsync_width = join(d.hsync_width_hi, d.hsync_width_lo);
+    const vactive = join(d.vactive_hi, d.vactive_lo);
+    const vsync_offset = join(d.vsync_offset_hi, d.vsync_offset_lo);
+    const vsync_width = join(d.vsync_width_hi, d.vsync_width_lo);
 
-        const hactive = join(d.hactive_hi, d.hactive_lo);
-        const hsync_offset = join(d.hsync_offset_hi, d.hsync_offset_lo);
-        const hsync_width = join(d.hsync_width_hi, d.hsync_width_lo);
-        const vactive = join(d.vactive_hi, d.vactive_lo);
-        const vsync_offset = join(d.vsync_offset_hi, d.vsync_offset_lo);
-        const vsync_width = join(d.vsync_width_hi, d.vsync_width_lo);
+    return .{
+        .clock = @as(u32, d.pixel_clock) * 10,
+        .vic = 0,
+        .aspect = .none,
+        .hdisplay = hactive,
+        .hsync_start = hactive + hsync_offset,
+        .hsync_end = hactive + hsync_offset + hsync_width,
+        .htotal = hactive + join(d.hblank_hi, d.hblank_lo),
+        .hsync_pos = d.hsync_pos,
+        .vdisplay = vactive,
+        .vsync_start = vactive + vsync_offset,
+        .vsync_end = vactive + vsync_offset + vsync_width,
+        .vtotal = vactive + join(d.vblank_hi, d.vblank_lo),
+        .vsync_pos = d.vsync_pos,
+        .interlaced = d.interlaced,
+    };
+}
 
-        return .{
-            .clock = @as(u32, d.pixel_clock) * 10,
-            .hdisplay = hactive,
-            .hsync_start = hactive + hsync_offset,
-            .hsync_end = hactive + hsync_offset + hsync_width,
-            .htotal = hactive + join(d.hblank_hi, d.hblank_lo),
-            .hsync_pos = d.hsync_pos,
-            .vdisplay = vactive,
-            .vsync_start = vactive + vsync_offset,
-            .vsync_end = vactive + vsync_offset + vsync_width,
-            .vtotal = vactive + join(d.vblank_hi, d.vblank_lo),
-            .vsync_pos = d.vsync_pos,
-            .interlaced = d.interlaced,
-        };
-    }
-
-    /// Join the upper bits and the lower 8 bits.
-    inline fn join(hi: anytype, lo: u8) u16 {
-        return (@as(u16, hi) << @bitSizeOf(u8)) | lo;
-    }
-};
+/// Join the upper bits and the lower 8 bits.
+inline fn join(hi: anytype, lo: u8) u16 {
+    return (@as(u16, hi) << @bitSizeOf(u8)) | lo;
+}
 
 /// Detailed timing descriptor layout.
 const DtdLayout = packed struct(u144) {
@@ -259,8 +231,8 @@ const DtdLayout = packed struct(u144) {
     interlaced: bool,
 };
 
-/// Iterator over the detailed timings.
-pub const TimingIterator = struct {
+/// Iterator over the video mode derived from DTDs.
+pub const ModeIterator = struct {
     /// Bytes of the descriptors.
     bytes: []const u8,
     /// Current position.
@@ -269,11 +241,11 @@ pub const TimingIterator = struct {
     /// Get the next detailed timing.
     ///
     /// Descriptors other than DTD are skipped.
-    pub fn next(self: *TimingIterator) ?Timing {
+    pub fn next(self: *ModeIterator) ?Mode {
         while (self.pos + DtdLayout.size <= self.bytes.len) {
             const d = self.bytes[self.pos..][0..DtdLayout.size];
             self.pos += DtdLayout.size;
-            if (Timing.parse(d)) |t| return t;
+            if (parseDtd(d)) |m| return m;
         } else return null;
     }
 };
@@ -410,21 +382,26 @@ pub const Cta = struct {
         return .{ .bytes = self.layout.data[0..self.dtdStart()] };
     }
 
-    /// Get the detailed timings.
-    pub fn timings(self: Cta) TimingIterator {
+    /// Get the modes of the detailed timings.
+    pub fn modes(self: Cta) ModeIterator {
         return .{ .bytes = self.layout.data[self.dtdStart()..] };
     }
 
     /// Check if the sink supports the given Video Identification Code.
     pub fn hasVic(self: Cta, vic: u8) bool {
+        return self.findSvd(vic) != null;
+    }
+
+    /// Find the SVD of the given Video Identification Code.
+    pub fn findSvd(self: Cta, vic: u8) ?Svd {
         var it = self.dataBlocks();
         while (it.next()) |b| {
             if (b.tag != .video) continue;
             for (b.payload) |code| {
                 const svd: Svd = @bitCast(code);
-                if (svd.vic() == vic) return true;
+                if (svd.vic() == vic) return svd;
             }
-        } else return false;
+        } else return null;
     }
 
     /// Check if the sink is an HDMI sink.
@@ -514,7 +491,7 @@ test "parse rejects the block of the other kind" {
 }
 
 test "base block detailed timings" {
-    var it = Base.parse(&test_base).?.timings();
+    var it = Base.parse(&test_base).?.modes();
     const t = it.next().?;
     try testing.expectEqual(165_360, t.clock);
     try testing.expectEqual(1920, t.hdisplay);
@@ -526,7 +503,7 @@ test "base block detailed timings" {
 
 test "CTA detailed timings" {
     const cta = Cta.parse(&test_cta).?;
-    var it = cta.timings();
+    var it = cta.modes();
     const t = it.next().?;
     try testing.expectEqual(148_500, t.clock);
     try testing.expectEqual(1920, t.hdisplay);
@@ -558,3 +535,4 @@ const std = @import("std");
 const builtin = @import("builtin");
 const dd = @import("dd");
 const i2c = dd.i2c;
+const Mode = @import("Mode.zig");

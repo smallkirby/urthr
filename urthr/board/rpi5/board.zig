@@ -195,8 +195,11 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
     }
 
     // Framebuffer.
+    // TODO: The output is fixed to HDMI1.
     log.info("Initializing HVS.", .{});
     outer: {
+        const chan_index = 1;
+
         const hvsbase = try urd.mem.phys.reserveAndRemap(
             "HVS",
             memmap.hvs.start,
@@ -206,18 +209,31 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
         );
         rdd.hvs.setBase(hvsbase, urd.mem.dma.interface(0));
 
+        const ddc = try urd.mem.phys.reserveAndRemap(
+            "HDMI DDC",
+            memmap.hdmi_ddc.start,
+            memmap.hdmi_ddc.size(),
+            null,
+            .device,
+        );
+        var bsc = dd.i2c.BrcmStb.init(
+            ddc + memmap.hdmi1_ddc_offset,
+            .hz_97500,
+        );
+
         rdd.hvs.init() catch |err| {
             log.err("HVS initialization failed: {t}", .{err});
             break :outer;
         };
 
-        // TODO: The output is fixed to 1920x1080 on HDMI1.
-        const mode = rdd.pv.findMode(1920, 1080) orelse {
+        const mode = selectVideoMode(chan_index, bsc.adapter()) orelse {
             log.err("No supported display mode", .{});
             break :outer;
         };
+        log.info("Display mode: {d}x{d} (VIC#{d})", .{ mode.hdisplay, mode.vdisplay, mode.vic });
+
         const chan = rdd.hvs.Channel{
-            .index = 1,
+            .index = chan_index,
             .width = mode.hdisplay,
             .height = mode.vdisplay,
         };
@@ -620,6 +636,68 @@ const console = struct {
 // Internals
 // =============================================================
 
+/// Select the display mode using the information from the EDID.
+///
+/// The native mode is preferred, then the larger one is selected.
+/// If no candidate mode is found, falls back to VIC#16.
+fn selectVideoMode(chan: usize, ddc: dd.i2c.Adapter) ?Mode {
+    const fallback = Mode.fromVic(16) orelse unreachable;
+
+    // Read CTA extension block through DDC.
+    var block: [edid.block_size]u8 = undefined;
+    const cta = readCta(ddc, &block) orelse return fallback;
+    log.debug("EDID: chan={d}, hdmi={}", .{ chan, cta.isHdmi() });
+
+    // Iterate over all modes supported both by Urthr, PV, and display.
+    var best: ?Mode = null;
+    var best_native = false;
+    for (Mode.cta_modes) |cand| {
+        if (!rdd.pv.supports(chan, cand)) {
+            continue; // PV does not support
+        }
+        const svd = cta.findSvd(cand.vic) orelse continue;
+        const native = svd.isNative();
+
+        if (best) |b| {
+            // Prefer native modes over non-native ones.
+            if (best_native and !native) continue;
+            // Prefer larger modes.
+            if (best_native == native and cand.pixels() <= b.pixels()) continue;
+        }
+        best = cand;
+        best_native = native;
+    }
+
+    return best orelse {
+        log.warn("EDID has no supported mode", .{});
+        return fallback;
+    };
+}
+
+/// Read the first CTA-861 extension block as bytes.
+fn readCta(ddc: dd.i2c.Adapter, block: *[dd.video.edid.block_size]u8) ?edid.Cta {
+    const base_block = edid.readBlockI2c(ddc, 0) catch |err| {
+        log.warn("EDID read failed: {t}", .{err});
+        return null;
+    };
+    const base = edid.Base.parse(&base_block) orelse {
+        log.warn("EDID base block is invalid", .{});
+        return null;
+    };
+
+    var index: usize = 1;
+    while (index <= base.extensionCount()) : (index += 1) {
+        block.* = edid.readBlockI2c(ddc, index) catch |err| {
+            log.warn("EDID extension block#{d} read failed: {t}", .{ index, err });
+            return null;
+        };
+        if (edid.Cta.parse(block)) |cta| return cta;
+    } else {
+        log.warn("No CTA-861 extension block found", .{});
+        return null;
+    }
+}
+
 /// DMA channel used for memcpy.
 const memcpy_dma_chan = 6;
 
@@ -642,6 +720,8 @@ const FbConsole = common.FbConsole;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const dd = @import("dd");
+const edid = dd.video.edid;
+const Mode = dd.video.Mode;
 const rdd = @import("dd.zig");
 const urd = @import("urthr");
 const net = urd.net;
