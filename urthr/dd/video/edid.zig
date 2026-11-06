@@ -130,10 +130,17 @@ const BaseLayout = extern struct {
 
 /// Parse the DTD to construct a video mode.
 ///
-/// Returns null if the descriptor is not a DTD.
+/// Returns null if the descriptor is not a DTD or the descriptor is not supported.
 fn parseDtd(bytes: *const [DtdLayout.size]u8) ?Mode {
     const d: *align(1) const DtdLayout = @ptrCast(bytes);
-    if (d.pixel_clock == 0) return null;
+    // Not valid descriptor.
+    if (d.pixel_clock == 0) {
+        return null;
+    }
+    // Digital separate sync is not supported.
+    if (d.sync_type != .digital_separate) {
+        return null;
+    }
 
     const hactive = join(d.hactive_hi, d.hactive_lo);
     const hsync_offset = join(d.hsync_offset_hi, d.hsync_offset_lo);
@@ -142,7 +149,7 @@ fn parseDtd(bytes: *const [DtdLayout.size]u8) ?Mode {
     const vsync_offset = join(d.vsync_offset_hi, d.vsync_offset_lo);
     const vsync_width = join(d.vsync_width_hi, d.vsync_width_lo);
 
-    return .{
+    var mode: Mode = .{
         .clock = @as(u32, d.pixel_clock) * 10,
         .vic = 0,
         .aspect = .none,
@@ -158,6 +165,8 @@ fn parseDtd(bytes: *const [DtdLayout.size]u8) ?Mode {
         .vsync_pos = d.vsync_pos,
         .interlaced = d.interlaced,
     };
+    mode.fillCtaInfo();
+    return mode;
 }
 
 /// Join the upper bits and the lower 8 bits.
@@ -219,12 +228,25 @@ const DtdLayout = packed struct(u144) {
     vborder: u8,
     /// Stereo mode lower bits.
     stereo_lo: bool,
+    /// Polarity of the horizontal sync is positive.
     ///
+    /// Valid only for the digital separate sync.
     hsync_pos: bool,
+    /// Polarity of the vertical sync is positive.
     ///
+    /// Valid only for the digital separate sync.
     vsync_pos: bool,
-    ///
-    sync_type: u2,
+    /// Sync signal type.
+    sync_type: enum(u2) {
+        /// Analogue composite sync.
+        analog_composite = 0,
+        /// Analogue sync with both polarities.
+        bipolar_analog_composite = 1,
+        /// Digital sync with horizontal and vertical signals in the same line.
+        digital_composite = 2,
+        /// Digital sync with separate horizontal and vertical signals.
+        digital_separate = 3,
+    },
     /// Stereo mode upper bits.
     stereo_hi: u2,
     /// Interlaced.

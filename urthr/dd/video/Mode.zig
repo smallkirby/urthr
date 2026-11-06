@@ -101,6 +101,19 @@ pub fn fromVic(vic: u8) ?Self {
     } else return null;
 }
 
+/// Fill the given mode with known field values defined in CTA-861.
+///
+/// nop if no pre-defined mode matches.
+pub fn fillCtaInfo(self: *Self) void {
+    for (cta_modes) |m| {
+        if (!self.hasSameTimings(m)) continue;
+
+        self.vic = m.vic;
+        self.aspect = m.aspect;
+        return;
+    }
+}
+
 /// Check if the timings are in the order of active, front porch, sync, and back porch.
 pub fn isValid(self: Self) bool {
     return self.clock != 0 and
@@ -113,6 +126,26 @@ pub fn isValid(self: Self) bool {
 /// Get the number of active pixels.
 pub fn pixels(self: Self) usize {
     return @as(usize, self.hdisplay) * self.vdisplay;
+}
+
+/// Check if the two timings are the same, ignoring non timing fields.
+fn hasSameTimings(self: Self, other: Self) bool {
+    // Resolution of the pixel clock of the DTD in kHz.
+    const dtd_clock_resolution = 10;
+
+    const clock_diff = @abs(@as(i64, self.clock) - @as(i64, other.clock));
+    return clock_diff <= dtd_clock_resolution and
+        self.hdisplay == other.hdisplay and
+        self.hsync_start == other.hsync_start and
+        self.hsync_end == other.hsync_end and
+        self.htotal == other.htotal and
+        self.hsync_pos == other.hsync_pos and
+        self.vdisplay == other.vdisplay and
+        self.vsync_start == other.vsync_start and
+        self.vsync_end == other.vsync_end and
+        self.vtotal == other.vtotal and
+        self.vsync_pos == other.vsync_pos and
+        self.interlaced == other.interlaced;
 }
 
 // =============================================================

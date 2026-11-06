@@ -636,24 +636,64 @@ const console = struct {
 // Internals
 // =============================================================
 
+// =============================================================
+// Video
+
+/// EDID blocks of the sink.
+const Sink = struct {
+    /// Base block.
+    base: edid.Base,
+    /// The first CTA-861 extension block.
+    cta: ?edid.Cta,
+};
+
 /// Select the display mode using the information from the EDID.
 ///
-/// The native mode is preferred, then the larger one is selected.
+/// The modes in the VIC list of the CTA-861 block are preferred.
+/// Among them, the native mode is preferred, then the larger one is selected.
+/// If there is no such mode, the first usable mode defined by the DTDs is selected.
+///
 /// If no candidate mode is found, falls back to VIC#16.
 fn selectVideoMode(chan: usize, ddc: dd.i2c.Adapter) ?Mode {
     const fallback = Mode.fromVic(16) orelse unreachable;
 
-    // Read CTA extension block through DDC.
-    var block: [edid.block_size]u8 = undefined;
-    const cta = readCta(ddc, &block) orelse return fallback;
-    log.debug("EDID: chan={d}, hdmi={}", .{ chan, cta.isHdmi() });
+    // Read EDID base block and the first CTA-861 extension block.
+    var base_block: [edid.block_size]u8 = undefined;
+    var cta_block: [edid.block_size]u8 = undefined;
+    const sink = readEdid(
+        ddc,
+        &base_block,
+        &cta_block,
+    ) orelse return fallback;
 
-    // Iterate over all modes supported both by Urthr, PV, and display.
+    // Use modes both in the VIC list and Urthr's pre-defined table.
+    if (sink.cta) |cta| {
+        if (selectByVic(chan, cta)) |mode| return mode;
+    }
+
+    // Use modes defined by the DTDs.
+    var modes = sink.base.modes();
+    if (firstUsable(chan, &modes)) |mode| {
+        return mode;
+    }
+
+    // Use modes defined in the DTDs (not in Urthr's pre-defined table)
+    if (sink.cta) |cta| {
+        var cta_modes = cta.modes();
+        if (firstUsable(chan, &cta_modes)) |mode| return mode;
+    }
+
+    log.warn("EDID has no supported mode", .{});
+    return fallback;
+}
+
+/// Select the best mode from the modes both in the VIC list and Urthr's table.
+fn selectByVic(chan: usize, cta: edid.Cta) ?Mode {
     var best: ?Mode = null;
     var best_native = false;
     for (Mode.cta_modes) |cand| {
-        if (!rdd.pv.supports(chan, cand)) {
-            continue; // PV does not support
+        if (!canOutput(chan, cand)) {
+            continue; // PV or HDMI does not support
         }
         const svd = cta.findSvd(cand.vic) orelse continue;
         const native = svd.isNative();
@@ -668,35 +708,56 @@ fn selectVideoMode(chan: usize, ddc: dd.i2c.Adapter) ?Mode {
         best_native = native;
     }
 
-    return best orelse {
-        log.warn("EDID has no supported mode", .{});
-        return fallback;
-    };
+    return best;
 }
 
-/// Read the first CTA-861 extension block as bytes.
-fn readCta(ddc: dd.i2c.Adapter, block: *[dd.video.edid.block_size]u8) ?edid.Cta {
-    const base_block = edid.readBlockI2c(ddc, 0) catch |err| {
+/// Get the first mode the PV and HDMI can output from the DTDs.
+fn firstUsable(chan: usize, it: *edid.ModeIterator) ?Mode {
+    while (it.next()) |mode| {
+        if (canOutput(chan, mode)) return mode;
+    } else return null;
+}
+
+/// Check if both the PV and HDMI can output the mode.
+fn canOutput(chan: usize, mode: Mode) bool {
+    return rdd.pv.supports(chan, mode) and rdd.hdmi.supports(mode);
+}
+
+/// Read the base block and the first CTA-861 extension block into the buffers.
+fn readEdid(
+    ddc: dd.i2c.Adapter,
+    base_block: *[edid.block_size]u8,
+    cta_block: *[edid.block_size]u8,
+) ?Sink {
+    // Read the EDID base block.
+    base_block.* = edid.readBlockI2c(ddc, 0) catch |err| {
         log.warn("EDID read failed: {t}", .{err});
         return null;
     };
-    const base = edid.Base.parse(&base_block) orelse {
+    const base = edid.Base.parse(base_block) orelse {
         log.warn("EDID base block is invalid", .{});
         return null;
     };
 
+    // Find the first CTA-861 extension block.
+    var cta: ?edid.Cta = null;
     var index: usize = 1;
-    while (index <= base.extensionCount()) : (index += 1) {
-        block.* = edid.readBlockI2c(ddc, index) catch |err| {
+    while (index <= base.extensionCount() and cta == null) : (index += 1) {
+        cta_block.* = edid.readBlockI2c(ddc, index) catch |err| {
             log.warn("EDID extension block#{d} read failed: {t}", .{ index, err });
-            return null;
+            break;
         };
-        if (edid.Cta.parse(block)) |cta| return cta;
-    } else {
-        log.warn("No CTA-861 extension block found", .{});
-        return null;
+        cta = edid.Cta.parse(cta_block);
     }
+    if (cta == null) {
+        log.warn("No CTA-861 extension block found", .{});
+    }
+
+    return .{ .base = base, .cta = cta };
 }
+
+// =============================================================
+// DMA Engine
 
 /// DMA channel used for memcpy.
 const memcpy_dma_chan = 6;

@@ -146,6 +146,11 @@ pub fn reset(index: usize) void {
     dvp.modify(ClockStop, .{ .pixel = true });
 }
 
+/// Check if the HDMI can output the mode.
+pub fn supports(mode: Mode) bool {
+    return getPhySettings(@as(u64, mode.clock) * 1000) != null;
+}
+
 /// Set the rate of the clocks used by the HDMI.
 pub fn initClocks(mode: Mode) Error!void {
     const tmds_rate: u32 = mode.clock * 1000; // to kHz
