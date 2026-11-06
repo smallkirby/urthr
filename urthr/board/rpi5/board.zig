@@ -649,9 +649,9 @@ const Sink = struct {
 
 /// Select the display mode using the information from the EDID.
 ///
-/// The modes in the VIC list of the CTA-861 block are preferred.
-/// Among them, the native mode is preferred, then the larger one is selected.
-/// If there is no such mode, the first usable mode defined by the DTDs is selected.
+/// The preferred timing is used if usable.
+/// Otherwise, the best one is selected from all the usable modes
+/// among the VIC list in the CTA-861 block, and the DTDs in both blocks.
 ///
 /// If no candidate mode is found, falls back to VIC#16.
 fn selectVideoMode(chan: usize, ddc: dd.i2c.Adapter) ?Mode {
@@ -666,56 +666,48 @@ fn selectVideoMode(chan: usize, ddc: dd.i2c.Adapter) ?Mode {
         &cta_block,
     ) orelse return fallback;
 
-    // Use modes both in the VIC list and Urthr's pre-defined table.
-    if (sink.cta) |cta| {
-        if (selectByVic(chan, cta)) |mode| return mode;
+    // Use the preferred timing in the base block.
+    var base_iter = sink.base.modes();
+    if (sink.base.hasPreferredTiming()) {
+        if (base_iter.next()) |mode| {
+            if (canOutput(chan, mode)) return mode;
+        }
     }
 
-    // Use modes defined by the DTDs.
-    var modes = sink.base.modes();
-    if (firstUsable(chan, &modes)) |mode| {
-        return mode;
-    }
-
-    // Use modes defined in the DTDs (not in Urthr's pre-defined table)
-    if (sink.cta) |cta| {
-        var cta_modes = cta.modes();
-        if (firstUsable(chan, &cta_modes)) |mode| return mode;
-    }
-
-    log.warn("EDID has no supported mode", .{});
-    return fallback;
-}
-
-/// Select the best mode from the modes both in the VIC list and Urthr's table.
-fn selectByVic(chan: usize, cta: edid.Cta) ?Mode {
+    // Select the best mode from the remaining modes in the base block.
     var best: ?Mode = null;
-    var best_native = false;
-    for (Mode.cta_modes) |cand| {
-        if (!canOutput(chan, cand)) {
-            continue; // PV or HDMI does not support
+    updateBestAll(chan, &best, &base_iter);
+    // Select the best mode from the VIC list and the pre-defined table.
+    if (sink.cta) |cta| {
+        for (Mode.cta_modes) |mode| {
+            if (cta.hasVic(mode.vic)) {
+                updateBest(chan, &best, mode);
+            }
         }
-        const svd = cta.findSvd(cand.vic) orelse continue;
-        const native = svd.isNative();
-
-        if (best) |b| {
-            // Prefer native modes over non-native ones.
-            if (best_native and !native) continue;
-            // Prefer larger modes.
-            if (best_native == native and cand.pixels() <= b.pixels()) continue;
-        }
-        best = cand;
-        best_native = native;
+        var cta_modes = cta.modes();
+        updateBestAll(chan, &best, &cta_modes);
     }
 
-    return best;
+    return best orelse {
+        log.warn("EDID has no supported mode", .{});
+        return fallback;
+    };
 }
 
-/// Get the first mode the PV and HDMI can output from the DTDs.
-fn firstUsable(chan: usize, it: *edid.ModeIterator) ?Mode {
+/// Consider all the remaining modes of the iterator.
+fn updateBestAll(chan: usize, best: *?Mode, it: *edid.ModeIterator) void {
     while (it.next()) |mode| {
-        if (canOutput(chan, mode)) return mode;
-    } else return null;
+        updateBest(chan, best, mode);
+    }
+}
+
+/// Update the best mode if the candidate is usable and better.
+fn updateBest(chan: usize, best: *?Mode, cand: Mode) void {
+    if (!canOutput(chan, cand)) return;
+    if (best.*) |b| {
+        if (!cand.isBetterThan(b)) return;
+    }
+    best.* = cand;
 }
 
 /// Check if both the PV and HDMI can output the mode.

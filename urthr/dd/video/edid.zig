@@ -80,6 +80,17 @@ pub const Base = struct {
     pub fn modes(self: Base) ModeIterator {
         return .{ .bytes = std.mem.asBytes(&self.layout.descriptors) };
     }
+
+    /// Check if the first DTD is the preferred timing.
+    ///
+    /// In EDID 1.4 or later, the first one is always preferred.
+    /// If the version is earlier than 1.4, preferred only if the feature flag is set.
+    pub fn hasPreferredTiming(self: Base) bool {
+        const feature_preferred_timing = 1 << 1;
+        const l = self.layout;
+        return (l.version == 1 and l.revision >= 4) or
+            l.features & feature_preferred_timing != 0;
+    }
 };
 
 /// Layout of the EDID base block.

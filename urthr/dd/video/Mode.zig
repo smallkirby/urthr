@@ -128,6 +128,29 @@ pub fn pixels(self: Self) usize {
     return @as(usize, self.hdisplay) * self.vdisplay;
 }
 
+/// Get the vertical refresh rate in Hz.
+pub fn refreshRate(self: Self) u32 {
+    const total = @as(u64, self.htotal) * self.vtotal;
+    rtt.expect(total != 0);
+
+    const pixel_clock = @as(u64, self.clock) * 1000;
+    const hz = (pixel_clock + total / 2) / total;
+    return @intCast(hz);
+}
+
+/// Check if the mode is more favorable than the other.
+///
+/// Prefers larger resolution, higher refresh rate, and then higher pixel clock.
+pub fn isBetterThan(self: Self, other: Self) bool {
+    if (self.pixels() != other.pixels()) {
+        return self.pixels() > other.pixels();
+    }
+    if (self.refreshRate() != other.refreshRate()) {
+        return self.refreshRate() > other.refreshRate();
+    }
+    return self.clock > other.clock;
+}
+
 /// Check if the two timings are the same, ignoring non timing fields.
 fn hasSameTimings(self: Self, other: Self) bool {
     // Resolution of the pixel clock of the DTD in kHz.
@@ -152,4 +175,6 @@ fn hasSameTimings(self: Self, other: Self) bool {
 // Imports
 // =============================================================
 
+const common = @import("common");
+const rtt = common.rtt;
 const hdmi = @import("hdmi.zig");
