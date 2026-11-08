@@ -115,6 +115,14 @@ pub const hdmi0_ddc_offset = 0x200;
 /// Offset of the DDC controller of HDMI1.
 pub const hdmi1_ddc_offset = 0x280;
 
+/// L2 interrupt controller.
+pub const l2intr = Range{
+    .start = 0x0010_7D51_0000,
+    .end = 0x0010_7D51_1000,
+};
+/// Offset of the registers of the L2 interrupt controller.
+pub const l2intr_offset = 0x600;
+
 /// Hardware Video Scaler.
 pub const hvs = Range{
     .start = 0x0010_7C58_0000,

@@ -4,6 +4,7 @@ pub const ether = @import("dd/ether.zig");
 pub const gpio = @import("dd/gpio.zig");
 pub const hdmi = @import("dd/hdmi.zig");
 pub const hvs = @import("dd/hvs.zig");
+pub const l2intr = @import("dd/l2intr.zig");
 pub const pcie = @import("dd/pcie.zig");
 pub const pm = @import("dd/pm.zig");
 pub const pv = @import("dd/pv.zig");

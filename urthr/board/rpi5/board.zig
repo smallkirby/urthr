@@ -256,6 +256,18 @@ pub fn initPeripherals1() (urd.mem.Error || net.Error)!void {
             );
             rdd.hdmi.setBase(hdmibase, hdbase, urd.mem.dma.interface(0));
             rdd.hdmi.reset(chan.index);
+
+            const l2base = try urd.mem.phys.reserveAndRemap(
+                "L2 interrupt",
+                memmap.l2intr.start,
+                memmap.l2intr.size(),
+                null,
+                .device,
+            );
+            rdd.l2intr.setBase(l2base + memmap.l2intr_offset);
+            initHotplug() catch |err| {
+                log.err("HDMI hotplug detection setup failed: {t}", .{err});
+            };
         }
 
         // Install the display list of the framebuffer.
@@ -639,6 +651,9 @@ const console = struct {
 // =============================================================
 // Video
 
+/// HDMI index of the output.
+const hdmi_index = 1;
+
 /// EDID blocks of the sink.
 const Sink = struct {
     /// Base block.
@@ -646,6 +661,48 @@ const Sink = struct {
     /// The first CTA-861 extension block.
     cta: ?edid.Cta,
 };
+
+/// Enable the HPD interrupts of the HDMI.
+fn initHotplug() urd.exception.Error!void {
+    rtt.expect(hdmi_index == 0 or hdmi_index == 1);
+
+    try urd.exception.setHandler(rdd.l2intr.intid, .{
+        .function = handleHotplug,
+        .ctx = null,
+    });
+
+    rdd.l2intr.enable(hdmiHpdConnected(hdmi_index));
+    rdd.l2intr.enable(hdmiHpdRemoved(hdmi_index));
+    arch.gicv2.setTrigger(rdd.l2intr.intid, .level);
+    arch.gicv2.enableIrq(rdd.l2intr.intid);
+}
+
+/// Interrupt handler of the HDMI hotplug.
+fn handleHotplug(_: urd.exception.Vector, _: ?*anyopaque) void {
+    if (rdd.l2intr.isPending(hdmiHpdConnected(hdmi_index))) {
+        rdd.l2intr.clear(hdmiHpdConnected(hdmi_index));
+        log.debug("HDMI{d} hotplug: connected", .{hdmi_index});
+    }
+    if (rdd.l2intr.isPending(hdmiHpdRemoved(hdmi_index))) {
+        rdd.l2intr.clear(hdmiHpdRemoved(hdmi_index));
+        log.debug("HDMI{d} hotplug: removed", .{hdmi_index});
+    }
+}
+
+inline fn hdmiHpdConnected(comptime chan: usize) rdd.l2intr.Irq {
+    return switch (chan) {
+        0 => .hdmi0_hpd_connected,
+        1 => .hdmi1_hpd_connected,
+        else => unreachable,
+    };
+}
+inline fn hdmiHpdRemoved(comptime chan: usize) rdd.l2intr.Irq {
+    return switch (chan) {
+        0 => .hdmi0_hpd_removed,
+        1 => .hdmi1_hpd_removed,
+        else => unreachable,
+    };
+}
 
 /// Select the display mode using the information from the EDID.
 ///
@@ -768,6 +825,7 @@ const log = std.log.scoped(.rpi5);
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
+const rtt = common.rtt;
 const Console = common.Console;
 const FbConsole = common.FbConsole;
 const IoAllocator = common.mem.IoAllocator;

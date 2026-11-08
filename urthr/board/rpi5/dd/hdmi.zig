@@ -82,6 +82,7 @@ const CoreRegs = mmio.Module(.{ .size = u32 }, &.{
     .{ 0x18C, DeepColorConfig1 },
     .{ 0x194, GcpConfig },
     .{ 0x198, GcpWord1 },
+    .{ 0x1C8, Hotplug },
 });
 const Cores = mmio.Array(CoreRegs, num_hdmi, 0x5000);
 
@@ -144,6 +145,11 @@ pub fn reset(index: usize) void {
     const dvp = dvps.sub(Dvps, index);
     hd.write(DvpCtl, DvpCtl{ .value = 0 });
     dvp.modify(ClockStop, .{ .pixel = true });
+}
+
+/// Check if a sink is connected to the HDMI.
+pub fn isConnected(index: usize) bool {
+    return cores.sub(Cores, index).read(Hotplug).connected;
 }
 
 /// Check if the HDMI can output the mode.
@@ -948,6 +954,13 @@ const VertA0 = packed struct(u32) { value: u32 };
 const VertA1 = packed struct(u32) { value: u32 };
 const VertB0 = packed struct(u32) { value: u32 };
 const VertB1 = packed struct(u32) { value: u32 };
+
+const Hotplug = packed struct(u32) {
+    /// Hot plug detected.
+    connected: bool,
+    /// Not used.
+    _1: u31 = 0,
+};
 
 // =============================================================
 // RM
