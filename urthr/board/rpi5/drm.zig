@@ -110,6 +110,9 @@ pub fn init() urd.mem.Error!void {
         urd.console.addBackend(fbcon.interface()) catch |err| {
             log.warn("failed to add console backend: {t}", .{err});
         };
+        urd.fb.addBackend(fb) catch |err| {
+            log.warn("failed to add framebuffer backend: {t}", .{err});
+        };
     }
 }
 
