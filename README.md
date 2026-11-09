@@ -41,22 +41,25 @@ For the supported features on each board, see [Features](#features).
 | Device Driver | PL011 UART | o | o | o | - |
 | | 16550 UART | - | - | - | o |
 | | SDHC | o | x | x | x |
-| | xHCI | o | x | o | x |
-| | PCIe | o | x | o | x |
+| | xHCI | o | x | o | o |
+| | PCIe | o | x | o | o |
 | | virtio block | - | o | o | o |
 | | virtio rng | - | o | o | - |
 | | virtio net | - | - | - | o |
+| | virtio gpu | - | - | - | o |
 | Device | Cadence Gigabit Ethernet MAC | o | - | - | - |
 | | DMA | o | o | - | x |
 | | VideoCore framebuffer | o | o | - | - |
 | | Broadcom STB PCIe Controller | o | - | - | - |
 | | Power Management | o | o | o | o |
-| | RP1 Sourthbridge | o | - | - | - |
+| | RP1 Southbridge | o | - | - | - |
+| | VC4 DRM (HVS / PixelValve / HDMI HPD) | o | - | - | - |
+| | BRCM STB BSC I2C | o | - | - | - |
 | Arch | GICv2 | o | o | - | - |
 | | GICv3 | - | - | o | - |
 | | SMP | o | o | o | o |
 | | PSCI | o | - | o | - |
-| | MSI-X | o | x | o | x |
+| | MSI-X | o | x | o | o |
 | Networking | IP | o | x | x | o |
 | | TCP | o | x | x | o |
 | | UDP | o | x | x | o |
