@@ -29,6 +29,7 @@ const Pvs = mmio.Array(PvRegs, 2, 0x1000);
 /// Set the base address of PVs.
 pub fn setBase(base: usize) void {
     pvs.setBase(base);
+    pvs.provideTimer(arch.timer.createTimer());
 }
 
 // =============================================================
@@ -164,6 +165,27 @@ pub fn enable(chan: usize) Error!void {
 pub fn enableVideo(chan: usize) Error!void {
     const index = findPv(chan) orelse return Error.NoPixelValve;
     pvs.sub(Pvs, index).modify(VControl, .{ .viden = true });
+}
+
+/// Stop the video output of the PV fed by the given HVS channel.
+pub fn disableVideo(chan: usize) Error!void {
+    const index = findPv(chan) orelse return Error.NoPixelValve;
+    var pv = pvs.sub(Pvs, index);
+
+    pv.modify(VControl, .{ .viden = false });
+    if (!pv.tryWaitFor(VControl, .{ .viden = false }, .ms(1))) {
+        log.warn("Timeout waiting for the PV video to stop", .{});
+    }
+}
+
+/// Disable the PV fed by the given HVS channel and flush its FIFO.
+pub fn reset(chan: usize) Error!void {
+    const index = findPv(chan) orelse return Error.NoPixelValve;
+    const pv = pvs.sub(Pvs, index);
+
+    // The PV needs to be disabled before it can be flushed.
+    pv.modify(Control, .{ .en = false });
+    pv.modify(Control, .{ .fifo_clr = true });
 }
 
 /// Find the index of the PV fed by the HVS channel.
@@ -313,6 +335,7 @@ const PipeInitCtrl = packed struct(u32) {
 
 const std = @import("std");
 const log = std.log.scoped(.pv);
+const arch = @import("arch").impl;
 const common = @import("common");
 const dd = @import("dd");
 const Mode = dd.video.Mode;

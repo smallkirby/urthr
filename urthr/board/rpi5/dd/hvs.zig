@@ -251,6 +251,17 @@ pub fn initChannel(index: usize, width: usize, height: usize) void {
     });
 }
 
+/// Reset and disable the display channel.
+pub fn stopChannel(index: usize) void {
+    const disp = hvs.sub(Disps, index);
+    if (!disp.read(DispControl0).enb) {
+        return;
+    }
+
+    disp.modify(DispControl0, .{ .reset = true });
+    disp.modify(DispControl0, .{ .enb = false });
+}
+
 /// Create a new framebuffer and show it on the screen.
 ///
 /// TODO: the existing framebuffer created by the FW leaks.

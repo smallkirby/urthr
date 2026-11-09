@@ -292,6 +292,23 @@ pub fn enableVideo(index: usize, mode: Mode) void {
     });
 }
 
+/// Stop the packet transmission.
+pub fn disableVideo(index: usize) void {
+    const stride = 4;
+    const core = cores.sub(Cores, index);
+
+    core.writei(RamPacketConfig, 0);
+    hd.modifyIndexed(VidCtl, index, stride, .{
+        .clrrgb = true,
+    });
+    hd.modifyIndexed(VidCtl, index, stride, .{
+        .blankpix = true,
+    });
+    arch.timer.spinWaitMilli(1);
+
+    // We don't unset VID_CTL_ENABLE since it results in a system lockup on BCM2712.
+}
+
 /// Switch the HDMI core to the HDMI mode.
 pub fn enableHdmiMode(index: usize) Error!void {
     var core = cores.sub(Cores, index);
@@ -463,10 +480,7 @@ pub fn initPhy(index: usize, mode: Mode) Error!void {
     const phy = phys.sub(Phys, index);
     const rm = rms.sub(Rms, index);
 
-    // Reset PHY.
-    phy.writei(ResetCtl, 0);
-    phy.writei(PowerupCtl, 0);
-    phy.writez(PllPostKdiv, .{ .bypass_en = true });
+    resetPhy(index);
 
     for ([_]u32{
         0x810C_6000,
@@ -531,6 +545,25 @@ pub fn initPhy(index: usize, mode: Mode) Error!void {
     phy.modify(PllResetCtl, .{
         .pll_resetb = true,
     });
+}
+
+/// Power down the PHY.
+pub fn powerDown(index: usize) void {
+    const stride = 4;
+
+    hd.modifyIndexed(VidCtl, index, stride, .{
+        .blankpix = true,
+    });
+    resetPhy(index);
+}
+
+/// Reset the PHY.
+fn resetPhy(index: usize) void {
+    const phy = phys.sub(Phys, index);
+
+    phy.writei(ResetCtl, 0);
+    phy.writei(PowerupCtl, 0);
+    phy.writez(PllPostKdiv, .{ .bypass_en = true });
 }
 
 /// Oscillator frequency of the PLL in Hz.

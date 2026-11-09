@@ -273,6 +273,11 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         try gemdev.appendInterface(iface);
     }
 
+    // HDMI hotplug.
+    drm.startHotplugWorker() catch |err| {
+        log.err("HDMI hotplug worker start failed: {t}", .{err});
+    };
+
     // xHC
     log.info("Initializing xHC.", .{});
     blkxhc: {

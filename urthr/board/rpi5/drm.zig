@@ -1,5 +1,8 @@
 //! Display pipeline.
 
+/// BSC controller for the DDC.
+var bsc: dd.i2c.BrcmStb = undefined;
+
 /// Initialize the display pipeline and register the framebuffer console.
 pub fn init() urd.mem.Error!void {
     // TODO: The output is fixed to HDMI1.
@@ -23,7 +26,7 @@ pub fn init() urd.mem.Error!void {
             null,
             .device,
         );
-        var bsc = dd.i2c.BrcmStb.init(
+        bsc = dd.i2c.BrcmStb.init(
             ddc + memmap.hdmi1_ddc_offset,
             .hz_97500,
         );
@@ -84,66 +87,23 @@ pub fn init() urd.mem.Error!void {
             log.err("HVS framebuffer creation failed: {t}", .{err});
             break :outer;
         };
-        // HVS channel enable.
-        rdd.hvs.initChannel(chan.index, mode.hdisplay, mode.vdisplay);
-
-        // Pre CRTC configure.
-        {
-            rdd.hdmi.initClocks(mode) catch |err| {
-                log.err("HDMI clock configuration failed: {t}", .{err});
-            };
-            rdd.hdmi.initPhy(chan.index, mode) catch |err| {
-                log.err("HDMI PHY configuration failed: {t}", .{err});
-            };
-            rdd.hdmi.initScheduler(chan.index);
-            rdd.hdmi.setTimings(chan.index, mode);
-        }
 
         // Pixel Valve.
-        pv: {
-            const pvbase = try urd.mem.phys.reserveAndRemap(
-                "PV",
-                memmap.pv.start,
-                memmap.pv.size(),
-                null,
-                .device,
-            );
-            rdd.pv.setBase(pvbase);
+        const pvbase = try urd.mem.phys.reserveAndRemap(
+            "PV",
+            memmap.pv.start,
+            memmap.pv.size(),
+            null,
+            .device,
+        );
+        rdd.pv.setBase(pvbase);
 
-            rdd.pv.configure(chan.index, .hdmi1, mode) catch |err| {
-                log.err("PV configuration failed: {t}", .{err});
-                break :pv;
-            };
-            rdd.pv.enable(chan.index) catch |err| {
-                log.err("PV enabling failed: {t}", .{err});
-                break :pv;
-            };
-
-            // Pre CRTC enable.
-            rdd.hdmi.setupCsc(chan.index, mode);
-            rdd.hdmi.initFifo(chan.index);
-
-            // CRTC enable.
-            rdd.pv.enableVideo(chan.index) catch |err| {
-                log.err("PV video enabling failed: {t}", .{err});
-                break :pv;
-            };
-
-            // Post CRTC enable.
-            rdd.hdmi.enableVideo(chan.index, mode);
-            rdd.hdmi.enableHdmiMode(chan.index) catch |err| {
-                log.err("HDMI mode activation failed: {t}", .{err});
-            };
-            rdd.hdmi.setAviPacket(chan.index, mode) catch |err| {
-                log.err("HDMI AVI InfoFrame transmission failed: {t}", .{err});
-            };
-            rdd.hdmi.setSpdPacket(chan.index) catch |err| {
-                log.err("HDMI SPD InfoFrame transmission failed: {t}", .{err});
-            };
-            rdd.hdmi.recenterFifo(chan.index) catch |err| {
-                log.err("HDMI FIFO recentering failed: {t}", .{err});
-            };
-        }
+        enable(chan, mode);
+        output = .{
+            .chan = chan,
+            .mode = mode,
+            .enabled = true,
+        };
 
         const fbcon = urd.mem.bin.create(FbConsole) catch unreachable;
         fbcon.* = FbConsole.init(fb);
@@ -151,6 +111,74 @@ pub fn init() urd.mem.Error!void {
             log.warn("failed to add console backend: {t}", .{err});
         };
     }
+}
+
+/// Start the video output of the HVS channel to the HDMI.
+fn enable(chan: rdd.hvs.Channel, mode: Mode) void {
+    // HVS channel enable.
+    rdd.hvs.initChannel(chan.index, mode.hdisplay, mode.vdisplay);
+
+    // Pre CRTC configure.
+    rdd.hdmi.initClocks(mode) catch |err| {
+        log.err("HDMI clock configuration failed: {t}", .{err});
+    };
+    rdd.hdmi.initPhy(chan.index, mode) catch |err| {
+        log.err("HDMI PHY configuration failed: {t}", .{err});
+    };
+    rdd.hdmi.initScheduler(chan.index);
+    rdd.hdmi.setTimings(chan.index, mode);
+
+    // Pixel Valve.
+    rdd.pv.configure(chan.index, .hdmi1, mode) catch |err| {
+        log.err("PV configuration failed: {t}", .{err});
+        return;
+    };
+    rdd.pv.enable(chan.index) catch |err| {
+        log.err("PV enabling failed: {t}", .{err});
+        return;
+    };
+
+    // Pre CRTC enable.
+    rdd.hdmi.setupCsc(chan.index, mode);
+    rdd.hdmi.initFifo(chan.index);
+
+    // CRTC enable.
+    rdd.pv.enableVideo(chan.index) catch |err| {
+        log.err("PV video enabling failed: {t}", .{err});
+        return;
+    };
+
+    // Post CRTC enable.
+    rdd.hdmi.enableVideo(chan.index, mode);
+    rdd.hdmi.enableHdmiMode(chan.index) catch |err| {
+        log.err("HDMI mode activation failed: {t}", .{err});
+    };
+    rdd.hdmi.setAviPacket(chan.index, mode) catch |err| {
+        log.err("HDMI AVI InfoFrame transmission failed: {t}", .{err});
+    };
+    rdd.hdmi.setSpdPacket(chan.index) catch |err| {
+        log.err("HDMI SPD InfoFrame transmission failed: {t}", .{err});
+    };
+    rdd.hdmi.recenterFifo(chan.index) catch |err| {
+        log.err("HDMI FIFO recentering failed: {t}", .{err});
+    };
+}
+
+/// Stop the video output.
+fn disable() void {
+    rdd.pv.disableVideo(hdmi_index) catch |err| {
+        log.err("PV video disabling failed: {t}", .{err});
+    };
+    // Avoid a pixel stuck in an unflushable FIFO between the PV and the HDMI.
+    arch.timer.spinWaitMilli(20);
+
+    rdd.hdmi.disableVideo(hdmi_index);
+    rdd.pv.reset(hdmi_index) catch |err| {
+        log.err("PV reset failed: {t}", .{err});
+    };
+    rdd.hvs.stopChannel(hdmi_index);
+    rdd.hdmi.powerDown(hdmi_index);
+    arch.timer.spinWaitMilli(20);
 }
 
 // =============================================================
@@ -166,6 +194,21 @@ const Sink = struct {
     /// The first CTA-861 extension block.
     cta: ?edid.Cta,
 };
+
+/// State of the video output.
+const Output = struct {
+    /// HVS channel.
+    chan: rdd.hvs.Channel,
+    /// Output mode.
+    mode: Mode,
+    /// Video is being output.
+    enabled: bool,
+};
+
+/// State of the video output.
+var output: ?Output = null;
+/// Event signaled by the HPD interrupt.
+var hotplug_event: urd.sync.Event = .{};
 
 /// Enable the HPD interrupts of the HDMI.
 fn initHotplug() urd.exception.Error!void {
@@ -191,6 +234,52 @@ fn handleHotplug(_: urd.exception.Vector, _: ?*anyopaque) void {
     if (rdd.l2intr.isPending(hdmiHpdRemoved(hdmi_index))) {
         rdd.l2intr.clear(hdmiHpdRemoved(hdmi_index));
         log.debug("HDMI{d} hotplug: removed", .{hdmi_index});
+    }
+
+    _ = hotplug_event.wake();
+}
+
+/// Start the thread that detects and handle HDMI hotplug events.
+pub fn startHotplugWorker() !void {
+    _ = try urd.task.kspawn("hdmi-hp", hotplugWorker, .{});
+}
+
+/// Thread function that handles HDMI hotplug events.
+fn hotplugWorker() noreturn {
+    while (true) {
+        _ = hotplug_event.wait(null);
+        const out = output orelse continue;
+
+        if (out.enabled and !rdd.hdmi.isConnected(hdmi_index)) {
+            // Sink is disconnected.
+            disable();
+            output.?.enabled = false;
+        } else if (!out.enabled and rdd.hdmi.isConnected(hdmi_index)) {
+            // Sink is connected.
+            const mode = selectVideoMode(
+                hdmi_index,
+                bsc.adapter(),
+            ) orelse continue;
+
+            // Resolution change is not supported.
+            if (mode.hdisplay != out.mode.hdisplay or mode.vdisplay != out.mode.vdisplay) {
+                log.warn("Resolution change is not supported: {d}x{d}", .{
+                    mode.hdisplay, mode.vdisplay,
+                });
+                continue;
+            }
+
+            // Enable the video output with the selected mode.
+            enable(out.chan, mode);
+            output = .{
+                .chan = out.chan,
+                .mode = mode,
+                .enabled = true,
+            };
+            log.info("HDMI{d} output enabled: {d}x{d} (VIC#{d})", .{
+                hdmi_index, mode.hdisplay, mode.vdisplay, mode.vic,
+            });
+        }
     }
 }
 
