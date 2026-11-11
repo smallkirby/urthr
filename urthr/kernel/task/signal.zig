@@ -256,6 +256,8 @@ pub fn sigreturn() void {
             break :blk saved_mask;
         },
 
+        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+
         else => @compileError("Unsupported architecture."),
     };
 
@@ -510,6 +512,10 @@ pub const SigFrame = switch (builtin.cpu.arch) {
         saved_mask: Mask,
     },
 
+    .riscv64 => extern struct {
+        mcontext: extern struct {},
+    },
+
     else => @compileError("Unsupported architecture."),
 };
 comptime {
@@ -517,6 +523,7 @@ comptime {
         @offsetOf(SigFrame, "mcontext") == switch (builtin.cpu.arch) {
             .aarch64 => 176,
             .x86_64 => 40,
+            .riscv64 => 0,
             else => unreachable,
         },
         "Invalid mcontext offset.",
@@ -736,6 +743,8 @@ fn isDeliverable(_: SigInt, ctx: *const Context) bool {
             return ctx.rsp != 0; // only deliver when returning to Ring-3.
         },
 
+        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+
         else => @compileError("Unsupported architecture."),
     }
 }
@@ -864,6 +873,8 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             ctx.rsp = ret_uaddr;
         },
 
+        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+
         else => @compileError("Unsupported architecture."),
     }
 }
@@ -932,6 +943,8 @@ fn generateTrampoline() Trampoline {
                 }
             }.f,
         },
+
+        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
 
         else => @compileError("Unsupported architecture."),
     };

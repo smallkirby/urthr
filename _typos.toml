@@ -46,3 +46,5 @@ controllen = "controllen"
 WRONLY = "WRONLY"
 # RPi5 HVS
 heade = "heade"
+# RISC-V
+sie = "sie" # SIE bit of SSTATUS CSR

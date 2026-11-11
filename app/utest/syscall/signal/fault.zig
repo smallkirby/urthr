@@ -4,6 +4,7 @@ test "illegal instruction terminates the process with SIGILL" {
             switch (builtin.cpu.arch) {
                 .x86_64 => asm volatile ("ud2"),
                 .aarch64 => asm volatile ("udf #0"),
+                .riscv64 => asm volatile ("unimp"), // TODO
                 else => @compileError("Unsupported architecture."),
             }
             unreachable;
@@ -39,6 +40,7 @@ test "SIGILL handler receives the address of the faulting instruction" {
             switch (builtin.cpu.arch) {
                 .x86_64 => asm volatile ("ud2"),
                 .aarch64 => asm volatile ("udf #0"),
+                .riscv64 => asm volatile ("unimp"), // TODO
                 else => @compileError("Unsupported architecture."),
             }
         }
@@ -81,6 +83,7 @@ test "breakpoint instruction terminates the process with SIGTRAP" {
             switch (builtin.cpu.arch) {
                 .x86_64 => asm volatile ("int3"),
                 .aarch64 => asm volatile ("brk #0"),
+                .riscv64 => asm volatile ("unimp"), // TODO
                 else => @compileError("Unsupported architecture."),
             }
             unreachable;

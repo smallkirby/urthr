@@ -155,7 +155,7 @@ fn statxFromFile(file: *fs.File) Statx {
 }
 
 const Stat = switch (builtin.cpu.arch) {
-    .aarch64 => extern struct {
+    .aarch64, .riscv64 => extern struct {
         /// Device ID.
         st_dev: u64,
         /// Inode number.

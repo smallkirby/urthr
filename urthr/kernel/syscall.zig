@@ -3,11 +3,12 @@
 /// List of system calls.
 ///
 /// NOTE that this table is referenced only at comptime to construct runtime constants.
-const entries =
+const entries = switch (builtin.cpu.arch) {
+
 // =============================================================
-// Aarch64
+// Aarch64 and RISC-V
 // =============================================================
-if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
+.aarch64, .riscv64 => [_]Descriptor{
     // =============================================================
     // POSIX system calls.
 
@@ -136,12 +137,12 @@ if (builtin.cpu.arch.isAARCH64())[_]Descriptor{
     .new("ping",        512,    sysPing),
     .new("perf_dump",   513,    sysPerfDump),
     .new("aperf",       514,    aperf.sysAperf),
-}
+},
 
 // =============================================================
 // x64
 // =============================================================
-else if (builtin.cpu.arch.isX86())[_]Descriptor{
+.x86_64 => [_]Descriptor{
     // =============================================================
     // POSIX system calls.
 
@@ -291,9 +292,10 @@ else if (builtin.cpu.arch.isX86())[_]Descriptor{
     .new("ping",                 512,   sysPing),
     .new("perf_dump",            513,   sysPerfDump),
     .new("aperf",                514,   aperf.sysAperf),
-}
-else [_]Descriptor{}
-;
+},
+
+else => [_]Descriptor{},
+};
 
 // zig fmt: on
 

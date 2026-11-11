@@ -515,7 +515,7 @@ test "getdents64 re-reads from the start after lseek to 0" {
 }
 
 const Stat = switch (builtin.cpu.arch) {
-    .aarch64 => extern struct {
+    .aarch64, .riscv64 => extern struct {
         /// Device ID.
         st_dev: u64,
         /// Inode number.

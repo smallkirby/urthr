@@ -4,6 +4,7 @@
 pub const impl = switch (builtin.target.cpu.arch) {
     .aarch64 => @import("arch/aarch64/arch.zig"),
     .x86_64 => @import("arch/x64/arch.zig"),
+    .riscv64 => @import("arch/riscv64/arch.zig"),
     else => @compileError("Unsupported architecture."),
 };
 

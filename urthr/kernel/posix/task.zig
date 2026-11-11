@@ -143,7 +143,7 @@ pub fn sysClone(flags: CloneFlags, stack: usize, parent_tidp: usize, arg4: usize
     // The order of the last two arguments depends on the architecture.
     const child_tidp, const tls = switch (builtin.cpu.arch) {
         .x86_64 => .{ arg4, arg5 },
-        .aarch64 => .{ arg5, arg4 },
+        .aarch64, .riscv64 => .{ arg5, arg4 },
         else => @compileError("Unsupported architecture."),
     };
 

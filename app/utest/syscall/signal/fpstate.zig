@@ -2,6 +2,7 @@
 const num_vregs = switch (builtin.cpu.arch) {
     .x86_64 => 16, // XMM0-XMM15
     .aarch64 => 32, // V0-V31
+    .riscv64 => 0, // TODO
     else => @compileError("Unsupported architecture."),
 };
 
@@ -69,6 +70,8 @@ fn onSignalClobber(_: linux.SIG) callconv(.c) void {
             :
             : [src] "{x9}" (src),
             : vregClobbers(.{ .memory = true })),
+        .riscv64 => asm volatile ("unimp"), // TODO
+
         else => @compileError("Unsupported architecture."),
     }
     handler_called = true;
@@ -95,6 +98,8 @@ fn raiseKeepingRegs(pid: usize, signo: usize, out: *align(16) VregSet) void {
               [pid] "{x0}" (pid),
               [sig] "{x1}" (signo),
             : vregClobbers(.{ .x0 = true, .memory = true })),
+
+        .riscv64 => asm volatile ("unimp"), // TODO
 
         else => @compileError("Unsupported architecture."),
     }

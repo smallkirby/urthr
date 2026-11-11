@@ -1,5 +1,5 @@
 pub const OpenFlags = switch (builtin.cpu.arch) {
-    .x86_64 => packed struct(i32) {
+    .x86_64, .riscv64 => packed struct(i32) {
         /// Write-only.
         wo: bool = false,
         /// Read and write.

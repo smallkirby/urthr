@@ -117,6 +117,7 @@ fn aperf() !u64 {
               [arg1] "{x0}" (@intFromPtr(&buf)),
               [arg2] "{x1}" (size_buf),
             : .{ .memory = true }),
+        .riscv64 => @panic("TODO: RISC-V: aperf not supported yet"),
         else => @compileError("Unsupported architecture"),
     };
 

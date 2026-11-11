@@ -9,10 +9,12 @@ pub const BoardType = enum {
     rpi4b,
     /// Raspberry Pi 5
     rpi5,
-    /// QEMU virt machine
+    /// QEMU aarch64 virt machine
     virt,
     /// QEMU Q35 machine.
     q35,
+    /// QEMU RISC-V virt machine.
+    rv64virt,
 
     /// Get the board type from its name.
     pub fn from(name: []const u8) ?BoardType {
@@ -33,6 +35,8 @@ pub const BoardType = enum {
             => .aarch64,
             .q35,
             => .x86_64,
+            .rv64virt,
+            => .riscv64,
         };
     }
 
@@ -45,6 +49,7 @@ pub const BoardType = enum {
             .rpi5 => "kernel_2712.img",
             .virt => "virt.img",
             .q35 => "BOOTX64.EFI",
+            .rv64virt => "rv64virt.img",
         };
     }
 };
@@ -55,6 +60,7 @@ pub const impl = switch (options.board) {
     .rpi5 => @import("board/rpi5/board.zig"),
     .virt => @import("board/virt/board.zig"),
     .q35 => @import("board/q35/board.zig"),
+    .rv64virt => @import("board/rv64virt/board.zig"),
 };
 
 /// Get the name of the board.
@@ -62,8 +68,9 @@ pub fn description() []const u8 {
     return switch (options.board) {
         .rpi4b => "Raspberry Pi 4B",
         .rpi5 => "Raspberry Pi 5",
-        .virt => "QEMU virt machine",
+        .virt => "QEMU aarch64 virt machine",
         .q35 => "QEMU Q35 machine",
+        .rv64virt => "QEMU RISC-V virt machine",
     };
 }
 

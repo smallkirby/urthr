@@ -164,6 +164,12 @@ pub fn build(b: *std.Build) !void {
     // Targets
     // =============================================================
 
+    const has_bl = switch (board_type.arch()) {
+        .aarch64, .x86_64 => true,
+        .riscv64 => false,
+        else => unreachable,
+    };
+
     const bl_target = switch (board_type.arch()) {
         .aarch64 => b.resolveTargetQuery(.{
             .cpu_arch = .aarch64,
@@ -183,6 +189,10 @@ pub fn build(b: *std.Build) !void {
         .x86_64 => b.resolveTargetQuery(.{
             .cpu_arch = .x86_64,
             .os_tag = .uefi,
+        }),
+        // RISC-V target does not support BL.
+        .riscv64 => b.resolveTargetQuery(.{
+            .cpu_arch = .riscv64,
         }),
         else => unreachable,
     };
@@ -216,6 +226,22 @@ pub fn build(b: *std.Build) !void {
                 .sse2,
                 .avx,
                 .avx2,
+            }),
+        }),
+        .riscv64 => b.resolveTargetQuery(.{
+            .cpu_arch = .riscv64,
+            .abi = .none,
+            .os_tag = .freestanding,
+            .ofmt = .elf,
+            .cpu_features_add = std.Target.riscv.featureSet(&[_]std.Target.riscv.Feature{
+                .m,
+                .a,
+                .c,
+            }),
+            .cpu_features_sub = std.Target.riscv.featureSet(&[_]std.Target.riscv.Feature{
+                .f,
+                .d,
+                .relax,
             }),
         }),
         else => unreachable,
@@ -325,6 +351,7 @@ pub fn build(b: *std.Build) !void {
                 .rpi5 => b.path("urthr/board/rpi5/memmap.zig"),
                 .virt => b.path("urthr/board/virt/memmap.zig"),
                 .q35 => b.path("urthr/board/q35/memmap.zig"),
+                .rv64virt => b.path("urthr/board/rv64virt/memmap.zig"),
             },
             .imports = &.{.{ .name = "common", .module = common_module }},
         }));
@@ -332,6 +359,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = switch (board_type.arch()) {
                 .x86_64 => b.path("urthr/arch/x64/constants.zig"),
                 .aarch64 => b.path("urthr/arch/aarch64/constants.zig"),
+                .riscv64 => b.path("urthr/arch/riscv64/constants.zig"),
                 else => unreachable,
             },
             .imports = &.{.{ .name = "common", .module = common_module }},
@@ -452,7 +480,11 @@ pub fn build(b: *std.Build) !void {
                 .root_source_file = b.path("urthr/main.zig"),
                 .target = kernel_target,
                 .optimize = optimize,
-                .code_model = if (board_type.arch() == .x86_64) .large else .default,
+                .code_model = switch (board_type.arch()) {
+                    .x86_64 => .large,
+                    .riscv64 => .medium,
+                    else => .default,
+                },
                 .pic = if (board_type.arch() == .x86_64) true else null,
                 .red_zone = false,
             }),
@@ -492,6 +524,9 @@ pub fn build(b: *std.Build) !void {
                 b.path("urthr/arch/x64/smp.S"),
                 b.path("urthr/arch/x64/uaccess.S"),
             },
+            .riscv64 => &[_]LazyPath{
+                b.path("urthr/arch/riscv64/head.S"),
+            },
             else => unreachable,
         }, &.{const_header});
 
@@ -518,7 +553,7 @@ pub fn build(b: *std.Build) !void {
     // Wyrd Executable
     // =============================================================
 
-    const wyrd = blk: {
+    const wyrd = if (!has_bl) undefined else blk: {
         const exe = b.addExecutable(.{
             .name = "wyrd",
             .root_module = b.createModule(.{
@@ -554,10 +589,10 @@ pub fn build(b: *std.Build) !void {
         exe.step.dependOn(&pp_wyrd.step);
         break :blk exe;
     };
-    iu.installArtifact(wyrd, .target, .bin);
+    if (has_bl) iu.installArtifact(wyrd, .target, .bin);
 
     // Raw Wyrd image.
-    const wyrd_bin = blk: {
+    const wyrd_bin = if (!has_bl) undefined else blk: {
         switch (board_type.arch()) {
             .aarch64 => {
                 const objcopy = b.addObjCopy(wyrd.getEmittedBin(), .{
@@ -594,7 +629,15 @@ pub fn build(b: *std.Build) !void {
     const booter = blk: {
         const booter_name = "booter";
 
-        if (serial_boot) {
+        if (!has_bl) {
+            // Raw Urthr image is the booter.
+            break :blk iu.createInstallFile(
+                urthr_bin.source,
+                booter_name,
+                .target,
+                .bin,
+            );
+        } else if (serial_boot) {
             // Wryd serial is the booter.
             break :blk iu.createInstallFile(
                 wyrd_bin.source,
@@ -625,7 +668,7 @@ pub fn build(b: *std.Build) !void {
             );
         }
     };
-    booter.step.dependOn(&wyrd_bin.step);
+    if (has_bl) booter.step.dependOn(&wyrd_bin.step);
     booter.step.dependOn(&urthr_bin.step);
     b.getInstallStep().dependOn(&booter.step);
 
@@ -676,6 +719,12 @@ pub fn build(b: *std.Build) !void {
             }),
             .x86_64 => b.resolveTargetQuery(.{
                 .cpu_arch = .x86_64,
+                .os_tag = .linux,
+                .abi = .gnu,
+                .ofmt = .elf,
+            }),
+            .riscv64 => b.resolveTargetQuery(.{
+                .cpu_arch = .riscv64,
                 .os_tag = .linux,
                 .abi = .gnu,
                 .ofmt = .elf,
@@ -894,6 +943,7 @@ pub fn build(b: *std.Build) !void {
         const qemu_bin = switch (board_type.arch()) {
             .aarch64 => b.fmt("{s}/qemu-system-aarch64", .{qemu_dir}),
             .x86_64 => b.fmt("{s}/qemu-system-x86_64", .{qemu_dir}),
+            .riscv64 => b.fmt("{s}/qemu-system-riscv64", .{qemu_dir}),
             else => unreachable,
         };
         const drive = switch (board_type) {
@@ -977,15 +1027,15 @@ pub fn build(b: *std.Build) !void {
         .install_dir = .prefix,
         .install_subdir = "docs/urthr",
     });
-    const wyrd_docs = b.addInstallDirectory(.{
+    const wyrd_docs = if (has_bl) b.addInstallDirectory(.{
         .source_dir = wyrd.getEmittedDocs(),
         .install_dir = .prefix,
         .install_subdir = "docs/wyrd",
-    });
+    }) else undefined;
 
     const docs = b.step("docs", "Generate documentation");
     docs.dependOn(&urthr_docs.step);
-    docs.dependOn(&wyrd_docs.step);
+    if (has_bl) docs.dependOn(&wyrd_docs.step);
 }
 
 const InstallUtil = struct {
@@ -1235,6 +1285,7 @@ const Qemu = struct {
             .rpi5 => "raspi5",
             .virt => "virt-9.0,gic-version=3,secure=on,virtualization=on",
             .q35 => "q35",
+            .rv64virt => "virt",
         };
 
         var args = Args.empty;
@@ -1253,6 +1304,12 @@ const Qemu = struct {
                 "cortex-a76",
                 "-smp",
                 "4",
+            }),
+            .rv64virt => try appendStrings(&args, allocator, &.{
+                "-cpu",
+                "rv64",
+                "-smp",
+                "1",
             }),
             .q35 => {
                 try appendStrings(&args, allocator, &.{
@@ -1336,7 +1393,7 @@ const Qemu = struct {
                         .file = sd_path,
                     });
                 },
-                .virt => {
+                .virt, .rv64virt => {
                     try appendStrings(&args, allocator, &.{
                         "-device",
                         "virtio-blk-device,drive=disk",
