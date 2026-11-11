@@ -1,12 +1,27 @@
 //! 16550 UART driver.
 //!
-//! Supports only Port I/O.
+//! For x64, accessed only via Port I/O.
+//! For other architectures, accessed via MMIO.
 
 // =============================================================
 // Module Definition
 // =============================================================
 
-var uart = pio.Module(&.{
+/// Bus used to access the registers.
+const bus: enum { pio, mmio } = switch (builtin.cpu.arch) {
+    .x86_64 => .pio,
+    else => .mmio,
+};
+
+/// Address type of registers.
+const Address = switch (bus) {
+    // Port address.
+    .pio => u16,
+    // Memory address.
+    .mmio => usize,
+};
+
+const registers = .{
     .{ 0x00, Rbr },
     .{ 0x00, Thr },
     .{ 0x00, Dll },
@@ -19,18 +34,23 @@ var uart = pio.Module(&.{
     .{ 0x05, Lsr },
     .{ 0x06, Msr },
     .{ 0x07, Scr },
-}){};
+};
+
+var uart = switch (bus) {
+    .pio => pio.Module(&registers){},
+    .mmio => mmio.Module(.{ .natural = u8 }, &registers){},
+};
 
 // =============================================================
 
-/// Set the base I/O port of the 16550 UART.
-pub fn setBase(base: u16) void {
+/// Set the base of the 16550 UART registers.
+pub fn setBase(base: Address) void {
     uart.setBase(base);
 }
 
 /// Initialize the 16550 UART for the given AXI clock.
 ///
-/// Caller must ensure that the 16550 base I/O port is set correctly beforehand.
+/// Caller must ensure that the 16550 base is set correctly beforehand.
 pub fn init(clk: anytype, baudrate: u64) void {
     // Divisor for the baud rate generator.
     const divisor = clk / (16 * baudrate);
@@ -277,7 +297,9 @@ const Scr = packed struct {
 // Imports
 // =============================================================
 
+const builtin = @import("builtin");
 const std = @import("std");
 const atomic = std.atomic;
 const common = @import("common");
+const mmio = common.mmio;
 const pio = common.pio;
