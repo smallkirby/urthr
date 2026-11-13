@@ -120,23 +120,33 @@ pub fn map1gb(as: AddressSpace, arg: MapArgument, opts: MapOptions, allocator: P
 }
 
 /// Changes permissions of an existing VA range using 4KiB pages.
-pub fn remap4kb(_: AddressSpace, _: usize, _: usize, _: Permission, _: RemapOptions, _: PageAllocator) Error!void {
-    @panic(todo);
+pub fn remap4kb(as: AddressSpace, va: usize, size: usize, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
+    return remapImpl(as.select(va), va, size, .@"4kb", perm, opts, allocator);
+}
+
+/// Changes permissions of an existing VA range using 2MiB pages.
+pub fn remap2mb(as: AddressSpace, va: usize, size: usize, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
+    return remapImpl(as.select(va), va, size, .@"2mb", perm, opts, allocator);
+}
+
+/// Changes permissions of an existing VA range using 1GiB pages.
+pub fn remap1gb(as: AddressSpace, va: usize, size: usize, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
+    return remapImpl(as.select(va), va, size, .@"1gb", perm, opts, allocator);
 }
 
 /// Unmaps the VA range using 4KiB pages.
-pub fn unmap4kb(_: AddressSpace, _: usize, _: usize, _: UnmapOptions, _: PageAllocator) Error!void {
-    @panic(todo);
+pub fn unmap4kb(as: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"4kb", opts, allocator);
 }
 
 /// Unmaps the VA range using 2MiB pages.
-pub fn unmap2mb(_: AddressSpace, _: usize, _: usize, _: UnmapOptions, _: PageAllocator) Error!void {
-    @panic(todo);
+pub fn unmap2mb(as: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"2mb", opts, allocator);
 }
 
 /// Unmaps the VA range using 1GiB pages.
-pub fn unmap1gb(_: AddressSpace, _: usize, _: usize, _: UnmapOptions, _: PageAllocator) Error!void {
-    @panic(todo);
+pub fn unmap1gb(as: AddressSpace, va: usize, size: usize, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    return unmapImpl(as.select(va), va, size, .@"1gb", opts, allocator);
 }
 
 /// Enable MMU.
@@ -241,6 +251,64 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
     }
 }
 
+/// Changes permissions of an existing virtual address range using the given granule size.
+fn remapImpl(root: PageTable, va: usize, size: usize, mg: Granule, perm: Permission, opts: RemapOptions, allocator: PageAllocator) Error!void {
+    const granule = mg.granule();
+    const level = mg.level();
+
+    if (size % size_4k != 0) return Error.InvalidMapping;
+    if (va % granule != 0) return Error.InvalidMapping;
+    if (size % granule != 0) return Error.InvalidMapping;
+
+    for (0..size / granule) |i| {
+        const entry = try lookupEntry(
+            root._tbl,
+            va + i * granule,
+            level,
+            allocator,
+        );
+
+        const readable = perm.kr or perm.kw or perm.ur or perm.uw;
+        const writable = perm.kw or perm.uw;
+        const executable = perm.kx or perm.ux;
+
+        var value = entry.*;
+        value.valid = readable or executable;
+        value.readable = readable;
+        value.writable = writable;
+        value.executable = executable;
+        value.user = perm.ur or perm.uw or perm.ux;
+        entry.* = value;
+    }
+
+    if (opts.flush) {
+        tlb.invalidateAll(undefined, .local);
+    }
+}
+
+/// Unmaps the given virtual address range using the given granule size.
+fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, opts: UnmapOptions, allocator: PageAllocator) Error!void {
+    const granule = mg.granule();
+    const level = mg.level();
+
+    if (size % size_4k != 0) return Error.InvalidMapping;
+    if (va % granule != 0) return Error.InvalidMapping;
+    if (size % granule != 0) return Error.InvalidMapping;
+
+    for (0..size / granule) |i| {
+        try lookupInvalidate(
+            root._tbl,
+            va + i * granule,
+            level,
+            allocator,
+        );
+    }
+
+    if (opts.flush) {
+        tlb.invalidateAll(undefined, .local);
+    }
+}
+
 /// Lookup the page table entry for the given virtual address.
 ///
 /// If the descriptor does not exist, spawn a new table descriptor recursively.
@@ -268,6 +336,41 @@ fn lookupSpawn(root: []TableEntry, va: usize, level: Level, allocator: PageAlloc
     }
 
     return &tbl[getIndex(level, va)];
+}
+
+/// Lookup an existing page table entry for the given virtual address.
+fn lookupEntry(root: []TableEntry, va: usize, level: Level, allocator: PageAllocator) Error!*TableEntry {
+    var tbl = root;
+
+    var cur_level: Level = 0;
+    while (cur_level < level) : (cur_level += 1) {
+        const entry = &tbl[getIndex(cur_level, va)];
+        if (!entry.valid) {
+            return Error.InvalidMapping;
+        }
+        if (entry.isLeaf()) {
+            return Error.InvalidMapping;
+        }
+        tbl = allocator.translateV(getTable(entry.next()));
+    }
+
+    const leaf: *TableEntry = @ptrCast(&tbl[getIndex(level, va)]);
+    if (!leaf.valid or !leaf.isLeaf()) {
+        return Error.InvalidMapping;
+    }
+
+    return leaf;
+}
+
+/// Lookup the page table entry for the given virtual address and invalidate it.
+fn lookupInvalidate(root: []TableEntry, va: usize, level: Level, allocator: PageAllocator) Error!void {
+    const entry = try lookupEntry(
+        root,
+        va,
+        level,
+        allocator,
+    );
+    entry.valid = false;
 }
 
 /// Load the root table of the given address space into SATP.
