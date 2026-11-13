@@ -3,10 +3,11 @@
 //! This file is referenced by mkconst tool.
 
 /// Available DRAM regions.
+///
+/// The MROM (Open SBI) occupies the first 2 MiB of DRAM.
 pub const drams = [_]Range{
-    // 2 GiB
     .{
-        .start = 0x8000_0000,
+        .start = 0x8020_0000,
         .end = 0x1_0000_0000,
     },
 };
