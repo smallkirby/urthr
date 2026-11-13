@@ -7,6 +7,7 @@
 /// Entries must be sorted in alphabetical order in each group.
 const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     .{ .satp, Satp },
+    .{ .time, Time },
 };
 
 /// CSR register enum.
@@ -63,4 +64,11 @@ pub const Satp = packed struct(u64) {
         /// Page-based 64-bit virtual addressing.
         sv64 = 11,
     };
+};
+
+/// Time CSR.
+///
+/// Available only when Zicntr extension is implemented.
+pub const Time = packed struct(u64) {
+    value: u64,
 };

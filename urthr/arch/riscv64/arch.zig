@@ -42,12 +42,20 @@ pub fn getCoreId() usize {
 
 /// Get the value that is unique to each core.
 pub fn getPerCpuBase() usize {
-    @panic(todo);
+    return asm volatile (
+        \\mv %[addr], tp
+        : [addr] "=r" (-> usize),
+        :
+        : .{ .memory = true });
 }
 
 /// Set the value that is unique to each core.
-pub fn setPerCpuBase(_: usize) void {
-    @panic(todo);
+pub fn setPerCpuBase(addr: usize) void {
+    asm volatile (
+        \\mv tp, %[addr]
+        :
+        : [addr] "r" (addr),
+        : .{ .memory = true });
 }
 
 /// Enable syscall architectural features.
