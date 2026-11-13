@@ -53,12 +53,23 @@ pub inline fn getNormalTempMaps() []const common.Range {
 ///
 /// The UART is already configured by the firmware.
 pub fn boot() void {
+    // Init NS16550 UART.
     dd.uart16550.setBase(memmap.uart.start);
+
+    // Set timer frequency.
+    arch.timer.setFreq(memmap.timer_freq);
 }
 
 /// Map new I/O memory regions.
-pub fn remapIo(_: IoAllocator) IoAllocator.Error!void {
-    @panic(todo);
+pub fn remapIo(allocator: IoAllocator) IoAllocator.Error!void {
+    dd.uart16550.setBase(try allocator.reserveAndRemap(
+        "NS16550",
+        memmap.uart.start,
+        memmap.uart.size(),
+        null,
+        .device,
+    ));
+    try allocator.iounmap(memmap.uart.start, memmap.uart.size());
 }
 
 /// Move new normal memory regions.

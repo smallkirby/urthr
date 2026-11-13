@@ -12,6 +12,11 @@ pub const drams = [_]Range{
     },
 };
 
+/// Timer frequency in Hz.
+///
+/// TODO: should be read from DTB.
+pub const timer_freq: u32 = 10_000_000;
+
 // =============================================================
 // Kernel
 // =============================================================
