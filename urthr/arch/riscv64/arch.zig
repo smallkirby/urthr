@@ -1,5 +1,6 @@
 pub const exception = @import("isr.zig");
 pub const mmu = @import("mmu.zig");
+pub const sbi = @import("sbi.zig");
 pub const smp = @import("smp.zig");
 pub const timer = @import("timer.zig");
 pub const thread = @import("thread.zig");
