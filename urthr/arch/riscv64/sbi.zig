@@ -101,6 +101,8 @@ pub const Eid = enum(usize) {
     base = 0x0000_0010,
     /// Timer extension.
     timer = 0x54494D45,
+    /// Hart State Management extension.
+    hsm = 0x48534D,
 };
 
 /// SBI function IDs.
@@ -126,6 +128,15 @@ fn Fid(comptime eid: Eid) type {
         .timer => enum(usize) {
             /// Set timer.
             set_timer = 0x00,
+        },
+
+        .hsm => enum(usize) {
+            /// Hart start.
+            hart_start = 0x00,
+            /// Hart stop.
+            hart_stop = 0x01,
+            /// Hart get status.
+            hart_get_status = 0x02,
         },
     };
 }
@@ -183,6 +194,55 @@ pub fn getMimpId() Error!usize {
 /// Programs the clock for the next event after the given absolute time.
 pub fn setTimer(time: usize) Error!void {
     _ = try call(.timer, .set_timer, time, 0, 0).unwrap();
+}
+
+// =============================================================
+// Hart State Management extension
+
+/// Hart states.
+pub const HartState = enum(usize) {
+    /// The hart is physically powered-up and executing normally.
+    started = 0,
+    /// The hart is not executing in S-mode or any lower privilege mode.
+    stopped = 1,
+    /// Some other hart has requested to start the hart from the STOPPED state.
+    start_pending = 2,
+    /// The hart has requested to stop itself from the STARTED state.
+    stop_pending = 3,
+    /// The hart is in a platform specific suspended state.
+    suspended = 4,
+    /// The hart has requested to put itself in a platform specific low power state.
+    suspend_pending = 5,
+    /// An interrupt or platform specific HW event has caused the hart to resume normal execution.
+    resume_pending = 6,
+};
+
+/// Request to start executing the target hart in S-mode at the given address.
+///
+/// Register state:
+/// - satp          : 0
+/// - sstatus.SIE   : 0
+/// - a0            : hart ID
+/// - a1            : opaque parameter
+///
+/// This call is asynchronous and may return before the target hart starts executing.
+pub fn hartStart(hartid: usize, start_addr: usize, parameter: usize) Error!void {
+    _ = try call(.hsm, .hart_start, hartid, start_addr, parameter).unwrap();
+}
+
+/// Requests to stop executing the calling hart in S-mode.
+///
+/// Must be called with S-mode IRQ disabled.
+pub fn hartStop(hartid: usize) Error!noreturn {
+    _ = try call(.hsm, .hart_stop, hartid, 0, 0).unwrap();
+
+    unreachable;
+}
+
+/// Get the hart state.
+pub fn hartState(hartid: usize) Error!HartState {
+    const ret = call(.hsm, .hart_state, hartid, 0, 0).unwrap();
+    return @fromBackingInt(ret.value);
 }
 
 // =============================================================
