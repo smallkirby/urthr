@@ -66,6 +66,18 @@ pub const uart = Range{
     .end = 0x1000_1000,
 };
 
+/// Virtio MMIO devices.
+///
+/// QEMU virt machine has 8 virtio-mmio devices.
+pub const virtio = Range{
+    .start = 0x1000_1000,
+    .end = 0x1000_9000,
+};
+/// Interval of the virtio MMIO devices.
+pub const virtio_stride: usize = 0x1000;
+/// PLIC interrupt source of the first virtio MMIO device.
+pub const virtio_first_source: usize = 1;
+
 // =============================================================
 // Imports
 // =============================================================

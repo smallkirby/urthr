@@ -23,6 +23,11 @@ var plic_contexts: [num_cpus]usize = @splat(0);
 /// so this variable tracks pending IPI to multiplex IPI requests.
 var ipi_pending: [num_cpus]std.atomic.Value(u64) = @splat(.init(0));
 
+/// Base address of the virtio MMIO devices.
+var virtio_base: usize = undefined;
+/// Virtio block device.
+var virtio_blk_dev: ?dd.VirtioBlk = null;
+
 /// Hart IDs of all CPUs.
 const hart_ids = [_]usize{ 0, 1, 2, 3 };
 /// Number of CPU cores in the system.
@@ -129,13 +134,52 @@ pub fn initPeripherals1() common.mem.Error!void {
 /// Initialize peripherals phase 2.
 ///
 /// This function is called after exceptions are enabled.
-pub fn initPeripherals2() urd.mem.Error!void {}
+pub fn initPeripherals2() urd.mem.Error!void {
+    // virtio
+    virtio_base = try urd.mem.phys.reserveAndRemap(
+        "virtio",
+        memmap.virtio.start,
+        memmap.virtio.size(),
+        null,
+        .device,
+    );
+}
 
 /// Initialize peripherals.
 ///
 /// This function is called after initial task is spawned.
 /// This function can spawn new threads.
-pub fn initPeripherals3() common.mem.Error!void {}
+pub fn initPeripherals3() common.mem.Error!void {
+    // virtio-blk
+    for (0..(memmap.virtio.size() / memmap.virtio_stride)) |i| {
+        const base = virtio_base + i * memmap.virtio_stride;
+
+        const dev = if (dd.virtio.mmio.init(
+            base,
+            .block,
+            dd.VirtioBlk.Features{ .flush = true },
+            urd.mem.page,
+            urd.mem.bin,
+        )) |result| if (result) |dev| dev else {
+            continue;
+        } else |_| {
+            continue;
+        };
+        virtio_blk_dev = dd.VirtioBlk.init(
+            dev.interface(),
+            urd.mem.dma.interface(0),
+            urd.mem.bin,
+        ) catch continue;
+
+        // Register IRQ.
+        const irq = plic_vector_base + memmap.virtio_first_source + i;
+        enableIrq(irq);
+        virtio_blk_dev.?.registerIrq(irq);
+
+        log.info("Found virtio-blk device#{d}", .{i});
+        break;
+    }
+}
 
 /// Prepare for waking up secondary cores.
 ///
@@ -335,7 +379,10 @@ pub fn sendIpi(cpu: usize, vector: u64) void {
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
-    return null;
+    return if (virtio_blk_dev) |*dev|
+        dev.interface()
+    else
+        null;
 }
 
 /// Get console instance.

@@ -529,6 +529,7 @@ pub fn build(b: *std.Build) !void {
                 b.path("urthr/arch/riscv64/isr.S"),
                 b.path("urthr/arch/riscv64/smp.S"),
                 b.path("urthr/arch/riscv64/switch.S"),
+                b.path("urthr/arch/riscv64/uaccess.S"),
             },
             else => unreachable,
         }, &.{const_header});
