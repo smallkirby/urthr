@@ -526,6 +526,7 @@ pub fn build(b: *std.Build) !void {
             },
             .riscv64 => &[_]LazyPath{
                 b.path("urthr/arch/riscv64/head.S"),
+                b.path("urthr/arch/riscv64/isr.S"),
             },
             else => unreachable,
         }, &.{const_header});
