@@ -7,6 +7,7 @@
 /// Entries must be sorted in alphabetical order in each group.
 const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     .{ .satp, Satp },
+    .{ .sie, Sie },
     .{ .time, Time },
 };
 
@@ -64,6 +65,28 @@ pub const Satp = packed struct(u64) {
         /// Page-based 64-bit virtual addressing.
         sv64 = 11,
     };
+};
+
+/// Supervisor Interrupt Enable Register. WARL.
+pub const Sie = packed struct(u64) {
+    /// Reserved.
+    _0: u1 = 0,
+    /// Supervisor-level software interrupts.
+    ssie: bool,
+    /// Reserved.
+    _2: u3 = 0,
+    /// Supervisor-level timer interrupts.
+    stie: bool,
+    /// Reserved.
+    _6: u3 = 0,
+    /// Supervisor-level external interrupts.
+    seie: bool,
+    /// Reserved.
+    _10: u3 = 0,
+    /// Local-counter-overflow interrupts.
+    lcofie: bool,
+    /// Reserved.
+    _14: u50 = 0,
 };
 
 /// Time CSR.

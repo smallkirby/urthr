@@ -1,7 +1,5 @@
 //! RISC-V timer.
 
-const todo = "TODO: RISC-V: timer is not supported yet";
-
 /// Interrupt ID of the supervisor timer interrupt.
 ///
 /// Supervisor timer interrupt number.
@@ -50,24 +48,42 @@ fn spinWait(ns: u64) void {
     }
 }
 
-/// Set the timer deadline.
-pub fn setDeadline(_: u32) void {
-    @panic(todo);
+/// Set the relative timer deadline.
+pub fn setDeadline(ticks: u32) void {
+    sbi.setTimer(getCount() + ticks) catch unreachable;
+    enable();
 }
 
 /// Enable the timer.
 pub fn enable() void {
-    @panic(todo);
+    am.csrs(.sie, .{ .stie = true });
 }
 
 /// Cancel the timer deadline.
 pub fn cancelDeadline() void {
-    @panic(todo);
+    sbi.setTimer(std.math.maxInt(usize)) catch unreachable;
+    am.csrc(.sie, .{ .stie = true });
 }
+
+// =============================================================
+// Timer interface.
+// =============================================================
+
+const timer_vtable = Timer.Vtable{
+    .getCurrent = timerGetCurrent,
+};
 
 /// Create a timer instance.
 pub fn createTimer() Timer {
-    @panic(todo);
+    return .{
+        ._ctx = &.{},
+        .vtable = timer_vtable,
+    };
+}
+
+/// Get the current tick and convert it to microseconds.
+fn timerGetCurrent(_: *anyopaque) u64 {
+    return (getCount() * 1_000_000) / getFreq();
 }
 
 // =============================================================
@@ -77,4 +93,5 @@ pub fn createTimer() Timer {
 const std = @import("std");
 const Timer = @import("common").Timer;
 const am = @import("asm.zig");
+const sbi = @import("sbi.zig");
 const regs = @import("register.zig");
