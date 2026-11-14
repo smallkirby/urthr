@@ -232,7 +232,7 @@ pub const Sstatus = packed struct(u64) {
     /// Reserved. WPRI.
     _25: u7 = 0,
     /// Effective XLEN for U-mode.
-    uxl: enum(u2) { @"32" = 0, @"64" = 1 },
+    uxl: enum(u2) { @"32" = 1, @"64" = 2, _ },
     /// Reserved. WPRI.
     _34: u29 = 0,
     /// Some of FS, VS, or XS are dirty.
