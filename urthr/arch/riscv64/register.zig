@@ -137,7 +137,7 @@ pub const Sstatus = packed struct(u64) {
     /// S-mode disable trap.
     sdt: bool,
     /// Reserved. WPRI.
-    _25: u6 = 0,
+    _25: u7 = 0,
     /// Effective XLEN for U-mode.
     uxl: enum(u2) { @"32" = 0, @"64" = 1 },
     /// Reserved. WPRI.
