@@ -23,7 +23,7 @@ pub fn halt() void {
 
 /// Wait until an interrupt becomes pending.
 pub fn wfi() void {
-    @panic(todo);
+    asm volatile ("wfi");
 }
 
 /// Memory barrier domain.
@@ -65,29 +65,27 @@ pub fn setPerCpuBase(addr: usize) void {
         : .{ .memory = true });
 }
 
-/// Enable syscall architectural features.
-pub fn initSyscall() void {
-    @panic(todo);
-}
+/// No-op on RISC-V.
+pub fn initSyscall() void {}
 
 /// Set system call handler function.
-pub fn setSystemCallHandler(_: anytype) void {
-    @panic(todo);
+pub fn setSystemCallHandler(f: anytype) void {
+    svc.setHandler(f);
 }
 
 /// Set hook called before every return to EL0.
-pub fn setEreturnHook(_: exception.EreturnHook) void {
-    @panic(todo);
+pub fn setEreturnHook(f: exception.EreturnHook) void {
+    exception.setEreturnHook(f);
 }
 
 /// Set page fault handler function.
-pub fn setPageFaultHandler(_: exception.PageFaultHandler) void {
-    @panic(todo);
+pub fn setPageFaultHandler(f: exception.PageFaultHandler) void {
+    exception.setPageFaultHandler(f);
 }
 
 /// Set user fault handler function.
-pub fn setUserFaultHandler(_: exception.UserFaultHandler) void {
-    @panic(todo);
+pub fn setUserFaultHandler(f: exception.UserFaultHandler) void {
+    exception.setUserFaultHandler(f);
 }
 
 /// Exception APIs.
@@ -151,3 +149,4 @@ pub const intr = struct {
 const common = @import("common");
 const rtt = common.rtt;
 const am = @import("asm.zig");
+const svc = @import("svc.zig");

@@ -74,9 +74,73 @@ pub const Satp = packed struct(u64) {
 /// Supervisor Cause Register.
 pub const Scause = packed struct(u64) {
     /// Exception code.
-    code: u63,
+    code: Code = .{ ._raw = 0 },
     /// Whether the trap was caused by an interrupt.
     interrupt: bool,
+
+    pub const Code = packed union {
+        /// Interrupt code.
+        i: Icode,
+        /// Exception code.
+        e: Ecode,
+        /// Raw value of the represented code.
+        _raw: u63,
+
+        /// Raw integer value of the code.
+        pub fn raw(self: Code) u63 {
+            return self._raw;
+        }
+    };
+
+    /// Exception codes for interrupts.
+    pub const Icode = enum(u63) {
+        /// Supervisor software interrupt.
+        ssi = 1,
+        /// Supervisor timer interrupt.
+        sti = 5,
+        /// Supervisor external interrupt.
+        sei = 9,
+        /// Counter-overflow interrupt.
+        coi = 13,
+
+        _,
+    };
+
+    /// Exception codes for non-interrupts.
+    pub const Ecode = enum(u63) {
+        /// Instruction address misaligned.
+        ialign = 0,
+        /// Instruction access fault.
+        ifault = 1,
+        /// Illegal instruction.
+        illegal = 2,
+        /// Breakpoint.
+        breakpoint = 3,
+        /// Load address misaligned.
+        lalign = 4,
+        /// Load access fault.
+        lfault = 5,
+        /// Store/AMO address misaligned.
+        salign = 6,
+        /// Store/AMO access fault.
+        sfault = 7,
+        /// Environment call from U-mode.
+        ecall_u = 8,
+        /// Environment call from S-mode.
+        ecall_s = 9,
+        /// Instruction page fault.
+        ipf = 12,
+        /// Load page fault.
+        lpf = 13,
+        /// Store/AMO page fault.
+        spf = 15,
+        /// Software check.
+        scheck = 18,
+        /// Hardware error.
+        herr = 19,
+
+        _,
+    };
 };
 
 /// Supervisor Interrupt Enable Register. WARL.

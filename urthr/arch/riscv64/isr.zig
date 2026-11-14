@@ -6,9 +6,14 @@ var irq_ctx: ?*const Context linksection(common.pcpu.section) = null;
 
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
-
 /// Function pointer to the registered interrupt handler.
 var handler: ?HandlerSignature = null;
+/// Hook called before returning to U-mode.
+var eret_hook: ?EreturnHook = null;
+/// Function pointer to the registered page fault handler.
+var pagefault_handler: ?PageFaultHandler = null;
+/// Function pointer to the registered user fault handler.
+var userfault_handler: ?UserFaultHandler = null;
 
 /// Exception handler function signature.
 ///
@@ -62,6 +67,26 @@ pub fn setHandler(h: HandlerSignature) void {
     handler = h;
 }
 
+/// Set the page fault handler function.
+pub fn setPageFaultHandler(h: PageFaultHandler) void {
+    pagefault_handler = h;
+}
+
+/// Set the user fault handler function.
+pub fn setUserFaultHandler(h: UserFaultHandler) void {
+    userfault_handler = h;
+}
+
+/// Set hook called before returning to U-mode.
+pub fn setEreturnHook(f: EreturnHook) void {
+    eret_hook = f;
+}
+
+/// Call the registered ERET hook, if any.
+pub fn callEreturnHook(ctx: *Context) void {
+    if (eret_hook) |f| f(ctx);
+}
+
 /// Get the state of the thread interrupted by an IRQ.
 ///
 /// Available only while handling an IRQ.
@@ -73,6 +98,15 @@ pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
         .fp = ctx.s0,
         .user = sstatus.spp == .user,
     };
+}
+
+/// Get the interrupt code of the IRQ being handled on this core.
+///
+/// Available only while handling an IRQ.
+pub fn getIrqCode() u64 {
+    const ctx = getIrqContext() orelse @panic("Not in IRQ context.");
+    rtt.expectEqual(true, ctx.scause.interrupt);
+    return ctx.scause.code.raw();
 }
 
 /// Get the address of a per-CPU variable for the current core.
@@ -160,7 +194,10 @@ export fn handleTrap(ctx: *Context) callconv(.c) void {
         }
         return defaultHandler(ctx, "Interrupt");
     } else {
-        return defaultHandler(ctx, "Exception");
+        return switch (cause.code.e) {
+            .ecall_u => svc.ecall(ctx),
+            else => defaultHandler(ctx, "Exception"),
+        };
     }
 }
 
@@ -248,4 +285,5 @@ const UnsafeWriter = common.UnsafeWriter;
 const am = @import("asm.zig");
 const arch = @import("arch.zig");
 const regs = @import("register.zig");
+const svc = @import("svc.zig");
 const StackIterator = @import("StackIterator.zig");
