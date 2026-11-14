@@ -199,7 +199,7 @@ fn call(comptime eid: Eid, fid: Fid(eid), a0: anytype, a1: anytype, a2: anytype)
           [value] "={a1}" (value),
         : [eid] "{a7}" (eid),
           [fid] "{a6}" (fid),
-          [arg0] "{a0}" (a0),
+          [a0] "{a0}" (a0),
           [a1] "{a1}" (a1),
           [a2] "{a2}" (a2),
         : .{ .memory = true });
