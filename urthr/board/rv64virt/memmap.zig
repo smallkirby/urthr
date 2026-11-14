@@ -54,6 +54,12 @@ pub const sifive_test = Range{
     .end = 0x0010_1000,
 };
 
+/// Platform-Level Interrupt Controller.
+pub const plic = Range{
+    .start = 0x0C00_0000,
+    .end = 0x0C40_0000,
+};
+
 /// NS16550 UART.
 pub const uart = Range{
     .start = 0x1000_0000,
