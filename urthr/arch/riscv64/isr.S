@@ -64,13 +64,14 @@ trap_vector:
   mv   a0, sp
   call handleTrap
 
+.global exit_exception
+exit_exception:
   // Restore CSRs.
   RESTORE_CSR t0, sepc,     31*8
   RESTORE_CSR t0, sstatus,  32*8
   // Restore GPRs.
   ld   ra,   0*8(sp)
   ld   gp,   2*8(sp)
-  ld   tp,   3*8(sp)
   ld   t0,   4*8(sp)
   ld   t1,   5*8(sp)
   ld   t2,   6*8(sp)

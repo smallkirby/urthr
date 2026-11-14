@@ -1,4 +1,5 @@
 pub const exception = @import("isr.zig");
+pub const fpu = @import("fpu.zig");
 pub const mmu = @import("mmu.zig");
 pub const sbi = @import("sbi.zig");
 pub const smp = @import("smp.zig");
@@ -133,7 +134,7 @@ pub const intr = struct {
     }
 
     /// Set the exception handler function.
-    pub fn setHandler(handler: exception.Handler) void {
+    pub fn setHandler(handler: exception.HandlerSignature) void {
         exception.setHandler(handler);
     }
 };

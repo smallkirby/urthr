@@ -125,8 +125,8 @@ pub const Context = extern struct {
     a7: u64,
 
     sepc: u64,
-    sstatus: u64,
-    scause: u64,
+    sstatus: regs.Sstatus,
+    scause: regs.Scause,
     stval: u64,
 
     _pad0: u64 = 0,
@@ -174,10 +174,10 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) noreturn {
     w.log("", .{});
 
     // Print CSRs.
-    w.log("  SCAUSE : 0x{X:0>16}", .{ctx.scause});
+    w.log("  SCAUSE : 0x{X:0>16}", .{@as(u64, @bitCast(ctx.scause))});
     w.log("    SEPC : 0x{X:0>16}", .{ctx.sepc});
     w.log("   STVAL : 0x{X:0>16}", .{ctx.stval});
-    w.log(" SSTATUS : 0x{X:0>16}", .{ctx.sstatus});
+    w.log(" SSTATUS : 0x{X:0>16}", .{@as(u64, @bitCast(ctx.sstatus))});
 
     // Print GPRs.
     w.log("", .{});
