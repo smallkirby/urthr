@@ -35,8 +35,6 @@ pub const UnmapOptions = struct {
     flush: bool = true,
 };
 
-const todo = "TODO: MMU is not supported on riscv64 yet.";
-
 /// Describes a virtual address space.
 pub const AddressSpace = struct {
     /// Root page table shared by both VA halves.
@@ -90,8 +88,34 @@ pub fn createAddressSpace(allocator: PageAllocator) Error!AddressSpace {
 }
 
 /// Frees the user page tables of the given address space.
-pub fn destroyAddressSpace(_: AddressSpace, _: PageAllocator) void {
-    @panic(todo);
+pub fn destroyAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
+    if (!as._has_user) return;
+    const pt = as._root orelse return;
+
+    for (pt._tbl[0..root_half_ents]) |desc| if (desc.valid and !desc.isLeaf()) {
+        const child = getTable(desc.next());
+        destroyTableRecursive(
+            allocator.translateV(child),
+            1,
+            allocator,
+        );
+    };
+    allocator.freePagesV(@as([*]u8, @ptrCast(pt._tbl.ptr))[0..size_4k]);
+}
+
+/// Recursively frees all table pages under the given table.
+fn destroyTableRecursive(tbl: []TableEntry, level: Level, allocator: PageAllocator) void {
+    if (level < 3) {
+        for (tbl) |desc| if (desc.valid and !desc.isLeaf()) {
+            const child = getTable(desc.next());
+            destroyTableRecursive(
+                allocator.translateV(child),
+                level + 1,
+                allocator,
+            );
+        };
+    }
+    allocator.freePagesV(@as([*]u8, @ptrCast(tbl.ptr))[0..size_4k]);
 }
 
 /// Fix up the table addresses held by the address space.
@@ -154,19 +178,21 @@ pub fn enable(as: AddressSpace, allocator: PageAllocator) void {
     loadSatp(as, allocator);
 }
 
-/// Switch the current address space.
-pub fn switchAddressSpace(_: AddressSpace, _: PageAllocator) void {
-    @panic(todo);
+/// Switch the user-space address space to the user address space of `pt`.
+///
+/// TLB is flushed after the switch.
+pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
+    loadSatp(as, allocator);
 }
 
 /// Translate the given virtual address to physical address by walking the page tables.
 pub fn translateWalk(_: AddressSpace, _: usize, _: PageAllocator) ?usize {
-    @panic(todo);
+    @panic("unimplemented");
 }
 
 /// Get the physical address corresponding to the given virtual address.
 pub fn getPhysicalAddress(_: usize) usize {
-    @panic(todo);
+    @panic("unimplemented");
 }
 
 // =============================================================
@@ -354,7 +380,7 @@ fn lookupEntry(root: []TableEntry, va: usize, level: Level, allocator: PageAlloc
         tbl = allocator.translateV(getTable(entry.next()));
     }
 
-    const leaf: *TableEntry = @ptrCast(&tbl[getIndex(level, va)]);
+    const leaf: *TableEntry = &tbl[getIndex(level, va)];
     if (!leaf.valid or !leaf.isLeaf()) {
         return Error.InvalidMapping;
     }
@@ -449,7 +475,7 @@ pub const tlb = struct {
 
     /// Invalidate the TLB entries covering the given virtual address range.
     pub fn invalidateRange(_: AddressSpace, _: usize, _: usize, _: Scope) void {
-        @panic(todo);
+        @panic("unimplemented");
     }
 };
 
