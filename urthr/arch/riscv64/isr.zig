@@ -100,6 +100,21 @@ pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
     };
 }
 
+/// Enable supervisor software interrupts on this core.
+pub fn enableSoftwareIrq() void {
+    am.csrs(.sie, .{ .ssie = true });
+}
+
+/// Enable supervisor external interrupts on this core.
+pub fn enableExternalIrq() void {
+    am.csrs(.sie, .{ .seie = true });
+}
+
+/// Clear the pending supervisor software interrupt of this core.
+pub fn clearSoftwareIrq() void {
+    am.csrc(.sip, .{ .ssip = true });
+}
+
 /// Get the interrupt code of the IRQ being handled on this core.
 ///
 /// Available only while handling an IRQ.

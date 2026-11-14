@@ -103,6 +103,8 @@ pub const Eid = enum(usize) {
     timer = 0x54494D45,
     /// Hart State Management extension.
     hsm = 0x48534D,
+    /// IPI extension.
+    ipi = 0x00735049,
 };
 
 /// SBI function IDs.
@@ -137,6 +139,11 @@ fn Fid(comptime eid: Eid) type {
             hart_stop = 0x01,
             /// Hart get status.
             hart_get_status = 0x02,
+        },
+
+        .ipi => enum(usize) {
+            /// Send IPI.
+            send_ipi = 0x00,
         },
     };
 }
@@ -243,6 +250,14 @@ pub fn hartStop(hartid: usize) Error!noreturn {
 pub fn hartState(hartid: usize) Error!HartState {
     const ret = call(.hsm, .hart_state, hartid, 0, 0).unwrap();
     return @fromBackingInt(ret.value);
+}
+
+// =============================================================
+// IPI extension
+
+/// Send an IPI to all the harts defined in the mask.
+pub fn sendIpi(hart_mask: usize, hart_mask_base: usize) Error!void {
+    _ = try call(.ipi, .send_ipi, hart_mask, hart_mask_base, 0).unwrap();
 }
 
 // =============================================================

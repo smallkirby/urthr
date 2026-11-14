@@ -1,6 +1,7 @@
 pub const exception = @import("isr.zig");
 pub const fpu = @import("fpu.zig");
 pub const mmu = @import("mmu.zig");
+pub const plic = @import("plic.zig");
 pub const sbi = @import("sbi.zig");
 pub const smp = @import("smp.zig");
 pub const timer = @import("timer.zig");
@@ -27,14 +28,25 @@ pub fn wfi() void {
 }
 
 /// Memory barrier domain.
-pub const BarrierDomain = enum {};
+pub const BarrierDomain = enum {
+    /// Full system.
+    full,
+};
 
 /// Memory barrier type.
-pub const BarrierType = enum {};
+pub const BarrierType = enum {
+    /// Release.
+    release,
+    /// Acquire.
+    acquire,
+};
 
 /// Issue a memory barrier.
-pub fn barrier(_: BarrierDomain, _: BarrierType) void {
-    @panic(todo);
+pub fn barrier(_: BarrierDomain, typ: BarrierType) void {
+    switch (typ) {
+        .release => asm volatile ("fence iorw, ow" ::: .{ .memory = true }),
+        .acquire => asm volatile ("fence ir, iorw" ::: .{ .memory = true }),
+    }
 }
 
 /// Get the Unique ID of the current core.

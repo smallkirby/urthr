@@ -9,6 +9,7 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     .{ .satp, Satp },
     .{ .scause, Scause },
     .{ .sie, Sie },
+    .{ .sip, Sip },
     .{ .sscratch, Sscratch },
     .{ .sstatus, Sstatus },
     .{ .stvec, Stvec },
@@ -161,6 +162,28 @@ pub const Sie = packed struct(u64) {
     _10: u3 = 0,
     /// Local-counter-overflow interrupts.
     lcofie: bool,
+    /// Reserved.
+    _14: u50 = 0,
+};
+
+/// Supervisor Interrupt Pending Register.
+pub const Sip = packed struct(u64) {
+    /// Reserved.
+    _0: u1 = 0,
+    /// Supervisor-level software interrupt is pending.
+    ssip: bool,
+    /// Reserved.
+    _2: u3 = 0,
+    /// Supervisor-level timer interrupt is pending.
+    stip: bool,
+    /// Reserved.
+    _6: u3 = 0,
+    /// Supervisor-level external interrupt is pending.
+    seip: bool,
+    /// Reserved.
+    _10: u3 = 0,
+    /// Local-counter-overflow interrupt is pending.
+    lcofip: bool,
     /// Reserved.
     _14: u50 = 0,
 };
