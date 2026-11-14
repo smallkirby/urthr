@@ -27,6 +27,9 @@ _start:
   mv    s0, a0
   mv    s1, a1
 
+  // SSCRATCH holds the hart ID only during early boot.
+  csrw  sscratch, a0
+
   // Clear BSS.
   lla   t0, __bss_start
   lla   t1, __bss_end

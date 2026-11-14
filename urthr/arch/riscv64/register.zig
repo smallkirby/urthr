@@ -9,6 +9,7 @@ const definitions = &[_]@Tuple(&.{ @EnumLiteral(), type }){
     .{ .satp, Satp },
     .{ .scause, Scause },
     .{ .sie, Sie },
+    .{ .sscratch, Sscratch },
     .{ .sstatus, Sstatus },
     .{ .stvec, Stvec },
     .{ .time, Time },
@@ -98,6 +99,11 @@ pub const Sie = packed struct(u64) {
     lcofie: bool,
     /// Reserved.
     _14: u50 = 0,
+};
+
+/// Supervisor Scratch Register.
+pub const Sscratch = packed struct(u64) {
+    value: u64,
 };
 
 /// Supervisor Status Register.

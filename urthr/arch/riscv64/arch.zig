@@ -38,8 +38,13 @@ pub fn barrier(_: BarrierDomain, _: BarrierType) void {
 }
 
 /// Get the Unique ID of the current core.
+///
+/// This function must be called only during boot.
 pub fn getCoreId() usize {
-    @panic(todo);
+    const hartid = am.csrr(.sscratch).value;
+    rtt.expect(smp.isKnownHart(hartid));
+
+    return hartid;
 }
 
 /// Get the value that is unique to each core.
@@ -138,3 +143,11 @@ pub const intr = struct {
         exception.setHandler(handler);
     }
 };
+
+// =============================================================
+// Imports
+// =============================================================
+
+const common = @import("common");
+const rtt = common.rtt;
+const am = @import("asm.zig");
