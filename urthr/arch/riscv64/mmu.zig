@@ -186,8 +186,27 @@ pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
 }
 
 /// Translate the given virtual address to physical address by walking the page tables.
-pub fn translateWalk(_: AddressSpace, _: usize, _: PageAllocator) ?usize {
-    @panic("unimplemented");
+pub fn translateWalk(as: AddressSpace, va: usize, allocator: PageAllocator) ?usize {
+    var tbl = as.select(va)._tbl;
+
+    var level: Level = 0;
+    while (true) : (level += 1) {
+        const entry = tbl[getIndex(level, va)];
+        if (!entry.valid) return null;
+
+        if (entry.isLeaf()) {
+            const shift: u6 = page_shift_4k + @as(u6, 3 - level) * 9;
+            const size = @as(usize, 1) << shift;
+            const base = (@as(usize, entry.ppn) << page_shift_4k) & ~(size - 1);
+            return base | (va & (size - 1));
+        }
+
+        // A non-leaf entry at the last level is invalid.
+        if (level == 3) return null;
+
+        // Descend to the next level.
+        tbl = allocator.translateV(getTable(entry.next()));
+    }
 }
 
 /// Get the physical address corresponding to the given virtual address.
@@ -456,7 +475,10 @@ fn isCanonical(va: usize) bool {
 /// TLB maintenance.
 pub const tlb = struct {
     /// Whether IPI is needed for cross-CPU TLB shootdown.
-    pub const supports_global = true;
+    pub const supports_global = false;
+
+    /// Number of pages above which a range invalidation falls back to a full flush.
+    const range_max = 64;
 
     pub const Scope = enum {
         /// Local to this core.
@@ -474,8 +496,29 @@ pub const tlb = struct {
     }
 
     /// Invalidate the TLB entries covering the given virtual address range.
-    pub fn invalidateRange(_: AddressSpace, _: usize, _: usize, _: Scope) void {
-        @panic("unimplemented");
+    pub fn invalidateRange(as: AddressSpace, va: usize, len: usize, scope: Scope) void {
+        if (scope == .global) {
+            @panic("Global TLB invalidation not supported");
+        }
+
+        const start = util.rounddown(va, size_4k);
+        const npages = (va +% len -% start + size_4k - 1) / size_4k;
+        if (npages == 0) {
+            return;
+        }
+
+        // Fall back to full flush.
+        if (npages > range_max) {
+            return invalidateAll(as, scope);
+        }
+
+        // Invalidate page by page.
+        for (0..npages) |i| {
+            asm volatile ("sfence.vma %[va], zero"
+                :
+                : [va] "r" (start + i * size_4k),
+                : .{ .memory = true });
+        }
     }
 };
 
