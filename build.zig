@@ -1312,7 +1312,7 @@ const Qemu = struct {
                 "-cpu",
                 "rv64",
                 "-smp",
-                "1",
+                "4",
             }),
             .q35 => {
                 try appendStrings(&args, allocator, &.{

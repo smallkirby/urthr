@@ -12,6 +12,12 @@ pub const drams = [_]Range{
     },
 };
 
+/// Open SBI firmware region.
+pub const mrom = Range{
+    .start = 0x8000_0000,
+    .end = 0x8020_0000,
+};
+
 /// Timer frequency in Hz.
 ///
 /// TODO: should be read from DTB.

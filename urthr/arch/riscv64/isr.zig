@@ -103,10 +103,10 @@ pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
 /// Get the interrupt code of the IRQ being handled on this core.
 ///
 /// Available only while handling an IRQ.
-pub fn getIrqCode() u64 {
+pub fn getIrqCode() regs.Scause.Icode {
     const ctx = getIrqContext() orelse @panic("Not in IRQ context.");
     rtt.expectEqual(true, ctx.scause.interrupt);
-    return ctx.scause.code.raw();
+    return ctx.scause.code.i;
 }
 
 /// Get the address of a per-CPU variable for the current core.
