@@ -61,4 +61,5 @@ jobs:
             -Drestart \
             -Dsdcreate \
             -Dinit=/bin/utest \
+            -Dinit_args="!bench" \
             -Dallow_init_exit
