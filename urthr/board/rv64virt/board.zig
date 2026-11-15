@@ -23,6 +23,8 @@ var plic_contexts: [num_cpus]usize = @splat(0);
 /// so this variable tracks pending IPI to multiplex IPI requests.
 var ipi_pending: [num_cpus]std.atomic.Value(u64) = @splat(.init(0));
 
+/// Base virtual base address of the SiFive test device.
+var sifive_test_base: usize = 0;
 /// Base address of the virtio MMIO devices.
 var virtio_base: usize = undefined;
 /// Virtio block device.
@@ -121,6 +123,15 @@ pub fn deinitLoader() void {}
 ///
 /// This function is called before exceptions are enabled.
 pub fn initPeripherals1() common.mem.Error!void {
+    // SiFive test device.
+    sifive_test_base = try urd.mem.phys.reserveAndRemap(
+        "SiFive test",
+        memmap.sifive_test.start,
+        memmap.sifive_test.size(),
+        null,
+        .device,
+    );
+
     // PLIC.
     arch.plic.setBase(try urd.mem.phys.reserveAndRemap(
         "PLIC",
@@ -400,7 +411,9 @@ pub fn getConsole() Console {
 
 /// Trigger a system cold reset.
 pub fn reset(status: u8) void {
-    const finisher: *volatile u32 = @ptrFromInt(memmap.sifive_test.start);
+    const finisher: *volatile u32 = @ptrFromInt(
+        if (sifive_test_base != 0) sifive_test_base else memmap.sifive_test.start,
+    );
     finisher.* = if (status == 0)
         0x5555
     else
