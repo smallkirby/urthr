@@ -743,7 +743,9 @@ fn isDeliverable(_: SigInt, ctx: *const Context) bool {
             return ctx.rsp != 0; // only deliver when returning to Ring-3.
         },
 
-        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+        .riscv64 => {
+            return ctx.sstatus.spp == .user; // only deliver when returning to U-mode.
+        },
 
         else => @compileError("Unsupported architecture."),
     }

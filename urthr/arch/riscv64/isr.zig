@@ -4,6 +4,21 @@ extern fn trap_vector() void;
 /// Context of the interrupt being handled on this core.
 var irq_ctx: ?*const Context linksection(common.pcpu.section) = null;
 
+/// Per-CPU area used by the trap vector when it takes a trap from U-mode.
+///
+/// SSCRATCH points to this area while the hart is running in U-mode.
+const TrapScratch = extern struct {
+    /// Scratch for user T0, since T0 is used as a scratch register in the trap handler.
+    t0: usize,
+    /// Scratch for user SP.
+    usp: usize,
+    /// Top of the kernel stack of the current thread.
+    ksp: usize,
+    /// TP of the kernel.
+    ktp: usize,
+};
+export var trap_scratch: TrapScratch linksection(common.pcpu.section) = std.mem.zeroes(TrapScratch);
+
 /// Called when an exception handler reaches the end.
 var terminator: ?*const fn (u8) void = null;
 /// Function pointer to the registered interrupt handler.
@@ -30,11 +45,22 @@ pub const HandlerSignature = *const fn () ?void;
 pub const PageFaultHandler = *const fn (far: usize, access: common.mem.AccessType, user: bool) bool;
 
 /// User mode fault kinds.
-pub const UserFault = enum {};
+pub const UserFault = enum {
+    /// Segmentation fault.
+    segv,
+    /// Illegal instruction.
+    ill,
+    /// Floating point exception.
+    fpe,
+    /// Bus error.
+    bus,
+    /// Trap.
+    trap,
+};
 
 /// User fault handler function signature.
 ///
-/// Called for synchronous exceptions taken from EL0, other than data aborts and SVC.
+/// Called for synchronous exceptions taken from U-mode, other than page faults and ECALL.
 pub const UserFaultHandler = *const fn (kind: UserFault, addr: usize) void;
 
 /// Hook function signature called before returning to U-mode.
@@ -80,6 +106,18 @@ pub fn setUserFaultHandler(h: UserFaultHandler) void {
 /// Set hook called before returning to U-mode.
 pub fn setEreturnHook(f: EreturnHook) void {
     eret_hook = f;
+}
+
+/// Get the top of the kernel stack used when a trap is taken from U-mode.
+pub fn getKernelStack() usize {
+    return percpu(&trap_scratch).ksp;
+}
+
+/// Set the top of the kernel stack used when a trap is taken from U-mode.
+///
+/// Must be called with IRQ disabled.
+pub fn setKernelStack(top: usize) void {
+    percpu(&trap_scratch).ksp = top;
 }
 
 /// Call the registered ERET hook, if any.
@@ -198,6 +236,7 @@ var console: Console = undefined;
 export fn handleTrap(ctx: *Context) callconv(.c) void {
     const cause: regs.Scause = @bitCast(ctx.scause);
 
+    // Handle IRQs first.
     if (cause.interrupt) {
         const prev = setIrqContext(ctx);
         defer _ = setIrqContext(prev);
@@ -208,11 +247,74 @@ export fn handleTrap(ctx: *Context) callconv(.c) void {
             }
         }
         return defaultHandler(ctx, "Interrupt");
+    }
+
+    // Allow IRQs while handling the trap.
+    const from_user = isFromUser(ctx);
+    if (from_user) am.csrs(.sstatus, .{ .sie = true });
+    defer if (from_user) am.csrc(.sstatus, .{ .sie = true });
+
+    switch (cause.code.e) {
+        // ECALL
+        .ecall_u => {
+            if (from_user) return svc.ecall(ctx);
+        },
+        // Page faults
+        .ipf, .lpf, .spf => {
+            return handlePageFault(ctx, cause.code.e, from_user);
+        },
+        // User exceptions
+        .ialign, .lalign, .salign, .illegal, .breakpoint, .ifault, .lfault, .sfault => {
+            if (from_user) return handleUserFault(ctx, cause.code.e);
+        },
+        else => {},
+    }
+    return defaultHandler(ctx, "Exception");
+}
+
+/// Handle a page fault.
+fn handlePageFault(ctx: *Context, code: regs.Scause.Ecode, from_user: bool) void {
+    const access: common.mem.AccessType = switch (code) {
+        .spf => .write,
+        else => .read,
+    };
+
+    // Call page fault handler if available.
+    if (pagefault_handler) |pf| {
+        if (pf(ctx.stval, access, from_user)) {
+            if (from_user) callEreturnHook(ctx);
+            return;
+        }
+    }
+
+    // Fall back to user fault handler or fixup.
+    if (from_user) {
+        if (userfault_handler) |uf| {
+            uf(.segv, ctx.stval);
+            callEreturnHook(ctx);
+            return;
+        }
+    } else if (uaccess.fixupFor(ctx.sepc)) |fixup| {
+        ctx.sepc = fixup;
+        return;
+    }
+
+    return defaultHandler(ctx, "Page Fault");
+}
+
+/// Handle user exceptions.
+fn handleUserFault(ctx: *Context, code: regs.Scause.Ecode) void {
+    if (userfault_handler) |uf| {
+        switch (code) {
+            .ifault, .lfault, .sfault => uf(.segv, ctx.stval),
+            .ialign, .lalign, .salign => uf(.bus, ctx.stval),
+            .breakpoint => uf(.trap, ctx.sepc),
+            else => uf(.ill, ctx.sepc),
+        }
+        callEreturnHook(ctx);
+        return;
     } else {
-        return switch (cause.code.e) {
-            .ecall_u => svc.ecall(ctx),
-            else => defaultHandler(ctx, "Exception"),
-        };
+        return defaultHandler(ctx, "User Fault");
     }
 }
 
@@ -288,6 +390,11 @@ fn defaultHandler(ctx: *Context, comptime kind: []const u8) noreturn {
     }
 }
 
+/// Check if the trap was taken from U-mode.
+inline fn isFromUser(ctx: *const Context) bool {
+    return ctx.sstatus.spp == .user;
+}
+
 // =============================================================
 // Imports
 // =============================================================
@@ -301,4 +408,5 @@ const am = @import("asm.zig");
 const arch = @import("arch.zig");
 const regs = @import("register.zig");
 const svc = @import("svc.zig");
+const uaccess = @import("uaccess.zig");
 const StackIterator = @import("StackIterator.zig");

@@ -26,6 +26,8 @@ pub const size_2mib = 2 * units.mib;
 pub const size_1gib = 1 * units.gib;
 
 /// Kind of memory access.
+///
+/// TODO: add instruction fetch access type.
 pub const AccessType = enum {
     /// Read access.
     read,
