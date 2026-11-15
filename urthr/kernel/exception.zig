@@ -145,8 +145,8 @@ const LargeIrq = struct {
     }
 
     fn cmpByKey(key: Vector, a: *const LargeIrq) std.math.Order {
-        if (a.vector < key) return .lt;
-        if (a.vector > key) return .gt;
+        if (key < a.vector) return .lt;
+        if (key > a.vector) return .gt;
         return .eq;
     }
 };
