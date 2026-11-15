@@ -2,6 +2,12 @@
 //!
 //! - ref. https://github.com/raspberrypi/linux/blob/3b2b4267d502acb3f9183ceca20719c30e60fca3/drivers/pinctrl/pinctrl-rp1.c
 //! - ref. https://github.com/raspberrypi/utils/blob/230d67ad28e74b17a42064453b2163991cb51a5e/pinctrl/gpiochip_rp1.c
+//!
+//!
+//! SPDX-License-Identifier: GPL-2.0
+//!
+//! Copyright (C) 2023 Raspberry Pi Ltd.
+//!
 
 // =============================================================
 // Module Definition

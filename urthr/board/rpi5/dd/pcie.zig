@@ -2,6 +2,12 @@
 //!
 //! ref. https://github.com/raspberrypi/linux/blob/a1073743767f9e7fdc7017ababd2a07ea0c97c1c/drivers/pci/controller/pcie-brcmstb.c
 //! ref. https://github.com/tnishinaga/pi5_hack/blob/653a12c40127ec2f9d6655336fb27b13090aab4c/baremetal/XX_pcie/src/bcm2712_pcie.rs
+//!
+//!
+//! SPDX-License-Identifier: GPL-2.0+
+//!
+//! Copyright (C) 2009 - 2019 Broadcom
+//!
 
 // =============================================================
 // Module Definition

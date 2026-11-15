@@ -1,6 +1,12 @@
 //! brcm2711-rng200 Random Number Generator.
 //!
 //! ref. https://github.com/raspberrypi/linux/blob/5f23da14d91d4ba66604ec75453564e4e2afc57e/drivers/char/hw_random/iproc-rng200.c
+//!
+//!
+//! SPDX-License-Identifier: GPL-2.0-only
+//!
+//! Copyright (C) 2015 Broadcom Corporation
+//!
 
 // =============================================================
 // Module Definition
