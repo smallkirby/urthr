@@ -532,11 +532,10 @@ pub fn powerOff() noreturn {
 ///
 /// Callers are responsible for freeing the returned array and its contents.
 pub fn getCmdline() !?[]const []const u8 {
-    const fw = fwcfg.interface();
-    const file = fw.lookupFile(urd.fwcfg_filename) orelse return null;
+    const file = fwcfg.lookupFile(urd.fwcfg_filename) orelse return null;
     if (file.size == 0) return null;
 
-    const content = try fw.readFile(file, mem.bin);
+    const content = try fwcfg.readFile(file, mem.bin);
     errdefer mem.bin.free(content);
 
     var it = common.util.ShellWordIterator.init(content);
@@ -575,4 +574,4 @@ const Pair = common.Pair;
 const urd = @import("urthr");
 const mem = urd.mem;
 const dd = @import("dd");
-const fwcfg = @import("fwcfg.zig");
+const fwcfg = dd.fwcfg;

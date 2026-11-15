@@ -205,8 +205,11 @@ pub inline fn getNormalTempMaps() []const common.Range {
 ///
 /// Expects all virtual address range is identity-mapped.
 pub fn boot() void {
+    // NS16550 UART.
     dd.uart16550.setBase(0x3F8);
     dd.uart16550.init(1_843_200, 115_200); // 1.8432 MHz, 115200 bps
+    // QEMU fw_cfg.
+    dd.fwcfg.setBase(0x510);
 }
 
 /// Map new I/O memory regions.
@@ -890,11 +893,10 @@ pub fn powerOff() noreturn {
 ///
 /// Callers are responsible for freeing the returned array and its contents.
 pub fn getCmdline() !?[]const []const u8 {
-    const fw = fwcfg.interface();
-    const file = fw.lookupFile(urd.fwcfg_filename) orelse return null;
+    const file = fwcfg.lookupFile(urd.fwcfg_filename) orelse return null;
     if (file.size == 0) return null;
 
-    const content = try fw.readFile(file, mem.bin);
+    const content = try fwcfg.readFile(file, mem.bin);
     errdefer mem.bin.free(content);
 
     var it = common.util.ShellWordIterator.init(content);
@@ -939,4 +941,4 @@ const net = urd.net;
 const dd = @import("dd");
 
 const acpi = @import("acpi.zig");
-const fwcfg = @import("fwcfg.zig");
+const fwcfg = dd.fwcfg;

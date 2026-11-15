@@ -3,7 +3,7 @@
 //! Drivers don't know about the board layout and cannot rely on any board-specific information.
 
 pub const fake_rng = @import("dd/fake_rng.zig");
-pub const FwCfg = @import("dd/FwCfg.zig");
+pub const fwcfg = @import("dd/fwcfg.zig");
 pub const i2c = @import("dd/i2c.zig");
 pub const net = @import("dd/net.zig");
 pub const pci = @import("dd/pci.zig");
