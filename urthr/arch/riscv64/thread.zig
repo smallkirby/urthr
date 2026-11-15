@@ -138,7 +138,8 @@ pub fn setThreadPointer(tp: usize) void {
 ///
 /// Does not return.
 pub fn enterUserland(pc: usize, sp: usize, kstack: usize) noreturn {
-    rtt.expectEqual(0, am.csrr(.sstatus).sie);
+    // Disable IRQs.
+    _ = arch.intr.maskAll();
 
     // Set kernel stack for the trap handler.
     isr.setKernelStack(kstack);
@@ -170,9 +171,7 @@ fn trampoline() callconv(.naked) noreturn {
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const common = @import("common");
-const rtt = common.rtt;
-const am = @import("asm.zig");
+const arch = @import("arch.zig");
 const regs = @import("register.zig");
 const isr = @import("isr.zig");
 const IsrContext = isr.Context;
