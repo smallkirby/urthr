@@ -78,6 +78,12 @@ pub const virtio_stride: usize = 0x1000;
 /// PLIC interrupt source of the first virtio MMIO device.
 pub const virtio_first_source: usize = 1;
 
+/// fw_cfg device.
+pub const fw_cfg = Range{
+    .start = 0x1010_0000,
+    .end = 0x1010_1000,
+};
+
 // =============================================================
 // Imports
 // =============================================================

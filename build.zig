@@ -1282,7 +1282,7 @@ const Qemu = struct {
 
     pub fn command(self: Qemu, allocator: Allocator) ![]const Arg {
         if (self.append) |_| switch (self.machine) {
-            .virt, .q35 => {},
+            .virt, .q35, .rv64virt => {},
             else => @panic("Command line arguments cannot be specified for this board."),
         };
 
@@ -1422,6 +1422,12 @@ const Qemu = struct {
                 try appendStrings(&args, allocator, &.{
                     "-semihosting",
                 });
+                if (self.append) |append| try appendStrings(&args, allocator, &.{
+                    "-fw_cfg",
+                    try std.fmt.allocPrint(allocator, "name={s},string={s}", .{ fwcfg_name, append }),
+                });
+            },
+            .rv64virt => {
                 if (self.append) |append| try appendStrings(&args, allocator, &.{
                     "-fw_cfg",
                     try std.fmt.allocPrint(allocator, "name={s},string={s}", .{ fwcfg_name, append }),

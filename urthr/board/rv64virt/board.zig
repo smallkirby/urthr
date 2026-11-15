@@ -140,6 +140,15 @@ pub fn initPeripherals1() common.mem.Error!void {
         null,
         .device,
     ));
+
+    // QEMU fw_cfg.
+    fwcfg.setBase(try urd.mem.phys.reserveAndRemap(
+        "fw_cfg",
+        memmap.fw_cfg.start,
+        memmap.fw_cfg.size(),
+        null,
+        .device,
+    ));
 }
 
 /// Initialize peripherals phase 2.
@@ -433,9 +442,22 @@ pub fn powerOff() noreturn {
     }
 }
 
-/// Get the command line passed by the host.
+/// Get the command line passed by the host via a fw_cfg.
+///
+/// Callers are responsible for freeing the returned array and its contents.
 pub fn getCmdline() !?[]const []const u8 {
-    return null;
+    const file = fwcfg.lookupFile(urd.fwcfg_filename) orelse return null;
+    if (file.size == 0) return null;
+
+    const content = try fwcfg.readFile(file, urd.mem.bin);
+    errdefer urd.mem.bin.free(content);
+
+    var it = common.util.ShellWordIterator.init(content);
+    var argv: std.array_list.Aligned([]const u8, null) = .empty;
+    while (it.next()) |word| {
+        argv.append(urd.mem.bin, word) catch break;
+    }
+    return argv.items;
 }
 
 /// Wrapper functions for console API.
@@ -458,6 +480,7 @@ const log = std.log.scoped(.rv64v);
 const arch = @import("arch").impl;
 const common = @import("common");
 const dd = @import("dd");
+const fwcfg = dd.fwcfg;
 const Console = common.Console;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
