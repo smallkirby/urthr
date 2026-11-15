@@ -256,7 +256,10 @@ export fn serrorCurElSpx(ctx: *Context) callconv(.c) void {
 }
 
 export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
-    switch (am.mrs(.esr_el1).ec) {
+    const esr = am.mrs(.esr_el1);
+    const far = am.mrsi(.far_el1);
+
+    switch (esr.ec) {
         // System call.
         .svc_a64 => {
             maskIrq(false);
@@ -268,14 +271,14 @@ export fn syncLowerElA64(ctx: *Context) callconv(.c) void {
         .dabort_lower => {
             maskIrq(false);
             defer maskIrq(true);
-            return handleDataAbortUser(ctx);
+            return handleDataAbortUser(ctx, esr, far);
         },
 
         // Other faults caused by the user program.
         .iabort_lower, .unknown, .illegal_exec_state, .simd, .bti, .pc_align, .sp_align, .brk_a64 => {
             maskIrq(false);
             defer maskIrq(true);
-            return handleUserFault(ctx);
+            return handleUserFault(ctx, esr, far);
         },
 
         // Unhandled.
@@ -291,10 +294,8 @@ fn maskIrq(mask: bool) void {
 }
 
 /// Handle a data abort taken from EL0.
-fn handleDataAbortUser(ctx: *Context) void {
-    const esr = am.mrs(.esr_el1);
+fn handleDataAbortUser(ctx: *Context, esr: regs.Esr, far: usize) void {
     const iss: regs.Esr.IssDabort = @bitCast(esr.iss);
-    const far = am.mrsi(.far_el1);
 
     if (iss.dfsc == .alignment) {
         if (userfault_handler) |uf| {
@@ -316,10 +317,8 @@ fn handleDataAbortUser(ctx: *Context) void {
 }
 
 /// Call user-mode exception handler.
-fn handleUserFault(ctx: *Context) void {
-    const esr = am.mrs(.esr_el1);
+fn handleUserFault(ctx: *Context, esr: regs.Esr, far: usize) void {
     const ec = esr.ec;
-    const far = am.mrsi(.far_el1);
 
     // Call page fault handler if the fault was a translation fault on instruction fetch.
     const fsc: regs.Esr.Dfsc = @fromBackingInt(@truncate(esr.iss));
