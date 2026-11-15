@@ -1,5 +1,3 @@
-const todo = "TODO: RISC-V: thread is not supported yet";
-
 /// Context saved during a thread switch.
 const SwitchContext = extern struct {
     ra: usize,
