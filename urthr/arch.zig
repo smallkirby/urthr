@@ -8,6 +8,16 @@ pub const impl = switch (builtin.target.cpu.arch) {
     else => @compileError("Unsupported architecture."),
 };
 
+/// State of the thread interrupted by an IRQ.
+pub const InterruptedInfo = struct {
+    /// Instruction pointer.
+    pc: u64,
+    /// Frame pointer. Valid only when `user` is false.
+    fp: u64,
+    /// Code was running in user mode when interrupted.
+    user: bool,
+};
+
 // =============================================================
 // Imports
 // =============================================================

@@ -193,7 +193,7 @@ const PfErrorCode = packed struct(u32) {
 /// Get the state of the thread interrupted by an IRQ.
 ///
 /// Available only while handling an IRQ.
-pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
+pub fn getInterruptedInfo() ?InterruptedInfo {
     const ctx = getIrqContext() orelse return null;
     return .{
         .pc = ctx.rip,
@@ -523,6 +523,7 @@ const common = @import("common");
 const units = common.units;
 const Console = common.Console;
 const UnsafeWriter = common.UnsafeWriter;
+const InterruptedInfo = @import("arch").InterruptedInfo;
 const am = @import("asm.zig");
 const arch = @import("arch.zig");
 const gdt = @import("gdt.zig");

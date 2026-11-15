@@ -128,7 +128,7 @@ pub fn callEreturnHook(ctx: *Context) void {
 /// Get the state of the thread interrupted by an IRQ.
 ///
 /// Available only while handling an IRQ.
-pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
+pub fn getInterruptedInfo() ?InterruptedInfo {
     const ctx = getIrqContext() orelse return null;
     const sstatus: regs.Sstatus = @bitCast(ctx.sstatus);
     return .{
@@ -404,6 +404,7 @@ const common = @import("common");
 const rtt = common.rtt;
 const Console = common.Console;
 const UnsafeWriter = common.UnsafeWriter;
+const InterruptedInfo = @import("arch").InterruptedInfo;
 const am = @import("asm.zig");
 const arch = @import("arch.zig");
 const regs = @import("register.zig");

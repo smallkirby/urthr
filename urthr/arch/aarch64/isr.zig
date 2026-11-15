@@ -436,7 +436,7 @@ export fn serrorLowerElA32(ctx: *Context) callconv(.c) void {
 /// Get the state of the thread interrupted by an IRQ.
 ///
 /// Available only while handling an IRQ.
-pub fn getInterruptedInfo() ?common.arch.InterruptedInfo {
+pub fn getInterruptedInfo() ?InterruptedInfo {
     const ctx = getIrqContext() orelse return null;
     return .{
         .pc = ctx.pc,
@@ -503,6 +503,7 @@ const std = @import("std");
 const common = @import("common");
 const Console = common.Console;
 const UnsafeWriter = common.UnsafeWriter;
+const InterruptedInfo = @import("arch").InterruptedInfo;
 const am = @import("asm.zig");
 const regs = @import("register.zig");
 const StackIterator = @import("StackIterator.zig");

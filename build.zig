@@ -287,6 +287,7 @@ pub fn build(b: *std.Build) !void {
     {
         arch_module.addImport("common", common_module);
         arch_module.addImport("options", options_module);
+        arch_module.addImport("arch", arch_module);
     }
     {
         dd_module.addImport("common", common_module);
