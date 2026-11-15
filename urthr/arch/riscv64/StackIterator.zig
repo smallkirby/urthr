@@ -31,7 +31,13 @@ fn isFrameValid(fp: usize, ra: usize) bool {
     return fp != 0 and
         std.mem.isAligned(fp, @sizeOf(usize)) and
         std.mem.isAligned(ra, @sizeOf(usize)) and
-        true;
+        isKernelAddress(fp) and
+        isKernelAddress(ra);
+}
+
+/// Check if the address is in the kernel address space.
+fn isKernelAddress(addr: usize) bool {
+    return @as(isize, @bitCast(addr)) < 0;
 }
 
 // =============================================================
