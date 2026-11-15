@@ -256,7 +256,46 @@ pub fn sigreturn() void {
             break :blk saved_mask;
         },
 
-        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+        .riscv64 => blk: {
+            const frame: *const SigFrame = @ptrFromInt(ctx.sp);
+
+            // Restore GPRs.
+            const gpr = &frame.mcontext.gregs;
+            ctx.sepc = gpr[0];
+            ctx.ra = gpr[1];
+            ctx.sp = gpr[2];
+            ctx.gp = gpr[3];
+            ctx.tp = gpr[4];
+            ctx.t0 = gpr[5];
+            ctx.t1 = gpr[6];
+            ctx.t2 = gpr[7];
+            ctx.s0 = gpr[8];
+            ctx.s1 = gpr[9];
+            ctx.a0 = gpr[10];
+            ctx.a1 = gpr[11];
+            ctx.a2 = gpr[12];
+            ctx.a3 = gpr[13];
+            ctx.a4 = gpr[14];
+            ctx.a5 = gpr[15];
+            ctx.a6 = gpr[16];
+            ctx.a7 = gpr[17];
+            ctx.s2 = gpr[18];
+            ctx.s3 = gpr[19];
+            ctx.s4 = gpr[20];
+            ctx.s5 = gpr[21];
+            ctx.s6 = gpr[22];
+            ctx.s7 = gpr[23];
+            ctx.s8 = gpr[24];
+            ctx.s9 = gpr[25];
+            ctx.s10 = gpr[26];
+            ctx.s11 = gpr[27];
+            ctx.t3 = gpr[28];
+            ctx.t4 = gpr[29];
+            ctx.t5 = gpr[30];
+            ctx.t6 = gpr[31];
+
+            break :blk frame.saved_mask;
+        },
 
         else => @compileError("Unsupported architecture."),
     };
@@ -412,7 +451,7 @@ pub fn pushSync(signo: Signal, fault: ?usize) void {
 // =============================================================
 
 const UcFlags = switch (builtin.cpu.arch) {
-    .aarch64 => u64,
+    .aarch64, .riscv64 => u64,
     .x86_64 => packed struct(u64) {
         /// Indicates the presence of extended state information.
         fp: bool = false,
@@ -513,7 +552,41 @@ pub const SigFrame = switch (builtin.cpu.arch) {
     },
 
     .riscv64 => extern struct {
-        mcontext: extern struct {},
+        /// Context flags.
+        flags: UcFlags = 0,
+        /// Not used.
+        link: u64 = 0,
+        /// Stack information.
+        stack: extern struct {
+            /// Bottom of the stack.
+            sp: usize,
+            /// Stack flags.
+            flags: i32 = 2, // disabled
+            /// Size of the alternate stack region.
+            size: usize = 0,
+        },
+        /// Signal mask.
+        saved_mask: Mask = 0,
+        /// Not used.
+        _rsvd: [1024 / 8 - @sizeOf(Mask)]u8 = @splat(0),
+        /// CPU context.
+        mcontext: extern struct {
+            /// User-mode general-purpose registers.
+            ///
+            /// pc, ra, sp, gp, tp, t0-t2, s0, s1, a0-a7, s2-s11, t3-t6.
+            gregs: [32]u64 = @splat(0),
+            /// FP state.
+            fpregs: Qstate align(16) = .{},
+        } align(16),
+
+        const Qstate = extern struct {
+            /// FPU registers.
+            f: [64]u64 = @splat(0),
+            /// FCSR.
+            fcsr: u32 = 0,
+            /// Reserved.
+            _rsvd: [3]u32 = @splat(0),
+        };
     },
 
     else => @compileError("Unsupported architecture."),
@@ -523,7 +596,7 @@ comptime {
         @offsetOf(SigFrame, "mcontext") == switch (builtin.cpu.arch) {
             .aarch64 => 176,
             .x86_64 => 40,
-            .riscv64 => 0,
+            .riscv64 => 176,
             else => unreachable,
         },
         "Invalid mcontext offset.",
@@ -576,7 +649,7 @@ const Frame = extern struct {
 /// Size in bytes of the red-zone.
 const red_zone_size: u64 = switch (builtin.cpu.arch) {
     .x86_64 => 128, // SysV
-    .aarch64 => 0,
+    .aarch64, .riscv64 => 0,
     else => @compileError("Unsupported architecture."),
 };
 
@@ -875,7 +948,45 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
             ctx.rsp = ret_uaddr;
         },
 
-        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+        .riscv64 => {
+            var local: Frame = std.mem.zeroes(Frame);
+
+            // Save user context into the sigframe.
+            const sf = &local.sigframe;
+            {
+                sf.saved_mask = th.sigstate.blocked;
+                sf.mcontext.gregs = .{
+                    ctx.sepc, ctx.ra, ctx.sp,  ctx.gp,  ctx.tp, ctx.t0, ctx.t1, ctx.t2,
+                    ctx.s0,   ctx.s1, ctx.a0,  ctx.a1,  ctx.a2, ctx.a3, ctx.a4, ctx.a5,
+                    ctx.a6,   ctx.a7, ctx.s2,  ctx.s3,  ctx.s4, ctx.s5, ctx.s6, ctx.s7,
+                    ctx.s8,   ctx.s9, ctx.s10, ctx.s11, ctx.t3, ctx.t4, ctx.t5, ctx.t6,
+                };
+            }
+
+            // Push signal information.
+            const si = &local.siginfo;
+            {
+                si.signo = @intCast(signo);
+                si.sigfield = switch (@as(Signal, @fromBackingInt(@intCast(signo)))) {
+                    .segv, .ill, .fpe, .bus, .trap => .{ .fault = .{
+                        .addr = th.sigstate.fault,
+                    } },
+                    else => .{ .zero = .{} },
+                };
+            }
+
+            // Copy constructed sigframe and siginfo to user space.
+            const frame_uaddr = (ctx.sp - red_zone_size - @sizeOf(Frame)) & ~@as(u64, 0xF);
+            try urd.uaccess.copyToUser(frame_uaddr, std.mem.asBytes(&local));
+
+            // Modify user context to execute the signal handler.
+            ctx.a0 = signo;
+            ctx.a1 = frame_uaddr + @offsetOf(Frame, "siginfo");
+            ctx.a2 = frame_uaddr + @offsetOf(Frame, "sigframe");
+            ctx.sepc = action.handler;
+            ctx.sp = frame_uaddr;
+            ctx.ra = trampoline;
+        },
 
         else => @compileError("Unsupported architecture."),
     }
@@ -946,7 +1057,17 @@ fn generateTrampoline() Trampoline {
             }.f,
         },
 
-        .riscv64 => @panic("TODO: RISC-V: signal not supported yet"),
+        .riscv64 => .{
+            .size = 8,
+            .code = struct {
+                fn f() callconv(.naked) noreturn {
+                    asm volatile (
+                        \\li a7, 139 // rt_sigreturn
+                        \\ecall
+                    );
+                }
+            }.f,
+        },
 
         else => @compileError("Unsupported architecture."),
     };
