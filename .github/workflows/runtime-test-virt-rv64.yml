@@ -1,0 +1,64 @@
+name: Runtime Tests (QEMU virt RISC-V)
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  ZIG_VERSION: 0.17.0
+
+jobs:
+  runtime_test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/urthr:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        BUILD_TYPE: [Debug, ReleaseSafe, ReleaseFast]
+      max-parallel: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependency
+        run: |
+          apt update
+          apt install -y \
+            git \
+            sudo \
+            binutils \
+            curl \
+            wget \
+            tar \
+            xz-utils \
+            qemu-system-riscv64 \
+            qemu-utils \
+            cpp \
+            libcapstone-dev \
+            fdisk \
+            dosfstools \
+            mtools
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Runtime Tests (virt)
+        run: |
+          zig build run --summary all \
+            -Dlog_level=debug \
+            -Doptimize=${{ matrix.BUILD_TYPE }} \
+            -Dboard=rv64virt \
+            -Dqemu=/usr/bin \
+            -Drtt \
+            -Drestart \
+            -Dsdcreate \
+            -Dinit=/bin/utest \
+            -Dallow_init_exit

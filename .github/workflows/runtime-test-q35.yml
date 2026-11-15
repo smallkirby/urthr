@@ -1,4 +1,4 @@
-name: Runtime Tests (QEMU Q35 Machine)
+name: Runtime Tests (QEMU Q35 x64)
 
 on:
   push:

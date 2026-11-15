@@ -1,4 +1,4 @@
-name: Runtime Tests (QEMU virt)
+name: Runtime Tests (QEMU virt aarch64)
 
 on:
   push:
