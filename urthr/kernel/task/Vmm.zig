@@ -28,7 +28,7 @@ brk: usize = 0,
 /// Next candidate address for anonymous mmap.
 mmap_hint: usize = mmap_base,
 /// Number of tasks sharing this address space.
-refcnt: usize = 1,
+refcnt: std.atomic.Value(usize) = .init(1),
 /// Forces exclusive access to VMM.
 lock: SpinLock = .{},
 
@@ -55,7 +55,7 @@ pub fn new(allocator: Allocator, as: arch.mmu.AddressSpace) Allocator.Error!*Sel
 
 /// Increment the reference count to share this address space.
 pub fn ref(self: *Self) *Self {
-    self.refcnt += 1;
+    _ = self.refcnt.fetchAdd(1, .acq_rel);
     return self;
 }
 
@@ -63,8 +63,9 @@ pub fn ref(self: *Self) *Self {
 ///
 /// Resources are released only when the last reference is dropped.
 pub fn deinit(self: *Self, allocator: Allocator) void {
-    self.refcnt -= 1;
-    if (self.refcnt > 0) return;
+    if (self.refcnt.fetchSub(1, .acq_rel) > 1) {
+        return;
+    }
 
     // Unmap all VMAs and free their backing pages.
     while (self.tree.min()) |node| {
@@ -799,7 +800,7 @@ fn flushTlb(self: *const Self, scope: Scope, range: ?FlushRange) void {
     }
 
     if (comptime !arch.mmu.tlb.supports_global) {
-        if (scope == .global and self.refcnt > 1) {
+        if (scope == .global and self.refcnt.load(.acquire) > 1) {
             urd.ipi.tlbShootdown(if (range) |r| .{
                 .addr = r.addr,
                 .len = r.len,

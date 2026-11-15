@@ -81,7 +81,7 @@ pub const Handlers = struct {
     /// Reference count.
     ///
     /// Freed when it drops to zero.
-    refcnt: usize = 1,
+    refcnt: std.atomic.Value(usize) = .init(1),
     /// Per-signal action table (0-origin).
     actions: [num_signals]Action = @splat(.{}),
 
@@ -115,14 +115,15 @@ pub const Handlers = struct {
 
     /// Increment the reference count to share this handler table.
     pub fn ref(self: *Handlers) *Handlers {
-        self.refcnt += 1;
+        _ = self.refcnt.fetchAdd(1, .acq_rel);
         return self;
     }
 
     /// Decrement the reference count, freeing the table when it reaches zero.
     pub fn deinit(self: *Handlers, allocator: Allocator) void {
-        self.refcnt -= 1;
-        if (self.refcnt == 0) allocator.destroy(self);
+        if (self.refcnt.fetchSub(1, .acq_rel) == 1) {
+            allocator.destroy(self);
+        }
     }
 };
 
