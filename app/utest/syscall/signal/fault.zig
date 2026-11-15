@@ -63,15 +63,25 @@ test "misaligned SSE access terminates the process with SIGSEGV" {
 }
 
 test "misaligned exclusive access terminates the process with SIGBUS" {
-    if (builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    switch (builtin.cpu.arch) {
+        .aarch64, .riscv64 => {},
+        else => return error.SkipZigTest,
+    }
 
     try utest.expectRunChildSignaled(.BUS, 0, struct {
         pub fn lambda(_: usize) noreturn {
             var buf: [16]u8 align(16) = undefined;
-            asm volatile ("ldxr x0, [%[p]]"
-                :
-                : [p] "r" (@intFromPtr(&buf) + 1),
-                : .{ .x0 = true });
+            switch (builtin.cpu.arch) {
+                .aarch64 => asm volatile ("ldxr x0, [%[p]]"
+                    :
+                    : [p] "r" (@intFromPtr(&buf) + 1),
+                    : .{ .x0 = true }),
+                .riscv64 => asm volatile ("lr.d t0, (%[p])"
+                    :
+                    : [p] "r" (@intFromPtr(&buf) + 1),
+                    : .{ .t0 = true }),
+                else => unreachable,
+            }
             unreachable;
         }
     });
@@ -83,7 +93,7 @@ test "breakpoint instruction terminates the process with SIGTRAP" {
             switch (builtin.cpu.arch) {
                 .x86_64 => asm volatile ("int3"),
                 .aarch64 => asm volatile ("brk #0"),
-                .riscv64 => asm volatile ("unimp"), // TODO
+                .riscv64 => asm volatile ("ebreak"),
                 else => @compileError("Unsupported architecture."),
             }
             unreachable;

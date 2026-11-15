@@ -3,11 +3,13 @@ const iterations = 100;
 const num_fpu = switch (builtin.cpu.arch) {
     .x86_64 => 16,
     .aarch64 => 32,
+    .riscv64 => 32,
     else => 0,
 };
 const bytes_fpu = switch (builtin.cpu.arch) {
     .x86_64 => 32,
     .aarch64 => 16,
+    .riscv64 => 8, // D extension
     else => 0,
 };
 
@@ -209,13 +211,122 @@ fn yield(pattern: *const FpuState, out: *FpuState) void {
               .v31 = true,
             }),
 
+        .riscv64 => asm volatile (
+            \\fld f0,  ( 0*8)(%[p])
+            \\fld f1,  ( 1*8)(%[p])
+            \\fld f2,  ( 2*8)(%[p])
+            \\fld f3,  ( 3*8)(%[p])
+            \\fld f4,  ( 4*8)(%[p])
+            \\fld f5,  ( 5*8)(%[p])
+            \\fld f6,  ( 6*8)(%[p])
+            \\fld f7,  ( 7*8)(%[p])
+            \\fld f8,  ( 8*8)(%[p])
+            \\fld f9,  ( 9*8)(%[p])
+            \\fld f10, (10*8)(%[p])
+            \\fld f11, (11*8)(%[p])
+            \\fld f12, (12*8)(%[p])
+            \\fld f13, (13*8)(%[p])
+            \\fld f14, (14*8)(%[p])
+            \\fld f15, (15*8)(%[p])
+            \\fld f16, (16*8)(%[p])
+            \\fld f17, (17*8)(%[p])
+            \\fld f18, (18*8)(%[p])
+            \\fld f19, (19*8)(%[p])
+            \\fld f20, (20*8)(%[p])
+            \\fld f21, (21*8)(%[p])
+            \\fld f22, (22*8)(%[p])
+            \\fld f23, (23*8)(%[p])
+            \\fld f24, (24*8)(%[p])
+            \\fld f25, (25*8)(%[p])
+            \\fld f26, (26*8)(%[p])
+            \\fld f27, (27*8)(%[p])
+            \\fld f28, (28*8)(%[p])
+            \\fld f29, (29*8)(%[p])
+            \\fld f30, (30*8)(%[p])
+            \\fld f31, (31*8)(%[p])
+            \\
+            \\ecall
+            \\
+            \\fsd f0,  ( 0*8)(%[out])
+            \\fsd f1,  ( 1*8)(%[out])
+            \\fsd f2,  ( 2*8)(%[out])
+            \\fsd f3,  ( 3*8)(%[out])
+            \\fsd f4,  ( 4*8)(%[out])
+            \\fsd f5,  ( 5*8)(%[out])
+            \\fsd f6,  ( 6*8)(%[out])
+            \\fsd f7,  ( 7*8)(%[out])
+            \\fsd f8,  ( 8*8)(%[out])
+            \\fsd f9,  ( 9*8)(%[out])
+            \\fsd f10, (10*8)(%[out])
+            \\fsd f11, (11*8)(%[out])
+            \\fsd f12, (12*8)(%[out])
+            \\fsd f13, (13*8)(%[out])
+            \\fsd f14, (14*8)(%[out])
+            \\fsd f15, (15*8)(%[out])
+            \\fsd f16, (16*8)(%[out])
+            \\fsd f17, (17*8)(%[out])
+            \\fsd f18, (18*8)(%[out])
+            \\fsd f19, (19*8)(%[out])
+            \\fsd f20, (20*8)(%[out])
+            \\fsd f21, (21*8)(%[out])
+            \\fsd f22, (22*8)(%[out])
+            \\fsd f23, (23*8)(%[out])
+            \\fsd f24, (24*8)(%[out])
+            \\fsd f25, (25*8)(%[out])
+            \\fsd f26, (26*8)(%[out])
+            \\fsd f27, (27*8)(%[out])
+            \\fsd f28, (28*8)(%[out])
+            \\fsd f29, (29*8)(%[out])
+            \\fsd f30, (30*8)(%[out])
+            \\fsd f31, (31*8)(%[out])
+            :
+            : [p] "r" (pattern),
+              [out] "r" (out),
+              [nr] "{a7}" (@backingInt(linux.SYS.sched_yield)),
+            : .{
+              .memory = true,
+              .a0 = true,
+              .f0 = true,
+              .f1 = true,
+              .f2 = true,
+              .f3 = true,
+              .f4 = true,
+              .f5 = true,
+              .f6 = true,
+              .f7 = true,
+              .f8 = true,
+              .f9 = true,
+              .f10 = true,
+              .f11 = true,
+              .f12 = true,
+              .f13 = true,
+              .f14 = true,
+              .f15 = true,
+              .f16 = true,
+              .f17 = true,
+              .f18 = true,
+              .f19 = true,
+              .f20 = true,
+              .f21 = true,
+              .f22 = true,
+              .f23 = true,
+              .f24 = true,
+              .f25 = true,
+              .f26 = true,
+              .f27 = true,
+              .f28 = true,
+              .f29 = true,
+              .f30 = true,
+              .f31 = true,
+            }),
+
         else => unreachable,
     }
 }
 
 test "context switch preserves FPU registers across context switches" {
     switch (builtin.cpu.arch) {
-        .x86_64, .aarch64 => {},
+        .x86_64, .aarch64, .riscv64 => {},
         else => return error.SkipZigTest,
     }
 

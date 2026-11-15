@@ -70,7 +70,10 @@ fn dumpPerfTrace() void {
             : [number] "{rax}" (nr),
             : .{ .rcx = true, .r11 = true, .memory = true })
     else if (builtin.cpu.arch.isRISCV())
-        @panic("TODO: RISC-V: perf dump not supported yet")
+        asm volatile ("ecall"
+            : [ret] "={a0}" (-> u64),
+            : [number] "{a7}" (nr),
+            : .{ .memory = true })
     else
         @compileError("unsupported architecture");
 

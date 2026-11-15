@@ -2,12 +2,19 @@
 const num_vregs = switch (builtin.cpu.arch) {
     .x86_64 => 16, // XMM0-XMM15
     .aarch64 => 32, // V0-V31
-    .riscv64 => 0, // TODO
+    .riscv64 => 32, // F0-F31
+    else => @compileError("Unsupported architecture."),
+};
+
+/// Size in bytes of a vector register.
+const vreg_size = switch (builtin.cpu.arch) {
+    .x86_64, .aarch64 => 16,
+    .riscv64 => 8,
     else => @compileError("Unsupported architecture."),
 };
 
 /// Contents of all vector registers.
-const VregSet = [num_vregs][16]u8;
+const VregSet = [num_vregs][vreg_size]u8;
 
 /// Generate contents of vector registers unique per register.
 fn makeVregs(comptime invert: bool) VregSet {
@@ -70,7 +77,10 @@ fn onSignalClobber(_: linux.SIG) callconv(.c) void {
             :
             : [src] "{x9}" (src),
             : vregClobbers(.{ .memory = true })),
-        .riscv64 => asm volatile ("unimp"), // TODO
+        .riscv64 => asm volatile (loadRegs("t0")
+            :
+            : [src] "{t0}" (src),
+            : vregClobbers(.{ .memory = true })),
 
         else => @compileError("Unsupported architecture."),
     }
@@ -99,7 +109,14 @@ fn raiseKeepingRegs(pid: usize, signo: usize, out: *align(16) VregSet) void {
               [sig] "{x1}" (signo),
             : vregClobbers(.{ .x0 = true, .memory = true })),
 
-        .riscv64 => asm volatile ("unimp"), // TODO
+        .riscv64 => asm volatile (loadRegs("t0") ++ "ecall\n" ++ storeRegs("t1")
+            :
+            : [src] "{t0}" (src),
+              [out] "{t1}" (out),
+              [nr] "{a7}" (@as(usize, 129)), // kill syscall
+              [pid] "{a0}" (pid),
+              [sig] "{a1}" (signo),
+            : vregClobbers(.{ .a0 = true, .memory = true })),
 
         else => @compileError("Unsupported architecture."),
     }
@@ -117,6 +134,7 @@ fn loadRegs(comptime r: []const u8) []const u8 {
             asm_str = asm_str ++ switch (builtin.cpu.arch) {
                 .x86_64 => std.fmt.comptimePrint("movdqa {d}(%%{s}), %%xmm{d}\n", .{ i * 16, r, i }),
                 .aarch64 => std.fmt.comptimePrint("ldr q{d}, [{s}, #{d}]\n", .{ i, r, i * 16 }),
+                .riscv64 => std.fmt.comptimePrint("fld f{d}, {d}({s})\n", .{ i, i * 8, r }),
                 else => unreachable,
             };
         }
@@ -133,6 +151,7 @@ fn storeRegs(comptime r: []const u8) []const u8 {
             asm_str = asm_str ++ switch (builtin.cpu.arch) {
                 .x86_64 => std.fmt.comptimePrint("movdqa %%xmm{d}, {d}(%%{s})\n", .{ i, i * 16, r }),
                 .aarch64 => std.fmt.comptimePrint("str q{d}, [{s}, #{d}]\n", .{ i, r, i * 16 }),
+                .riscv64 => std.fmt.comptimePrint("fsd f{d}, {d}({s})\n", .{ i, i * 8, r }),
                 else => unreachable,
             };
         }
@@ -149,6 +168,7 @@ fn vregClobbers(comptime base: std.builtin.assembly.Clobbers) std.builtin.assemb
             const name = switch (builtin.cpu.arch) {
                 .x86_64 => std.fmt.comptimePrint("xmm{d}", .{i}),
                 .aarch64 => std.fmt.comptimePrint("v{d}", .{i}),
+                .riscv64 => std.fmt.comptimePrint("f{d}", .{i}),
                 else => unreachable,
             };
             @field(clobbers, name) = true;
