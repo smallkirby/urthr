@@ -525,6 +525,7 @@ pub fn build(b: *std.Build) !void {
                 b.path("urthr/arch/x64/uaccess.S"),
             },
             .riscv64 => &[_]LazyPath{
+                b.path("urthr/arch/riscv64/fpu.S"),
                 b.path("urthr/arch/riscv64/head.S"),
                 b.path("urthr/arch/riscv64/isr.S"),
                 b.path("urthr/arch/riscv64/smp.S"),

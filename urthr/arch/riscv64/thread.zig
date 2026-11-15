@@ -123,7 +123,8 @@ fn userContext() *IsrContext {
 /// Must be called while IRQ disabled.
 ///
 /// Returns the pointer to the previous thread's context.
-pub fn switchContext(oldsp: *usize, newsp: *const usize, kstack: usize, th: *anyopaque, _: ?*anyopaque) *anyopaque {
+pub fn switchContext(oldsp: *usize, newsp: *const usize, kstack: usize, th: *anyopaque, oldfpu: ?*anyopaque) *anyopaque {
+    if (oldfpu) |f| fpu.saveState(f);
     isr.setKernelStack(kstack);
     return switchContextAsm(oldsp, newsp, th);
 }

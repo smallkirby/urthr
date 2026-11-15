@@ -4,8 +4,13 @@ const size_state = @sizeOf(State);
 const align_state = 16;
 
 /// Layout of the saved FPU state.
+///
+/// Assumes D extension is available.
 pub const State = extern struct {
-    _unused: [16]u8,
+    /// Floating-point registers F0-F31.
+    f: [32]u64,
+    /// Floating-point control and status register.
+    fcsr: u64,
 };
 
 /// Initialize the thread stack.
@@ -31,10 +36,16 @@ pub fn getStateSize() usize {
 }
 
 /// Save the current FPU state into the given region.
-pub fn saveState(_: *anyopaque) void {}
+pub fn saveState(state: *anyopaque) void {
+    fpuSaveState(state);
+}
+extern fn fpuSaveState(state: *anyopaque) callconv(.c) void;
 
 /// Restore the FPU state from the given region.
-pub fn restoreState(_: *anyopaque) void {}
+pub fn restoreState(state: *anyopaque) void {
+    fpuRestoreState(state);
+}
+extern fn fpuRestoreState(state: *anyopaque) callconv(.c) void;
 
 // =============================================================
 // Imports

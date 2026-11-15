@@ -294,6 +294,9 @@ pub fn sigreturn() void {
             ctx.t5 = gpr[30];
             ctx.t6 = gpr[31];
 
+            // Restore FP context.
+            FpContext.restore(frame);
+
             break :blk frame.saved_mask;
         },
 
@@ -576,8 +579,23 @@ pub const SigFrame = switch (builtin.cpu.arch) {
             /// pc, ra, sp, gp, tp, t0-t2, s0, s1, a0-a7, s2-s11, t3-t6.
             gregs: [32]u64 = @splat(0),
             /// FP state.
-            fpregs: Qstate align(16) = .{},
+            fpregs: FpState align(16) = .{ .q = .{} },
         } align(16),
+
+        /// FP state layout, depending on the FLEN of the hart.
+        const FpState = extern union {
+            /// D extension.
+            d: Dstate,
+            /// Q extension.
+            q: Qstate,
+        };
+
+        const Dstate = extern struct {
+            /// FPU registers.
+            f: [32]u64 = @splat(0),
+            /// FCSR.
+            fcsr: u32 = 0,
+        };
 
         const Qstate = extern struct {
             /// FPU registers.
@@ -802,6 +820,33 @@ const FpContext = switch (builtin.cpu.arch) {
         }
     },
 
+    .riscv64 => struct {
+        /// Save the state into the sigframe.
+        ///
+        /// Only D extension is supported.
+        fn save(sf: *SigFrame) void {
+            var state: arch.thread.FpuState align(16) = undefined;
+            arch.thread.saveFpu(&state);
+
+            sf.mcontext.fpregs.d = .{
+                .f = state.f,
+                .fcsr = @truncate(state.fcsr),
+            };
+        }
+
+        /// Restore the state from the sigframe.
+        ///
+        /// Only D extension is supported.
+        fn restore(sf: *const SigFrame) void {
+            const d = &sf.mcontext.fpregs.d;
+            var state: arch.thread.FpuState align(16) = .{
+                .f = d.f,
+                .fcsr = d.fcsr & 0xFF,
+            };
+            arch.thread.restoreFpu(&state);
+        }
+    },
+
     else => @compileError("Unsupported architecture."),
 };
 
@@ -962,6 +1007,9 @@ fn setupSigFrame(ctx: *Context, th: *Thread, signo: SigInt, action: Action) !voi
                     ctx.s8,   ctx.s9, ctx.s10, ctx.s11, ctx.t3, ctx.t4, ctx.t5, ctx.t6,
                 };
             }
+
+            // Save FP state.
+            FpContext.save(sf);
 
             // Push signal information.
             const si = &local.siginfo;
