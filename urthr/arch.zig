@@ -8,6 +8,11 @@ pub const impl = switch (builtin.target.cpu.arch) {
     else => @compileError("Unsupported architecture."),
 };
 
+/// Function signature of exception handler.
+///
+/// Returns null if the exception cannot be handled.
+pub const ExceptionHandler = *const fn (u64) ?void;
+
 /// State of the thread interrupted by an IRQ.
 pub const InterruptedInfo = struct {
     /// Instruction pointer.

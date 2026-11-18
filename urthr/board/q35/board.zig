@@ -1,16 +1,11 @@
 pub const memmap = @import("memmap.zig");
 pub const sync = @import("sync.zig");
 
-/// Function signature of exception handler.
-///
-/// Returns null if the exception cannot be handled.
-pub const ExceptionHandler = *const fn (u64) ?void;
-
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
 
 /// Exception handler called when an IRQ occurs.
-var exception_handler: ?ExceptionHandler = null;
+var exception_handler: ?carch.ExceptionHandler = null;
 
 /// Boot info handed over by the bootloader.
 var boot_info: BootInfo = undefined;
@@ -784,7 +779,7 @@ pub fn getRandom(buf: []u8) void {
 }
 
 /// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: ExceptionHandler) void {
+pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
     // Set exception handler stub.
     exception_handler = f;
 
@@ -924,7 +919,8 @@ const console = struct {
 
 const std = @import("std");
 const log = std.log.scoped(.q35);
-const arch = @import("arch").impl;
+const carch = @import("arch");
+const arch = carch.impl;
 const BootInfo = @import("boot").BootInfo;
 const common = @import("common");
 const rtt = common.rtt;

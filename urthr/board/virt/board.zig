@@ -1,11 +1,6 @@
 pub const memmap = @import("memmap.zig");
 pub const sync = @import("sync.zig");
 
-/// Function signature of exception handler.
-///
-/// Returns null if the exception cannot be handled.
-pub const ExceptionHandler = *const fn (u64) ?void;
-
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
 
@@ -17,7 +12,7 @@ pub const resched_vector = 1;
 const virtio_mmio_vector_base: usize = 48;
 
 /// Exception handler called when an IRQ occurs.
-var exception_handler: ?ExceptionHandler = null;
+var exception_handler: ?carch.ExceptionHandler = null;
 
 /// Virtio block device instance.
 var virtio_blk_dev: ?dd.VirtioBlk = null;
@@ -417,7 +412,7 @@ pub fn getRandom(buf: []u8) void {
 }
 
 /// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: ExceptionHandler) void {
+pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
     // Set exception handler stub.
     exception_handler = f;
 
@@ -563,7 +558,8 @@ const console = struct {
 
 const std = @import("std");
 const log = std.log.scoped(.virt);
-const arch = @import("arch").impl;
+const carch = @import("arch");
+const arch = carch.impl;
 const common = @import("common");
 const rtt = common.rtt;
 const util = common.util;

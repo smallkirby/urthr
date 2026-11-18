@@ -1,13 +1,8 @@
 pub const memmap = @import("memmap.zig");
 pub const sync = @import("sync.zig");
 
-/// Function signature of exception handler.
-///
-/// Returns null if the exception cannot be handled.
-pub const ExceptionHandler = *const fn (u64) ?void;
-
 /// Exception handler called when an IRQ occurs.
-var exception_handler: ?ExceptionHandler = null;
+var exception_handler: ?carch.ExceptionHandler = null;
 
 /// Vector number of the PLIC interrupt source 0.
 ///
@@ -289,7 +284,7 @@ pub fn getRandom(buf: []u8) void {
 }
 
 /// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: ExceptionHandler) void {
+pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
     // Set exception handler stub.
     exception_handler = f;
 
@@ -332,7 +327,7 @@ fn handleIrq() ?void {
 }
 
 /// Dispatch pending IPIs of this core to the registered handlers.
-fn handleIpi(handler: ExceptionHandler) ?void {
+fn handleIpi(handler: carch.ExceptionHandler) ?void {
     // Clear the pending interrupt first.
     arch.exception.clearSoftwareIrq();
 
@@ -347,7 +342,7 @@ fn handleIpi(handler: ExceptionHandler) ?void {
 }
 
 /// Dispatch the external interrupt claimed from PLIC to the registered handler.
-fn handlePlic(handler: ExceptionHandler) ?void {
+fn handlePlic(handler: carch.ExceptionHandler) ?void {
     const me = urd.smp.getLogicalCoreId();
     const context = plic_contexts[me];
 
@@ -477,7 +472,8 @@ const console = struct {
 
 const std = @import("std");
 const log = std.log.scoped(.rv64v);
-const arch = @import("arch").impl;
+const carch = @import("arch");
+const arch = carch.impl;
 const common = @import("common");
 const dd = @import("dd");
 const fwcfg = dd.fwcfg;

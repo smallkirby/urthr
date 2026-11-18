@@ -1,11 +1,6 @@
 pub const memmap = @import("memmap.zig");
 pub const sync = @import("sync.zig");
 
-/// Function signature of exception handler.
-///
-/// Returns null if the exception cannot be handled.
-pub const ExceptionHandler = *const fn (u64) ?void;
-
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
 
@@ -15,7 +10,7 @@ pub const tlb_shootdown_vector = 0;
 pub const resched_vector = 1;
 
 /// Exception handler called when an IRQ occurs.
-var exception_handler: ?ExceptionHandler = null;
+var exception_handler: ?carch.ExceptionHandler = null;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(_: usize) void {}
@@ -278,7 +273,7 @@ pub fn getRandom(buf: []u8) void {
 pub fn deinitLoader() void {}
 
 /// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: ExceptionHandler) void {
+pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
     // Set exception handler stub.
     exception_handler = f;
 
@@ -425,7 +420,8 @@ fn dmaMemcpy(_: *anyopaque, dst: usize, src: usize, len: usize) void {
 
 const std = @import("std");
 const log = std.log.scoped(.rpi4b);
-const arch = @import("arch").impl;
+const carch = @import("arch");
+const arch = carch.impl;
 const options = @import("options");
 const common = @import("common");
 const bits = common.bits;
