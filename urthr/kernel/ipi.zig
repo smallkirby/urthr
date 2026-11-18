@@ -19,8 +19,8 @@ pub fn initGlobal() void {
 
 /// Enable IPI infrastructure on the calling core.
 pub fn initLocal() void {
-    board.enableIrq(.tlb_shootdown);
-    board.enableIrq(.resched);
+    board.irq.enable(.tlb_shootdown);
+    board.irq.enable(.resched);
 }
 
 // =============================================================
@@ -67,7 +67,7 @@ pub fn tlbShootdown(range: ?Range) void {
     tlb_shootdown_pending.store(others, .release);
 
     // Send a TLB shootdown IPI to all other cores.
-    board.sendIpiAll(.tlb_shootdown);
+    board.irq.sendIpiAll(.tlb_shootdown);
     while (tlb_shootdown_pending.load(.acquire) != 0) {
         std.atomic.spinLoopHint();
     }
@@ -101,7 +101,7 @@ fn handleTlbShootdown(_: urd.exception.Vector, _: ?*anyopaque) void {
 
 /// Send a reschedule IPI to the given core.
 pub fn sendReschedule(cpu: usize) void {
-    board.sendIpi(cpu, .resched);
+    board.irq.sendIpi(cpu, .resched);
 }
 
 /// Handler invoked when a core receives a reschedule IPI.
@@ -115,7 +115,7 @@ fn handleReschedule(_: urd.exception.Vector, _: ?*anyopaque) void {
 
 const std = @import("std");
 const board = @import("board").impl;
-const IntVector = board.IntVector;
+const IntVector = board.irq.IntVector;
 const arch = @import("arch").impl;
 const urd = @import("urthr");
 const SpinLock = urd.sync.SpinLock;

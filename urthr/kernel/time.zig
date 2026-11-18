@@ -36,7 +36,7 @@ pub fn initLocal() void {
     }
 
     // Enable IRQ for the local timer.
-    board.enableIrq(.timer);
+    board.irq.enable(.timer);
 }
 
 /// Timer instance.

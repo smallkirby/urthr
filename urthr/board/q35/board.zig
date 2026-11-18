@@ -1,32 +1,11 @@
 pub const memmap = @import("memmap.zig");
+pub const irq = @import("irq.zig");
 pub const sync = @import("sync.zig");
 
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
-
-/// Exception handler called when an IRQ occurs.
-var exception_handler: ?carch.ExceptionHandler = null;
-
 /// Boot info handed over by the bootloader.
 var boot_info: BootInfo = undefined;
-
-/// Interrupt vector.
-pub const IntVector = enum(u8) {
-    /// Local timer interrupt.
-    timer = arch.timer.ppi_intid,
-    /// xHC interrupt.
-    xhci = 0x40,
-    /// virtio-net interrupt.
-    virtio_net = 0x41,
-    /// virtio-blk interrupt.
-    virtio_blk = 0x42,
-    /// virtio-gpu interrupt.
-    virtio_gpu = 0x43,
-    /// TLB shootdown IPI.
-    tlb_shootdown = 0x60,
-    /// Reschedule IPI.
-    resched = 0x61,
-};
 
 /// Peripheral devices on the board.
 var devices = struct {
@@ -296,16 +275,7 @@ pub fn initPeripherals1() common.mem.Error!void {
     }
 
     // APIC.
-    {
-        const lapic = try urd.mem.phys.reserveAndRemap(
-            "LAPIC",
-            arch.lapic.getBase(),
-            0x1000,
-            null,
-            .device,
-        );
-        arch.lapic.setBase(lapic);
-    }
+    try irq.initController();
 
     // Framebuffer.
     if (boot_info.fb) |fb| {
@@ -471,7 +441,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     if (devices.ecam) |*e| outer: {
         // Scan for a virtio-blk device.
         const hc = e.interface();
-        const vector = @backingInt(IntVector.virtio_blk);
+        const vector = @backingInt(irq.IntVector.virtio_blk);
         const result = (try bringUpVirtioPci(
             hc,
             &.{ dd.VirtioBlk.pci_device_id_legacy, dd.VirtioBlk.pci_device_id_modern },
@@ -515,7 +485,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     if (devices.ecam) |*e| outer: {
         // Scan for a virtio-net device.
         const hc = e.interface();
-        const vector = @backingInt(IntVector.virtio_net);
+        const vector = @backingInt(irq.IntVector.virtio_net);
         const bringup = (try bringUpVirtioPci(
             hc,
             &.{ dd.net.VirtioNet.pci_device_id_legacy, dd.net.VirtioNet.pci_device_id_modern },
@@ -566,7 +536,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     if (devices.ecam) |*e| outer: {
         // Scan for a virtio-gpu device.
         const hc = e.interface();
-        const vector = @backingInt(IntVector.virtio_gpu);
+        const vector = @backingInt(irq.IntVector.virtio_gpu);
         const result = (try bringUpVirtioPci(
             hc,
             &.{dd.VirtioGpu.pci_device_id},
@@ -629,7 +599,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     // xHC
     if (devices.ecam) |*e| outer: {
         const hc = e.interface();
-        const vector = @backingInt(IntVector.xhci);
+        const vector = @backingInt(irq.IntVector.xhci);
 
         // Scan for xHC device.
         var scan_buf: [16]dd.pci.ScanResult = undefined;
@@ -786,66 +756,6 @@ pub fn getRandom(buf: []u8) void {
             byte.* = @truncate(val);
             break;
         }
-    }
-}
-
-/// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
-    // Set exception handler stub.
-    exception_handler = f;
-
-    // Set exception handler.
-    arch.intr.setHandler(handleIrq);
-
-    // Disable the legacy PIC in favor of the local/IO APIC.
-    arch.pic.disable();
-}
-
-/// Vector delivered by the local APIC for spurious interrupts.
-const spurious_vector: u8 = 0xFF;
-
-/// Initialize interrupts for the calling AP.
-pub fn initIrqLocal() PageAllocator.Error!void {
-    arch.exception.initLocal();
-    arch.lapic.enable(spurious_vector);
-
-    // Unmask all maskable interrupts.
-    arch.intr.unmaskAll();
-}
-
-/// Enable an interrupt by ID.
-///
-/// TODO: supports I/O APIC.
-pub fn enableIrq(_: IntVector) void {}
-
-/// Send an IPI to all cores except the caller.
-pub fn sendIpiAll(vector: IntVector) void {
-    arch.lapic.sendIpiAllExclSelf(@backingInt(vector));
-}
-
-/// Send an IPI to the core of the given logical CPU ID.
-pub fn sendIpi(cpu: usize, vector: IntVector) void {
-    arch.lapic.sendIpi(
-        @intCast(urd.smp.archCoreIdOf(cpu)),
-        @backingInt(vector),
-    );
-}
-
-/// IRQ handler function.
-fn handleIrq(vector: u64) ?void {
-    if (exception_handler) |f| {
-        const ret = f(vector);
-
-        arch.lapic.eoi();
-
-        if (urd.sched.shouldReschedule()) {
-            urd.sched.reschedule();
-        }
-
-        return ret;
-    } else {
-        arch.lapic.eoi();
-        return null;
     }
 }
 

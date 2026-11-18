@@ -41,14 +41,14 @@ pub fn initGlobal() void {
     arch.exception.setTerminator(urd.eol);
 
     // Initialize board-specific IRQ handling.
-    board.initIrqGlobal(call);
+    board.irq.initGlobal(call);
 }
 
 /// Initialize local IRQ handling for the current core.
 ///
 /// IRQs are still masked at this point.
 pub fn initLocal() urd.mem.Error!void {
-    try board.initIrqLocal();
+    try board.irq.initLocal();
 }
 
 /// Call the registered interrupt handler for the given vector.

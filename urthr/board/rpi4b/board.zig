@@ -1,21 +1,9 @@
 pub const memmap = @import("memmap.zig");
+pub const irq = @import("irq.zig");
 pub const sync = @import("sync.zig");
 
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
-
-/// Interrupt vector.
-pub const IntVector = enum(u8) {
-    /// TLB shootdown IPI.
-    tlb_shootdown = 0,
-    /// Reschedule IPI.
-    resched = 1,
-    /// Local timer interrupt.
-    timer = arch.timer.ppi_intid,
-};
-
-/// Exception handler called when an IRQ occurs.
-var exception_handler: ?carch.ExceptionHandler = null;
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(_: usize) void {}
@@ -119,16 +107,7 @@ pub fn remapNormal(_: PageAllocator, _: PageAllocator) common.mem.Error!void {}
 /// This function is called before exceptions are enabled.
 pub fn initPeripherals1() urd.mem.Error!void {
     // Interrupt controller.
-    {
-        arch.gicv2.setBase(try urd.mem.phys.reserveAndRemap(
-            "GIC",
-            map.gic.start,
-            map.gic.size(),
-            null,
-            .device,
-        ));
-        arch.gicv2.initGlobal();
-    }
+    try irq.initController();
 
     // DMA
     {
@@ -276,65 +255,6 @@ pub fn getRandom(buf: []u8) void {
 
 /// De-initialize loader resources.
 pub fn deinitLoader() void {}
-
-/// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
-    // Set exception handler stub.
-    exception_handler = f;
-
-    // Set exception handler.
-    arch.intr.setHandler(handleIrq);
-}
-
-/// Initialize GIC for the calling AP.
-pub fn initIrqLocal() urd.mem.Error!void {
-    // Initialize CPU interface.
-    arch.gicv2.initLocal();
-
-    // Initialize exception handling for this CPU.
-    arch.exception.initLocal();
-}
-
-/// Enable an interrupt by ID.
-pub fn enableIrq(vector: IntVector) void {
-    arch.gicv2.enableIrq(@backingInt(vector));
-}
-
-/// Send an IPI to all cores except the caller.
-pub fn sendIpiAll(vector: IntVector) void {
-    arch.gicv2.sendSgi(@intCast(@backingInt(vector)), .all);
-}
-
-/// Send an IPI to the core of the given logical CPU ID.
-pub fn sendIpi(cpu: usize, vector: IntVector) void {
-    arch.gicv2.sendSgi(@intCast(@backingInt(vector)), .{
-        .target = &.{@intCast(cpu)},
-    });
-}
-
-/// IRQ handler function.
-fn handleIrq() ?void {
-    const iar = arch.gicv2.readIar();
-    const intid = iar.interrupt_id;
-
-    if (exception_handler) |handler| {
-        if (handler(intid)) |_| {
-            arch.gicv2.eoi(iar);
-
-            if (urd.sched.shouldReschedule()) {
-                urd.sched.reschedule();
-            }
-
-            return;
-        } else {
-            // Handler for this interrupt not registered.
-            return null;
-        }
-    } else {
-        // Root handler registered.
-        return null;
-    }
-}
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {

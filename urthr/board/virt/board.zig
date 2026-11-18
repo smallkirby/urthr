@@ -1,24 +1,12 @@
 pub const memmap = @import("memmap.zig");
+pub const irq = @import("irq.zig");
 pub const sync = @import("sync.zig");
 
 /// Number of CPU cores in the system.
 pub const num_cpus = 4;
 
-/// Interrupt vector.
-pub const IntVector = enum(u8) {
-    /// TLB shootdown IPI.
-    tlb_shootdown = 0,
-    /// Reschedule IPI.
-    resched = 1,
-    /// Local timer interrupt.
-    timer = arch.timer.ppi_intid,
-};
-
 /// SPI of the first virtio-mmio transport slot.
 const virtio_mmio_vector_base: usize = 48;
-
-/// Exception handler called when an IRQ occurs.
-var exception_handler: ?carch.ExceptionHandler = null;
 
 /// Base address of the virtio MMIO region.
 var virtio_base: usize = undefined;
@@ -112,36 +100,7 @@ pub fn deinitLoader() void {}
 /// This function is called before exceptions are enabled.
 pub fn initPeripherals1() common.mem.Error!void {
     // Interrupt controller.
-    {
-        const gicd = try urd.mem.phys.reserveAndRemap(
-            "GICD",
-            memmap.gicd.start,
-            memmap.gicd.size(),
-            null,
-            .device,
-        );
-        const gicr = try urd.mem.phys.reserveAndRemap(
-            "GICR",
-            memmap.gicr.start,
-            memmap.gicr.size(),
-            null,
-            .device,
-        );
-        const its = try urd.mem.phys.reserveAndRemap(
-            "ITS",
-            memmap.gicits.start,
-            memmap.gicits.size(),
-            null,
-            .device,
-        );
-        arch.gicv3.setBase(
-            gicd,
-            .new(gicr, memmap.gicr.start),
-            .new(its, memmap.gicits.start),
-        );
-
-        try arch.gicv3.initGlobal(urd.mem.page);
-    }
+    try irq.initController();
 
     // PCIe ECAM.
     {
@@ -239,9 +198,9 @@ pub fn initPeripherals3() common.mem.Error!void {
             ) catch continue;
 
             // Register IRQ.
-            const irq = virtio_mmio_vector_base + i;
-            arch.gicv3.enableIrq(irq);
-            devices.virtio_blk.?.registerIrq(irq);
+            const vector = virtio_mmio_vector_base + i;
+            arch.gicv3.enableIrq(vector);
+            devices.virtio_blk.?.registerIrq(vector);
 
             log.info("Found virtio-blk device#{d}", .{i});
             break;
@@ -306,8 +265,8 @@ pub fn initPeripherals3() common.mem.Error!void {
         log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
 
         // Initialize xHC driver.
-        const irq = arch.gicv3.lpi_base + 0;
-        devices.xhc = dd.usb.Xhc.init(base, irq, mem.dma.interface(0)) catch |err| {
+        const lpi = arch.gicv3.lpi_base + 0;
+        devices.xhc = dd.usb.Xhc.init(base, lpi, mem.dma.interface(0)) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :outer;
         };
@@ -319,7 +278,7 @@ pub fn initPeripherals3() common.mem.Error!void {
         const msg = arch.gicv3.registerLpi(
             devid,
             1,
-            irq,
+            lpi,
             mem.page,
         ) catch |err| {
             log.err("Failed to register LPIs for xHC: {t}", .{err});
@@ -417,64 +376,6 @@ pub fn getRandom(buf: []u8) void {
         @panic("Failed to read from virtio RNG device.");
     };
     @memcpy(buf, random);
-}
-
-/// Set the exception handler for IRQs.
-pub fn initIrqGlobal(f: carch.ExceptionHandler) void {
-    // Set exception handler stub.
-    exception_handler = f;
-
-    // Set exception handler.
-    arch.intr.setHandler(handleIrq);
-}
-
-/// Initialize GIC for the calling AP.
-pub fn initIrqLocal() common.mem.PageAllocator.Error!void {
-    // Initialize CPU interface.
-    try arch.gicv3.initLocal(urd.mem.page);
-
-    // Initialize exception handling for this CPU.
-    arch.exception.initLocal();
-}
-
-/// Enable an interrupt by ID.
-pub fn enableIrq(vector: IntVector) void {
-    arch.gicv3.enableIrq(@backingInt(vector));
-}
-
-/// Send an IPI to all cores except the caller.
-pub fn sendIpiAll(vector: IntVector) void {
-    arch.gicv3.sendSgi(@intCast(@backingInt(vector)), .all);
-}
-
-/// Send an IPI to the core of the given logical CPU ID.
-pub fn sendIpi(cpu: usize, vector: IntVector) void {
-    arch.gicv3.sendSgi(@intCast(@backingInt(vector)), .{
-        .target = &.{@intCast(cpu)},
-    });
-}
-
-/// IRQ handler function.
-fn handleIrq() ?void {
-    const intid = arch.gicv3.readIar();
-
-    if (exception_handler) |handler| {
-        if (handler(intid)) |_| {
-            arch.gicv3.eoi(intid);
-
-            if (urd.sched.shouldReschedule()) {
-                urd.sched.reschedule();
-            }
-
-            return;
-        } else {
-            // Handler for this interrupt not registered.
-            return null;
-        }
-    } else {
-        // Root handler registered.
-        return null;
-    }
 }
 
 /// Get the block device interface.
