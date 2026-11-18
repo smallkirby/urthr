@@ -3,7 +3,7 @@
 # Fetch and build the Buildroot userland.
 #
 # Usage: scripts/build_buildroot.bash <arch> [output dir]
-#   arch: aarch64 | x86_64
+#   arch: aarch64 | x86_64 | riscv64
 #   output dir: Buildroot out-of-tree build directory
 #
 # Safe to re-run. Skips the download and extract if the source tree already exists,
@@ -21,7 +21,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "$#" -lt 1 ]; then
   echo_error "Usage: $0 <arch> [output dir]"
-  echo_error "  arch: aarch64 | x86_64"
+  echo_error "  arch: aarch64 | x86_64 | riscv64"
   exit 1
 fi
 

@@ -848,6 +848,7 @@ pub fn build(b: *std.Build) !void {
                 rootfs_dir,
                 bootfs_boot_dir,
             });
+            run.has_side_effects = true;
             run.step.dependOn(&merge_rootfs.step);
         }
 
