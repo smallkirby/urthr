@@ -20,18 +20,20 @@ const virtio_mmio_vector_base: usize = 48;
 /// Exception handler called when an IRQ occurs.
 var exception_handler: ?carch.ExceptionHandler = null;
 
-/// Virtio block device instance.
-var virtio_blk_dev: ?dd.VirtioBlk = null;
-/// Virtio RNG device instance.
-var virtio_rng_dev: ?dd.VirtioRng = null;
 /// Base address of the virtio MMIO region.
 var virtio_base: usize = undefined;
 
-/// PCIe ECAM.
-var ecam: dd.pci.EcamHost = undefined;
-
-/// xHC device.
-var xhc: ?*dd.usb.Xhc = null;
+/// Peripheral devices on the board.
+var devices = struct {
+    /// Virtio block device instance.
+    virtio_blk: ?dd.VirtioBlk = null,
+    /// Virtio RNG device instance.
+    virtio_rng: ?dd.VirtioRng = null,
+    /// xHC device.
+    xhc: ?*dd.usb.Xhc = null,
+    /// PCIe ECAM.
+    ecam: dd.pci.EcamHost = undefined,
+}{};
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(_: usize) void {}
@@ -150,7 +152,7 @@ pub fn initPeripherals1() common.mem.Error!void {
             null,
             .device,
         );
-        ecam = dd.pci.EcamHost.init(pci);
+        devices.ecam = dd.pci.EcamHost.init(pci);
     }
 
     // QEMU fw_cfg
@@ -198,7 +200,7 @@ pub fn initPeripherals2() urd.mem.Error!void {
             } else |_| {
                 continue;
             };
-            virtio_rng_dev = dd.VirtioRng.init(dev.interface()) catch continue;
+            devices.virtio_rng = dd.VirtioRng.init(dev.interface()) catch continue;
 
             log.info("Found virtio-rng device#{d}", .{i});
             break;
@@ -230,7 +232,7 @@ pub fn initPeripherals3() common.mem.Error!void {
             } else |_| {
                 continue;
             };
-            virtio_blk_dev = dd.VirtioBlk.init(
+            devices.virtio_blk = dd.VirtioBlk.init(
                 dev.interface(),
                 mem.dma.interface(0),
                 urd.mem.bin,
@@ -239,7 +241,7 @@ pub fn initPeripherals3() common.mem.Error!void {
             // Register IRQ.
             const irq = virtio_mmio_vector_base + i;
             arch.gicv3.enableIrq(irq);
-            virtio_blk_dev.?.registerIrq(irq);
+            devices.virtio_blk.?.registerIrq(irq);
 
             log.info("Found virtio-blk device#{d}", .{i});
             break;
@@ -248,7 +250,7 @@ pub fn initPeripherals3() common.mem.Error!void {
 
     // xHC
     outer: {
-        const hc = ecam.interface();
+        const hc = devices.ecam.interface();
 
         // Scan for xHC device.
         var scan_buf: [16]dd.pci.ScanResult = undefined;
@@ -305,7 +307,7 @@ pub fn initPeripherals3() common.mem.Error!void {
 
         // Initialize xHC driver.
         const irq = arch.gicv3.lpi_base + 0;
-        xhc = dd.usb.Xhc.init(base, irq, mem.dma.interface(0)) catch |err| {
+        devices.xhc = dd.usb.Xhc.init(base, irq, mem.dma.interface(0)) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :outer;
         };
@@ -334,7 +336,7 @@ pub fn initPeripherals3() common.mem.Error!void {
         table.maskEntry(0, false);
         dd.pci.enableMsix(hc, xhcdev.addr, msix.cap_offset);
     }
-    if (xhc) |x| outer: {
+    if (devices.xhc) |x| outer: {
         x.reset() catch |err| {
             log.err("xHC reset failed: {t}", .{err});
             break :outer;
@@ -409,9 +411,9 @@ pub fn wakeSubcore(core: usize, entry: usize, stack: usize) urd.mem.Error!void {
 
 /// Fill the given buffer with random data.
 pub fn getRandom(buf: []u8) void {
-    rtt.expect(virtio_rng_dev != null);
+    rtt.expect(devices.virtio_rng != null);
 
-    const random = virtio_rng_dev.?.read(buf.len, urd.mem.page) catch {
+    const random = devices.virtio_rng.?.read(buf.len, urd.mem.page) catch {
         @panic("Failed to read from virtio RNG device.");
     };
     @memcpy(buf, random);
@@ -477,7 +479,7 @@ fn handleIrq() ?void {
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
-    return if (virtio_blk_dev) |*dev|
+    return if (devices.virtio_blk) |*dev|
         dev.interface()
     else
         null;

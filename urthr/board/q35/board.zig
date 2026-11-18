@@ -10,20 +10,6 @@ var exception_handler: ?carch.ExceptionHandler = null;
 /// Boot info handed over by the bootloader.
 var boot_info: BootInfo = undefined;
 
-/// PCIe ECAM.
-var ecam: ?dd.pci.EcamHost = null;
-
-/// Virtio block device instance.
-var virtio_blk_dev: ?dd.VirtioBlk = null;
-/// Virtio GPU device instance.
-var virtio_gpu_dev: ?dd.VirtioGpu = null;
-
-/// GOP framebuffer console instance.
-var fb_console: FbConsole = undefined;
-
-/// xHC device.
-var xhc: ?*dd.usb.Xhc = null;
-
 /// Interrupt vector.
 pub const IntVector = enum(u8) {
     /// Local timer interrupt.
@@ -41,6 +27,21 @@ pub const IntVector = enum(u8) {
     /// Reschedule IPI.
     resched = 0x61,
 };
+
+/// Peripheral devices on the board.
+var devices = struct {
+    /// Virtio block device instance.
+    virtio_blk: ?dd.VirtioBlk = null,
+    /// Virtio GPU device instance.
+    virtio_gpu: ?dd.VirtioGpu = null,
+    /// xHC device.
+    xhc: ?*dd.usb.Xhc = null,
+    /// PCIe ECAM.
+    ecam: ?dd.pci.EcamHost = null,
+
+    /// GOP framebuffer console instance.
+    fb_console: FbConsole = undefined,
+}{};
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -290,7 +291,7 @@ pub fn initPeripherals1() common.mem.Error!void {
                 null,
                 .device,
             );
-            ecam = dd.pci.EcamHost.init(pci);
+            devices.ecam = dd.pci.EcamHost.init(pci);
         }
     }
 
@@ -316,8 +317,9 @@ pub fn initPeripherals1() common.mem.Error!void {
             .wc,
         );
 
-        fb_console = .init(.{
-            .ctx = &fb_console,
+        var fb_console = &devices.fb_console;
+        fb_console.* = .init(.{
+            .ctx = fb_console,
             .vtable = .{},
             .base = base,
             .phys = fb.base,
@@ -466,7 +468,7 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {}
 /// This function can spawn new threads.
 pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     // virtio-blk
-    if (ecam) |*e| outer: {
+    if (devices.ecam) |*e| outer: {
         // Scan for a virtio-blk device.
         const hc = e.interface();
         const vector = @backingInt(IntVector.virtio_blk);
@@ -477,7 +479,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         )) orelse break :outer;
 
         // Initialize virtio-blk device.
-        virtio_blk_dev = dd.VirtioBlk.init(
+        devices.virtio_blk = dd.VirtioBlk.init(
             result.dev.interface(),
             mem.dma.interface(0),
             urd.mem.bin,
@@ -506,11 +508,11 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         };
 
         // Register IRQ.
-        virtio_blk_dev.?.registerIrq(vector);
+        devices.virtio_blk.?.registerIrq(vector);
     }
 
     // virtio-net
-    if (ecam) |*e| outer: {
+    if (devices.ecam) |*e| outer: {
         // Scan for a virtio-net device.
         const hc = e.interface();
         const vector = @backingInt(IntVector.virtio_net);
@@ -561,7 +563,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     }
 
     // virtio-gpu
-    if (ecam) |*e| outer: {
+    if (devices.ecam) |*e| outer: {
         // Scan for a virtio-gpu device.
         const hc = e.interface();
         const vector = @backingInt(IntVector.virtio_gpu);
@@ -572,7 +574,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         )) orelse break :outer;
 
         // Initialize virtio-gpu device.
-        virtio_gpu_dev = dd.VirtioGpu.init(
+        devices.virtio_gpu = dd.VirtioGpu.init(
             result.dev.interface(),
             mem.dma.interface(0),
             urd.mem.bin,
@@ -580,7 +582,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
             log.warn("Failed to initialize virtio-gpu: {t}", .{err});
             break :outer;
         };
-        const gpu = &virtio_gpu_dev.?;
+        const gpu = &devices.virtio_gpu.?;
 
         // Register MSI-X.
         const msix = result.msix;
@@ -625,7 +627,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     }
 
     // xHC
-    if (ecam) |*e| outer: {
+    if (devices.ecam) |*e| outer: {
         const hc = e.interface();
         const vector = @backingInt(IntVector.xhci);
 
@@ -679,7 +681,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
 
         // Initialize xHC driver.
-        xhc = dd.usb.Xhc.init(base, vector, mem.dma.interface(0)) catch |err| {
+        devices.xhc = dd.usb.Xhc.init(base, vector, mem.dma.interface(0)) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :outer;
         };
@@ -697,7 +699,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         table.maskEntry(0, false);
         dd.pci.enableMsix(hc, xhcdev.addr, msix.cap_offset);
     }
-    if (xhc) |x| outer: {
+    if (devices.xhc) |x| outer: {
         x.reset() catch |err| {
             log.err("xHC reset failed: {t}", .{err});
             break :outer;
@@ -849,7 +851,7 @@ fn handleIrq(vector: u64) ?void {
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
-    return if (virtio_blk_dev) |*dev|
+    return if (devices.virtio_blk) |*dev|
         dev.interface()
     else
         null;

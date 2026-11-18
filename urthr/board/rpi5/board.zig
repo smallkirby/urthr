@@ -20,8 +20,11 @@ var exception_handler: ?carch.ExceptionHandler = null;
 /// MAC address of GEM controller.
 const gem_mac = net.ether.MacAddr.encode("B8:27:EB:00:00:00");
 
-/// xHC controller.
-var xhc: ?*dd.usb.Xhc = null;
+/// Peripheral devices on the board.
+var devices = struct {
+    /// xHC controller.
+    xhc: ?*dd.usb.Xhc = null,
+}{};
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(_: usize) void {}
@@ -285,12 +288,12 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         const intid = rdd.rp1.getIrqNumber(.usb1);
 
         // Initialize xHC driver.
-        xhc = dd.usb.Xhc.init(base, intid, rdd.pcie.getDmaAllocator()) catch |err| {
+        devices.xhc = dd.usb.Xhc.init(base, intid, rdd.pcie.getDmaAllocator()) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :blkxhc;
         };
     }
-    if (xhc) |x| outer: {
+    if (devices.xhc) |x| outer: {
         x.reset() catch |err| {
             log.err("xHC reset failed: {t}", .{err});
             break :outer;

@@ -22,8 +22,12 @@ var ipi_pending: [num_cpus]std.atomic.Value(u64) = @splat(.init(0));
 var sifive_test_base: usize = 0;
 /// Base address of the virtio MMIO devices.
 var virtio_base: usize = undefined;
-/// Virtio block device.
-var virtio_blk_dev: ?dd.VirtioBlk = null;
+
+/// Peripheral devices on the board.
+var devices = struct {
+    /// Virtio block device.
+    virtio_blk: ?dd.VirtioBlk = null,
+}{};
 
 /// Hart IDs of all CPUs.
 const hart_ids = [_]usize{ 0, 1, 2, 3 };
@@ -187,7 +191,7 @@ pub fn initPeripherals3() common.mem.Error!void {
         } else |_| {
             continue;
         };
-        virtio_blk_dev = dd.VirtioBlk.init(
+        devices.virtio_blk = dd.VirtioBlk.init(
             dev.interface(),
             urd.mem.dma.interface(0),
             urd.mem.bin,
@@ -196,7 +200,7 @@ pub fn initPeripherals3() common.mem.Error!void {
         // Register IRQ.
         const irq = plic_vector_base + memmap.virtio_first_source + i;
         enableIrq(@fromBackingInt(@intCast(irq)));
-        virtio_blk_dev.?.registerIrq(irq);
+        devices.virtio_blk.?.registerIrq(irq);
 
         log.info("Found virtio-blk device#{d}", .{i});
         break;
@@ -404,7 +408,7 @@ pub fn sendIpi(cpu: usize, vector: IntVector) void {
 
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
-    return if (virtio_blk_dev) |*dev|
+    return if (devices.virtio_blk) |*dev|
         dev.interface()
     else
         null;
