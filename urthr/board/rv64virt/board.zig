@@ -30,10 +30,17 @@ const hart_ids = [_]usize{ 0, 1, 2, 3 };
 /// Number of CPU cores in the system.
 pub const num_cpus = hart_ids.len;
 
-/// Vector used for the TLB shootdown IPI.
-pub const tlb_shootdown_vector = 0;
-/// Vector used for the reschedule IPI.
-pub const resched_vector = 1;
+/// Interrupt vector.
+pub const IntVector = enum(u8) {
+    /// TLB shootdown IPI.
+    tlb_shootdown = 0,
+    /// Reschedule IPI.
+    resched = 1,
+    /// Local timer interrupt.
+    timer = arch.timer.ppi_intid,
+
+    _,
+};
 
 const todo = "TODO: RISC-V: not supported yet";
 
@@ -188,7 +195,7 @@ pub fn initPeripherals3() common.mem.Error!void {
 
         // Register IRQ.
         const irq = plic_vector_base + memmap.virtio_first_source + i;
-        enableIrq(irq);
+        enableIrq(@fromBackingInt(@intCast(irq)));
         virtio_blk_dev.?.registerIrq(irq);
 
         log.info("Found virtio-blk device#{d}", .{i});
@@ -354,26 +361,29 @@ fn handlePlic(handler: carch.ExceptionHandler) ?void {
 }
 
 /// Enable an interrupt by ID.
-pub fn enableIrq(id: usize) void {
-    switch (id) {
+pub fn enableIrq(vector: IntVector) void {
+    switch (vector) {
         // Timer interrupt.
-        arch.timer.ppi_intid => arch.timer.enable(),
+        .timer => arch.timer.enable(),
         // IPIs.
-        tlb_shootdown_vector, resched_vector => arch.exception.enableSoftwareIrq(),
+        .tlb_shootdown, .resched => arch.exception.enableSoftwareIrq(),
         // PLIC interrupts.
-        else => if (id >= plic_vector_base) {
+        _ => {
+            const id: usize = @backingInt(vector);
+            if (id < plic_vector_base) {
+                @panic("Unexpected IRQ number to enable");
+            }
+
             const me = urd.smp.getLogicalCoreId();
             const source: u32 = @intCast(id - plic_vector_base);
             arch.plic.setPriority(source, 1);
             arch.plic.enable(plic_contexts[me], source);
-        } else {
-            @panic("Unexpected IRQ number to enable");
         },
     }
 }
 
 /// Send an IPI to all cores except the caller.
-pub fn sendIpiAll(vector: u64) void {
+pub fn sendIpiAll(vector: IntVector) void {
     const self = urd.smp.getLogicalCoreId();
     for (0..num_cpus) |cpu| {
         if (cpu != self) sendIpi(cpu, vector);
@@ -381,9 +391,9 @@ pub fn sendIpiAll(vector: u64) void {
 }
 
 /// Send an IPI to the core of the given logical CPU ID.
-pub fn sendIpi(cpu: usize, vector: u64) void {
+pub fn sendIpi(cpu: usize, vector: IntVector) void {
     // Set SW IPI pending bit.
-    _ = ipi_pending[cpu].fetchOr(@as(u64, 1) << @intCast(vector), .release);
+    _ = ipi_pending[cpu].fetchOr(@as(u64, 1) << @intCast(@backingInt(vector)), .release);
 
     // Send IPI to the target core.
     const target = urd.smp.archCoreIdOf(cpu);

@@ -24,18 +24,23 @@ var fb_console: FbConsole = undefined;
 /// xHC device.
 var xhc: ?*dd.usb.Xhc = null;
 
-/// IDT vector assigned to the xHC interrupt.
-const xhci_vector: u8 = 0x40;
-/// IDT vector assigned to the virtio-net interrupt.
-const virtio_net_vector: u8 = 0x41;
-/// IDT vector assigned to the virtio-blk interrupt.
-const virtio_blk_vector: u8 = 0x42;
-/// IDT vector assigned to the virtio-gpu interrupt.
-const virtio_gpu_vector: u8 = 0x43;
-/// IDT vector assigned to the TLB shootdown IPI.
-pub const tlb_shootdown_vector: u8 = 0x60;
-/// IDT vector assigned to the reschedule IPI.
-pub const resched_vector: u8 = 0x61;
+/// Interrupt vector.
+pub const IntVector = enum(u8) {
+    /// Local timer interrupt.
+    timer = arch.timer.ppi_intid,
+    /// xHC interrupt.
+    xhci = 0x40,
+    /// virtio-net interrupt.
+    virtio_net = 0x41,
+    /// virtio-blk interrupt.
+    virtio_blk = 0x42,
+    /// virtio-gpu interrupt.
+    virtio_gpu = 0x43,
+    /// TLB shootdown IPI.
+    tlb_shootdown = 0x60,
+    /// Reschedule IPI.
+    resched = 0x61,
+};
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(binfo_ptr: usize) void {
@@ -464,6 +469,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     if (ecam) |*e| outer: {
         // Scan for a virtio-blk device.
         const hc = e.interface();
+        const vector = @backingInt(IntVector.virtio_blk);
         const result = (try bringUpVirtioPci(
             hc,
             &.{ dd.VirtioBlk.pci_device_id_legacy, dd.VirtioBlk.pci_device_id_modern },
@@ -483,7 +489,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         // Register MSI-X.
         const msix = result.msix;
         const msg = arch.msi.buildMessage(
-            virtio_blk_vector,
+            vector,
             arch.lapic.getId(),
         );
         const table = dd.pci.MsixTable{
@@ -500,13 +506,14 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         };
 
         // Register IRQ.
-        virtio_blk_dev.?.registerIrq(virtio_blk_vector);
+        virtio_blk_dev.?.registerIrq(vector);
     }
 
     // virtio-net
     if (ecam) |*e| outer: {
         // Scan for a virtio-net device.
         const hc = e.interface();
+        const vector = @backingInt(IntVector.virtio_net);
         const bringup = (try bringUpVirtioPci(
             hc,
             &.{ dd.net.VirtioNet.pci_device_id_legacy, dd.net.VirtioNet.pci_device_id_modern },
@@ -527,7 +534,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
 
         // Register MSI-X.
         const msg = arch.msi.buildMessage(
-            virtio_net_vector,
+            vector,
             arch.lapic.getId(),
         );
         const table = dd.pci.MsixTable{
@@ -542,7 +549,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
             log.warn("Failed to bind virtio-net RX queue to MSI-X: {t}", .{err});
             break :outer;
         };
-        try net.registerIrq(netdev, virtio_net_vector);
+        try net.registerIrq(netdev, vector);
 
         // TODO: should we create an interface here?
         const iface = try urd.net.ip.Interface.create(
@@ -557,6 +564,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     if (ecam) |*e| outer: {
         // Scan for a virtio-gpu device.
         const hc = e.interface();
+        const vector = @backingInt(IntVector.virtio_gpu);
         const result = (try bringUpVirtioPci(
             hc,
             &.{dd.VirtioGpu.pci_device_id},
@@ -577,7 +585,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         // Register MSI-X.
         const msix = result.msix;
         const msg = arch.msi.buildMessage(
-            virtio_gpu_vector,
+            vector,
             arch.lapic.getId(),
         );
         const table = dd.pci.MsixTable{
@@ -594,7 +602,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         };
 
         // Register IRQ.
-        gpu.registerIrq(virtio_gpu_vector);
+        gpu.registerIrq(vector);
 
         // Setup the framebuffer and expose it as /dev/fbN.
         const displays = gpu.getDisplayInfo(urd.mem.bin) catch |err| {
@@ -619,6 +627,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
     // xHC
     if (ecam) |*e| outer: {
         const hc = e.interface();
+        const vector = @backingInt(IntVector.xhci);
 
         // Scan for xHC device.
         var scan_buf: [16]dd.pci.ScanResult = undefined;
@@ -670,13 +679,13 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
 
         // Initialize xHC driver.
-        xhc = dd.usb.Xhc.init(base, xhci_vector, mem.dma.interface(0)) catch |err| {
+        xhc = dd.usb.Xhc.init(base, vector, mem.dma.interface(0)) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :outer;
         };
 
         // Register MSI-X.
-        const msg = arch.msi.buildMessage(xhci_vector, arch.lapic.getId());
+        const msg = arch.msi.buildMessage(vector, arch.lapic.getId());
         const msix = dd.pci.parseMsixConfig(hc, xhcdev.addr) orelse {
             log.err("Failed to parse MSI-X configuration for xHC.", .{});
             break :outer;
@@ -805,18 +814,18 @@ pub fn initIrqLocal() PageAllocator.Error!void {
 /// Enable an interrupt by ID.
 ///
 /// TODO: supports I/O APIC.
-pub fn enableIrq(_: usize) void {}
+pub fn enableIrq(_: IntVector) void {}
 
 /// Send an IPI to all cores except the caller.
-pub fn sendIpiAll(vector: u64) void {
-    arch.lapic.sendIpiAllExclSelf(@intCast(vector));
+pub fn sendIpiAll(vector: IntVector) void {
+    arch.lapic.sendIpiAllExclSelf(@backingInt(vector));
 }
 
 /// Send an IPI to the core of the given logical CPU ID.
-pub fn sendIpi(cpu: usize, vector: u64) void {
+pub fn sendIpi(cpu: usize, vector: IntVector) void {
     arch.lapic.sendIpi(
         @intCast(urd.smp.archCoreIdOf(cpu)),
-        @intCast(vector),
+        @backingInt(vector),
     );
 }
 

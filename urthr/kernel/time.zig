@@ -36,7 +36,7 @@ pub fn initLocal() void {
     }
 
     // Enable IRQ for the local timer.
-    board.enableIrq(arch.timer.ppi_intid);
+    board.enableIrq(.timer);
 }
 
 /// Timer instance.
