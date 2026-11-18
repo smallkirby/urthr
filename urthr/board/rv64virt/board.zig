@@ -11,14 +11,17 @@ var virtio_base: usize = undefined;
 var devices = struct {
     /// Virtio block device.
     virtio_blk: ?dd.VirtioBlk = null,
+    /// Virtio GPU device.
+    virtio_gpu: ?dd.VirtioGpu = null,
+
+    /// Framebuffer console instance.
+    fb_console: FbConsole = undefined,
 }{};
 
 /// Hart IDs of all CPUs.
 const hart_ids = [_]usize{ 0, 1, 2, 3 };
 /// Number of CPU cores in the system.
 pub const num_cpus = hart_ids.len;
-
-const todo = "TODO: RISC-V: not supported yet";
 
 /// Stash the loader-provided boot info for later use.
 pub fn setBoardInfo(_: usize) void {}
@@ -169,6 +172,65 @@ pub fn initPeripherals3() common.mem.Error!void {
         devices.virtio_blk.?.registerIrq(vector);
 
         log.info("Found virtio-blk device#{d}", .{i});
+        break;
+    }
+
+    // virtio-gpu
+    for (0..(memmap.virtio.size() / memmap.virtio_stride)) |i| {
+        const base = virtio_base + i * memmap.virtio_stride;
+
+        const dev = if (dd.virtio.mmio.init(
+            base,
+            .gpu,
+            dd.VirtioGpu.Features{},
+            urd.mem.page,
+            urd.mem.bin,
+        )) |result| if (result) |dev| dev else {
+            continue;
+        } else |_| {
+            continue;
+        };
+        devices.virtio_gpu = dd.VirtioGpu.init(
+            dev.interface(),
+            urd.mem.dma.interface(0),
+            urd.mem.bin,
+        ) catch |err| {
+            log.warn("Failed to initialize virtio-gpu: {t}", .{err});
+            break;
+        };
+        const gpu = &devices.virtio_gpu.?;
+
+        // Register IRQ.
+        const vector = irq.plic_vector_base + memmap.virtio_first_source + i;
+        irq.enable(@fromBackingInt(@intCast(vector)));
+        gpu.registerIrq(vector);
+
+        // Setup the framebuffer and expose it as /dev/fbN.
+        const displays = gpu.getDisplayInfo(urd.mem.bin) catch |err| {
+            log.warn("Failed to get display info: {t}", .{err});
+            break;
+        };
+        defer urd.mem.bin.free(displays);
+        if (displays.len == 0) {
+            log.warn("No enabled display found.", .{});
+            break;
+        }
+
+        const fb = gpu.setupFramebuffer(displays[0]) catch |err| {
+            log.warn("Failed to setup framebuffer: {t}", .{err});
+            break;
+        };
+        urd.fb.addBackend(fb) catch |err| {
+            log.warn("failed to add framebuffer backend: {t}", .{err});
+        };
+
+        // Register framebuffer console backend.
+        devices.fb_console = FbConsole.init(fb);
+        urd.console.addBackend(devices.fb_console.interface()) catch |err| {
+            log.warn("Failed to add framebuffer console backend: {t}", .{err});
+        };
+
+        log.info("Found virtio-gpu device#{d}", .{i});
         break;
     }
 }
@@ -339,6 +401,7 @@ const common = @import("common");
 const dd = @import("dd");
 const fwcfg = dd.fwcfg;
 const Console = common.Console;
+const FbConsole = common.FbConsole;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const urd = @import("urthr");

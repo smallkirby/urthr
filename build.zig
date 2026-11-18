@@ -1482,6 +1482,10 @@ const Qemu = struct {
                 "-device",
                 "virtio-gpu-pci",
             }),
+            .rv64virt => if (self.graphic == .display) try appendStrings(&args, allocator, &.{
+                "-device",
+                "virtio-gpu-device",
+            }),
             else => {},
         }
 
