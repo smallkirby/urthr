@@ -17,7 +17,7 @@ pub const Error = error{
     PermissionDenied,
     /// The given arguments are invalid.
     InvalidArgument,
-} || common.mem.PageAllocator.Error || arch.mmu.Error || urd.fs.Error;
+} || common.mem.PageAllocator.Error || carch.MmuError || urd.fs.Error;
 
 /// Address space.
 as: arch.mmu.AddressSpace,
@@ -961,8 +961,9 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
 const RbTree = common.RbTree;
-const arch = @import("arch").impl;
+const carch = @import("arch");
+const arch = carch.impl;
 const urd = @import("urthr");
 const Permission = common.mem.Permission;
 const SpinLock = urd.sync.SpinLock;
-const Scope = arch.mmu.tlb.Scope;
+const Scope = carch.TlbScope;

@@ -1,37 +1,5 @@
-pub const Error = error{
-    /// Current mapping does not match the requested mapping.
-    InvalidMapping,
-} || PageAllocator.Error;
-
-pub const MapArgument = struct {
-    /// Virtual address to map.
-    va: usize,
-    /// Physical address to map.
-    pa: usize,
-    /// Size in bytes to map.
-    size: usize,
-    /// Permission of the mapping.
-    perm: Permission,
-    /// Attribute of the mapping.
-    attr: Attribute,
-};
-
-pub const MapOptions = struct {
-    /// Returns an error if the given addresses are not aligned to the given granule size.
-    exact: bool = true,
-    /// Whether to flush the TLB after the mapping is installed.
-    flush: bool = true,
-};
-
-pub const RemapOptions = struct {
-    /// Whether to flush the TLB after the operation completes.
-    flush: bool = true,
-};
-
-pub const UnmapOptions = struct {
-    /// Whether to flush the TLB after the operation completes.
-    flush: bool = true,
-};
+//! x64 4-level address translation.
+//!
 
 /// Describes a virtual address space.
 ///
@@ -265,34 +233,6 @@ pub fn getPhysicalAddress(_: usize) usize {
 // =============================================================
 // Internals
 // =============================================================
-
-/// Size of page block.
-const Granule = enum {
-    @"4kb",
-    @"2mb",
-    @"1gb",
-
-    fn granule(self: Granule) usize {
-        return switch (self) {
-            .@"4kb" => size_4k,
-            .@"2mb" => size_2mib,
-            .@"1gb" => size_1gib,
-        };
-    }
-
-    fn level(self: Granule) Level {
-        return switch (self) {
-            .@"4kb" => 3,
-            .@"2mb" => 2,
-            .@"1gb" => 1,
-        };
-    }
-};
-
-/// Translation level.
-///
-/// This counts the number of table descents from the level-4 table.
-const Level = u2;
 
 /// Attribute bits for the page table entry.
 ///
@@ -551,15 +491,8 @@ pub const tlb = struct {
     /// Number of pages above which a range invalidation falls back to a full flush.
     const range_max = 64;
 
-    pub const Scope = enum {
-        /// Local to this core.
-        local,
-        /// All CPUs.
-        global,
-    };
-
     /// Invalidate all TLB entries.
-    pub fn invalidateAll(_: AddressSpace, scope: Scope) void {
+    pub fn invalidateAll(_: AddressSpace, scope: TlbScope) void {
         switch (scope) {
             .local => reloadCr3(),
             .global => @panic("Global TLB invalidation not supported"),
@@ -567,7 +500,7 @@ pub const tlb = struct {
     }
 
     /// Invalidate the TLB entries covering the given virtual address range.
-    pub fn invalidateRange(_: AddressSpace, va: usize, len: usize, scope: Scope) void {
+    pub fn invalidateRange(_: AddressSpace, va: usize, len: usize, scope: TlbScope) void {
         if (scope == .global) {
             @panic("Global TLB invalidation not supported");
         }
@@ -731,5 +664,15 @@ const util = common.util;
 const Attribute = common.mem.Attribute;
 const Permission = common.mem.Permission;
 const PageAllocator = common.mem.PageAllocator;
+const arch = @import("arch");
+const Granule = arch.Granule;
+const Level = arch.Level;
+const MapArgument = arch.MapArgument;
+const MapOptions = arch.MapOptions;
+const RemapOptions = arch.RemapOptions;
+const UnmapOptions = arch.UnmapOptions;
+const TlbScope = arch.TlbScope;
+const Error = arch.MmuError;
+
 const am = @import("asm.zig");
 const regs = @import("register.zig");

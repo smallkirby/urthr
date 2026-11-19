@@ -1,7 +1,5 @@
-pub const Error = error{
-    /// Current mapping does not match the requested mapping.
-    InvalidMapping,
-} || PageAllocator.Error;
+//! AArch64 4-level address translation.
+//!
 
 /// Page size in bytes.
 const page_size = 4 * units.kib;
@@ -11,63 +9,6 @@ const page_shift = 12;
 const num_ents = page_size / @sizeOf(PageDesc);
 /// Virtual address space range in bits.
 const va_range = 48;
-
-/// Translation level.
-///
-/// 5-level translation is not supported.
-const Level = u2;
-
-pub const MapArgument = struct {
-    /// Virtual address to map.
-    va: usize,
-    /// Physical address to map.
-    pa: usize,
-    /// Size in bytes to map.
-    size: usize,
-    /// Permission of the mapping.
-    perm: Permission,
-    /// Attribute of the mapping.
-    attr: Attribute,
-};
-
-pub const MapOptions = struct {
-    /// Returns an error if the given addresses are not aligned to the given granule size.
-    exact: bool = true,
-    /// Whether to flush the TLB after the operation completes.
-    flush: bool = true,
-};
-
-pub const RemapOptions = struct {
-    /// Whether to flush the TLB after the operation completes.
-    flush: bool = true,
-};
-
-pub const UnmapOptions = struct {
-    /// Whether to flush the TLB after the operation completes.
-    flush: bool = true,
-};
-
-const Granule = enum {
-    @"4kb",
-    @"2mb",
-    @"1gb",
-
-    fn granule(self: Granule) usize {
-        return switch (self) {
-            .@"4kb" => page_size,
-            .@"2mb" => 2 * units.mib,
-            .@"1gb" => 1 * units.gib,
-        };
-    }
-
-    fn level(self: Granule) Level {
-        return switch (self) {
-            .@"4kb" => 3,
-            .@"2mb" => 2,
-            .@"1gb" => 1,
-        };
-    }
-};
 
 /// Describes a virtual address space.
 ///
@@ -508,15 +449,8 @@ pub const tlb = struct {
     /// Number of pages above which a range invalidation falls back to a full flush.
     const range_max = 64;
 
-    pub const Scope = enum {
-        /// Local to this core.
-        local,
-        /// All CPUs.
-        global,
-    };
-
     /// Invalidate all TLB entries.
-    pub fn invalidateAll(_: AddressSpace, scope: Scope) void {
+    pub fn invalidateAll(_: AddressSpace, scope: TlbScope) void {
         switch (scope) {
             .local => asm volatile (
                 \\dsb nshst
@@ -534,7 +468,7 @@ pub const tlb = struct {
     }
 
     /// Invalidate the TLB entries covering the given virtual address range.
-    pub fn invalidateRange(as: AddressSpace, va: usize, len: usize, scope: Scope) void {
+    pub fn invalidateRange(as: AddressSpace, va: usize, len: usize, scope: TlbScope) void {
         const npages = (len + page_size - 1) / page_size;
         if (npages == 0) {
             return;
@@ -753,6 +687,15 @@ const util = common.util;
 const Attribute = common.mem.Attribute;
 const Permission = common.mem.Permission;
 const PageAllocator = common.mem.PageAllocator;
+const arch = @import("arch");
+const Granule = arch.Granule;
+const Level = arch.Level;
+const MapArgument = arch.MapArgument;
+const MapOptions = arch.MapOptions;
+const RemapOptions = arch.RemapOptions;
+const UnmapOptions = arch.UnmapOptions;
+const TlbScope = arch.TlbScope;
+const Error = arch.MmuError;
 
 const am = @import("asm.zig");
 const regs = @import("register.zig");
