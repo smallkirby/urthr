@@ -27,8 +27,15 @@ tree: VmTree = .{},
 brk: usize = 0,
 /// Next candidate address for anonymous mmap.
 mmap_hint: usize = mmap_base,
-/// Number of tasks sharing this address space.
-refcnt: std.atomic.Value(usize) = .init(1),
+/// Number of tasks using this address space.
+///
+/// When this reaches zero, all user mappings are unmapped,
+/// while kernel mappings are kept alive.
+users: std.atomic.Value(usize) = .init(1),
+/// Number of references to the resources.
+///
+/// When this reaches zero, this struct and its all page tables are freed.
+refs: std.atomic.Value(usize) = .init(1),
 /// Forces exclusive access to VMM.
 lock: SpinLock = .{},
 
@@ -53,17 +60,29 @@ pub fn new(allocator: Allocator, as: arch.mmu.AddressSpace) Allocator.Error!*Sel
     return vmm;
 }
 
-/// Increment the reference count to share this address space.
+/// Increment the number of user tasks of this address space.
 pub fn ref(self: *Self) *Self {
-    _ = self.refcnt.fetchAdd(1, .acq_rel);
+    _ = self.users.fetchAdd(1, .acq_rel);
+    _ = self.refs.fetchAdd(1, .acq_rel);
     return self;
 }
 
-/// Deinitialize this instance and free all resources.
+/// Decrement the user count and reference count of this address space.
 ///
-/// Resources are released only when the last reference is dropped.
-pub fn deinit(self: *Self, allocator: Allocator) void {
-    if (self.refcnt.fetchSub(1, .acq_rel) > 1) {
+/// The caller must not be running on this address space.
+pub fn release(self: *Self, allocator: Allocator) void {
+    self.leave();
+    self.unref(allocator);
+}
+
+/// Decrement the user count and unmap all VMAs if it was the last one.
+///
+/// This function may block.
+///
+/// This function can be called while running on this address space,
+/// since the page tables are kept alive until the reference count reaches zero.
+pub fn leave(self: *Self) void {
+    if (self.users.fetchSub(1, .acq_rel) > 1) {
         return;
     }
 
@@ -72,8 +91,20 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
         const vma = node.container();
         self.unmap(vma.start, vma.size) catch {};
     }
+}
 
-    // Free the page table pages themselves.
+/// Drop a reference to this address space.
+/// If it was the last one, all the page tables and this instance are freed.
+///
+/// The caller must not be running on this address space.
+pub fn unref(self: *Self, allocator: Allocator) void {
+    if (self.refs.fetchSub(1, .acq_rel) > 1) {
+        return;
+    }
+
+    // All users must have left.
+    rtt.expectEqual(0, self.users.load(.acquire));
+    // Destroy the address space and free its page tables.
     arch.mmu.destroyAddressSpace(self.as, urd.mem.page);
 
     allocator.destroy(self);
@@ -90,7 +121,7 @@ pub fn clone(self: *Self, allocator: Allocator) Error!*Self {
         allocator,
         self.as.kernelOnly(),
     );
-    errdefer child.deinit(allocator);
+    errdefer child.release(allocator);
 
     // Request TLB shootdown if needed.
     var need_flush = false;
@@ -800,7 +831,7 @@ fn flushTlb(self: *const Self, scope: Scope, range: ?FlushRange) void {
     }
 
     if (comptime !arch.mmu.tlb.supports_global) {
-        if (scope == .global and self.refcnt.load(.acquire) > 1) {
+        if (scope == .global and self.users.load(.acquire) > 1) {
             urd.ipi.tlbShootdown(if (range) |r| .{
                 .addr = r.addr,
                 .len = r.len,

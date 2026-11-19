@@ -36,7 +36,7 @@ pub fn initLocal() Allocator.Error!void {
     const th = try allocator.create(Thread);
     errdefer allocator.destroy(th);
     const vmm = try urd.task.Vmm.new(allocator, urd.mem.getKernelPageTable());
-    errdefer vmm.deinit(allocator);
+    errdefer vmm.release(allocator);
 
     // Create a new thread group for the idle thread.
     const group = try urd.task.ThreadGroup.new(allocator, th, 0, 0, 0);

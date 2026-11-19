@@ -135,7 +135,7 @@ pub fn kspawn(filename: []const u8, entry: anytype, args: anytype) Error!*Thread
 
     // Create user-space page table.
     const vmm = try Vmm.new(mem.bin, mem.getKernelPageTable());
-    errdefer vmm.deinit(mem.bin);
+    errdefer vmm.release(mem.bin);
 
     // Create a new thread group for the new kernel thread.
     const id = allocateId();
@@ -216,7 +216,7 @@ pub fn execve(
     errdefer {
         current.vmm = old_vm;
         arch.mmu.switchAddressSpace(old_vm.as, mem.page);
-        new_vm.deinit(allocator);
+        new_vm.release(allocator);
     }
 
     // Setup user image.
@@ -256,7 +256,7 @@ pub fn execve(
     arch.thread.setThreadPointer(uimg.tp);
 
     // Old VM is no longer needed.
-    old_vm.deinit(allocator);
+    old_vm.release(allocator);
 
     // Wake up the parent waiting on a vfork-clone.
     if (current.vfork_done) |vd| {
@@ -395,7 +395,7 @@ pub fn clone(flags: CloneFlags, stack: usize) Error!*Thread {
         cur.vmm.ref()
     else
         cur.vmm.clone(mem.bin) catch return Error.OutOfMemory;
-    errdefer vmm.deinit(mem.bin);
+    errdefer vmm.release(mem.bin);
 
     // Share or copy the thread group.
     const group = if (flags.thread)
@@ -542,6 +542,9 @@ pub fn exit(status: thread.ExitStatus) noreturn {
 pub fn onSwitchedOut(prev: *Thread) void {
     if (prev.state == .moribund or prev.state == .dead) {
         prev.group.accountExited(prev);
+
+        // Drop the reference on behalf of the previous thread.
+        prev.vmm.unref(mem.bin);
     }
 
     switch (prev.state) {
@@ -595,8 +598,9 @@ fn releaseThread(th: *thread.Thread) void {
     // Release fs information.
     th.fs.info.deinit(mem.bin);
 
-    // Free the address space.
-    th.vmm.deinit(mem.bin);
+    // Leave the address space.
+    // The page tables are still alive until unreferenced by a succeeding thread.
+    th.vmm.leave();
 
     // Release the signal handler table.
     th.sigstate.handlers.deinit(mem.bin);
@@ -923,6 +927,9 @@ fn ThreadFuncWrapper(comptime f: anytype, ArgType: type) type {
 
             // Destroy arguments.
             mem.bin.destroy(argv);
+
+            // Leave the address space.
+            sched.getCurrent().vmm.leave();
 
             // Exit thread.
             sched.exitCurrent(.dead);
