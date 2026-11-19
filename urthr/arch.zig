@@ -66,7 +66,7 @@ pub const UnmapOptions = struct {
 
 /// Translation level.
 ///
-/// This counts the number of table descents from the top-level table.
+/// Level 0 is the lowest level that maps 4KiB pages.
 /// 5-level translation is not supported.
 pub const Level = u2;
 
@@ -88,9 +88,9 @@ pub const Granule = enum {
     /// Translation level of the leaf entry.
     pub fn level(self: Granule) Level {
         return switch (self) {
-            .@"4kb" => 3,
-            .@"2mb" => 2,
-            .@"1gb" => 1,
+            .@"4kb" => 0,
+            .@"2mb" => 1,
+            .@"1gb" => 2,
         };
     }
 };

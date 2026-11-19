@@ -1,5 +1,8 @@
 //! Sv48 MMU.
 
+/// Level of the root page table.
+const top_level: Level = 3;
+
 /// Describes a virtual address space.
 pub const AddressSpace = struct {
     /// Root page table shared by both VA halves.
@@ -61,7 +64,7 @@ pub fn destroyAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
         const child = getTable(desc.next());
         destroyTableRecursive(
             allocator.translateV(child),
-            1,
+            top_level - 1,
             allocator,
         );
     };
@@ -70,12 +73,12 @@ pub fn destroyAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
 
 /// Recursively frees all table pages under the given table.
 fn destroyTableRecursive(tbl: []TableEntry, level: Level, allocator: PageAllocator) void {
-    if (level < 3) {
+    if (level > 0) {
         for (tbl) |desc| if (desc.valid and !desc.isLeaf()) {
             const child = getTable(desc.next());
             destroyTableRecursive(
                 allocator.translateV(child),
-                level + 1,
+                level - 1,
                 allocator,
             );
         };
@@ -154,20 +157,20 @@ pub fn switchAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
 pub fn translateWalk(as: AddressSpace, va: usize, allocator: PageAllocator) ?usize {
     var tbl = as.select(va)._tbl;
 
-    var level: Level = 0;
-    while (true) : (level += 1) {
+    var level = top_level;
+    while (true) : (level -= 1) {
         const entry = tbl[getIndex(level, va)];
         if (!entry.valid) return null;
 
         if (entry.isLeaf()) {
-            const shift: u6 = page_shift_4k + @as(u6, 3 - level) * 9;
+            const shift: u6 = page_shift_4k + @as(u6, level) * 9;
             const size = @as(usize, 1) << shift;
             const base = (@as(usize, entry.ppn) << page_shift_4k) & ~(size - 1);
             return base | (va & (size - 1));
         }
 
         // A non-leaf entry at the last level is invalid.
-        if (level == 3) return null;
+        if (level == 0) return null;
 
         // Descend to the next level.
         tbl = allocator.translateV(getTable(entry.next()));
@@ -297,8 +300,8 @@ fn unmapImpl(root: PageTable, va: usize, size: usize, mg: Granule, opts: UnmapOp
 fn lookupSpawn(root: []TableEntry, va: usize, level: Level, allocator: PageAllocator) Error!*TableEntry {
     var tbl = root;
 
-    var cur_level: Level = 0;
-    while (cur_level < level) : (cur_level += 1) {
+    var cur_level = top_level;
+    while (cur_level > level) : (cur_level -= 1) {
         const entry = &tbl[getIndex(cur_level, va)];
 
         // Spawn a new table.
@@ -324,8 +327,8 @@ fn lookupSpawn(root: []TableEntry, va: usize, level: Level, allocator: PageAlloc
 fn lookupEntry(root: []TableEntry, va: usize, level: Level, allocator: PageAllocator) Error!*TableEntry {
     var tbl = root;
 
-    var cur_level: Level = 0;
-    while (cur_level < level) : (cur_level += 1) {
+    var cur_level = top_level;
+    while (cur_level > level) : (cur_level -= 1) {
         const entry = &tbl[getIndex(cur_level, va)];
         if (!entry.valid) {
             return Error.InvalidMapping;
@@ -373,7 +376,7 @@ fn loadSatp(as: AddressSpace, allocator: PageAllocator) void {
 
 /// Get the index for the given level from the given virtual address for Sv48 paging.
 fn getIndex(level: Level, va: usize) usize {
-    return (va >> (page_shift_4k + (@as(u6, 3 - level) * 9))) & 0x1FF;
+    return (va >> (page_shift_4k + (@as(u6, level) * 9))) & 0x1FF;
 }
 
 /// Calculate the physical page number from the given physical address.

@@ -10,6 +10,9 @@ const num_ents = page_size / @sizeOf(PageDesc);
 /// Virtual address space range in bits.
 const va_range = 48;
 
+/// Level of the root page table.
+const top_level: Level = 3;
+
 /// Describes a virtual address space.
 ///
 /// Internal fields are an aarch64-specific detail
@@ -72,17 +75,17 @@ pub fn createPageTable(allocator: PageAllocator) Error!PageTable {
 /// Actual data pages are not freed.
 pub fn destroyAddressSpace(as: AddressSpace, allocator: PageAllocator) void {
     const pt = as._l0 orelse return;
-    destroyTableRecursive(pt._tbl, 0, allocator);
+    destroyTableRecursive(pt._tbl, top_level, allocator);
 }
 
 /// Recursively frees all table pages under the given table.
 fn destroyTableRecursive(tbl: []TableDesc, level: Level, allocator: PageAllocator) void {
-    if (level < 3) {
+    if (level > 0) {
         for (tbl) |desc| if (desc.valid and desc.table) {
             const child = getTable(TableDesc, desc.next());
             destroyTableRecursive(
                 allocator.translateV(child),
-                level + 1,
+                level - 1,
                 allocator,
             );
         };
@@ -154,7 +157,7 @@ fn mapImpl(root: PageTable, arg: MapArgument, mg: Granule, opts: MapOptions, all
     }
 
     const asize = util.roundup(arg.size, granule);
-    const page_type: @FieldType(PageDesc, "type") = if (level == 3) .page else .block;
+    const page_type: @FieldType(PageDesc, "type") = if (level == 0) .page else .block;
 
     const base_pa = util.rounddown(arg.pa, granule);
     const base_va = util.rounddown(arg.va, granule);
@@ -230,8 +233,8 @@ fn lookupInvalidate(root: []TableDesc, va: usize, level: Level, allocator: PageA
 fn lookupEntry(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
     var tbl = root;
 
-    var cur_level: Level = 0;
-    while (cur_level < level) : (cur_level += 1) {
+    var cur_level = top_level;
+    while (cur_level > level) : (cur_level -= 1) {
         const desc = &tbl[getIndex(cur_level, va)];
 
         if (!desc.valid) return error.InvalidMapping;
@@ -338,17 +341,17 @@ pub fn flush() void {
 pub fn translateWalk(as: AddressSpace, va: usize, allocator: PageAllocator) ?usize {
     var tbl = as.select(va)._tbl;
 
-    var cur_level: usize = 0;
-    while (cur_level <= 3) : (cur_level += 1) {
-        const tdesc: *const TableDesc = &tbl[getIndex(@intCast(cur_level), va)];
+    var cur_level = top_level;
+    while (true) : (cur_level -= 1) {
+        const tdesc: *const TableDesc = &tbl[getIndex(cur_level, va)];
         const pdesc: *const PageDesc = @ptrCast(tdesc);
 
         if (!tdesc.valid) {
             return null;
         }
 
-        if (cur_level == 3 or pdesc.type == .block) {
-            const offset_bits: u6 = @intCast(page_shift + (3 - cur_level) * 9);
+        if (cur_level == 0 or pdesc.type == .block) {
+            const offset_bits: u6 = @intCast(page_shift + @as(u6, cur_level) * 9);
             const offset_mask = (@as(usize, 1) << offset_bits) - 1;
             return (@as(usize, @intCast(pdesc.oa)) << page_shift) | (va & offset_mask);
         }
@@ -356,8 +359,6 @@ pub fn translateWalk(as: AddressSpace, va: usize, allocator: PageAllocator) ?usi
         // Descend to the next level.
         tbl = getTable(TableDesc, allocator.translateV(tdesc.next()));
     }
-
-    return null;
 }
 
 /// Get the physical address corresponding to the given virtual address.
@@ -379,8 +380,8 @@ pub fn getPhysicalAddress(va: usize) usize {
 fn lookupSpawn(root: []TableDesc, va: usize, level: Level, allocator: PageAllocator) Error!*PageDesc {
     var tbl = root;
 
-    var cur_level: Level = 0;
-    while (cur_level < level) : (cur_level += 1) {
+    var cur_level = top_level;
+    while (cur_level > level) : (cur_level -= 1) {
         const desc = &tbl[getIndex(cur_level, va)];
 
         // Spawn a new table.
@@ -418,7 +419,7 @@ fn getTable(T: type, tbl: anytype) []T {
 
 /// Get the index for the given level from the given virtual address.
 fn getIndex(level: Level, va: usize) usize {
-    return (va >> (12 + (@as(u6, 3 - level) * 9))) & 0x1FF;
+    return (va >> (12 + (@as(u6, level) * 9))) & 0x1FF;
 }
 
 /// Allocate a new table of the specified descriptor type.
