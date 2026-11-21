@@ -6,6 +6,13 @@
 pub const Ivrs = struct {
     /// SDT header.
     header: SdtHeader,
+    /// I/O virtualization information common to all IOMMU units.
+    ivinfo: IvInfo,
+    /// IVHD blocks, one per IOMMU unit.
+    ivhds: []const Ivhd,
+
+    /// Page allocator.
+    allocator: PageAllocator,
 };
 
 /// IVRS header following immediately after the SDT header.
@@ -237,6 +244,18 @@ const Ivhd = struct {
             },
             else => return null,
         }
+    }
+
+    /// Get the priority of the IVHD type.
+    ///
+    /// When multiple IVHDs describe the same IOMMU, the one with higher priority should be used.
+    fn priority(self: Ivhd) u8 {
+        return switch (self.type) {
+            .ivhd10 => 0,
+            .ivhd11 => 1,
+            .ivhd40 => 0, // not supported
+            else => unreachable,
+        };
     }
 
     /// Type 10h.
@@ -517,29 +536,65 @@ pub fn parse(phys: usize, allocator: PageAllocator) PageAllocator.Error!?Ivrs {
         log.err("Invalid IVRS length: {d}", .{header.length});
         return null;
     }
+    const ivdbs = IvdbIter.init(
+        virt + ivdb_offset,
+        header.length - ivdb_offset,
+    );
 
-    var iter = IvdbIter.init(virt + ivdb_offset, header.length - ivdb_offset);
+    // Count the number of IVHDs.
+    const num_ivhds = blk: {
+        var count: usize = 0;
+        var counter = ivdbs;
+        while (counter.next()) |block| {
+            if (Ivhd.from(block) != null) count += 1;
+        }
+        break :blk count;
+    };
+
+    const ivhds = try allocator.alloc(Ivhd, num_ivhds);
+    errdefer allocator.free(ivhds);
+    var len: usize = 0;
+
+    // Parse all IVHDs.
+    var iter = ivdbs;
     while (iter.next()) |block| {
-        if (Ivhd.from(block)) |ivhd| {
-            // Parse as IVHD.
-            log.debug("IVHD {}: DevID=0x{X:0>4}, cap=0x{X}, base=0x{X}, EFR={?X}", .{
-                ivhd.type, ivhd.deviceid, ivhd.cap_offset, ivhd.base, ivhd.efr_image,
-            });
-
-            // Parse device entries.
-            var entries = DeviceEntryIter.init(ivhd.entries);
-            while (entries.next()) |entry| {
-                log.debug("  {} DevID=0x{X:0>4}", .{
-                    entry.type, entry.devid,
-                });
-            }
-        } else {
+        const ivhd = Ivhd.from(block) orelse {
             log.warn("Skipping non-IVHD IVDB.", .{});
             continue;
+        };
+        log.debug("IVHD {}: DevID=0x{X:0>4}, cap=0x{X}, base=0x{X}, EFR={?X}", .{
+            ivhd.type, ivhd.deviceid, ivhd.cap_offset, ivhd.base, ivhd.efr_image,
+        });
+
+        // Parse device entries.
+        var entries = DeviceEntryIter.init(ivhd.entries);
+        while (entries.next()) |entry| {
+            log.debug("  {} DevID=0x{X:0>4}", .{ entry.type, entry.devid });
+        }
+
+        // Check if this IVHD duplicates an existing IOMMU.
+        const dup = for (ivhds[0..len]) |*cur| {
+            if (cur.base == ivhd.base and cur.seg_group == ivhd.seg_group) {
+                break cur;
+            }
+        } else null;
+
+        // Take only IOMMU with the highest priority.
+        if (dup) |cur| {
+            if (ivhd.priority() > cur.priority()) cur.* = ivhd;
+        } else {
+            ivhds[len] = ivhd;
+            len += 1;
         }
     }
+    log.debug("{d} IOMMU units found.", .{len});
 
-    return .{ .header = header };
+    return .{
+        .header = header,
+        .ivinfo = ivinfo,
+        .ivhds = ivhds[0..len],
+        .allocator = allocator, // TODO: should be GPA, instead of page allocator
+    };
 }
 
 // =============================================================
