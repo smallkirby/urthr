@@ -52,12 +52,15 @@ pub const SdtHeader = extern struct {
 
 /// System description table kind.
 pub const Table = enum {
+    /// AMD I/O Virtualization Reporting Structure.
+    ivrs,
     /// PCIe memory-mapped configuration space base address descriptor table.
     mcfg,
 
     /// Get the table identifier.
     pub fn id(self: Table) []const u8 {
         return switch (self) {
+            .ivrs => "IVRS",
             .mcfg => "MCFG",
         };
     }
