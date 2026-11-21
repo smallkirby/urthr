@@ -1003,7 +1003,9 @@ pub fn build(b: *std.Build) !void {
     try ut.addTestModule(
         "common_test",
         b.path("urthr/common.zig"),
-        &.{},
+        &.{
+            .{ .name = "options", .module = options_module },
+        },
         optimize,
     );
     try ut.addTestModule(

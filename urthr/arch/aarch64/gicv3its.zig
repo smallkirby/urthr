@@ -169,7 +169,7 @@ pub fn sync(target: u64) void {
 
 /// Get a physical address of the ITS Translation Register.
 pub fn getTranslaterPhys() usize {
-    return base.phys + its.getRegisterOffset(Translater);
+    return base.phys + its.offsetOf(Translater);
 }
 
 /// Submit a command to the command queue.
@@ -226,18 +226,18 @@ fn setupBasers(alloc: PageAllocator) Error!void {
 // Registers
 // =============================================================
 
-var its = mmio.Module(.{ .natural = u64 }, &.{
-    .{ 0x0000, Ctlr },
-    .{ 0x0008, Typer },
-    .{ 0x0080, Cbaser },
-    .{ 0x0088, Cwriter },
-    .{ 0x0090, Creader },
-    .{ 0x0100, mmio.Marker(.baser) },
-    .{ 0x10040, Translater },
+var its = mmio.Module(.{ .natural = u64 }, .{
+    Reg(0x0000, Ctlr),
+    Reg(0x0008, Typer),
+    Reg(0x0080, Cbaser),
+    Reg(0x0088, Cwriter),
+    Reg(0x0090, Creader),
+    Mrk(0x0100, .baser),
+    Reg(0x10040, Translater),
 }){};
 
 fn getBaserAt(index: usize) *volatile Baser {
-    return @ptrFromInt(its.getMarkerAddress(.baser) + index * @sizeOf(Baser));
+    return @ptrFromInt(its.addressOf(.baser) + index * @sizeOf(Baser));
 }
 
 /// GITS_CTLR, ITS Control Register.
@@ -440,6 +440,8 @@ const Cacheability = enum(u3) {
 const std = @import("std");
 const common = @import("common");
 const mem = common.mem;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;
 const PageAllocator = mem.PageAllocator;
 const Pair = common.Pair;

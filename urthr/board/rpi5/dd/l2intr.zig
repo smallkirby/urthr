@@ -12,12 +12,12 @@
 // Module Definition
 // =============================================================
 
-var l2 = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Status },
-    .{ 0x08, Clear },
-    .{ 0x0C, MaskStatus },
-    .{ 0x10, MaskSet },
-    .{ 0x14, MaskClear },
+var l2 = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Status),
+    Reg(0x08, Clear),
+    Reg(0x0C, MaskStatus),
+    Reg(0x10, MaskSet),
+    Reg(0x14, MaskClear),
 }){};
 
 /// GIC interrupt ID of the controller.
@@ -93,4 +93,5 @@ const MaskClear = packed struct(u32) { value: u32 };
 // =============================================================
 
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;

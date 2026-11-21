@@ -12,11 +12,11 @@
 // Module Definition
 // =============================================================
 
-var rng = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Ctrl },
-    .{ 0x0C, TotalBitCount },
-    .{ 0x20, FifoData },
-    .{ 0x24, FifoCount },
+var rng = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Ctrl),
+    Reg(0x0C, TotalBitCount),
+    Reg(0x20, FifoData),
+    Reg(0x24, FifoCount),
 }){};
 
 // =============================================================
@@ -95,5 +95,6 @@ const FifoData = packed struct(u32) {
 const std = @import("std");
 const common = @import("common");
 const rtt = common.rtt;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const arch = @import("arch").impl;

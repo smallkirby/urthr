@@ -1,15 +1,15 @@
 // =============================================================
 // xHCI Capability Registers
 
-pub const Capability = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, CapInfo },
-    .{ 0x04, HcsParams1 },
-    .{ 0x08, HcsParams2 },
-    .{ 0x0C, HcsParams3 },
-    .{ 0x10, CapParam1 },
-    .{ 0x14, DbOffset },
-    .{ 0x18, RtsOffset },
-    .{ 0x1C, CapParam2 },
+pub const Capability = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, CapInfo),
+    Reg(0x04, HcsParams1),
+    Reg(0x08, HcsParams2),
+    Reg(0x0C, HcsParams3),
+    Reg(0x10, CapParam1),
+    Reg(0x14, DbOffset),
+    Reg(0x18, RtsOffset),
+    Reg(0x1C, CapParam2),
 });
 
 pub const CapInfo = packed struct(u32) {
@@ -86,15 +86,15 @@ pub const CapParam2 = packed struct(u32) {
 // =============================================================
 // xHC Operational Registers
 
-pub const Operational = mmio.Module(.{ .natural = u64 }, &.{
-    .{ 0x00, CommandRegister },
-    .{ 0x04, StatusRegister },
-    .{ 0x08, PageSize },
-    .{ 0x18, Crcr0 },
-    .{ 0x1C, Crcr1 },
-    .{ 0x30, Dcbaap },
-    .{ 0x38, ConfigureRegister },
-    .{ 0x400, mmio.Marker(.port_set) },
+pub const Operational = mmio.Module(.{ .natural = u64 }, .{
+    Reg(0x00, CommandRegister),
+    Reg(0x04, StatusRegister),
+    Reg(0x08, PageSize),
+    Reg(0x18, Crcr0),
+    Reg(0x1C, Crcr1),
+    Reg(0x30, Dcbaap),
+    Reg(0x38, ConfigureRegister),
+    Mrk(0x400, .port_set),
 });
 
 /// USB Command Register. (USBCMD)
@@ -214,11 +214,11 @@ pub const ConfigureRegister = packed struct(u32) {
 };
 
 /// Entry in Port Register Set.
-pub const Port = mmio.Module(.{ .natural = u64 }, &.{
-    .{ 0x00, PortSc },
-    .{ 0x04, PortPmsc },
-    .{ 0x08, PortLi },
-    .{ 0x0C, PortHlpmc },
+pub const Port = mmio.Module(.{ .natural = u64 }, .{
+    Reg(0x00, PortSc),
+    Reg(0x04, PortPmsc),
+    Reg(0x08, PortLi),
+    Reg(0x0C, PortHlpmc),
 });
 
 /// Port Status and Control Register.
@@ -313,8 +313,8 @@ pub const PortHlpmc = packed struct(u32) {
 // =============================================================
 // xHCI Runtime Registers
 
-pub const Runtime = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, MfIndex },
+pub const Runtime = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, MfIndex),
 });
 
 pub const MfIndex = packed struct(u32) {
@@ -325,12 +325,12 @@ pub const MfIndex = packed struct(u32) {
 // Interrupter Register
 
 /// Interrupter Register for each interrupter.
-pub const Interrupter = mmio.Module(.{ .natural = u64 }, &.{
-    .{ 0x00, Iman },
-    .{ 0x04, Imod },
-    .{ 0x08, Erstsz },
-    .{ 0x10, Erstba },
-    .{ 0x18, Erdp },
+pub const Interrupter = mmio.Module(.{ .natural = u64 }, .{
+    Reg(0x00, Iman),
+    Reg(0x04, Imod),
+    Reg(0x08, Erstsz),
+    Reg(0x10, Erstba),
+    Reg(0x18, Erdp),
 });
 
 /// Interrupt Management Register.
@@ -401,4 +401,6 @@ pub const DoorBell = packed struct(u32) {
 // =============================================================
 
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;

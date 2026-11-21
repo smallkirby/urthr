@@ -5,55 +5,55 @@
 /// PCI Header Type 1.
 ///
 /// For bridges and switches.
-pub const HeaderType1 = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, HeaderVendorDevice },
-    .{ 0x04, HeaderCommandStatus },
-    .{ 0x08, HeaderRevClass },
-    .{ 0x0C, HeaderBistLatCacheLine },
+pub const HeaderType1 = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, HeaderVendorDevice),
+    Reg(0x04, HeaderCommandStatus),
+    Reg(0x08, HeaderRevClass),
+    Reg(0x0C, HeaderBistLatCacheLine),
 
-    .{ 0x10, HeaderBar0 },
-    .{ 0x14, HeaderBar1 },
-    .{ 0x18, HeaderBusNum },
-    .{ 0x1C, HeaderIoBaseLimit },
-    .{ 0x20, HeaderMemBaseLimit },
-    .{ 0x24, HeaderPrefMemBaseLimit },
-    .{ 0x28, HeaderPrefBaseUpper },
-    .{ 0x2C, HeaderPrefLimitUpper },
-    .{ 0x30, HeaderIoBaseUpper },
-    .{ 0x34, HeaderCapPtr },
-    .{ 0x38, HeaderExpansionRom },
-    .{ 0x3C, HeaderInt },
-    .{ 0x100, ExtCapHeader },
+    Reg(0x10, HeaderBar0),
+    Reg(0x14, HeaderBar1),
+    Reg(0x18, HeaderBusNum),
+    Reg(0x1C, HeaderIoBaseLimit),
+    Reg(0x20, HeaderMemBaseLimit),
+    Reg(0x24, HeaderPrefMemBaseLimit),
+    Reg(0x28, HeaderPrefBaseUpper),
+    Reg(0x2C, HeaderPrefLimitUpper),
+    Reg(0x30, HeaderIoBaseUpper),
+    Reg(0x34, HeaderCapPtr),
+    Reg(0x38, HeaderExpansionRom),
+    Reg(0x3C, HeaderInt),
+    Reg(0x100, ExtCapHeader),
 });
 
 /// PCI Header Type 0.
 ///
 /// For regular endpoint devices.
-pub const HeaderType0 = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, HeaderVendorDevice },
-    .{ 0x04, HeaderCommandStatus },
-    .{ 0x08, HeaderRevClass },
-    .{ 0x0C, HeaderBistLatCacheLine },
+pub const HeaderType0 = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, HeaderVendorDevice),
+    Reg(0x04, HeaderCommandStatus),
+    Reg(0x08, HeaderRevClass),
+    Reg(0x0C, HeaderBistLatCacheLine),
 
-    .{ 0x10, HeaderBar0 },
-    .{ 0x14, HeaderBar1 },
-    .{ 0x18, HeaderBar2 },
-    .{ 0x1C, HeaderBar3 },
-    .{ 0x20, HeaderBar4 },
-    .{ 0x24, HeaderBar5 },
-    .{ 0x28, HeaderCardbusCis },
-    .{ 0x2C, HeaderSubsys },
-    .{ 0x30, HeaderExpansionRom },
-    .{ 0x34, HeaderCapPtr },
-    .{ 0x3C, HeaderInt },
-    .{ 0x100, ExtCapHeader },
+    Reg(0x10, HeaderBar0),
+    Reg(0x14, HeaderBar1),
+    Reg(0x18, HeaderBar2),
+    Reg(0x1C, HeaderBar3),
+    Reg(0x20, HeaderBar4),
+    Reg(0x24, HeaderBar5),
+    Reg(0x28, HeaderCardbusCis),
+    Reg(0x2C, HeaderSubsys),
+    Reg(0x30, HeaderExpansionRom),
+    Reg(0x34, HeaderCapPtr),
+    Reg(0x3C, HeaderInt),
+    Reg(0x100, ExtCapHeader),
 });
 
 /// PCIe Capability Structure.
-pub const PcieCap = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, CapCap },
-    .{ 0x0C, LinkCap1 },
-    .{ 0x30, LinkControlStatus2 },
+pub const PcieCap = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, CapCap),
+    Reg(0x0C, LinkCap1),
+    Reg(0x30, LinkControlStatus2),
 });
 
 // =============================================================
@@ -258,13 +258,13 @@ fn Io(Module: type) type {
 
         /// Read a register `T` whose offset is determined by `Module`.
         pub fn readReg(self: Self, comptime T: type) T {
-            const offset, _ = Module.getRegister(T);
+            const offset = (Module{}).offsetOf(T);
             return @bitCast(self.read(@intCast(offset)));
         }
 
         /// Read-modify-write a register `T` whose offset is determined by `Module`.
         pub fn modifyReg(self: Self, comptime T: type, value: anytype) void {
-            const offset, _ = Module.getRegister(T);
+            const offset = (Module{}).offsetOf(T);
             self.modifyAs(@intCast(offset), T, value);
         }
 
@@ -275,7 +275,7 @@ fn Io(Module: type) type {
         ///
         /// Note that the index of the returned value does not necessarily match the BAR index.
         pub fn parseBars(self: Self, out: []BarInfo) []const BarInfo {
-            const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
+            const bar_base = (HeaderType0{}).offsetOf(HeaderBar0);
 
             var out_idx: usize = 0;
             var skip: bool = false;
@@ -355,7 +355,7 @@ fn Io(Module: type) type {
         pub fn setBarAddress(self: Self, bar: BarInfo, addr: u64) void {
             rtt.expectEqual(0, addr & ~bar.address_mask);
 
-            const bar_base, _ = HeaderType0.getRegister(HeaderBar0);
+            const bar_base = (HeaderType0{}).offsetOf(HeaderBar0);
 
             switch (bar.type) {
                 .io => {
@@ -964,7 +964,8 @@ const common = @import("common");
 const DmaAllocator = common.mem.DmaAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const rtt = common.rtt;
 const urthr = @import("urthr");
 const mem = urthr.mem;

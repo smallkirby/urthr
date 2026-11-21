@@ -4,35 +4,35 @@
 // Module Definition
 // =============================================================
 
-var rp1 = mmio.Module(.{ .size = void }, &.{
-    .{ 0x0000_0000, mmio.Marker(.sysinfo) },
-    .{ 0x0000_8000, mmio.Marker(.syscfg) },
-    .{ 0x0000_C000, mmio.Marker(.otp) },
-    .{ 0x0001_0000, mmio.Marker(.resets) },
-    .{ 0x0001_8000, mmio.Marker(.clocks_main) },
-    .{ 0x0001_C000, mmio.Marker(.clocks_video) },
-    .{ 0x0002_0000, mmio.Marker(.pll_sys) },
-    .{ 0x0002_4000, mmio.Marker(.pll_audio) },
-    .{ 0x0002_8000, mmio.Marker(.pll_video) },
-    .{ 0x0003_0000, mmio.Marker(.uart0) },
-    .{ 0x0003_4000, mmio.Marker(.uart1) },
-    .{ 0x0003_8000, mmio.Marker(.uart2) },
-    .{ 0x0003_C000, mmio.Marker(.uart3) },
-    .{ 0x0004_0000, mmio.Marker(.uart4) },
-    .{ 0x0004_4000, mmio.Marker(.uart5) },
-    .{ 0x000B_0000, mmio.Marker(.sdio0_cfg) },
-    .{ 0x000B_4000, mmio.Marker(.sdio1_cfg) },
-    .{ 0x000D_0000, mmio.Marker(.io_bank0) },
-    .{ 0x000E_0000, mmio.Marker(.rio_bank0) },
-    .{ 0x000F_0000, mmio.Marker(.pad_bank0) },
-    .{ 0x0010_0000, mmio.Marker(.eth) },
-    .{ 0x0010_4000, mmio.Marker(.eth_cfg) },
-    .{ 0x0010_8000, mmio.Marker(.pcie) },
-    .{ 0x0020_0000, mmio.Marker(.usbhost0) },
-    .{ 0x0030_0000, mmio.Marker(.usbhost1) },
-    .{ 0x0018_0000, mmio.Marker(.sdio0) },
-    .{ 0x0018_4000, mmio.Marker(.sdio1) },
-    .{ 0x0040_0000, mmio.Marker(.end) },
+var rp1 = mmio.Module(.{ .size = void }, .{
+    Mrk(0x0000_0000, .sysinfo),
+    Mrk(0x0000_8000, .syscfg),
+    Mrk(0x0000_C000, .otp),
+    Mrk(0x0001_0000, .resets),
+    Mrk(0x0001_8000, .clocks_main),
+    Mrk(0x0001_C000, .clocks_video),
+    Mrk(0x0002_0000, .pll_sys),
+    Mrk(0x0002_4000, .pll_audio),
+    Mrk(0x0002_8000, .pll_video),
+    Mrk(0x0003_0000, .uart0),
+    Mrk(0x0003_4000, .uart1),
+    Mrk(0x0003_8000, .uart2),
+    Mrk(0x0003_C000, .uart3),
+    Mrk(0x0004_0000, .uart4),
+    Mrk(0x0004_4000, .uart5),
+    Mrk(0x000B_0000, .sdio0_cfg),
+    Mrk(0x000B_4000, .sdio1_cfg),
+    Mrk(0x000D_0000, .io_bank0),
+    Mrk(0x000E_0000, .rio_bank0),
+    Mrk(0x000F_0000, .pad_bank0),
+    Mrk(0x0010_0000, .eth),
+    Mrk(0x0010_4000, .eth_cfg),
+    Mrk(0x0010_8000, .pcie),
+    Mrk(0x0020_0000, .usbhost0),
+    Mrk(0x0030_0000, .usbhost1),
+    Mrk(0x0018_0000, .sdio0),
+    Mrk(0x0018_4000, .sdio1),
+    Mrk(0x0040_0000, .end),
 }){};
 
 const pcie0_range = common.Range{
@@ -244,56 +244,56 @@ pub fn init(allocator: IoAllocator) IoAllocator.Error!void {
     rp1fw.setBase(vsram);
 
     // Init mailbox.
-    rp1mb.init(rp1.getMarkerAddress(.syscfg));
+    rp1mb.init(rp1.addressOf(.syscfg));
 
     // Get FW version.
     const rp1version = rp1fw.getVersion();
     log.info("RP1 Firmware Version: {X:0>40}", .{rp1version});
 
     // Get Chip ID.
-    const chipid: *const volatile u32 = @ptrFromInt(rp1.getMarkerAddress(.sysinfo));
+    const chipid: *const volatile u32 = @ptrFromInt(rp1.addressOf(.sysinfo));
     log.info("RP1 Chip ID: 0x{X:0>8}", .{chipid.*});
     rtt.expectEqual(0x2000_1927, chipid.*);
 }
 
 /// Get the base address of I/O Bank registers.
 pub fn getIoBankBase() usize {
-    return rp1.getMarkerAddress(.io_bank0);
+    return rp1.addressOf(.io_bank0);
 }
 
 /// Get the base address of RIO Bank registers.
 pub fn getRioBase() usize {
-    return rp1.getMarkerAddress(.rio_bank0);
+    return rp1.addressOf(.rio_bank0);
 }
 
 /// Get the base address of Pad Bank registers.
 pub fn getPadsBase() usize {
-    return rp1.getMarkerAddress(.pad_bank0);
+    return rp1.addressOf(.pad_bank0);
 }
 
 /// Get the base address of Main Clocks registers.
 pub fn getClocksMain() usize {
-    return rp1.getMarkerAddress(.clocks_main);
+    return rp1.addressOf(.clocks_main);
 }
 
 /// Get the base address of Ethernet registers.
 pub fn getEthrBase() usize {
-    return rp1.getMarkerAddress(.eth);
+    return rp1.addressOf(.eth);
 }
 
 /// Get the base address of Ethernet configuration registers.
 pub fn getEthrCfgBase() usize {
-    return rp1.getMarkerAddress(.eth_cfg);
+    return rp1.addressOf(.eth_cfg);
 }
 
 /// Get the base address of usbhost0 registers.
 pub fn getUsbHost0Base() usize {
-    return rp1.getMarkerAddress(.usbhost0);
+    return rp1.addressOf(.usbhost0);
 }
 
 /// Get the base address of usbhost1 registers.
 pub fn getUsbHost1Base() usize {
-    return rp1.getMarkerAddress(.usbhost1);
+    return rp1.addressOf(.usbhost1);
 }
 
 /// Get the IRQ number of RP1 peripherals.
@@ -317,109 +317,109 @@ pub fn tryGetMsix(irq: usize) ?MsiIrq {
 fn mapPeris(allocator: IoAllocator, root: *IoAllocator.Resource) IoAllocator.Error!void {
     _ = try allocator.reserve(
         "sysinfo",
-        root.phys + rp1.getMarkerOffset(.sysinfo),
+        root.phys + rp1.offsetOf(.sysinfo),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "syscfg",
-        root.phys + rp1.getMarkerOffset(.syscfg),
+        root.phys + rp1.offsetOf(.syscfg),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "clocks_main",
-        root.phys + rp1.getMarkerOffset(.clocks_main),
+        root.phys + rp1.offsetOf(.clocks_main),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "uart0",
-        root.phys + rp1.getMarkerOffset(.uart0),
+        root.phys + rp1.offsetOf(.uart0),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "sdio0_cfg",
-        root.phys + rp1.getMarkerOffset(.sdio0_cfg),
+        root.phys + rp1.offsetOf(.sdio0_cfg),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "sdio1_cfg",
-        root.phys + rp1.getMarkerOffset(.sdio1_cfg),
+        root.phys + rp1.offsetOf(.sdio1_cfg),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "io_bank",
-        root.phys + rp1.getMarkerOffset(.io_bank0),
+        root.phys + rp1.offsetOf(.io_bank0),
         0x0000_C000,
         root,
     );
     _ = try allocator.reserve(
         "rio_bank",
-        root.phys + rp1.getMarkerOffset(.rio_bank0),
+        root.phys + rp1.offsetOf(.rio_bank0),
         0x0000_C000,
         root,
     );
     _ = try allocator.reserve(
         "pad_bank",
-        root.phys + rp1.getMarkerOffset(.pad_bank0),
+        root.phys + rp1.offsetOf(.pad_bank0),
         0x0000_C000,
         root,
     );
     _ = try allocator.reserve(
         "eth",
-        root.phys + rp1.getMarkerOffset(.eth),
+        root.phys + rp1.offsetOf(.eth),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "eth_cfg",
-        root.phys + rp1.getMarkerOffset(.eth_cfg),
+        root.phys + rp1.offsetOf(.eth_cfg),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "usbhost0",
-        root.phys + rp1.getMarkerOffset(.usbhost0),
+        root.phys + rp1.offsetOf(.usbhost0),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "usbhost1",
-        root.phys + rp1.getMarkerOffset(.usbhost1),
+        root.phys + rp1.offsetOf(.usbhost1),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "sdio0",
-        root.phys + rp1.getMarkerOffset(.sdio0),
+        root.phys + rp1.offsetOf(.sdio0),
         0x0000_4000,
         root,
     );
     _ = try allocator.reserve(
         "sdio1",
-        root.phys + rp1.getMarkerOffset(.sdio1),
+        root.phys + rp1.offsetOf(.sdio1),
         0x0000_4000,
         root,
     );
 }
 
 /// MIP module definition.
-const Mip = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x020, mmio.Marker(.int_cfgl_host) },
-    .{ 0x030, mmio.Marker(.int_cfgh_host) },
-    .{ 0x040, mmio.Marker(.int_maskl_host) },
-    .{ 0x050, mmio.Marker(.int_maskh_host) },
-    .{ 0x060, mmio.Marker(.int_maskl_vcpu) },
-    .{ 0x070, mmio.Marker(.int_maskh_vcpu) },
+const Mip = mmio.Module(.{ .size = u32 }, .{
+    Mrk(0x020, .int_cfgl_host),
+    Mrk(0x030, .int_cfgh_host),
+    Mrk(0x040, .int_maskl_host),
+    Mrk(0x050, .int_maskh_host),
+    Mrk(0x060, .int_maskl_vcpu),
+    Mrk(0x070, .int_maskh_vcpu),
 });
 
 /// PCIe endpoint configuration module definition.
-const PcieCfg = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x008, mmio.Marker(.msix_cfgs) },
+const PcieCfg = mmio.Module(.{ .size = u32 }, .{
+    Mrk(0x008, .msix_cfgs),
 });
 
 /// MSI-X Configuration Register.
@@ -472,13 +472,13 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
 
         var mip0 = Mip.new(mip0_base);
         // Unmask all for the host.
-        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskl_host))).* = 0;
-        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskh_host))).* = 0;
+        @as(*volatile u32, @ptrFromInt(mip0.addressOf(.int_maskl_host))).* = 0;
+        @as(*volatile u32, @ptrFromInt(mip0.addressOf(.int_maskh_host))).* = 0;
         // Mask all for the VPU and edge-triggered.
-        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskl_vcpu))).* = 0xFFFF_FFFF;
-        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_maskh_vcpu))).* = 0xFFFF_FFFF;
-        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_cfgl_host))).* = 0xFFFF_FFFF;
-        @as(*volatile u32, @ptrFromInt(mip0.getMarkerAddress(.int_cfgh_host))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.addressOf(.int_maskl_vcpu))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.addressOf(.int_maskh_vcpu))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.addressOf(.int_cfgl_host))).* = 0xFFFF_FFFF;
+        @as(*volatile u32, @ptrFromInt(mip0.addressOf(.int_cfgh_host))).* = 0xFFFF_FFFF;
     }
 
     // Setup MSI-X table entries.
@@ -500,7 +500,7 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
 
     // Setup PCIe MSI-X configuration.
     {
-        const cfg = PcieCfg.new(rp1.getMarkerAddress(.pcie));
+        const cfg = PcieCfg.new(rp1.addressOf(.pcie));
 
         // Ethernet
         msixConfigSet(cfg, .eth, std.mem.zeroInit(MsixCfg, .{
@@ -522,14 +522,14 @@ fn setupMsix(allocator: IoAllocator) IoAllocator.Error!void {
 /// Set MSI-X configuration register.
 fn msixConfigSet(cfg: PcieCfg, irq: MsiIrq, value: MsixCfg) void {
     const set_offset = 0x800;
-    const ptr: [*]volatile u32 = @ptrFromInt(cfg.getMarkerAddress(.msix_cfgs) + set_offset);
+    const ptr: [*]volatile u32 = @ptrFromInt(cfg.addressOf(.msix_cfgs) + set_offset);
 
     ptr[@backingInt(irq)] = @bitCast(value);
 }
 
 /// Acknowledge MSI-X interrupt.
 pub fn ackMsix(irq: MsiIrq) void {
-    const cfg = PcieCfg.new(rp1.getMarkerAddress(.pcie));
+    const cfg = PcieCfg.new(rp1.addressOf(.pcie));
 
     msixConfigSet(cfg, irq, std.mem.zeroInit(MsixCfg, .{
         .iack = true,
@@ -543,7 +543,8 @@ pub fn ackMsix(irq: MsiIrq) void {
 const std = @import("std");
 const log = std.log.scoped(.rp1);
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Mrk = common.io.Mrk;
 const rtt = common.rtt;
 const units = common.units;
 const IoAllocator = common.mem.IoAllocator;

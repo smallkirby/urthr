@@ -4,33 +4,33 @@
 // Module Definition
 // =============================================================
 
-const gem = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Ncr },
-    .{ 0x0004, Ncfgr },
-    .{ 0x0008, Nsr },
-    .{ 0x0010, Dmacfg },
-    .{ 0x0014, Tsr },
-    .{ 0x0018, Rxbqb },
-    .{ 0x001C, Txbqb },
-    .{ 0x0020, Rsr },
-    .{ 0x0024, Isr },
-    .{ 0x0028, Ier },
-    .{ 0x002C, Idr },
-    .{ 0x0030, Imr },
-    .{ 0x0034, Man },
-    .{ 0x0088, Sa1b },
-    .{ 0x008C, Sa1t },
-    .{ 0x00C0, Usrio },
-    .{ 0x00FC, Mid },
-    .{ 0x0108, Txcnt },
-    .{ 0x0158, Rxcnt },
-    .{ 0x0280, Dconfig1 },
-    .{ 0x0400, mmio.Marker(.isr) },
-    .{ 0x04C8, Txbqbh },
-    .{ 0x04D4, Rxbqbh },
-    .{ 0x0600, mmio.Marker(.ier) },
-    .{ 0x0620, mmio.Marker(.idr) },
-    .{ 0x0640, mmio.Marker(.imr) },
+const gem = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x0000, Ncr),
+    Reg(0x0004, Ncfgr),
+    Reg(0x0008, Nsr),
+    Reg(0x0010, Dmacfg),
+    Reg(0x0014, Tsr),
+    Reg(0x0018, Rxbqb),
+    Reg(0x001C, Txbqb),
+    Reg(0x0020, Rsr),
+    Reg(0x0024, Isr),
+    Reg(0x0028, Ier),
+    Reg(0x002C, Idr),
+    Reg(0x0030, Imr),
+    Reg(0x0034, Man),
+    Reg(0x0088, Sa1b),
+    Reg(0x008C, Sa1t),
+    Reg(0x00C0, Usrio),
+    Reg(0x00FC, Mid),
+    Reg(0x0108, Txcnt),
+    Reg(0x0158, Rxcnt),
+    Reg(0x0280, Dconfig1),
+    Mrk(0x0400, .isr),
+    Reg(0x04C8, Txbqbh),
+    Reg(0x04D4, Rxbqbh),
+    Mrk(0x0600, .ier),
+    Mrk(0x0620, .idr),
+    Mrk(0x0640, .imr),
 });
 
 const Self = @This();
@@ -228,10 +228,10 @@ fn setEnableIrq(self: *const Self, qidx: usize, enable: bool) void {
     rtt.expect(qidx == 0); // Only one queue supported.
 
     if (enable) {
-        self.module.writei(Ier, std.mem.zeroInit(InterruptBf, .{
+        self.module.write(Ier, .{ .value = std.mem.zeroInit(InterruptBf, .{
             .rcomp = true,
             .rxubr = true,
-        }));
+        }) });
     } else {
         self.module.writei(Idr, 0xFFFF_FFFF);
     }
@@ -1171,7 +1171,9 @@ const log = std.log.scoped(.gem);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;
 const rtt = common.rtt;
 const Timer = common.Timer;
 const DmaAllocator = common.mem.DmaAllocator;

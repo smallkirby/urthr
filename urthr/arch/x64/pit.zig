@@ -1,11 +1,11 @@
 //! Intel 8254 Programmable Interval Timer.
 
-var pit = pio.Module(&.{
-    .{ 0x40, Chan0Data },
-    .{ 0x41, Chan1Data },
-    .{ 0x42, Chan2Data },
-    .{ 0x43, ModeCommand },
-    .{ 0x61, Chan2Control },
+var pit = pio.Module(.{ .natural = u16 }, .{
+    Reg(0x40, Chan0Data),
+    Reg(0x41, Chan1Data),
+    Reg(0x42, Chan2Data),
+    Reg(0x43, ModeCommand),
+    Reg(0x61, Chan2Control),
 }){ .base = 0 };
 
 // =============================================================
@@ -154,7 +154,8 @@ const Chan2Control = packed struct(u8) {
 // =============================================================
 
 const common = @import("common");
-const pio = common.pio;
+const pio = common.io.pio;
+const Reg = common.io.Reg;
 const std = @import("std");
 const am = @import("asm.zig");
 const lapic = @import("lapic.zig");

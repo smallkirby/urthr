@@ -27,34 +27,34 @@ const QueueMap = std.AutoHashMap(u32, *virtio.Virtqueue);
 // =============================================================
 
 // The driver MUST only use 32 bit wide and aligned reads and writes to access the control registers.
-const Module = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x000, MagicValue },
-    .{ 0x004, Version },
-    .{ 0x008, virtio.DeviceId },
-    .{ 0x00c, VendorId },
-    .{ 0x010, DeviceFeat },
-    .{ 0x014, DeviceFeatSel },
-    .{ 0x020, DriverFeat },
-    .{ 0x024, DriverFeatSel },
-    .{ 0x028, GuestPageSize },
-    .{ 0x030, QueueSel },
-    .{ 0x034, QueueNumMax },
-    .{ 0x038, QueueNum },
-    .{ 0x03c, QueueAlign },
-    .{ 0x040, QueuePfn },
-    .{ 0x044, QueueReady },
-    .{ 0x050, QueueNotify },
-    .{ 0x060, InterruptStatus },
-    .{ 0x064, InterruptAck },
-    .{ 0x070, Status },
-    .{ 0x080, QueueDescLow },
-    .{ 0x084, QueueDescHigh },
-    .{ 0x090, QueueDriverLow },
-    .{ 0x094, QueueDriverHigh },
-    .{ 0x0a0, QueueDeviceLow },
-    .{ 0x0a4, QueueDeviceHigh },
-    .{ 0x0fc, ConfigGeneration },
-    .{ 0x100, mmio.Marker(.config) },
+const Module = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x000, MagicValue),
+    Reg(0x004, Version),
+    Reg(0x008, virtio.DeviceId),
+    Reg(0x00c, VendorId),
+    Reg(0x010, DeviceFeat),
+    Reg(0x014, DeviceFeatSel),
+    Reg(0x020, DriverFeat),
+    Reg(0x024, DriverFeatSel),
+    Reg(0x028, GuestPageSize),
+    Reg(0x030, QueueSel),
+    Reg(0x034, QueueNumMax),
+    Reg(0x038, QueueNum),
+    Reg(0x03c, QueueAlign),
+    Reg(0x040, QueuePfn),
+    Reg(0x044, QueueReady),
+    Reg(0x050, QueueNotify),
+    Reg(0x060, InterruptStatus),
+    Reg(0x064, InterruptAck),
+    Reg(0x070, Status),
+    Reg(0x080, QueueDescLow),
+    Reg(0x084, QueueDescHigh),
+    Reg(0x090, QueueDriverLow),
+    Reg(0x094, QueueDriverHigh),
+    Reg(0x0a0, QueueDeviceLow),
+    Reg(0x0a4, QueueDeviceHigh),
+    Reg(0x0fc, ConfigGeneration),
+    Mrk(0x100, .config),
 });
 
 /// Size in bytes of a single virtio MMIO device space.
@@ -269,7 +269,7 @@ fn finishInit(ctx: *anyopaque) void {
 /// Read bytes from the device config space at the given `offset`.
 fn readConfigBytes(ptr: *anyopaque, offset: usize, buf: []u8) void {
     const self: *const Self = @ptrCast(@alignCast(ptr));
-    const cbase = self.module.getMarkerAddress(.config);
+    const cbase = self.module.addressOf(.config);
     const src: [*]const volatile u8 = @ptrFromInt(cbase + offset);
     for (buf, 0..) |*b, i| b.* = src[i];
 }
@@ -445,7 +445,9 @@ const log = std.log.scoped(.vmmio);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;
 const PageAllocator = common.mem.PageAllocator;
 const dd = @import("dd");
 const virtio = dd.virtio;

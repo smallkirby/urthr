@@ -114,17 +114,17 @@ const gicd = struct {
     /// - GICD_ITARGETSRn
     /// - GICD_CPENDSGIRn
     /// - GICD_SPENDSGIRn
-    var mod = mmio.Module(.{ .size = u32 }, &.{
-        .{ 0x000, Ctlr },
-        .{ 0x004, Typer },
-        .{ 0x008, Iidr },
-        .{ 0x100, mmio.Marker(.isenabler) },
-        .{ 0x180, mmio.Marker(.icenabler) },
-        .{ 0x200, mmio.Marker(.ispendr) },
-        .{ 0x280, mmio.Marker(.icpendr) },
-        .{ 0x800, mmio.Marker(.itargetsr) },
-        .{ 0xC00, mmio.Marker(.icfgr) },
-        .{ 0xF00, Sgir },
+    var mod = mmio.Module(.{ .size = u32 }, .{
+        Reg(0x000, Ctlr),
+        Reg(0x004, Typer),
+        Reg(0x008, Iidr),
+        Mrk(0x100, .isenabler),
+        Mrk(0x180, .icenabler),
+        Mrk(0x200, .ispendr),
+        Mrk(0x280, .icpendr),
+        Mrk(0x800, .itargetsr),
+        Mrk(0xC00, .icfgr),
+        Reg(0xF00, Sgir),
     }){};
 
     /// Number of interrupts supported.
@@ -138,9 +138,9 @@ const gicd = struct {
         const bit_index = id % 32;
 
         const ptr: [*]volatile u32 = @ptrFromInt(if (enable)
-            mod.getMarkerAddress(.isenabler)
+            mod.addressOf(.isenabler)
         else
-            mod.getMarkerAddress(.icenabler));
+            mod.addressOf(.icenabler));
 
         ptr[reg_index] = bits.set(@as(u32, 0), bit_index);
     }
@@ -159,7 +159,7 @@ const gicd = struct {
         const reg_index = id / 16;
         const bit_index = (id % 16) * 2 + 1;
 
-        const ptr: [*]volatile u32 = @ptrFromInt(mod.getMarkerAddress(.icfgr));
+        const ptr: [*]volatile u32 = @ptrFromInt(mod.addressOf(.icfgr));
         const cur = ptr[reg_index];
 
         ptr[reg_index] = switch (trigger) {
@@ -176,7 +176,7 @@ const gicd = struct {
         const reg_index = id / 4;
         const byte_index = id % 4;
 
-        const ptr: [*]volatile u32 = @ptrFromInt(mod.getMarkerAddress(.itargetsr));
+        const ptr: [*]volatile u32 = @ptrFromInt(mod.addressOf(.itargetsr));
         const cur = ptr[reg_index];
 
         const shift: u5 = @intCast(byte_index * 8);
@@ -280,12 +280,12 @@ const gicd = struct {
 // =============================================================
 
 const gicc = struct {
-    var mod = mmio.Module(.{ .size = u32 }, &.{
-        .{ 0x000, Ctlr },
-        .{ 0x004, Pmr },
-        .{ 0x008, Bpr },
-        .{ 0x00C, Iar },
-        .{ 0x010, Eoir },
+    var mod = mmio.Module(.{ .size = u32 }, .{
+        Reg(0x000, Ctlr),
+        Reg(0x004, Pmr),
+        Reg(0x008, Bpr),
+        Reg(0x00C, Iar),
+        Reg(0x010, Eoir),
     }){};
 
     /// CPU Interface Control Register.
@@ -344,5 +344,7 @@ const std = @import("std");
 const log = std.log.scoped(.arch);
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;
 const rtt = common.rtt;

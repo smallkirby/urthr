@@ -6,13 +6,13 @@
 // Module Definition
 // =============================================================
 
-var cfg = mmio.Module(.{ .natural = u32 }, &.{
-    .{ 0x0000, Mode },
-    .{ 0x0008, Local },
-    .{ 0x000C, UseLocal },
-    .{ 0x0010, SdDelay },
-    .{ 0x0014, RxDelay },
-    .{ 0x001C, Cs },
+var cfg = mmio.Module(.{ .natural = u32 }, .{
+    Reg(0x0000, Mode),
+    Reg(0x0008, Local),
+    Reg(0x000C, UseLocal),
+    Reg(0x0010, SdDelay),
+    Reg(0x0014, RxDelay),
+    Reg(0x001C, Cs),
 }){};
 
 /// Offset of configuration registers within SDIO configuration block.
@@ -230,7 +230,8 @@ const Cs = packed struct(u32) {
 const std = @import("std");
 const log = std.log.scoped(.sdio);
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const rtt = common.rtt;
 const dd = @import("dd");
 const sdhc = dd.sdhc;

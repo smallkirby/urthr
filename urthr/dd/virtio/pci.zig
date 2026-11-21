@@ -391,26 +391,26 @@ const CfgType = enum(u8) {
 // =============================================================
 
 /// Common configuration structure registers.
-const CommonReg = mmio.Module(.{ .natural = u64 }, &.{
+const CommonReg = mmio.Module(.{ .natural = u64 }, .{
     // About the whole device.
-    .{ 0x00, DeviceFeatSel },
-    .{ 0x04, DeviceFeat },
-    .{ 0x08, DriverFeatSel },
-    .{ 0x0C, DriverFeat },
-    .{ 0x10, ConfigMsix },
-    .{ 0x12, NumQueues },
-    .{ 0x14, Status },
-    .{ 0x15, ConfigGeneration },
+    Reg(0x00, DeviceFeatSel),
+    Reg(0x04, DeviceFeat),
+    Reg(0x08, DriverFeatSel),
+    Reg(0x0C, DriverFeat),
+    Reg(0x10, ConfigMsix),
+    Reg(0x12, NumQueues),
+    Reg(0x14, Status),
+    Reg(0x15, ConfigGeneration),
 
     // About a specific virtqueue.
-    .{ 0x16, QueueSelect },
-    .{ 0x18, QueueSize },
-    .{ 0x1A, QueueMsixVector },
-    .{ 0x1C, QueueEnable },
-    .{ 0x1E, QueueNotifyOff },
-    .{ 0x20, QueueDesc },
-    .{ 0x28, QueueDriver },
-    .{ 0x30, QueueDevice },
+    Reg(0x16, QueueSelect),
+    Reg(0x18, QueueSize),
+    Reg(0x1A, QueueMsixVector),
+    Reg(0x1C, QueueEnable),
+    Reg(0x1E, QueueNotifyOff),
+    Reg(0x20, QueueDesc),
+    Reg(0x28, QueueDriver),
+    Reg(0x30, QueueDevice),
 });
 
 /// Driver uses to select which feature bits to use.
@@ -527,7 +527,8 @@ const log = std.log.scoped(.vpci);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const PageAllocator = common.mem.PageAllocator;
 const dd = @import("dd");
 const pci = dd.pci;

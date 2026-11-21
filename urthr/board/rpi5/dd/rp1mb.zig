@@ -4,18 +4,18 @@
 // Module Definition
 // =============================================================
 
-var mb = mmio.Module(.{ .natural = u32 }, &.{
-    .{ 0x0008, ProcEvents },
-    .{ 0x0010, HostEventIrqEn },
-    .{ 0x0014, HostEventIrq },
+var mb = mmio.Module(.{ .natural = u32 }, .{
+    Reg(0x0008, ProcEvents),
+    Reg(0x0010, HostEventIrqEn),
+    Reg(0x0014, HostEventIrq),
 
-    .{ 0x0008 + offset_hw_set, ProcEventsSet },
-    .{ 0x0010 + offset_hw_set, HostEventIrqEnSet },
-    .{ 0x0014 + offset_hw_set, HostEventIrqSet },
+    Reg(0x0008 + offset_hw_set, ProcEventsSet),
+    Reg(0x0010 + offset_hw_set, HostEventIrqEnSet),
+    Reg(0x0014 + offset_hw_set, HostEventIrqSet),
 
-    .{ 0x0008 + offset_hw_clear, ProcEventsClr },
-    .{ 0x0010 + offset_hw_clear, HostEventIrqEnClr },
-    .{ 0x0014 + offset_hw_clear, HostEventIrqClr },
+    Reg(0x0008 + offset_hw_clear, ProcEventsClr),
+    Reg(0x0010 + offset_hw_clear, HostEventIrqEnClr),
+    Reg(0x0014 + offset_hw_clear, HostEventIrqClr),
 }){};
 
 /// Offset to HW_SET register from ProcEvents register.
@@ -120,4 +120,5 @@ const std = @import("std");
 const log = std.log.scoped(.rp1mb);
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;

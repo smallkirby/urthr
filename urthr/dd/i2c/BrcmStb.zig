@@ -12,14 +12,14 @@
 // Module Definition
 // =============================================================
 
-const Bsc = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, ChipAddress },
-    .{ 0x04, DataIn },
-    .{ 0x24, CntReg },
-    .{ 0x28, CtlReg },
-    .{ 0x2C, IicEnable },
-    .{ 0x30, DataOut },
-    .{ 0x50, CtlHi },
+const Bsc = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, ChipAddress),
+    Arr(0x04, DataIn, data_reg_num, data_reg_size),
+    Reg(0x24, CntReg),
+    Reg(0x28, CtlReg),
+    Reg(0x2C, IicEnable),
+    Arr(0x30, DataOut, data_reg_num, data_reg_size),
+    Reg(0x50, CtlHi),
 });
 
 /// Number of data registers.
@@ -157,10 +157,9 @@ fn command(self: *Self, dir: i2c.Msg.Direction, cond: Cond, buf: []u8) i2c.Error
             var word: [data_reg_size]u8 = @splat(0);
             const n = @min(data_reg_size, buf.len - written);
             @memcpy(word[0..n], buf[written..][0..n]);
-            bsc.writeIndexed(
+            bsc.writeiIndexed(
                 DataIn,
                 written / data_reg_size,
-                data_reg_size,
                 std.mem.readInt(u32, &word, .little),
             );
         }
@@ -209,12 +208,7 @@ fn command(self: *Self, dir: i2c.Msg.Direction, cond: Cond, buf: []u8) i2c.Error
     if (dir == .read) {
         var read: usize = 0;
         while (read < buf.len) : (read += data_reg_size) {
-            const word = bsc.readIndexed(
-                DataOut,
-                read / data_reg_size,
-                data_reg_size,
-            ).value;
-
+            const word = bsc.readIndexed(DataOut, read / data_reg_size).value;
             var bytes: [data_reg_size]u8 = undefined;
             std.mem.writeInt(u32, &bytes, word, .little);
             const n = @min(data_reg_size, buf.len - read);
@@ -310,7 +304,9 @@ const CtlHi = packed struct(u32) {
 
 const std = @import("std");
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Arr = common.io.Arr;
 const rtt = common.rtt;
 const arch = @import("arch").impl;
 const dd = @import("dd");

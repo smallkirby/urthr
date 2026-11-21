@@ -530,7 +530,6 @@ const arch = @import("arch").impl;
 const common = @import("common");
 const rtt = common.rtt;
 const block = common.block;
-const mmio = common.mmio;
 const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;

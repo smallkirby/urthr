@@ -13,95 +13,89 @@
 //! Author: Rob Clark <robdclark@gmail.com>
 //!
 
-var dvps = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Dvps },
+var dvps = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, Dvp, num_hdmi, 0x5000),
 }){};
 
-var phys = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Phys },
+var phys = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, Phy, num_hdmi, 0x5000),
 }){};
 
-var cores = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Cores },
+var cores = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, Core, num_hdmi, 0x5000),
 }){};
 
-var rms = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Rms },
+var rms = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, Rm, num_hdmi, 0x5000),
 }){};
 
-var packets = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Packets },
+var packets = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, Packet, num_hdmi, 0x5000),
 }){};
 
-var cscs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Cscs },
+var cscs = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, Csc, num_hdmi, 0x80),
 }){};
 
-var hd = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x000, DvpCtl },
-    .{ 0x044, VidCtl },
+var hd = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x000, DvpCtl),
+    Arr(0x044, VidCtl, num_hdmi, 4),
 }){};
 
-const DvpRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0BC, ClockStop },
-    .{ 0x0F0, VecInterfaceCfg },
-    .{ 0x0F4, VecInterfaceXbar },
+const Dvp = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x0BC, ClockStop),
+    Reg(0x0F0, VecInterfaceCfg),
+    Reg(0x0F4, VecInterfaceXbar),
 });
-const Dvps = mmio.Array(DvpRegs, num_hdmi, 0x5000);
 
-const PhyRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x000, ResetCtl },
-    .{ 0x004, PowerupCtl },
-    .{ 0x008, LaneCtl0 },
-    .{ 0x00C, LaneCtl1 },
-    .{ 0x010, LaneCtl2 },
-    .{ 0x014, LaneCtlCk },
-    .{ 0x01C, PllRefclk },
-    .{ 0x028, PllPostKdiv },
-    .{ 0x02C, PllVcoclkDiv },
-    .{ 0x044, PllCfg },
-    .{ 0x054, TmdsClkWordSel },
-    .{ 0x060, PllMisc }, // 0-8
-    .{ 0x190, PllResetCtl },
-    .{ 0x194, PllPowerupCtl },
+const Phy = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x000, ResetCtl),
+    Reg(0x004, PowerupCtl),
+    Reg(0x008, LaneCtl0),
+    Reg(0x00C, LaneCtl1),
+    Reg(0x010, LaneCtl2),
+    Reg(0x014, LaneCtlCk),
+    Reg(0x01C, PllRefclk),
+    Reg(0x028, PllPostKdiv),
+    Reg(0x02C, PllVcoclkDiv),
+    Reg(0x044, PllCfg),
+    Reg(0x054, TmdsClkWordSel),
+    Arr(0x060, PllMisc, 9, @sizeOf(PllMisc)), // 0-8
+    Reg(0x190, PllResetCtl),
+    Reg(0x194, PllPowerupCtl),
 });
-const Phys = mmio.Array(PhyRegs, num_hdmi, 0x5000);
 
-const CoreRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x07C, FifoCtl },
-    .{ 0x0C4, RamPacketConfig },
-    .{ 0x0CC, RamPacketStatus },
-    .{ 0x0E8, SchedulerControl },
-    .{ 0x0EC, HorzA },
-    .{ 0x0F0, HorzB },
-    .{ 0x0F4, VertA0 },
-    .{ 0x0F8, VertB0 },
-    .{ 0x100, VertA1 },
-    .{ 0x104, VertB1 },
-    .{ 0x114, MiscControl },
-    .{ 0x18C, DeepColorConfig1 },
-    .{ 0x194, GcpConfig },
-    .{ 0x198, GcpWord1 },
-    .{ 0x1C8, Hotplug },
+const Core = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x07C, FifoCtl),
+    Reg(0x0C4, RamPacketConfig),
+    Reg(0x0CC, RamPacketStatus),
+    Reg(0x0E8, SchedulerControl),
+    Reg(0x0EC, HorzA),
+    Reg(0x0F0, HorzB),
+    Reg(0x0F4, VertA0),
+    Reg(0x0F8, VertB0),
+    Reg(0x100, VertA1),
+    Reg(0x104, VertB1),
+    Reg(0x114, MiscControl),
+    Reg(0x18C, DeepColorConfig1),
+    Reg(0x194, GcpConfig),
+    Reg(0x198, GcpWord1),
+    Reg(0x1C8, Hotplug),
 });
-const Cores = mmio.Array(CoreRegs, num_hdmi, 0x5000);
 
-const RmRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x018, RmOffset },
+const Rm = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x018, RmOffset),
 });
-const Rms = mmio.Array(RmRegs, num_hdmi, 0x5000);
 
-const PacketRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x000, PacketWord },
+const Packet = mmio.Module(.{ .size = u32 }, .{
+    Arr(0x000, PacketWord, 0x100, @sizeOf(PacketWord)),
 });
-const Packets = mmio.Array(PacketRegs, num_hdmi, 0x5000);
 
-const CscRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x000, CscCtl },
-    .{ 0x004, CscCoeff }, // 0-5
-    .{ 0x02C, CscChannelCtl },
+const Csc = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x000, CscCtl),
+    Arr(0x004, CscCoeff, 6, @sizeOf(CscCoeff)), // 0-5
+    Reg(0x02C, CscChannelCtl),
 });
-const Cscs = mmio.Array(CscRegs, num_hdmi, 0x80);
 
 /// Number of supported HDMI interfaces.
 const num_hdmi = 2;
@@ -142,14 +136,14 @@ var dma: DmaAllocator = undefined;
 
 /// Reset the HDMI pipeline.
 pub fn reset(index: usize) void {
-    const dvp = dvps.sub(Dvps, index);
+    const dvp = dvps.sub(Dvp, index);
     hd.write(DvpCtl, DvpCtl{ .value = 0 });
     dvp.modify(ClockStop, .{ .pixel = true });
 }
 
 /// Check if a sink is connected to the HDMI.
 pub fn isConnected(index: usize) bool {
-    return cores.sub(Cores, index).read(Hotplug).connected;
+    return cores.sub(Core, index).read(Hotplug).connected;
 }
 
 /// Check if the HDMI can output the mode.
@@ -192,8 +186,8 @@ pub fn initClocks(mode: Mode) Error!void {
 
 /// Configure the color space converter for the RGB output.
 pub fn setupCsc(index: usize, mode: Mode) void {
-    const dvp = dvps.sub(Dvps, index);
-    const csc = cscs.sub(Cscs, index);
+    const dvp = dvps.sub(Dvp, index);
+    const csc = cscs.sub(Csc, index);
 
     // CSC matrix for the full range RGB output, unity.
     const csc_rgb_full = [3][4]u16{
@@ -211,14 +205,13 @@ pub fn setupCsc(index: usize, mode: Mode) void {
     const xbar_rgb = 0x354021;
 
     // Set conversion matrix value.
-    const wsize = @sizeOf(CscCoeff);
     const matrix = if (isLimitedRange(mode)) csc_rgb_limited else csc_rgb_full;
     for (matrix, 0..) |row, i| {
-        csc.writeIndexed(CscCoeff, i * 2 + 0, wsize, CscCoeff{
+        csc.writeIndexed(CscCoeff, i * 2 + 0, .{
             .lo = row[0],
             .hi = row[1],
         });
-        csc.writeIndexed(CscCoeff, i * 2 + 1, wsize, CscCoeff{
+        csc.writeIndexed(CscCoeff, i * 2 + 1, .{
             .lo = row[2],
             .hi = row[3],
         });
@@ -250,13 +243,13 @@ inline fn isLimitedRange(mode: Mode) bool {
 
 /// Configure the FIFO of the HDMI core.
 pub fn initFifo(index: usize) void {
-    const core = cores.sub(Cores, index);
+    const core = cores.sub(Core, index);
     core.writez(FifoCtl, .{ .master_slave_n = true });
 }
 
 /// Recenter the FIFO of the HDMI core.
 pub fn recenterFifo(index: usize) Error!void {
-    var core = cores.sub(Cores, index);
+    var core = cores.sub(Core, index);
 
     const valid_write_mask = 0xEFFF;
     var drift: FifoCtl = @bitCast(core.readi(FifoCtl) & valid_write_mask);
@@ -276,9 +269,7 @@ pub fn recenterFifo(index: usize) Error!void {
 
 /// Enable the video output of HD block?
 pub fn enableVideo(index: usize, mode: Mode) void {
-    const stride = 4;
-
-    hd.modifyIndexed(VidCtl, index, stride, .{
+    hd.modifyIndexed(VidCtl, index, .{
         .enable = true,
         .underflow_enable = true,
         .frame_counter_reset = true,
@@ -287,21 +278,20 @@ pub fn enableVideo(index: usize, mode: Mode) void {
         .clrrgb = true,
         .blank_insert_en = true,
     });
-    hd.modifyIndexed(VidCtl, index, stride, .{
+    hd.modifyIndexed(VidCtl, index, .{
         .blankpix = false,
     });
 }
 
 /// Stop the packet transmission.
 pub fn disableVideo(index: usize) void {
-    const stride = 4;
-    const core = cores.sub(Cores, index);
+    const core = cores.sub(Core, index);
 
     core.writei(RamPacketConfig, 0);
-    hd.modifyIndexed(VidCtl, index, stride, .{
+    hd.modifyIndexed(VidCtl, index, .{
         .clrrgb = true,
     });
-    hd.modifyIndexed(VidCtl, index, stride, .{
+    hd.modifyIndexed(VidCtl, index, .{
         .blankpix = true,
     });
     arch.timer.spinWaitMilli(1);
@@ -311,7 +301,7 @@ pub fn disableVideo(index: usize) void {
 
 /// Switch the HDMI core to the HDMI mode.
 pub fn enableHdmiMode(index: usize) Error!void {
-    var core = cores.sub(Cores, index);
+    var core = cores.sub(Core, index);
 
     core.modify(SchedulerControl, .{ .mode_hdmi = true });
     if (!core.tryWaitFor(SchedulerControl, .{ .hdmi_active = true }, .ms(1000))) {
@@ -343,8 +333,8 @@ pub fn setSpdPacket(index: usize) Error!void {
 
 /// Send the InfoFrame via the packet RAM.
 fn sendPacket(index: usize, comptime kind: hdmi.InfoFrameType, data: []const u8) Error!void {
-    var core = cores.sub(Cores, index);
-    const packet = packets.sub(Packets, index);
+    var core = cores.sub(Core, index);
+    const packet = packets.sub(Packet, index);
 
     // Stop the packet.
     switch (kind) {
@@ -377,7 +367,7 @@ fn sendPacket(index: usize, comptime kind: hdmi.InfoFrameType, data: []const u8)
 }
 
 /// Write the InfoFrame to the slot of the packet RAM.
-fn writePacketRam(ram: Packets.Element, packet_id: usize, data: []const u8) void {
+fn writePacketRam(ram: Packet, packet_id: usize, data: []const u8) void {
     const packet_words = 9; // number of 32-bit words in a packet slot.
     const one_write_size = 7; // number of bytes written at a time
     const base = packet_id * packet_words;
@@ -385,7 +375,6 @@ fn writePacketRam(ram: Packets.Element, packet_id: usize, data: []const u8) void
 
     // Use larger and zero-cleared buffer since the one write is 7 bytes at a time
     // and may overrun the given data length.
-    const wsize = @sizeOf(PacketWord);
     var buffer = std.mem.zeroes([packet_words * @sizeOf(u32)]u8);
     @memcpy(buffer[0..data.len], data);
 
@@ -398,12 +387,12 @@ fn writePacketRam(ram: Packets.Element, packet_id: usize, data: []const u8) void
     }) {
         const word0: u32 = std.mem.readInt(u24, buffer[i + 0 ..][0..3], .little);
         const word1: u32 = std.mem.readInt(u32, buffer[i + 3 ..][0..4], .little);
-        ram.writeIndexed(PacketWord, base + word + 0, wsize, word0);
-        ram.writeIndexed(PacketWord, base + word + 1, wsize, word1);
+        ram.writeiIndexed(PacketWord, base + word + 0, word0);
+        ram.writeiIndexed(PacketWord, base + word + 1, word1);
     }
     // Clear remainder of packet RAM.
     while (word < packet_words) : (word += 1) {
-        ram.writeIndexed(PacketWord, base + word, wsize, 0);
+        ram.writeiIndexed(PacketWord, base + word, 0);
     }
 }
 
@@ -414,7 +403,7 @@ inline fn calcPacketId(packet_type: hdmi.InfoFrameType) usize {
 
 /// Configure the scheduler of the HDMI core.
 pub fn initScheduler(index: usize) void {
-    const core = cores.sub(Cores, index);
+    const core = cores.sub(Core, index);
 
     core.modify(SchedulerControl, .{
         .manual_format = true,
@@ -424,8 +413,8 @@ pub fn initScheduler(index: usize) void {
 
 /// Set the timings of the HDMI core based on the given mode.
 pub fn setTimings(index: usize, mode: Mode) void {
-    const core = cores.sub(Cores, index);
-    const dvp = dvps.sub(Dvps, index);
+    const core = cores.sub(Core, index);
+    const dvp = dvps.sub(Dvp, index);
 
     core.write(HorzA, .{
         .hap = @intCast(mode.hdisplay),
@@ -477,8 +466,8 @@ pub fn initPhy(index: usize, mode: Mode) Error!void {
     const tmds_rate = @as(u64, mode.clock) * 1000; // to Hz
     const settings = getPhySettings(tmds_rate) orelse return Error.UnsupportedRate;
     const vco = getVco(tmds_rate);
-    const phy = phys.sub(Phys, index);
-    const rm = rms.sub(Rms, index);
+    const phy = phys.sub(Phy, index);
+    const rm = rms.sub(Rm, index);
 
     resetPhy(index);
 
@@ -493,7 +482,7 @@ pub fn initPhy(index: usize, mode: Mode) Error!void {
         0xB080_4444,
         0xF80F_8000,
     }, 0..) |v, i| {
-        phy.writeIndexed(PllMisc, i, @sizeOf(PllMisc), PllMisc{ .value = v });
+        phy.writeiIndexed(PllMisc, i, v);
     }
     phy.write(PllRefclk, .{
         .reffrq = oscillator_freq / 1_000_000,
@@ -549,9 +538,7 @@ pub fn initPhy(index: usize, mode: Mode) Error!void {
 
 /// Power down the PHY.
 pub fn powerDown(index: usize) void {
-    const stride = 4;
-
-    hd.modifyIndexed(VidCtl, index, stride, .{
+    hd.modifyIndexed(VidCtl, index, .{
         .blankpix = true,
     });
     resetPhy(index);
@@ -559,7 +546,7 @@ pub fn powerDown(index: usize) void {
 
 /// Reset the PHY.
 fn resetPhy(index: usize) void {
-    const phy = phys.sub(Phys, index);
+    const phy = phys.sub(Phy, index);
 
     phy.writei(ResetCtl, 0);
     phy.writei(PowerupCtl, 0);
@@ -1090,7 +1077,10 @@ const arch = @import("arch").impl;
 const log = std.log.scoped(.hdmi);
 const common = @import("common");
 const dd = @import("dd");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Arr = common.io.Arr;
+const Sub = common.io.Sub;
 const rtt = common.rtt;
 const DmaAllocator = common.mem.DmaAllocator;
 const props = @import("vcmbox.zig").props;

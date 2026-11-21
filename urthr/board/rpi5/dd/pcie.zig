@@ -14,54 +14,54 @@
 // =============================================================
 
 /// STB module.
-var pcie = mmio.Module(.{ .size = u32 }, &.{
+var pcie = mmio.Module(.{ .size = u32 }, .{
     // =========================================================
     // Root Complex Configuration Space
-    .{ 0x00AC, mmio.Marker(.cap_regs) },
-    .{ 0x0A0C, RcTlVdmCtrl1 },
-    .{ 0x0A20, RcTlVdmCtrl0 },
-    .{ 0x0188, RcConfigVendorSpecific1 },
-    .{ 0x043C, RcConfigPriv1Id3 },
-    .{ 0x04DC, dd.pci.LinkCap1 },
+    Mrk(0x00AC, .cap_regs),
+    Reg(0x0A0C, RcTlVdmCtrl1),
+    Reg(0x0A20, RcTlVdmCtrl0),
+    Reg(0x0188, RcConfigVendorSpecific1),
+    Reg(0x043C, RcConfigPriv1Id3),
+    Reg(0x04DC, dd.pci.LinkCap1),
 
     // =========================================================
     // MDIO etc.
-    .{ 0x1100, RcDlMdioAddr },
-    .{ 0x1104, RcDlMdioWrite },
-    .{ 0x184C, RcPlPhyCtrl15 },
+    Reg(0x1100, RcDlMdioAddr),
+    Reg(0x1104, RcDlMdioWrite),
+    Reg(0x184C, RcPlPhyCtrl15),
 
     // =========================================================
     // Misc Registers
-    .{ 0x4008, MiscMiscCtrl },
-    .{ 0x400C, MemWin0Low },
-    .{ 0x4010, MemWin0High },
-    .{ 0x402C, RcBar1ConfigLo },
-    .{ 0x4030, RcBar1ConfigHi },
-    .{ 0x40D4, RcBar4ConfigLo },
-    .{ 0x40D8, RcBar4ConfigHi },
-    .{ 0x405C, RcConfigRetryTimeout },
-    .{ 0x4064, Control },
-    .{ 0x4068, MiscStatus },
-    .{ 0x4070, MemWin0BaseLimit },
-    .{ 0x4080, MemWin0BaseHi },
-    .{ 0x4084, MemWin0LimitHi },
-    .{ 0x40A0, PcieCtrl },
-    .{ 0x40A4, MiscUbusCtrl },
-    .{ 0x40A8, MiscUbusTimeout },
-    .{ 0x40AC, UbusBar1ConfigRemap },
-    .{ 0x40B0, UbusBar1ConfigRemapHi },
-    .{ 0x410C, UbusBar4ConfigRemap },
-    .{ 0x4110, UbusBar4ConfigRemapHi },
-    .{ 0x415C, MiscAxiIntfCtrl },
-    .{ 0x4164, MiscVdmPriorityToQosMapHi },
-    .{ 0x4168, MiscVdmPriorityToQosMapLo },
-    .{ 0x4170, PcieMiscAxiReadErrorData },
-    .{ 0x4304, HardDebug },
+    Reg(0x4008, MiscMiscCtrl),
+    Arr(0x400C, MemWin0Low, 4, 8),
+    Arr(0x4010, MemWin0High, 4, 8),
+    Arr(0x402C, RcBar1ConfigLo, 3, 8),
+    Arr(0x4030, RcBar1ConfigHi, 3, 8),
+    Arr(0x40D4, RcBar4ConfigLo, 1, 8),
+    Arr(0x40D8, RcBar4ConfigHi, 1, 8),
+    Reg(0x405C, RcConfigRetryTimeout),
+    Reg(0x4064, Control),
+    Reg(0x4068, MiscStatus),
+    Arr(0x4070, MemWin0BaseLimit, 4, 4),
+    Arr(0x4080, MemWin0BaseHi, 4, 8),
+    Arr(0x4084, MemWin0LimitHi, 4, 8),
+    Reg(0x40A0, PcieCtrl),
+    Reg(0x40A4, MiscUbusCtrl),
+    Reg(0x40A8, MiscUbusTimeout),
+    Arr(0x40AC, UbusBar1ConfigRemap, 3, 8),
+    Arr(0x40B0, UbusBar1ConfigRemapHi, 3, 8),
+    Arr(0x410C, UbusBar4ConfigRemap, 1, 8),
+    Arr(0x4110, UbusBar4ConfigRemapHi, 1, 8),
+    Reg(0x415C, MiscAxiIntfCtrl),
+    Reg(0x4164, MiscVdmPriorityToQosMapHi),
+    Reg(0x4168, MiscVdmPriorityToQosMapLo),
+    Reg(0x4170, PcieMiscAxiReadErrorData),
+    Reg(0x4304, HardDebug),
 
     // =========================================================
     // Configuration Space
-    .{ 0x8000, mmio.Marker(.config_data) },
-    .{ 0x9000, mmio.Marker(.config_address) },
+    Mrk(0x8000, .config_data),
+    Mrk(0x9000, .config_address),
 }){};
 
 /// Offset added to AXI addresses to represent DMA addresses.
@@ -85,7 +85,7 @@ pub fn setBase(base: usize) void {
 /// Initialize the PCIe controller.
 pub fn init() void {
     // Set base address of PCIe Capability Structure.
-    capm.setBase(pcie.getMarkerAddress(.cap_regs));
+    capm.setBase(pcie.addressOf(.cap_regs));
 
     // Reset controller.
     reset();
@@ -94,11 +94,11 @@ pub fn init() void {
     initBridge();
 
     // Disable PCIe -> GISB memory window.
-    pcie.modifyIndexed(RcBar1ConfigLo, 0, 8, .{
+    pcie.modifyIndexed(RcBar1ConfigLo, 0, .{
         .size = 0,
     });
     // Disable PCIe -> SCB memory window.
-    pcie.modifyIndexed(RcBar1ConfigLo, 2, 8, .{
+    pcie.modifyIndexed(RcBar1ConfigLo, 2, .{
         .size = 0,
     });
 }
@@ -126,15 +126,15 @@ const BrcmHost = struct {
     }
 
     fn readConfImpl(_: *anyopaque, addr: dd.pci.DevAddr, offset: u12) u32 {
-        @as(*volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_address))).* =
+        @as(*volatile u32, @ptrFromInt(pcie.addressOf(.config_address))).* =
             bits.concatMany(u32, .{ @as(u4, 0), addr.bus, addr.device, addr.function, @as(u12, 0) });
-        return @as(*const volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_data) + offset)).*;
+        return @as(*const volatile u32, @ptrFromInt(pcie.addressOf(.config_data) + offset)).*;
     }
 
     fn writeConfImpl(_: *anyopaque, addr: dd.pci.DevAddr, offset: u12, value: u32) void {
-        @as(*volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_address))).* =
+        @as(*volatile u32, @ptrFromInt(pcie.addressOf(.config_address))).* =
             bits.concatMany(u32, .{ @as(u4, 0), addr.bus, addr.device, addr.function, @as(u12, 0) });
-        @as(*volatile u32, @ptrFromInt(pcie.getMarkerAddress(.config_data) + offset)).* = value;
+        @as(*volatile u32, @ptrFromInt(pcie.addressOf(.config_data) + offset)).* = value;
     }
 
     fn getDmaAllocatorImpl(_: *anyopaque) DmaAllocator {
@@ -152,24 +152,24 @@ pub fn setOutTranslation(axi: usize, pci: usize, size: usize, comptime win: usiz
     const axi_limit_mb = (axi + size - 1) / units.mib;
 
     // Set PCIe window.
-    pcie.modifyIndexed(MemWin0Low, win, 8, .{
+    pcie.modifyIndexed(MemWin0Low, win, .{
         .mem_win0_low = bits.extract(u32, pci, 0),
     });
-    pcie.modifyIndexed(MemWin0High, win, 8, .{
+    pcie.modifyIndexed(MemWin0High, win, .{
         .mem_win0_high = bits.extract(u32, pci, 32),
     });
 
     // Set AXI window lower bits.
-    pcie.modifyIndexed(MemWin0BaseLimit, win, 4, .{
+    pcie.modifyIndexed(MemWin0BaseLimit, win, .{
         .mem_win0_base = bits.extract(u12, axi_base_mb, 0),
         .mem_win0_limit = bits.extract(u12, axi_limit_mb, 0),
     });
 
     // Set AXI window upper bits.
-    pcie.modifyIndexed(MemWin0BaseHi, win, 8, .{
+    pcie.modifyIndexed(MemWin0BaseHi, win, .{
         .mem_win0_base_hi = bits.extract(u8, axi_base_mb, 12),
     });
-    pcie.modifyIndexed(MemWin0LimitHi, win, 8, .{
+    pcie.modifyIndexed(MemWin0LimitHi, win, .{
         .mem_win0_limit_hi = bits.extract(u8, axi_limit_mb, 12),
     });
 }
@@ -185,11 +185,11 @@ pub fn setInTranslation(pci: u64, cpu_addr: u64, size: u64, comptime bar: usize)
         else
             .{ RcBar4ConfigLo, RcBar4ConfigHi, bar - 4 };
 
-        pcie.writeIndexed(BarLow, idx, 8, BarLow{
+        pcie.writeIndexed(BarLow, idx, .{
             .size = size_encoded,
             .pci_offset_lo = @intCast((pci >> 12) & 0xFFFFF),
         });
-        pcie.writeIndexed(BarHigh, idx, 8, BarHigh{
+        pcie.writeIndexed(BarHigh, idx, .{
             .pci_offset_hi = @intCast(pci >> 32),
         });
     }
@@ -201,11 +201,11 @@ pub fn setInTranslation(pci: u64, cpu_addr: u64, size: u64, comptime bar: usize)
         else
             .{ UbusBar4ConfigRemap, UbusBar4ConfigRemapHi, bar - 4 };
 
-        pcie.writeIndexed(UbusLow, idx, 8, UbusLow{
+        pcie.writeIndexed(UbusLow, idx, .{
             .access_en = true,
             .cpu_addr_lo = @intCast((cpu_addr >> 12) & 0xFFFFF),
         });
-        pcie.writeIndexed(UbusHigh, idx, 8, UbusHigh{
+        pcie.writeIndexed(UbusHigh, idx, .{
             .cpu_addr_hi = @intCast(cpu_addr >> 32),
         });
     }
@@ -388,7 +388,7 @@ fn initAer() void {
     }
 
     var aer = Aer{};
-    aer.setBase(conf.getRegisterAddress(dd.pci.ExtCapHeader));
+    aer.setBase(conf.addressOf(dd.pci.ExtCapHeader));
 
     // Unmask all error reporting.
     aer.writei(AerUncorrectableMask, 0);
@@ -411,12 +411,12 @@ pub fn getErrors() AerStatus {
     conf.setBase(pcie.base);
 
     var aer = Aer{};
-    aer.setBase(conf.getRegisterAddress(dd.pci.ExtCapHeader));
+    aer.setBase(conf.addressOf(dd.pci.ExtCapHeader));
 
     var ret: AerStatus = undefined;
     ret.correctable = aer.read(AerCorrectableErr);
     ret.uncorrectable = aer.read(AerUncorrectableErr);
-    const logs: [*]const volatile u32 = @ptrFromInt(aer.getMarkerAddress(.log0));
+    const logs: [*]const volatile u32 = @ptrFromInt(aer.addressOf(.log0));
     for (0..4) |i| {
         ret.logs[i] = logs[i];
     }
@@ -689,18 +689,18 @@ const HardDebug = packed struct(u32) {
 const extcap_id_aer = 1;
 
 /// AER register set starting from the extended capability header.
-const Aer = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, dd.pci.ExtCapHeader },
-    .{ 0x04, AerUncorrectableErr },
-    .{ 0x08, AerUncorrectableMask },
-    .{ 0x0C, AerUncorrectableSeverity },
-    .{ 0x10, AerCorrectableErr },
-    .{ 0x14, AerCorrectableMask },
-    .{ 0x18, AerCorrectableSeverity },
-    .{ 0x1C, mmio.Marker(.log0) },
-    .{ 0x20, mmio.Marker(.log1) },
-    .{ 0x24, mmio.Marker(.log2) },
-    .{ 0x28, mmio.Marker(.log3) },
+const Aer = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, dd.pci.ExtCapHeader),
+    Reg(0x04, AerUncorrectableErr),
+    Reg(0x08, AerUncorrectableMask),
+    Reg(0x0C, AerUncorrectableSeverity),
+    Reg(0x10, AerCorrectableErr),
+    Reg(0x14, AerCorrectableMask),
+    Reg(0x18, AerCorrectableSeverity),
+    Mrk(0x1C, .log0),
+    Mrk(0x20, .log1),
+    Mrk(0x24, .log2),
+    Mrk(0x28, .log3),
 });
 
 /// Uncorrectable errors.
@@ -794,7 +794,10 @@ const log = std.log.scoped(.brcstb);
 const arch = @import("arch").impl;
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Arr = common.io.Arr;
+const Mrk = common.io.Mrk;
 const rtt = common.rtt;
 const units = common.units;
 const Console = common.Console;

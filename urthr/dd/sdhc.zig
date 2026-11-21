@@ -11,41 +11,41 @@
 ///
 /// Should align register access on address boundaries matching the number of bytes in the access:
 /// e.g. word accesses should be aligned on 2-byte boundaries.
-var sdhc = mmio.Module(.{ .natural = u32 }, &.{
+var sdhc = mmio.Module(.{ .natural = u32 }, .{
     // =========================================================
     //  Host Controller Interface Register
-    .{ 0x00, Bcount32 },
-    .{ 0x04, Bsize },
-    .{ 0x06, Bcount16 },
-    .{ 0x08, Argument },
-    .{ 0x0C, TransferMode },
-    .{ 0x0E, Command },
-    .{ 0x10, Response0 },
-    .{ 0x14, Response1 },
-    .{ 0x18, Response2 },
-    .{ 0x1C, Response3 },
-    .{ 0x20, BufferDataPort },
-    .{ 0x24, PresentState },
-    .{ 0x28, HostControl1 },
-    .{ 0x29, PowerControl },
-    .{ 0x2C, ClockControl },
-    .{ 0x2E, TimeoutControl },
-    .{ 0x2F, SwReset },
-    .{ 0x30, NormalIntStatus },
-    .{ 0x32, ErrorIntStatus },
-    .{ 0x34, NormalIntStatusEn },
-    .{ 0x36, ErrorIntStatusEn },
-    .{ 0x38, NormalIntSignalEn },
-    .{ 0x3A, ErrorIntSignalEn },
-    .{ 0x3E, HostControl2 },
-    .{ 0x40, Capability1 },
-    .{ 0x44, Capability2 },
-    .{ 0x58, AdmaSystemAddress },
+    Reg(0x00, Bcount32),
+    Reg(0x04, Bsize),
+    Reg(0x06, Bcount16),
+    Reg(0x08, Argument),
+    Reg(0x0C, TransferMode),
+    Reg(0x0E, Command),
+    Reg(0x10, Response0),
+    Reg(0x14, Response1),
+    Reg(0x18, Response2),
+    Reg(0x1C, Response3),
+    Reg(0x20, BufferDataPort),
+    Reg(0x24, PresentState),
+    Reg(0x28, HostControl1),
+    Reg(0x29, PowerControl),
+    Reg(0x2C, ClockControl),
+    Reg(0x2E, TimeoutControl),
+    Reg(0x2F, SwReset),
+    Reg(0x30, NormalIntStatus),
+    Reg(0x32, ErrorIntStatus),
+    Reg(0x34, NormalIntStatusEn),
+    Reg(0x36, ErrorIntStatusEn),
+    Reg(0x38, NormalIntSignalEn),
+    Reg(0x3A, ErrorIntSignalEn),
+    Reg(0x3E, HostControl2),
+    Reg(0x40, Capability1),
+    Reg(0x44, Capability2),
+    Reg(0x58, AdmaSystemAddress),
 
     // =========================================================
     // Common Area Registers
-    .{ 0xFC, InterruptStatus },
-    .{ 0xFE, Version },
+    Reg(0xFC, InterruptStatus),
+    Reg(0xFE, Version),
 }){};
 
 /// Inserted card information.
@@ -2349,7 +2349,8 @@ const trace = urd.trace.scoped(.sdhc, .sdhc);
 const common = @import("common");
 const bits = common.bits;
 const block = common.block;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const rtt = common.rtt;
 const units = common.units;
 const DmaAllocator = common.mem.DmaAllocator;

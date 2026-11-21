@@ -8,38 +8,25 @@
 // =============================================================
 
 /// Bus used to access the registers.
-const bus: enum { pio, mmio } = switch (builtin.cpu.arch) {
-    .x86_64 => .pio,
-    else => .mmio,
-};
+const bus = if (builtin.cpu.arch == .x86_64) common.io.pio else common.io.mmio;
 
 /// Address type of registers.
-const Address = switch (bus) {
-    // Port address.
-    .pio => u16,
-    // Memory address.
-    .mmio => usize,
-};
+const Address = bus.Bus.Address;
 
-const registers = .{
-    .{ 0x00, Rbr },
-    .{ 0x00, Thr },
-    .{ 0x00, Dll },
-    .{ 0x01, Ier },
-    .{ 0x01, Dlm },
-    .{ 0x02, Iir },
-    .{ 0x02, Fcr },
-    .{ 0x03, Lcr },
-    .{ 0x04, Mcr },
-    .{ 0x05, Lsr },
-    .{ 0x06, Msr },
-    .{ 0x07, Scr },
-};
-
-var uart = switch (bus) {
-    .pio => pio.Module(&registers){},
-    .mmio => mmio.Module(.{ .natural = u8 }, &registers){},
-};
+var uart = bus.Module(.{ .natural = u8 }, .{
+    Reg(0x00, Rbr),
+    Reg(0x00, Thr),
+    Reg(0x00, Dll),
+    Reg(0x01, Ier),
+    Reg(0x01, Dlm),
+    Reg(0x02, Iir),
+    Reg(0x02, Fcr),
+    Reg(0x03, Lcr),
+    Reg(0x04, Mcr),
+    Reg(0x05, Lsr),
+    Reg(0x06, Msr),
+    Reg(0x07, Scr),
+}){};
 
 // =============================================================
 
@@ -301,5 +288,4 @@ const builtin = @import("builtin");
 const std = @import("std");
 const atomic = std.atomic;
 const common = @import("common");
-const mmio = common.mmio;
-const pio = common.pio;
+const Reg = common.io.Reg;

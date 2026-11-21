@@ -9,10 +9,10 @@
 // =============================================================
 
 /// eth_cfg module.
-var cfg = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Control },
-    .{ 0x04, Status },
-    .{ 0x14, Clkgen },
+var cfg = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Control),
+    Reg(0x04, Status),
+    Reg(0x14, Clkgen),
 }){};
 
 // =============================================================
@@ -113,6 +113,7 @@ const Clkgen = packed struct(u32) {
 const std = @import("std");
 const log = std.log.scoped(.rp5ethr);
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const arch = @import("arch").impl;
 const gpio = @import("gpio.zig");

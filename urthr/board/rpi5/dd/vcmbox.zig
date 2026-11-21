@@ -7,13 +7,13 @@
 // Module Definition
 // =============================================================
 
-var mbox = mmio.Module(.{ .size = u32 }, &.{
+var mbox = mmio.Module(.{ .size = u32 }, .{
     // MB#0 is always for VC to ARM. Can't write to it.
-    .{ 0x00, Mbox0Read },
-    .{ 0x18, Mbox0Status },
+    Reg(0x00, Mbox0Read),
+    Reg(0x18, Mbox0Status),
     // MB#1 is always for ARM to VC. Can't read from it.
-    .{ 0x20, Mbox1Write },
-    .{ 0x38, Mbox1Status },
+    Reg(0x20, Mbox1Write),
+    Reg(0x38, Mbox1Status),
 }){};
 
 // =============================================================
@@ -354,4 +354,5 @@ const log = std.log.scoped(.vcmbox);
 const common = @import("common");
 const rtt = common.rtt;
 const DmaAllocator = common.mem.DmaAllocator;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;

@@ -273,16 +273,16 @@ const ppi_start = 16;
 const spi_start = 32;
 
 const gicd = struct {
-    var mod = mmio.Module(.{ .size = u32 }, &.{
-        .{ 0x0000, Ctlr },
-        .{ 0x0004, Typer },
-        .{ 0x0008, Iidr },
-        .{ 0x0080, mmio.Marker(.igroupr) },
-        .{ 0x0100, mmio.Marker(.isenabler) },
-        .{ 0x0180, mmio.Marker(.icenabler) },
-        .{ 0x0C00, mmio.Marker(.icfgr) },
-        .{ 0x0D00, mmio.Marker(.igrpmodr) },
-        .{ 0x6100, mmio.Marker(.irouter) },
+    var mod = mmio.Module(.{ .size = u32 }, .{
+        Reg(0x0000, Ctlr),
+        Reg(0x0004, Typer),
+        Reg(0x0008, Iidr),
+        Mrk(0x0080, .igroupr),
+        Mrk(0x0100, .isenabler),
+        Mrk(0x0180, .icenabler),
+        Mrk(0x0C00, .icfgr),
+        Mrk(0x0D00, .igrpmodr),
+        Mrk(0x6100, .irouter),
     }){};
 
     /// Number of interrupts supported.
@@ -297,9 +297,9 @@ const gicd = struct {
         const bit_index = id % 32;
 
         const ptr: [*]volatile u32 = @ptrFromInt(if (enable)
-            mod.getMarkerAddress(.isenabler)
+            mod.addressOf(.isenabler)
         else
-            mod.getMarkerAddress(.icenabler));
+            mod.addressOf(.icenabler));
 
         ptr[reg_index] = bits.set(@as(u32, 0), bit_index);
     }
@@ -311,7 +311,7 @@ const gicd = struct {
         const reg_index = id / 16;
         const bit_index = (id % 16) * 2 + 1;
 
-        const ptr: [*]volatile u32 = @ptrFromInt(mod.getMarkerAddress(.icfgr));
+        const ptr: [*]volatile u32 = @ptrFromInt(mod.addressOf(.icfgr));
         const cur = ptr[reg_index];
 
         ptr[reg_index] = switch (trigger) {
@@ -325,7 +325,7 @@ const gicd = struct {
         rtt.expect(id < num_interrupts);
         rtt.expect(id >= spi_start);
 
-        const ptr: [*]volatile u64 = @ptrFromInt(mod.getMarkerAddress(.irouter));
+        const ptr: [*]volatile u64 = @ptrFromInt(mod.addressOf(.irouter));
         ptr[id] = aff;
     }
 
@@ -339,7 +339,7 @@ const gicd = struct {
 
         // IGROUPR
         {
-            const ptr: [*]volatile u32 = @ptrFromInt(mod.getMarkerAddress(.igroupr));
+            const ptr: [*]volatile u32 = @ptrFromInt(mod.addressOf(.igroupr));
             const cur = ptr[reg_index];
             ptr[reg_index] = switch (group) {
                 .g1ns => bits.set(cur, bit_index),
@@ -348,7 +348,7 @@ const gicd = struct {
 
         // IGRPMODR
         {
-            const ptr: [*]volatile u32 = @ptrFromInt(mod.getMarkerAddress(.igrpmodr));
+            const ptr: [*]volatile u32 = @ptrFromInt(mod.addressOf(.igrpmodr));
             const cur = ptr[reg_index];
             ptr[reg_index] = switch (group) {
                 .g1ns => bits.unset(cur, bit_index),
@@ -412,21 +412,21 @@ const gicd = struct {
 
 const gicr = struct {
     /// RD_base frame module.
-    const Redist = mmio.Module(.{ .natural = u64 }, &.{
-        .{ 0x000, Ctlr },
-        .{ 0x008, Typer1 },
-        .{ 0x00C, Typer2 },
-        .{ 0x014, Waker },
-        .{ 0x070, Propbaser },
-        .{ 0x078, Pendbaser },
+    const Redist = mmio.Module(.{ .natural = u64 }, .{
+        Reg(0x000, Ctlr),
+        Reg(0x008, Typer1),
+        Reg(0x00C, Typer2),
+        Reg(0x014, Waker),
+        Reg(0x070, Propbaser),
+        Reg(0x078, Pendbaser),
     });
 
     /// SGI_base frame module.
-    const Sgi = mmio.Module(.{ .size = u32 }, &.{
-        .{ 0x080, mmio.Marker(.igroupr) },
-        .{ 0x100, mmio.Marker(.isenabler) },
-        .{ 0x180, mmio.Marker(.icenabler) },
-        .{ 0xD00, mmio.Marker(.igrpmodr) },
+    const Sgi = mmio.Module(.{ .size = u32 }, .{
+        Mrk(0x080, .igroupr),
+        Mrk(0x100, .isenabler),
+        Mrk(0x180, .icenabler),
+        Mrk(0xD00, .igrpmodr),
     });
 
     /// Size in bytes of a single redistributor region.
@@ -473,9 +473,9 @@ const gicr = struct {
         const bit_index = id % 32;
 
         const ptr: [*]volatile u32 = @ptrFromInt(if (enable)
-            sgi.getMarkerAddress(.isenabler)
+            sgi.addressOf(.isenabler)
         else
-            sgi.getMarkerAddress(.icenabler));
+            sgi.addressOf(.icenabler));
 
         ptr[0] = bits.set(@as(u32, 0), bit_index);
     }
@@ -488,7 +488,7 @@ const gicr = struct {
 
         // IGROUPR0
         {
-            const ptr: [*]volatile u32 = @ptrFromInt(sgi.getMarkerAddress(.igroupr));
+            const ptr: [*]volatile u32 = @ptrFromInt(sgi.addressOf(.igroupr));
             const cur = ptr[0];
             ptr[0] = switch (group) {
                 .g1ns => bits.set(cur, bit_index),
@@ -497,7 +497,7 @@ const gicr = struct {
 
         // IGRPMODR0
         {
-            const ptr: [*]volatile u32 = @ptrFromInt(sgi.getMarkerAddress(.igrpmodr));
+            const ptr: [*]volatile u32 = @ptrFromInt(sgi.addressOf(.igrpmodr));
             const cur = ptr[0];
             ptr[0] = switch (group) {
                 .g1ns => bits.unset(cur, bit_index),
@@ -738,7 +738,9 @@ const std = @import("std");
 const common = @import("common");
 const PageAllocator = common.mem.PageAllocator;
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;
 const rtt = common.rtt;
 const Pair = common.Pair;
 const am = @import("asm.zig");

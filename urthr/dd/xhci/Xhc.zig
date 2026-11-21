@@ -321,7 +321,7 @@ fn getPortRegAt(self: *Self, index: usize) regs.Port {
     rtt.expect(index != 0);
 
     const pr_size = 16;
-    const base = self.op.getMarkerAddress(.port_set) + (index - 1) * pr_size;
+    const base = self.op.addressOf(.port_set) + (index - 1) * pr_size;
     return .new(base);
 }
 
@@ -583,29 +583,24 @@ const DoorBellArray = struct {
     /// Base address of DB registers array.
     base: usize,
 
-    const T = mmio.Register(regs.DoorBell, u32);
+    const Module = mmio.Module(.{ .size = u32 }, .{
+        Arr(0x00, regs.DoorBell, 256, @sizeOf(regs.DoorBell)),
+    });
 
     fn new(base: usize) DoorBellArray {
         return .{ .base = base };
     }
 
-    /// Get the DB Register at the given index.
-    fn at(self: *const DoorBellArray, index: usize) *volatile regs.DoorBell {
-        return @ptrFromInt(self.base + index * @sizeOf(regs.DoorBell));
-    }
-
     /// Notify the xHC of a command being pushed to the Command Ring.
     pub fn notifyCommand(self: *const DoorBellArray) void {
-        const db = self.at(0);
-        T.modify(@intFromPtr(db), .{
+        Module.new(self.base).modifyIndexed(regs.DoorBell, 0, .{
             .target = 0,
         });
     }
 
     /// Notify the specified endpoint, of the device specified by the slot ID, of a new TRB in the Transfer Ring.
     pub fn notifyEndpoint(self: *const DoorBellArray, slot: u8, dci: u5) void {
-        const db = self.at(slot);
-        T.modify(@intFromPtr(db), .{
+        Module.new(self.base).modifyIndexed(regs.DoorBell, slot, .{
             .target = dci,
         });
     }
@@ -620,7 +615,8 @@ const log = std.log.scoped(.xhc);
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Arr = common.io.Arr;
 const rtt = common.rtt;
 const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;

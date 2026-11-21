@@ -9,24 +9,24 @@
 // =============================================================
 
 /// Normal DMA registers module.
-const Ndma = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, ndma.Cs },
-    .{ 0x04, ndma.Cbad },
-    .{ 0x20, ndma.Debug },
+const Ndma = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, ndma.Cs),
+    Reg(0x04, ndma.Cbad),
+    Reg(0x20, ndma.Debug),
 });
 
 /// Light DMA registers module.
-const Ldma = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, dma4.Cs },
-    .{ 0x04, dma4.Cbad },
-    .{ 0x20, dma4.Debug },
+const Ldma = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, dma4.Cs),
+    Reg(0x04, dma4.Cbad),
+    Reg(0x20, dma4.Debug),
 });
 
 /// DMA4 registers module.
-const Dma4 = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, dma4.Cs },
-    .{ 0x04, dma4.Cbad },
-    .{ 0x0C, dma4.Debug },
+const Dma4 = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, dma4.Cs),
+    Reg(0x04, dma4.Cbad),
+    Reg(0x0C, dma4.Debug),
 });
 
 /// DMA kinds.
@@ -72,9 +72,9 @@ const ControlBlock = union(DmaType) {
 };
 
 /// Global registers.
-var global = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0xFE0, IntStatus },
-    .{ 0xFF0, Enable },
+var global = mmio.Module(.{ .size = u32 }, .{
+    Reg(0xFE0, IntStatus),
+    Reg(0xFF0, Enable),
 }){};
 
 /// Size in bytes of each DMA channel's register block.
@@ -643,7 +643,8 @@ const std = @import("std");
 const log = std.log.scoped(.dma);
 const Allocator = std.mem.Allocator;
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const rtt = common.rtt;
 const urd = @import("urthr");
 const mem = urd.mem;

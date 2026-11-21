@@ -1,16 +1,16 @@
 //! Local APIC.
 
-var lapic = mmio.Module(.{ .natural = u32 }, &.{
-    .{ 0x0020, Id },
-    .{ 0x00B0, Eoi },
-    .{ 0x00F0, Svr },
-    .{ 0x0280, Esr },
-    .{ 0x0300, IcrLow },
-    .{ 0x0310, IcrHigh },
-    .{ 0x0320, LvtTimer },
-    .{ 0x0380, InitialCount },
-    .{ 0x0390, CurrentCount },
-    .{ 0x03E0, DivideConfig },
+var lapic = mmio.Module(.{ .natural = u32 }, .{
+    Reg(0x0020, Id),
+    Reg(0x00B0, Eoi),
+    Reg(0x00F0, Svr),
+    Reg(0x0280, Esr),
+    Reg(0x0300, IcrLow),
+    Reg(0x0310, IcrHigh),
+    Reg(0x0320, LvtTimer),
+    Reg(0x0380, InitialCount),
+    Reg(0x0390, CurrentCount),
+    Reg(0x03E0, DivideConfig),
 }){};
 
 // =============================================================
@@ -370,6 +370,7 @@ pub const Divide = enum(u4) {
 const std = @import("std");
 const common = @import("common");
 const rtt = common.rtt;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const am = @import("asm.zig");
 const timer = @import("timer.zig");

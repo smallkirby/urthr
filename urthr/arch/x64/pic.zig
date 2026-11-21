@@ -3,20 +3,20 @@
 /// Vector offset the PIC's IRQ lines are remapped to.
 const vector_offset: u8 = 0x20;
 
-var primary = pio.Module(&.{
-    .{ 0x00, Icw1 },
-    .{ 0x01, Icw2 },
-    .{ 0x01, Icw3 },
-    .{ 0x01, Icw4 },
-    .{ 0x01, Ocw1 },
+var primary = pio.Module(.{ .natural = u16 }, .{
+    Reg(0x00, Icw1),
+    Reg(0x01, Icw2),
+    Reg(0x01, Icw3),
+    Reg(0x01, Icw4),
+    Reg(0x01, Ocw1),
 }){ .base = 0x20 };
 
-var secondary = pio.Module(&.{
-    .{ 0x00, Icw1 },
-    .{ 0x01, Icw2 },
-    .{ 0x01, Icw3 },
-    .{ 0x01, Icw4 },
-    .{ 0x01, Ocw1 },
+var secondary = pio.Module(.{ .natural = u16 }, .{
+    Reg(0x00, Icw1),
+    Reg(0x01, Icw2),
+    Reg(0x01, Icw3),
+    Reg(0x01, Icw4),
+    Reg(0x01, Ocw1),
 }){ .base = 0xA0 };
 
 // =============================================================
@@ -102,4 +102,5 @@ const Ocw1 = packed struct(u8) {
 // =============================================================
 
 const common = @import("common");
-const pio = common.pio;
+const pio = common.io.pio;
+const Reg = common.io.Reg;

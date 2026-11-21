@@ -6,31 +6,31 @@
 // Module Definition
 // =============================================================
 
-var plic = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00_0000, Priority },
-    .{ 0x00_2000, Enables },
-    .{ 0x20_0000, Contexts },
+var plic = mmio.Module(.{ .size = u32 }, .{
+    Arr(0x00_0000, Priority, max_sources, 4),
+    Sub(0x00_2000, Enable, max_contexts, 0x80),
+    Sub(0x20_0000, Context, max_contexts, 0x1000),
 }){};
 
 /// Interrupt enable bits of a context.
 ///
 /// Up to 1024 interrupt sources can be enabled per context.
-const Enable = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0, EnableBits },
+const Enable = mmio.Module(.{ .size = u32 }, .{
+    Arr(0x0, EnableBits, max_sources / @bitSizeOf(EnableBits), @sizeOf(EnableBits)),
 });
-const Enables = mmio.Array(Enable, max_contexts, 0x80);
 
+/// Maximum number of the interrupt sources defined by the specification.
+const max_sources = 1024;
 /// Maximum number of the contexts defined by the specification.
 const max_contexts = 15872;
 
 /// Registers of a context.
 ///
 /// Context means a pair of a hart and a privilege level.
-const Context = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0, Threshold },
-    .{ 0x4, ClaimComplete },
+const Context = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x0, Threshold),
+    Reg(0x4, ClaimComplete),
 });
-const Contexts = mmio.Array(Context, max_contexts, 0x1000);
 
 // =============================================================
 
@@ -41,22 +41,22 @@ pub fn setBase(base: usize) void {
 
 /// Enable the given interrupt source for the given context.
 pub fn enable(context: usize, source: u32) void {
-    const enables = plic.sub(Enables, context);
+    const enables = plic.sub(Enable, context);
     const index = source / @bitSizeOf(EnableBits);
 
-    var bits = enables.readIndexed(EnableBits, index, @sizeOf(EnableBits));
+    var bits = enables.readIndexed(EnableBits, index);
     bits.bits |= @as(u32, 1) << @intCast(source % @bitSizeOf(EnableBits));
-    enables.writeIndexed(EnableBits, index, @sizeOf(EnableBits), bits);
+    enables.writeIndexed(EnableBits, index, bits);
 }
 
 /// Disable the given interrupt source for the given context.
 pub fn disable(context: usize, source: u32) void {
-    const mod = plic.sub(Enables, context);
+    const mod = plic.sub(Enable, context);
     const index = source / @bitSizeOf(EnableBits);
 
-    var bits = mod.readIndexed(EnableBits, index, @sizeOf(EnableBits));
+    var bits = mod.readIndexed(EnableBits, index);
     bits.bits &= ~(@as(u32, 1) << @intCast(source % @bitSizeOf(EnableBits)));
-    mod.writeIndexed(EnableBits, index, @sizeOf(EnableBits), bits);
+    mod.writeIndexed(EnableBits, index, bits);
 }
 
 /// Set the priority of the given interrupt source.
@@ -64,7 +64,7 @@ pub fn disable(context: usize, source: u32) void {
 /// Priority 0 means the interrupt is disabled.
 /// Interrupt priority increases with increasing integer values.
 pub fn setPriority(source: u32, priority: u32) void {
-    plic.writeIndexed(Priority, source, @sizeOf(Priority), Priority{
+    plic.writeIndexed(Priority, source, Priority{
         .priority = priority,
     });
 }
@@ -73,7 +73,7 @@ pub fn setPriority(source: u32, priority: u32) void {
 ///
 /// Interrupts whose priority is not greater than the threshold are masked.
 pub fn setThreshold(context: usize, threshold: u32) void {
-    plic.sub(Contexts, context).write(Threshold, .{
+    plic.sub(Context, context).write(Threshold, .{
         .priority = threshold,
     });
 }
@@ -82,12 +82,14 @@ pub fn setThreshold(context: usize, threshold: u32) void {
 ///
 /// Returns zero if there is no pending interrupt.
 pub fn claim(context: usize) u32 {
-    return plic.sub(Contexts, context).read(ClaimComplete).source;
+    return plic.sub(Context, context).read(ClaimComplete).source;
 }
 
 /// Signal the completion of the given interrupt source.
 pub fn complete(context: usize, source: u32) void {
-    plic.sub(Contexts, context).write(ClaimComplete, .{ .source = source });
+    plic.sub(Context, context).write(ClaimComplete, .{
+        .source = source,
+    });
 }
 
 // =============================================================
@@ -128,4 +130,7 @@ const ClaimComplete = packed struct(u32) {
 // =============================================================
 
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Arr = common.io.Arr;
+const Sub = common.io.Sub;

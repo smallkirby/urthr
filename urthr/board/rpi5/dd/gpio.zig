@@ -14,27 +14,27 @@
 // =============================================================
 
 /// GPIO module.
-const Gpio = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Status },
-    .{ 0x04, Ctrl },
+const Gpio = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Status),
+    Arr(0x04, Ctrl, max_pins, 8),
 });
 
 /// RIO (Registered I/O) module.
-const Rio = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, RioOut },
-    .{ 0x04, RioOe },
+const Rio = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, RioOut),
+    Reg(0x04, RioOe),
 
-    .{ 0x00 + rio_set_offset, RioOutSet },
-    .{ 0x04 + rio_set_offset, RioOeSet },
+    Reg(0x00 + rio_set_offset, RioOutSet),
+    Reg(0x04 + rio_set_offset, RioOeSet),
 
-    .{ 0x00 + rio_clr_offset, RioOutClr },
-    .{ 0x04 + rio_clr_offset, RioOeClr },
+    Reg(0x00 + rio_clr_offset, RioOutClr),
+    Reg(0x04 + rio_clr_offset, RioOeClr),
 });
 
 /// PADs module.
-const Pads = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, VoltageSelect },
-    .{ 0x04, Pad },
+const Pads = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, VoltageSelect),
+    Arr(0x04, Pad, max_pins, @sizeOf(Pad)),
 });
 
 /// Function select definitions.
@@ -111,6 +111,8 @@ var pads_base: usize = undefined;
 
 /// Pin number type.
 const Pin = u8;
+/// Maximum number of pins in a bank.
+const max_pins = 28;
 /// Type of function select ID.
 const FselId = @EnumLiteral();
 
@@ -133,8 +135,8 @@ const Funcs = struct {
 };
 
 /// Set the base address of I/O bank, RIO bank, and PADs bank.
-pub fn setBase(io: usize, rio: usize, pads: usize) void {
-    gpio_base = io;
+pub fn setBase(iob: usize, rio: usize, pads: usize) void {
+    gpio_base = iob;
     rio_base = rio;
     pads_base = pads;
 }
@@ -144,24 +146,24 @@ pub fn setFunction(comptime pin: Pin, function: FselId) void {
     const info = getPinInfo(pin);
 
     // Select function.
-    info.gpio.writeIndexed(Ctrl, info.pin_offset, 8, std.mem.zeroInit(Ctrl, .{
+    info.gpio.writezIndexed(Ctrl, info.pin_offset, .{
         .funcsel = getFunctionNumber(pin, function),
         .oeover = .normal,
         .outover = .normal,
-    }));
+    });
 
     // Enable input and output.
-    info.pads.writeIndexed(Pad, info.pin_offset, 4, std.mem.zeroInit(Pad, .{
+    info.pads.writezIndexed(Pad, info.pin_offset, .{
         .ie = true,
         .od = false,
-    }));
+    });
 }
 
 /// Set pull-up/down configuration for the given pin.
 pub fn setPull(pin: u8, pull: PullType) void {
     const info = getPinInfo(pin);
 
-    info.pads.modifyIndexed(Pad, info.pin_offset, 4, .{
+    info.pads.modifyIndexed(Pad, info.pin_offset, .{
         .pue = pull == .up,
         .pde = pull == .down,
         .drive = .ma12,
@@ -173,7 +175,7 @@ pub fn setPull(pin: u8, pull: PullType) void {
 /// Get pull-up/down configuration for the given pin.
 pub fn getPull(pin: u8) PullType {
     const info = getPinInfo(pin);
-    const pad = info.pads.readIndexed(Pad, info.pin_offset, 4);
+    const pad = info.pads.readIndexed(Pad, info.pin_offset);
 
     return if (pad.pue) .up else if (pad.pde) .down else .off;
 }
@@ -469,4 +471,6 @@ const RioOeClr = packed struct(u32) {
 const std = @import("std");
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Arr = common.io.Arr;

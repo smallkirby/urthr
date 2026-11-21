@@ -6,17 +6,17 @@
 // Module Definition
 // =============================================================
 
-var pl011 = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Dr },
-    .{ 0x04, RsrEcr },
-    .{ 0x18, Fr },
-    .{ 0x24, Ibrd },
-    .{ 0x28, Fbrd },
-    .{ 0x2C, Lcrh },
-    .{ 0x30, Cr },
-    .{ 0x38, Imsc },
-    .{ 0x3C, Ris },
-    .{ 0x44, Icr },
+var pl011 = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Dr),
+    Reg(0x04, RsrEcr),
+    Reg(0x18, Fr),
+    Reg(0x24, u16).as(.ibrd), // UARTIBRD: Integer Baud Rate Register.
+    Reg(0x28, u6).as(.fbrd), // UARTFBRD: Fractional Baud Rate Register.
+    Reg(0x2C, Lcrh),
+    Reg(0x30, Cr),
+    Reg(0x38, Imsc),
+    Reg(0x3C, Ris),
+    Reg(0x44, Icr),
 }){};
 
 // =============================================================
@@ -51,21 +51,21 @@ pub fn init(clk: anytype, baudrate: u64) void {
     pl011.writei(Icr, Icr.mask());
 
     // Set baud rate.
-    pl011.writei(Ibrd, @as(u16, @intCast(ibrd)));
-    pl011.writei(Fbrd, @as(u6, @intCast(fbrd)));
+    pl011.write(.ibrd, @intCast(ibrd));
+    pl011.write(.fbrd, @intCast(fbrd));
 
     // Enable FIFO, set 8n1.
-    pl011.writei(Lcrh, std.mem.zeroInit(Lcrh, .{
+    pl011.writez(Lcrh, .{
         .fen = true,
         .wlen = .bits8,
-    }));
+    });
 
     // Enable UART, TX and RX.
-    pl011.writei(Cr, std.mem.zeroInit(Cr, .{
+    pl011.writez(Cr, .{
         .uarten = true,
         .txe = true,
         .rxe = true,
-    }));
+    });
 }
 
 /// Check if the transmit FIFO is full.
@@ -173,18 +173,6 @@ const Fr = packed struct {
     txfe: bool,
     /// Ring indicator.
     ri: bool,
-};
-
-/// UARTIBRD: Integer Baud Rate Register.
-const Ibrd = packed struct {
-    /// Baud rate divisor.
-    divint: u16,
-};
-
-/// UARTFBRD: Fractional Baud Rate Register.
-const Fbrd = packed struct {
-    /// Fractional baud rate divisor.
-    divfrac: u6,
 };
 
 /// UARTLCR_H: Line Control Register.
@@ -332,5 +320,6 @@ const atomic = std.atomic;
 const fmt = std.fmt;
 const arch = @import("arch");
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
 const util = common.util;

@@ -3,11 +3,10 @@
 pub const bits = @import("common/bits.zig");
 pub const block = @import("common/block.zig");
 pub const input_codes = @import("common/input_codes.zig");
+pub const io = @import("common/io.zig");
 pub const mem = @import("common/mem.zig");
-pub const mmio = @import("common/mmio.zig");
 pub const pcpu = @import("common/pcpu.zig");
 pub const perf = @import("common/perf.zig");
-pub const pio = @import("common/pio.zig");
 pub const regex = @import("common/regex.zig");
 pub const rtt = @import("common/rtt.zig");
 pub const typing = @import("common/typing.zig");
@@ -109,8 +108,8 @@ pub fn comptimeAssert(comptime condition: bool, comptime message: ?[]const u8) v
 
 test {
     _ = bits;
+    _ = io;
     _ = mem;
-    _ = mmio;
     _ = regex;
     _ = typing;
     _ = util;

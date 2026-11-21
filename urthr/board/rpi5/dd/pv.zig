@@ -9,22 +9,21 @@
 //! Copyright (C) 2015 Broadcom
 //!
 
-var pvs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Pvs },
+var pvs = mmio.Module(.{ .size = u32 }, .{
+    Sub(0x0000, PvRegs, num_pvs, 0x1000),
 }){};
 
-const PvRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Control },
-    .{ 0x04, VControl },
-    .{ 0x08, VsyncdEven },
-    .{ 0x0C, HorzA },
-    .{ 0x10, HorzB },
-    .{ 0x14, VertA },
-    .{ 0x18, VertB },
-    .{ 0x34, MuxCfg },
-    .{ 0x94, PipeInitCtrl },
+const PvRegs = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Control),
+    Reg(0x04, VControl),
+    Reg(0x08, VsyncdEven),
+    Reg(0x0C, HorzA),
+    Reg(0x10, HorzB),
+    Reg(0x14, VertA),
+    Reg(0x18, VertB),
+    Reg(0x34, MuxCfg),
+    Reg(0x94, PipeInitCtrl),
 });
-const Pvs = mmio.Array(PvRegs, 2, 0x1000);
 
 /// Set the base address of PVs.
 pub fn setBase(base: usize) void {
@@ -41,8 +40,11 @@ pub const Error = error{
     NoEncoder,
 };
 
+/// Number of pixel valves.
+const num_pvs = 2;
+
 /// HW constants of PV0 and PV1.
-const pv_data = [Pvs.len]PvData{
+const pv_data = [num_pvs]PvData{
     .{
         .chan = 0,
         .fifo_depth = 64,
@@ -94,7 +96,7 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
     const data = pv_data[index];
     const enc_select = getEncoderSelect(data, encoder) orelse return Error.NoEncoder;
     const ppc = data.pixels_per_clock;
-    const pv = pvs.sub(Pvs, index);
+    const pv = pvs.sub(PvRegs, index);
 
     // Reset the PV. It needs to be disabled before the FIFO is flushed.
     pv.modify(Control, .{ .en = false });
@@ -158,19 +160,19 @@ pub fn configure(chan: usize, encoder: Encoder, mode: Mode) Error!void {
 /// Enable the PV fed by the given HVS channel.
 pub fn enable(chan: usize) Error!void {
     const index = findPv(chan) orelse return Error.NoPixelValve;
-    pvs.sub(Pvs, index).modify(Control, .{ .en = true });
+    pvs.sub(PvRegs, index).modify(Control, .{ .en = true });
 }
 
 /// Start the video output of the PV fed by the given HVS channel.
 pub fn enableVideo(chan: usize) Error!void {
     const index = findPv(chan) orelse return Error.NoPixelValve;
-    pvs.sub(Pvs, index).modify(VControl, .{ .viden = true });
+    pvs.sub(PvRegs, index).modify(VControl, .{ .viden = true });
 }
 
 /// Stop the video output of the PV fed by the given HVS channel.
 pub fn disableVideo(chan: usize) Error!void {
     const index = findPv(chan) orelse return Error.NoPixelValve;
-    var pv = pvs.sub(Pvs, index);
+    var pv = pvs.sub(PvRegs, index);
 
     pv.modify(VControl, .{ .viden = false });
     if (!pv.tryWaitFor(VControl, .{ .viden = false }, .ms(1))) {
@@ -181,7 +183,7 @@ pub fn disableVideo(chan: usize) Error!void {
 /// Disable the PV fed by the given HVS channel and flush its FIFO.
 pub fn reset(chan: usize) Error!void {
     const index = findPv(chan) orelse return Error.NoPixelValve;
-    const pv = pvs.sub(Pvs, index);
+    const pv = pvs.sub(PvRegs, index);
 
     // The PV needs to be disabled before it can be flushed.
     pv.modify(Control, .{ .en = false });
@@ -340,4 +342,6 @@ const common = @import("common");
 const dd = @import("dd");
 const Mode = dd.video.Mode;
 const rtt = common.rtt;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Sub = common.io.Sub;

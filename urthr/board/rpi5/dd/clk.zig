@@ -7,8 +7,8 @@
 // =============================================================
 
 /// Clock register set for a specific clock.
-const Clock = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, Control },
+const Clock = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, Control),
 });
 
 /// Mapping of clock IDs to register set offsets.
@@ -93,4 +93,5 @@ const std = @import("std");
 const log = std.log.scoped(.rp5clk);
 const arch = @import("arch").impl;
 const common = @import("common");
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;

@@ -4,9 +4,9 @@
 // Module Definition
 // =============================================================
 
-var sram = mmio.Module(.{ .natural = u8 }, &.{
-    .{ 0x0000_FF00, mmio.Marker(.shmem) },
-    .{ 0x0001_0000, mmio.Marker(.end) },
+var sram = mmio.Module(.{ .natural = u8 }, .{
+    Mrk(0x0000_FF00, .shmem),
+    Mrk(0x0001_0000, .end),
 }){};
 
 // =============================================================
@@ -23,7 +23,7 @@ pub fn setBase(base: usize) void {
 
 /// Get the RP1 firmware version.
 pub fn getVersion() Version {
-    var buf: [*]volatile u32 = @ptrFromInt(sram.getMarkerAddress(.shmem));
+    var buf: [*]volatile u32 = @ptrFromInt(sram.addressOf(.shmem));
 
     buf[0] = @bitCast(Command{
         .op = .get_fw_version,
@@ -81,5 +81,6 @@ const std = @import("std");
 const log = std.log.scoped(.rp1);
 const common = @import("common");
 const bits = common.bits;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Mrk = common.io.Mrk;
 const mb = @import("rp1mb.zig");

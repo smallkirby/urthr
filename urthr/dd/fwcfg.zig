@@ -8,29 +8,21 @@
 // =============================================================
 
 /// Bus used to access the registers.
-const bus: enum { pio, mmio } = switch (builtin.cpu.arch) {
-    .x86_64 => .pio,
-    else => .mmio,
-};
+const bus = if (builtin.cpu.arch == .x86_64) pio else mmio;
 
 /// Address type of registers.
-const Address = switch (bus) {
-    // Port address.
-    .pio => u16,
-    // Memory address.
-    .mmio => usize,
-};
+const Address = bus.Bus.Address;
 
-var dev = switch (bus) {
-    .pio => pio.Module(&.{
-        .{ 0x00, Selector },
-        .{ 0x01, Data },
-    }){},
-    .mmio => mmio.Module(.{ .natural = u16 }, &.{
-        .{ 0x00, Data },
-        .{ 0x08, Selector },
-    }){},
-};
+var dev = if (bus == pio)
+    pio.Module(.{ .natural = u16 }, .{
+        Reg(0x00, Selector),
+        Reg(0x01, Data),
+    }){}
+else
+    mmio.Module(.{ .natural = u16 }, .{
+        Reg(0x00, Data),
+        Reg(0x08, Selector),
+    }){};
 
 /// Set the base address of fw_cfg device.
 pub fn setBase(base: Address) void {
@@ -107,9 +99,10 @@ fn readBytes(buf: []u8) void {
 ///
 /// Resets the read offset to zero.
 fn select(selector: u16) void {
-    switch (bus) {
-        .pio => dev.write(Selector, .{ .value = selector }),
-        .mmio => dev.write(Selector, .{ .value = @byteSwap(selector) }),
+    if (bus == pio) {
+        dev.write(Selector, .{ .value = selector });
+    } else {
+        dev.write(Selector, .{ .value = @byteSwap(selector) });
     }
 }
 
@@ -131,5 +124,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
-const mmio = common.mmio;
-const pio = common.pio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const pio = common.io.pio;

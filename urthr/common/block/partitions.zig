@@ -321,6 +321,5 @@ const Allocator = std.mem.Allocator;
 const common = @import("common");
 const bits = common.bits;
 const block = common.block;
-const mmio = common.mmio;
 const rtt = common.rtt;
 const Device = block.Device;

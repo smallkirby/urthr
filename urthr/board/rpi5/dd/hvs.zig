@@ -12,37 +12,38 @@
 //! Copyright (C) 2015 Broadcom
 //!
 
-var hvs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x0000, Version },
-    .{ 0x0004, CxmSize },
-    .{ 0x0008, LbmSize },
-    .{ 0x000C, UbmSize },
-    .{ 0x0010, CobaSize },
-    .{ 0x0014, CobSize },
-    .{ 0x0020, Control },
-    .{ 0x0024, FetcherStatus },
-    .{ 0x0028, FetchStatus },
-    .{ 0x0034, DlStatus },
-    .{ 0x0038, PriMap0 },
-    .{ 0x003C, PriMap1 },
-    .{ 0x00FC, HvsId },
-    .{ 0x0100, Disps },
-    .{ 0x4000, mmio.Marker(.dlist) },
+var hvs = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x0000, Version),
+    Reg(0x0004, CxmSize),
+    Reg(0x0008, LbmSize),
+    Reg(0x000C, UbmSize),
+    Reg(0x0010, CobaSize),
+    Reg(0x0014, CobSize),
+    Reg(0x0020, Control),
+    Reg(0x0024, FetcherStatus),
+    Reg(0x0028, FetchStatus),
+    Reg(0x0034, DlStatus),
+    Reg(0x0038, PriMap0),
+    Reg(0x003C, PriMap1),
+    Reg(0x00FC, HvsId),
+    Sub(0x0100, DispRegs, num_disps, 0x40),
+    Mrk(0x4000, .dlist),
 }){};
 
-const DispRegs = mmio.Module(.{ .size = u32 }, &.{
-    .{ 0x00, DispControl0 },
-    .{ 0x04, DispControl1 },
-    .{ 0x08, DispBgnd0 },
-    .{ 0x0C, DispBgnd1 },
-    .{ 0x10, DispLptrs },
-    .{ 0x14, DispCob },
-    .{ 0x18, DispStatus },
-    .{ 0x1C, DispDl },
-    .{ 0x20, DispRun },
+const DispRegs = mmio.Module(.{ .size = u32 }, .{
+    Reg(0x00, DispControl0),
+    Reg(0x04, DispControl1),
+    Reg(0x08, DispBgnd0),
+    Reg(0x0C, DispBgnd1),
+    Reg(0x10, DispLptrs),
+    Reg(0x14, DispCob),
+    Reg(0x18, DispStatus),
+    Reg(0x1C, DispDl),
+    Reg(0x20, DispRun),
 });
-const Disps = mmio.Array(DispRegs, 3, 0x40);
 
+/// Number of display channels.
+const num_disps = 3;
 /// Size in bytes of dlist region.
 const dlist_size = 0x4000;
 /// Number of words at the beginning of dlist memory owned by FW.
@@ -153,10 +154,10 @@ pub fn init() Error!void {
         // DISP2 gets 1 line, DISP0 and DISP1 get 4 lines (don't know why).
         var base: u16 = 0;
         var top: u16 = line_width;
-        var disp_idx: usize = Disps.len - 1;
+        var disp_idx: usize = num_disps - 1;
         while (true) : (disp_idx -= 1) {
             const cob = DispCob{ .base = base, .top = top };
-            hvs.sub(Disps, disp_idx).write(DispCob, cob);
+            hvs.sub(DispRegs, disp_idx).write(DispCob, cob);
 
             base = top + gap;
             top += line_width * num_lines;
@@ -182,7 +183,7 @@ fn initResources() void {
     // Reserve the first words of dlist memory for FW.
     resources.dlist.reserve(0, dlist_reserved_words) catch unreachable;
     // Reserve the dlist words used by existing dlist entries.
-    for (0..Disps.len) |i| {
+    for (0..num_disps) |i| {
         reserveDispResources(i);
     }
 
@@ -195,7 +196,7 @@ fn initResources() void {
 /// Mark the dlist words used by the given display as used.
 fn reserveDispResources(disp_idx: usize) void {
     const limit = resources.dlist.limit;
-    const head: usize = hvs.sub(Disps, disp_idx).read(DispDl).lact;
+    const head: usize = hvs.sub(DispRegs, disp_idx).read(DispDl).lact;
     if (head >= limit) return;
 
     var didx = head;
@@ -240,7 +241,7 @@ pub const Channel = struct {
 
 /// Reset and enable the display channel with the given size.
 pub fn initChannel(index: usize, width: usize, height: usize) void {
-    const disp = hvs.sub(Disps, index);
+    const disp = hvs.sub(DispRegs, index);
 
     disp.writez(DispControl0, .{ .reset = true });
     disp.modify(DispControl1, .{ .intlace = false, .bgenb = false });
@@ -253,7 +254,7 @@ pub fn initChannel(index: usize, width: usize, height: usize) void {
 
 /// Reset and disable the display channel.
 pub fn stopChannel(index: usize) void {
-    const disp = hvs.sub(Disps, index);
+    const disp = hvs.sub(DispRegs, index);
     if (!disp.read(DispControl0).enb) {
         return;
     }
@@ -414,7 +415,7 @@ const Plane = struct {
     /// Install the plane entry to dlist.
     fn install(self: *const Plane) void {
         arch.barrier(.full, .release);
-        hvs.sub(Disps, self.channel.index).write(DispLptrs, .{
+        hvs.sub(DispRegs, self.channel.index).write(DispLptrs, .{
             .heade = @intCast(self.dlist_head),
         });
     }
@@ -448,7 +449,7 @@ const Plane = struct {
 /// Get the pointer to the dlist word at the given index.
 fn getDlistPtr(didx: usize) *volatile u32 {
     rtt.expect(didx < dlist_size / @sizeOf(u32));
-    return @ptrFromInt(hvs.getMarkerAddress(.dlist) + didx * @sizeOf(u32));
+    return @ptrFromInt(hvs.addressOf(.dlist) + didx * @sizeOf(u32));
 }
 
 /// Get the value of dlist word at the given index as the given type.
@@ -748,7 +749,10 @@ const rtt = common.rtt;
 const DmaAllocator = common.mem.DmaAllocator;
 const RangeAllocator = common.mem.RangeAllocator;
 const Framebuffer = common.Framebuffer;
-const mmio = common.mmio;
+const mmio = common.io.mmio;
+const Reg = common.io.Reg;
+const Mrk = common.io.Mrk;
+const Sub = common.io.Sub;
 const urd = @import("urthr");
 const mem = urd.mem;
 const vcmbox = @import("vcmbox.zig");
