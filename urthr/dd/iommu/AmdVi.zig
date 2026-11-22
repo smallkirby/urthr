@@ -6,8 +6,11 @@ const Self = @This();
 
 const Vi = mmio.Module(.{ .natural = u64 }, .{
     Reg(0x0000, TableBase),
+    Reg(0x0008, CmdBufBase),
     Reg(0x0018, Control),
     Reg(0x0030, Efr),
+    Reg(0x2000, CmdHead),
+    Reg(0x2008, CmdTail),
     Reg(0x2020, Status),
 });
 
@@ -16,6 +19,8 @@ vi: Vi,
 
 /// Device table.
 dt: DmaMemory,
+/// Command buffer.
+cmdbuf: CmdBuf,
 
 /// Managed DMA allocator.
 allocator: DmaAllocator,
@@ -27,6 +32,7 @@ pub fn new(base: usize, allocator: DmaAllocator) Self {
     return .{
         .vi = .new(base),
         .dt = undefined,
+        .cmdbuf = undefined,
         .allocator = allocator,
     };
 }
@@ -40,6 +46,12 @@ pub fn init(self: *Self) Error!void {
 
     // Set the address of cleared device table.
     self.vi.write(TableBase, .init(self.dt.bus, self.dt.size));
+
+    // Initialize command buffer.
+    self.cmdbuf = try CmdBuf.init(self.allocator);
+    self.vi.write(CmdBufBase, .init(self.cmdbuf.buf.bus, CmdBuf.nents));
+    self.vi.writei(CmdHead, 0);
+    self.vi.writei(CmdTail, 0);
 }
 
 // =============================================================
@@ -189,6 +201,136 @@ const PagingMode = enum(u3) {
 };
 
 // =============================================================
+// Command
+// =============================================================
+
+/// IOMMU command buffer.
+const CmdBuf = struct {
+    /// DMA memory for the command buffer.
+    buf: DmaMemory,
+    /// Head offset from the base of the command buffer.
+    head: usize,
+    /// Tail offset from the base of the command buffer.
+    tail: usize,
+
+    /// Size in bytes of the command buffer.
+    const buf_size = 4096;
+    /// The number of command entries in the command buffer.
+    pub const nents = buf_size / @sizeOf(Cmd);
+
+    pub fn init(allocator: DmaAllocator) Error!CmdBuf {
+        const buf = try allocator.allocBytes(buf_size, .normal);
+        @memset(buf.slice(u8), 0);
+        allocator.syncForDeviceAll(buf);
+
+        return .{
+            .buf = buf,
+            .head = 0,
+            .tail = 0,
+        };
+    }
+};
+
+/// IOMMU commands.
+const Cmd = packed union {
+    /// Serialize itself with IOMMU command processing.
+    completion_wait: packed struct(u128) {
+        /// Completion store.
+        /// IOMMU writes the specified 64-bit Store Data value to the Store Address.
+        s: bool,
+        /// Completion interrupt.
+        /// IOMMU sets ComWaitInt when the command completes.
+        i: bool,
+        /// Flush queue.
+        /// If set, command queue is strictly executed in order, subsequent commands are not launched and executed until this command finishes.
+        f: bool,
+        /// Store address.
+        /// IOMMU may store the Store Data value at this SPA.
+        store_address: u49,
+        /// Reserved.
+        _52: u8 = 0,
+        /// Opcode.
+        code: CmdOpcode = .completion_wait,
+        /// Store data.
+        store_data: u64,
+    },
+
+    /// Not implemented yet.
+    invalidate_devtab_entry: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    invalidate_iommu_pages: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    invalidate_iotbl_pages: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    invalidate_interrupt_table: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    prefetch_iommu_pages: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    complete_ppr_request: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    invalidate_iommu_all: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    insert_guest_event: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    reset_vmmio: packed struct(u128) {
+        _: u128,
+    },
+
+    comptime {
+        std.debug.assert(@sizeOf(Cmd) == @sizeOf(u128));
+    }
+};
+
+/// Generic Command Buffer Entry Format.
+const CmdGeneric = packed struct(u128) {
+    /// First opcode dependent operand.
+    operand1: u60,
+    /// Opcode.
+    code: CmdOpcode,
+    /// Second opcode dependent operand.
+    operand2: u64,
+};
+
+const CmdOpcode = enum(u4) {
+    /// COMPLETION_WAIT.
+    completion_wait = 0x1,
+    /// INVALIDATE_DEVTAB_ENTRY.
+    invalidate_devtab_entry = 0x2,
+    /// INVALIDATE_IOMMU_PAGES.
+    invalidate_iommu_pages = 0x3,
+    /// INVALIDATE_IOTLB_PAGES.
+    invalidate_iotbl_pages = 0x4,
+    /// INVALIDATE_INTERRUPT_TABLE.
+    invalidate_interrupt_table = 0x5,
+    /// PREFETCH_IOMMU_PAGES.
+    prefetch_iommu_pages = 0x6,
+    /// COMPLETE_PPR_REQUEST.
+    complete_ppr_request = 0x7,
+    /// INVALIDATE_IOMMU_ALL.
+    invalidate_iommu_all = 0x8,
+    /// INSERT_GUEST_EVENT.
+    insert_guest_event = 0x9,
+    /// RESET_VMMIO.
+    reset_vmmio = 0xA,
+};
+
+// =============================================================
 // Registers
 // =============================================================
 
@@ -216,6 +358,34 @@ const TableBase = packed struct(u64) {
         return .{
             .size = @intCast(size / 4096 - 1),
             .dev_tab_base = @truncate(phys >> 12),
+        };
+    }
+};
+
+/// Command Buffer Base Address Register.
+const CmdBufBase = packed struct(u64) {
+    /// Command buffer base address. Bits [11:0] must be zero.
+    base: u52,
+    /// Reserved.
+    _52: u4 = 0,
+    /// Command buffer length.
+    len: u4,
+    /// Reserved.
+    _60: u4 = 0,
+
+    /// Create a command buffer base address register value.
+    ///
+    /// `phys` is the bus address of the first command buffer.
+    /// `len` is the number of command entries.
+    pub fn init(phys: usize, len: usize) CmdBufBase {
+        const comlen: usize = @ctz(len);
+        rtt.expectEqual(0, phys % 4096);
+        rtt.expectEqual(0, len % 256);
+        rtt.expect(std.math.isPowerOfTwo(len));
+        rtt.expect(0b1000 <= comlen and comlen <= 0b1111);
+        return .{
+            .base = @intCast(phys),
+            .len = @intCast(comlen),
         };
     }
 };
@@ -471,6 +641,22 @@ const Glx = enum(u2) {
 
 // =============================================================
 // Command and Event Status Register
+
+/// Command Buffer Head Pointer Register.
+const CmdHead = packed struct(u64) {
+    /// Command buffer head pointer. Bits [4:0] must be zero.
+    ptr: u19,
+    /// Reserved.
+    _19: u45 = 0,
+};
+
+/// Command Buffer Tail Pointer Register.
+const CmdTail = packed struct(u64) {
+    /// Command buffer tail pointer. Bits [4:0] must be zero.
+    ptr: u19,
+    /// Reserved.
+    _19: u45 = 0,
+};
 
 /// IOMMU Status Register.
 const Status = packed struct(u64) {
