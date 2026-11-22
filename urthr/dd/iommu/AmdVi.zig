@@ -54,7 +54,7 @@ pub fn init(self: *Self) Error!void {
     self.vi.write(TableBase, .init(self.dt.bus, self.dt.size));
 
     // Initialize command buffer.
-    self.cmdbuf = try CmdBuf.init(self.allocator);
+    self.cmdbuf = try CmdBuf.init(self.vi, self.allocator);
     self.vi.write(CmdBufBase, .init(self.cmdbuf.buf.bus, CmdBuf.nents));
     self.vi.writei(CmdHead, 0);
     self.vi.writei(CmdTail, 0);
@@ -75,6 +75,17 @@ pub fn init(self: *Self) Error!void {
         .cmd_buf_run = true,
         .event_log_run = true,
     }, null);
+
+    // Check if command queue is working.
+    self.cmdbuf.push(.{ .completion_wait = .{
+        .s = false,
+        .i = false,
+        .f = false,
+        .store_address = 0,
+        .store_data = 0,
+    } }) catch unreachable;
+    self.cmdbuf.sync();
+    rtt.expectEqual(@sizeOf(Cmd), self.vi.read(CmdHead).ptr);
 }
 
 // =============================================================
@@ -231,26 +242,53 @@ const PagingMode = enum(u3) {
 const CmdBuf = struct {
     /// DMA memory for the command buffer.
     buf: DmaMemory,
-    /// Head offset from the base of the command buffer.
-    head: usize,
     /// Tail offset from the base of the command buffer.
-    tail: usize,
+    tail: u19,
+
+    /// Managed DMA allocator.
+    _dma: DmaAllocator,
+    /// Module.
+    _vi: Vi,
 
     /// Size in bytes of the command buffer.
     const buf_size = 4096;
+    /// Unit size in bytes of a command.
+    const unit = @sizeOf(Cmd);
     /// The number of command entries in the command buffer.
-    pub const nents = buf_size / @sizeOf(Cmd);
+    pub const nents = buf_size / unit;
 
-    pub fn init(allocator: DmaAllocator) Error!CmdBuf {
+    pub fn init(vi: Vi, allocator: DmaAllocator) Error!CmdBuf {
         const buf = try allocator.allocBytes(buf_size, .normal);
         @memset(buf.slice(u8), 0);
         allocator.syncForDeviceAll(buf);
 
         return .{
             .buf = buf,
-            .head = 0,
             .tail = 0,
+            ._dma = allocator,
+            ._vi = vi,
         };
+    }
+
+    /// Push a command into the command buffer.
+    ///
+    /// Tail pointer is not advanced until `sync()` is called.
+    pub fn push(self: *CmdBuf, cmd: Cmd) error{Full}!void {
+        const head = self._vi.read(CmdHead).ptr;
+        const next_tail = (self.tail +% unit) % buf_size;
+        if (next_tail == head) {
+            return error.Full;
+        }
+
+        const cmds = self.buf.slice(Cmd);
+        cmds[self.tail / unit] = cmd;
+        self._dma.syncForDeviceAll(self.buf); // TODO: should not flush all
+        self.tail = next_tail;
+    }
+
+    /// Synchronize the tail pointer with IOMMU.
+    pub fn sync(self: *const CmdBuf) void {
+        self._vi.writei(CmdTail, self.tail);
     }
 };
 
