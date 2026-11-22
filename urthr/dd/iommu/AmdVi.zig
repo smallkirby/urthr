@@ -76,31 +76,37 @@ pub fn init(self: *Self) Error!void {
         .event_log_run = true,
     }, null);
 
-    // Check if command queue is working.
-    self.cmdbuf.push(.{ .completion_wait = .{
-        .s = false,
-        .i = false,
-        .f = false,
-        .store_address = 0,
-        .store_data = 0,
-    } }) catch unreachable;
-    self.cmdbuf.sync();
-    rtt.expectEqual(@sizeOf(Cmd), self.vi.read(CmdHead).ptr);
-
-    // Check if event logging is working.
-    {
-        self.cmdbuf.push(@bitCast(@as(u128, 0xDEADBEEF))) catch unreachable;
-        self.cmdbuf.sync();
-
-        if (self.evlog.pop()) |ev| {
-            const code = ev.getCode();
-            rtt.expectEqual(.illegal_command_error, code);
-        } else {
-            rtt.expect(false);
+    if (urd.enable_rtt) {
+        // Check if command queue is working.
+        {
+            self.cmdbuf.push(.{ .completion_wait = .{
+                .s = false,
+                .i = false,
+                .f = false,
+                .store_address = 0,
+                .store_data = 0,
+            } }) catch unreachable;
+            self.cmdbuf.sync();
+            self.cmdbuf.barrier() catch unreachable;
+            rtt.expectEqual(@sizeOf(Cmd) * 2, self.vi.read(CmdHead).ptr);
         }
-        self.evlog.sync();
 
-        // TODO: should restart halting command processing.
+        // Check if event logging is working.
+        {
+            self.cmdbuf.push(@bitCast(@as(u128, 0xDEADBEEF))) catch unreachable;
+            self.cmdbuf.sync();
+            self.cmdbuf.barrier() catch unreachable;
+
+            if (self.evlog.pop()) |ev| {
+                const code = ev.getCode();
+                rtt.expectEqual(.illegal_command_error, code);
+            } else {
+                rtt.expect(false);
+            }
+            self.evlog.sync();
+
+            // TODO: should restart halting command processing.
+        }
     }
 }
 
@@ -260,6 +266,8 @@ const CmdBuf = struct {
     buf: DmaMemory,
     /// Tail offset from the base of the command buffer.
     tail: u19,
+    /// Store buffers for completion waits.
+    barriers: DmaMemory,
 
     /// Managed DMA allocator.
     _dma: DmaAllocator,
@@ -273,14 +281,24 @@ const CmdBuf = struct {
     /// The number of command entries in the command buffer.
     pub const nents = buf_size / unit;
 
+    /// Store data type.
+    const Barrier = u64;
+    /// Store data value.
+    const store_data: Barrier = 0xDEADBEEF_CAFEBABE;
+
     pub fn init(vi: Vi, allocator: DmaAllocator) Error!CmdBuf {
         const buf = try allocator.allocBytes(buf_size, .normal);
         @memset(buf.slice(u8), 0);
         allocator.syncForDeviceAll(buf);
 
+        const barriers = try allocator.alloc(Barrier, 1, .normal);
+        @memset(barriers.slice(Barrier), 0);
+        allocator.syncForDeviceAll(barriers);
+
         return .{
             .buf = buf,
             .tail = 0,
+            .barriers = barriers,
             ._dma = allocator,
             ._vi = vi,
         };
@@ -305,6 +323,27 @@ const CmdBuf = struct {
     /// Synchronize the tail pointer with IOMMU.
     pub fn sync(self: *const CmdBuf) void {
         self._vi.writei(CmdTail, self.tail);
+    }
+
+    /// Blocks until all commands in the command buffer have completed.
+    pub fn barrier(self: *CmdBuf) error{Full}!void {
+        try self.push(.{ .completion_wait = .{
+            .s = true,
+            .i = false,
+            .f = false,
+            .store_address = @intCast(self.barriers.bus >> 3),
+            .store_data = store_data,
+        } });
+        self.sync();
+
+        const b: *const volatile Barrier = &self.barriers.slice(Barrier)[0];
+        while (b.* != store_data) {
+            std.atomic.spinLoopHint();
+            self._dma.syncForCpu(self.barriers.cpu, @sizeOf(Barrier));
+        }
+
+        self.barriers.slice(Barrier)[0] = 0;
+        self._dma.syncForDevice(self.barriers.bus, @sizeOf(Barrier));
     }
 };
 
@@ -982,3 +1021,4 @@ const mmio = common.io.mmio;
 const Reg = common.io.Reg;
 const DmaAllocator = common.mem.DmaAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;
+const urd = @import("urthr");
