@@ -64,6 +64,17 @@ pub fn init(self: *Self) Error!void {
     self.vi.write(EventLogBase, .init(self.evlog.buf.bus, EventLog.nents));
     self.vi.writei(EventLogHead, 0);
     self.vi.writei(EventLogTail, 0);
+
+    // Enable IOMMU.
+    self.vi.modify(Control, .{
+        .en = true,
+        .cmd_buf_en = true,
+        .event_log_en = true,
+    });
+    self.vi.waitFor(Status, .{
+        .cmd_buf_run = true,
+        .event_log_run = true,
+    }, null);
 }
 
 // =============================================================
