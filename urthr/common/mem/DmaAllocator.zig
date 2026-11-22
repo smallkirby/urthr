@@ -19,7 +19,7 @@ pub const DmaMemory = struct {
     cpu: usize,
     /// Bus address of the allocated memory region.
     bus: usize,
-    /// Size in bytes of the allocated memory region.
+    /// Size in bytes of the allocated memory region visible to user.
     size: usize,
 
     /// Translate the given bus address to a CPU address.
@@ -98,20 +98,21 @@ pub fn alloc(self: Self, T: type, n: usize, attr: Attribute) Error!DmaMemory {
     return .{
         .cpu = memory.cpu,
         .bus = memory.bus,
-        .size = aligned_size,
+        .size = @sizeOf(T) * n,
     };
 }
 
 /// Free the given memory region.
 ///
-/// `memory` must be identical to the memory returned by a previous call to `allocPages()`.
+/// `memory` must be identical to the memory returned by a previous call to `allocPages()`, `allocBytes()`, or `alloc()`.
 pub fn freePages(self: Self, memory: DmaMemory) void {
     rtt.expectEqual(0, memory.bus % page_size);
 
+    const size = std.mem.alignForward(usize, memory.size, page_size);
     self.vtable.freePages(self.ptr, .{
         .cpu = memory.cpu,
         .bus = memory.bus - self.offset,
-        .size = memory.size,
+        .size = size,
     });
 }
 
@@ -119,12 +120,14 @@ pub fn freePages(self: Self, memory: DmaMemory) void {
 ///
 /// `memory` must be identical to the memory returned by a previous call to `allocBytes()`.
 pub fn freeBytes(self: Self, memory: DmaMemory) void {
-    const size = std.mem.alignForward(usize, memory.size, page_size);
-    return self.freePages(.{
-        .cpu = memory.cpu,
-        .bus = memory.bus,
-        .size = size,
-    });
+    self.freePages(memory);
+}
+
+/// Free the given memory region.
+///
+/// `memory` must be identical to the memory returned by a previous call to `alloc()`.
+pub fn free(self: Self, memory: DmaMemory) void {
+    self.freePages(memory);
 }
 
 /// Synchronize the given memory region for CPU access.
