@@ -107,8 +107,7 @@ pub fn init(self: *Self) Error!void {
                 rtt.expect(false);
             }
             self.evlog.sync();
-
-            // TODO: should restart halting command processing.
+            self.restart();
         }
     }
 }
@@ -132,6 +131,33 @@ pub fn invall(self: *Self) Error!void {
     try self.cmdbuf.push(.{ .invalidate_iommu_all = .{} });
     self.cmdbuf.sync();
     try self.cmdbuf.barrier();
+}
+
+/// Restart the IOMMU command processing after the IOMMU halts it.
+///
+/// All the commands in the command buffer are discarded.
+fn restart(self: *Self) void {
+    if (self.vi.read(Status).cmd_buf_run) {
+        log.warn("restart() called while command processing is running", .{});
+        return;
+    }
+
+    self.vi.waitFor(Status, .{
+        .cmd_buf_run = false,
+    }, null);
+    self.vi.modify(Control, .{
+        .cmd_buf_en = false,
+    });
+
+    // Head pointer position is implementation defined, so discard all commands.
+    self.vi.writei(CmdHead, self.vi.readi(CmdTail));
+
+    self.vi.modify(Control, .{
+        .cmd_buf_en = true,
+    });
+    self.vi.waitFor(Status, .{
+        .cmd_buf_run = true,
+    }, null);
 }
 
 // =============================================================
