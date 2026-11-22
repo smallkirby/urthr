@@ -49,3 +49,5 @@ heade = "heade"
 # RISC-V
 sie = "sie" # SIE bit of SSTATUS CSR
 stip = "stip" # Supervisor Timer Interrupt pending.
+# AMD-vi
+gam = "gam" # Guest virtual APIC mode
