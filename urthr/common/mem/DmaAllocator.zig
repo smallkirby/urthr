@@ -88,6 +88,20 @@ pub fn allocBytes(self: Self, size: usize, attr: Attribute) Error!DmaMemory {
     };
 }
 
+/// Allocate an array of `n` items of the type `T`.
+///
+/// The allocated memory can be used for DMA operations.
+pub fn alloc(self: Self, T: type, n: usize, attr: Attribute) Error!DmaMemory {
+    const aligned_size = std.mem.alignForward(usize, @sizeOf(T) * n, common.mem.size_4kib);
+    const num_pages = aligned_size / page_size;
+    const memory = try self.allocPages(num_pages, attr);
+    return .{
+        .cpu = memory.cpu,
+        .bus = memory.bus,
+        .size = aligned_size,
+    };
+}
+
 /// Free the given memory region.
 ///
 /// `memory` must be identical to the memory returned by a previous call to `allocPages()`.

@@ -14,10 +14,179 @@ const Vi = mmio.Module(.{ .natural = u64 }, .{
 /// Register module.
 vi: Vi,
 
+/// Device table.
+dt: DmaMemory,
+
+/// Managed DMA allocator.
+allocator: DmaAllocator,
+
+pub const Error = common.mem.Error;
+
 /// Create a new AMD-Vi instance.
-pub fn new(base: usize) Self {
-    return .{ .vi = .new(base) };
+pub fn new(base: usize, allocator: DmaAllocator) Self {
+    return .{
+        .vi = .new(base),
+        .dt = undefined,
+        .allocator = allocator,
+    };
 }
+
+/// Initialize IOMMU with all devices passed through.
+pub fn init(self: *Self) Error!void {
+    // Allocate device table pages.
+    self.dt = try self.allocator.alloc(DevTableEntry, num_dt_ents, .normal);
+    @memset(self.dt.slice(DevTableEntry), std.mem.zeroes(DevTableEntry));
+    self.allocator.syncForDevice(self.dt.cpu, self.dt.size);
+
+    // Set the address of cleared device table.
+    self.vi.write(TableBase, .init(self.dt.bus, self.dt.size));
+}
+
+// =============================================================
+// Device Table
+// =============================================================
+
+/// DeviceID derived from Peripheral RequesterID.
+pub const DeviceId = u16;
+
+/// The number of device table entries in a table.
+const num_dt_ents = std.math.pow(usize, 2, @bitSizeOf(DeviceId));
+
+/// Device Table Entry.
+const DevTableEntry = packed struct(u256) {
+    /// Rest of this entry is valid.
+    v: bool,
+    /// Translation information valid.
+    tv: bool,
+    /// Reserved.
+    _2: u2 = 0,
+    /// CXL IO bits in ATS completions for CXL devices that implement the .cache interface.
+    cxl_mem_attr: u3,
+    /// Host Access Dirty.
+    had: Had,
+    /// Paging mode.
+    mode: PagingMode,
+    /// System physical address of the root page table for the I/O device for GPA-to-SPA translation.
+    pgtbl_root: u40,
+    /// PPR enable.
+    ppr: bool,
+    /// Guest PPR response with PASID.
+    gprp: bool,
+    /// Guest I/O protection valid.
+    giov: bool,
+    /// Guest translation valid.
+    gv: bool,
+    /// Guest levels translated.
+    glx: u2,
+    /// Guest CR3 table root pointer.
+    gcr3trp: u3,
+    /// I/O read permission.
+    ir: bool,
+    /// I/O write permission.
+    iw: bool,
+    /// Reserved.
+    _63: u1 = 0,
+
+    /// DomainID.
+    /// 16-bit integer chosen by SW that the IOMMU must use to tag its internal translation caches and mark event log entries.
+    domainid: u16,
+    /// GCR3 Table Root Pointer.
+    gcr3tbl_root_lo: u16,
+    /// IOTLB enable.
+    i: bool,
+    /// Suppress I/O page fault events.
+    se: bool,
+    /// Suppress all I/O page fault events.
+    sa: bool,
+    /// Port I/O control.
+    ioctl: u2,
+    /// IOTLB cache hint.
+    cache: bool,
+    /// Snoop disable.
+    sd: bool,
+    /// Allow exclusion.
+    ex: bool,
+    /// System management message enable.
+    sysmgt: u2,
+    /// Secure ATS.
+    sats: bool,
+    /// GCR3 Table Root Pointer [51:31].
+    gcr3tbl_root_hi: u21,
+
+    /// Interrupt map valid.
+    iv: bool,
+    /// Interrupt table length.
+    int_tab_len: u4,
+    /// Ignore unmapped interrupts.
+    ig: bool,
+    /// Interrupt table root pointer.
+    int_tab_root: u46,
+    /// Reserved.
+    _180: u2 = 0,
+    /// Guest paging mode.
+    gpmode: u2,
+    /// INIT pass-through.
+    init_pass: bool,
+    /// ExtInt pass-through.
+    eint_pass: bool,
+    /// NMI pass-through.
+    nmi_pass: bool,
+    /// Host Page Table Mode Hint.
+    hpt_mode: u1,
+    /// Interrupt control.
+    int_ctl: u2,
+    /// LINT0 pass-through.
+    lint0pass: bool,
+    /// LINT1 pass-through.
+    lint1pass: bool,
+
+    /// Reserved.
+    _192: u15 = 0,
+    /// Virtualize IOMMU enabled.
+    vimu_en: bool,
+    /// Guest DeviceID.
+    gdeviceid: u16,
+    /// GuestID.
+    guestid: u16,
+    /// Reserved.
+    _240: u5 = 0,
+    /// Reserved.
+    _245: u1 = 0,
+    /// Attribute override valid.
+    attrv: bool,
+    ///
+    mode0fc: bool,
+    ///
+    snoop_attr: u8,
+};
+
+/// Host Access Dirty.
+const Had = enum(u2) {
+    /// IOMMU does not set Access and Dirty bits in the host page table.
+    none = 0b00,
+    /// IOMMU sets Access bits in the host page table corresponding to peripheral requests.
+    access = 0b01,
+    /// IOMMU sets Access and Dirty bits in the host page table corresponding to peripheral requests.
+    access_dirty = 0b11,
+};
+
+/// How IOMMU performs GPA-to-SPA translation.
+const PagingMode = enum(u3) {
+    /// Translation disabled.
+    disable = 0b000,
+    /// 1 Level Page Table (21-bit GPA)
+    @"1" = 0b001,
+    /// 2 Level Page Table (30-bit GPA)
+    @"2" = 0b010,
+    /// 3 Level Page Table (39-bit GPA)
+    @"3" = 0b011,
+    /// 4 Level Page Table (48-bit GPA)
+    @"4" = 0b100,
+    /// 5 Level Page Table (57-bit GPA)
+    @"5" = 0b101,
+    /// 6 Level Page Table (64-bit GPA)
+    @"6" = 0b110,
+};
 
 // =============================================================
 // Registers
@@ -36,6 +205,19 @@ const TableBase = packed struct(u64) {
     dev_tab_base: u40,
     /// Reserved.
     _52: u12 = 0,
+
+    /// Create a table base register value.
+    ///
+    /// `phys` is the bus address of the first table.
+    /// `size` is a size in bytes of the device table.
+    pub fn init(phys: usize, size: usize) TableBase {
+        rtt.expectEqual(0, phys % 4096);
+        rtt.expectEqual(0, size % 4096);
+        return .{
+            .size = @intCast(size / 4096 - 1),
+            .dev_tab_base = @truncate(phys >> 12),
+        };
+    }
 };
 
 /// IOMMU Control Register.
@@ -339,5 +521,8 @@ const Status = packed struct(u64) {
 const std = @import("std");
 const log = std.log.scoped(.amdvi);
 const common = @import("common");
+const rtt = common.rtt;
 const mmio = common.io.mmio;
 const Reg = common.io.Reg;
+const DmaAllocator = common.mem.DmaAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;
