@@ -367,7 +367,7 @@ const RxQueue = struct {
             desc.ctrl_stat = std.mem.zeroInit(Control, .{});
         }
 
-        self.allocator.syncForDevice(self.memory.cpu, self.memory.size);
+        self.allocator.syncForDeviceAll(self.memory);
     }
 
     /// Get a RX buffer if it has been consumed by MAC.
@@ -395,7 +395,7 @@ const RxQueue = struct {
     /// The descriptor remains owned by software until `releaseRxBuf` is called.
     /// Returns null if no packet is available in the queue.
     pub fn tryAcquireRx(self: *RxQueue) ?net.Device.PollResult {
-        self.allocator.syncForCpu(self.memory.cpu, self.memory.size);
+        self.allocator.syncForCpuAll(self.memory);
 
         for (0..num_desc) |i| {
             const idx = (self.next_idx + i) % num_desc;
@@ -427,7 +427,7 @@ const RxQueue = struct {
     /// Returns the bus address of the buffer.
     fn createBuffer(self: *const RxQueue) DmaAllocator.Error!DmaMemory {
         const page = try self.allocator.allocBytes(buffer_size, .normal);
-        self.allocator.syncForCpu(page.cpu, page.size);
+        self.allocator.syncForCpuAll(page);
         return page;
     }
 
@@ -516,7 +516,7 @@ const TxQueue = struct {
             };
         }
 
-        self.allocator.syncForDevice(self.memory.cpu, self.memory.size);
+        self.allocator.syncForDeviceAll(self.memory);
     }
 
     /// Copy frame data into the TX buffer and set up the descriptor.

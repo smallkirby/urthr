@@ -40,7 +40,7 @@ pub const Ring = struct {
             .chain = false,
             .ioc = false,
         }));
-        allocator.syncForDevice(memory.cpu, memory.size);
+        allocator.syncForDeviceAll(memory);
 
         return .{
             .memory = memory,
@@ -131,8 +131,8 @@ pub const EventRing = struct {
             .size = trbs_per_page,
         };
 
-        self.allocator.syncForDevice(self.erst.cpu, self.erst.size);
-        self.allocator.syncForDevice(self.trbs.cpu, self.trbs.size);
+        self.allocator.syncForDeviceAll(self.erst);
+        self.allocator.syncForDeviceAll(self.trbs);
 
         // Set the Event Ring Segment Table.
         self.interrupter.writei(regs.Erstsz, @as(u32, @intCast(self.erst.slice(ErstEntry).len)));

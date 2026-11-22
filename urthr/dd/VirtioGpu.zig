@@ -246,7 +246,7 @@ pub fn setupFramebuffer(self: *Self, display: DisplayInfo) Error!Framebuffer {
 fn flushFramebuffer(ctx: *anyopaque) void {
     const scanout: *Scanout = @ptrCast(@alignCast(ctx));
     const gpu = scanout.gpu;
-    gpu.dma.syncForDevice(scanout.buf.cpu, scanout.buf.size);
+    gpu.dma.syncForDeviceAll(scanout.buf);
 
     gpu.transferToHost2d(
         scanout.resource_id,

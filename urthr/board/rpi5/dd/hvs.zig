@@ -301,7 +301,7 @@ pub fn createFramebuffer(allocator: Allocator, chan: Channel, vt: Framebuffer.VT
 
     // Clear the whole buffer.
     @memset(buf.slice(u32), 0xFF00_0000);
-    dma.syncForDevice(buf.cpu, buf.size);
+    dma.syncForDeviceAll(buf);
 
     // Create a plane and install it to the channel.
     screen.* = .{

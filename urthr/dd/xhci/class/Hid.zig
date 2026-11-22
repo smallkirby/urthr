@@ -122,7 +122,7 @@ fn onTransferEvent(ctx: *anyopaque, event: *const trbs.XferEventTrb, _: *Endpoin
         return;
     }
 
-    self.device.dma.syncForCpu(self.buf.cpu, self.buf.size);
+    self.device.dma.syncForCpuAll(self.buf);
 
     switch (self.instance) {
         .keyboard => self.handleKbdInput(self.buf),

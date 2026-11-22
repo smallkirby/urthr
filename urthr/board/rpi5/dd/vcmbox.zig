@@ -155,11 +155,11 @@ pub const props = struct {
             inline for (r.values) |value| b.push(value);
         }
         b.finalize();
-        dma.syncForDevice(buf.cpu, buf.size);
+        dma.syncForDeviceAll(buf);
 
         // Notify VC of the message.
         call(.prop2vc, @intCast(buf.bus));
-        dma.syncForCpu(buf.cpu, buf.size);
+        dma.syncForCpuAll(buf);
         if (!isValidCode(msg[1])) {
             log.err("VC mailbox call failed: response=0x{X}", .{msg[1]});
             return Error.DeviceError;

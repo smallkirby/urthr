@@ -36,7 +36,7 @@ pub fn init(self: *Self) Error!void {
     // Allocate device table pages.
     self.dt = try self.allocator.alloc(DevTableEntry, num_dt_ents, .normal);
     @memset(self.dt.slice(DevTableEntry), std.mem.zeroes(DevTableEntry));
-    self.allocator.syncForDevice(self.dt.cpu, self.dt.size);
+    self.allocator.syncForDeviceAll(self.dt);
 
     // Set the address of cleared device table.
     self.vi.write(TableBase, .init(self.dt.bus, self.dt.size));

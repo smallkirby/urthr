@@ -141,6 +141,11 @@ pub fn syncForCpuAny(self: Self, obj: anytype) void {
     self.syncForCpu(cpu, size);
 }
 
+/// Synchronize entire memory for CPU access.
+pub fn syncForCpuAll(self: Self, memory: DmaMemory) void {
+    self.syncForCpu(memory.cpu, memory.size);
+}
+
 /// Synchronize the given memory region for device access.
 pub fn syncForDevice(self: Self, cpu: usize, size: usize) void {
     self.vtable.sync(self.ptr, cpu, size, .device);
@@ -150,6 +155,11 @@ pub fn syncForDevice(self: Self, cpu: usize, size: usize) void {
 pub fn syncForDeviceAny(self: Self, obj: anytype) void {
     const cpu, const size = objinfo(obj);
     self.syncForDevice(cpu, size);
+}
+
+/// Synchronize entire memory for device access.
+pub fn syncForDeviceAll(self: Self, memory: DmaMemory) void {
+    self.syncForDevice(memory.cpu, memory.size);
 }
 
 /// Returns the pairof address and size of the given object.

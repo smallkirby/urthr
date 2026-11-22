@@ -144,7 +144,7 @@ fn onSlotEnabled(self: *Self, event: *const trbs.CmdCompletionTrb) Error!void {
     const dc = try self.dma.allocBytes(mem.page_size, .normal);
     errdefer self.dma.freeBytes(dc);
     @memset(dc.slice(u8), 0);
-    self.dma.syncForDevice(dc.cpu, dc.size);
+    self.dma.syncForDeviceAll(dc);
     self.xhc.setDeviceContext(slot, dc.bus);
     self.dctx = dc;
 
@@ -193,7 +193,7 @@ fn onSlotEnabled(self: *Self, event: *const trbs.CmdCompletionTrb) Error!void {
             .dcs = tr.pcs,
         };
     }
-    self.dma.syncForDevice(icm.cpu, icm.size);
+    self.dma.syncForDeviceAll(icm);
 
     // Request to assign the address.
     self.state = .waiting_address;
@@ -496,7 +496,7 @@ fn onConfigSet(_: ?*anyopaque, self: *Self, _: ?DmaMemory) Error!void {
     }
 
     // Sync the Input Context for the device.
-    self.dma.syncForDevice(icm.cpu, icm.size);
+    self.dma.syncForDeviceAll(icm);
 
     // Issue Configure Endpoint command.
     var cmd = trbs.ConfigureEndpointTrb.from(
