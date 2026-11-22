@@ -60,7 +60,7 @@ pub fn init(self: *Self) Error!void {
     self.vi.writei(CmdTail, 0);
 
     // Initialize event log.
-    self.evlog = try EventLog.init(self.allocator);
+    self.evlog = try EventLog.init(self.vi, self.allocator);
     self.vi.write(EventLogBase, .init(self.evlog.buf.bus, EventLog.nents));
     self.vi.writei(EventLogHead, 0);
     self.vi.writei(EventLogTail, 0);
@@ -86,6 +86,22 @@ pub fn init(self: *Self) Error!void {
     } }) catch unreachable;
     self.cmdbuf.sync();
     rtt.expectEqual(@sizeOf(Cmd), self.vi.read(CmdHead).ptr);
+
+    // Check if event logging is working.
+    {
+        self.cmdbuf.push(@bitCast(@as(u128, 0xDEADBEEF))) catch unreachable;
+        self.cmdbuf.sync();
+
+        if (self.evlog.pop()) |ev| {
+            const code = ev.getCode();
+            rtt.expectEqual(.illegal_command_error, code);
+        } else {
+            rtt.expect(false);
+        }
+        self.evlog.sync();
+
+        // TODO: should restart halting command processing.
+    }
 }
 
 // =============================================================
@@ -400,16 +416,21 @@ const EventLog = struct {
     /// DMA memory for the event log.
     buf: DmaMemory,
     /// Head offset from the base of the event log.
-    head: usize,
-    /// Tail offset from the base of the event log.
-    tail: usize,
+    head: u19,
+
+    /// Managed DMA allocator.
+    _dma: DmaAllocator,
+    /// Module.
+    _vi: Vi,
 
     /// Size in bytes of the event log.
     const buf_size = 4096;
+    /// Unit size in bytes of a single event log entry.
+    const unit = @sizeOf(Event);
     /// The number of log entries in the event log.
     pub const nents = buf_size / @sizeOf(Event);
 
-    pub fn init(allocator: DmaAllocator) Error!EventLog {
+    pub fn init(vi: Vi, allocator: DmaAllocator) Error!EventLog {
         const buf = try allocator.allocBytes(buf_size, .normal);
         @memset(buf.slice(u8), 0);
         allocator.syncForDeviceAll(buf);
@@ -417,8 +438,26 @@ const EventLog = struct {
         return .{
             .buf = buf,
             .head = 0,
-            .tail = 0,
+            ._dma = allocator,
+            ._vi = vi,
         };
+    }
+
+    /// Pop a single event from the event log.
+    ///
+    /// Returns null if the event log is empty.
+    pub fn pop(self: *EventLog) ?Event {
+        const tail = self._vi.read(EventLogTail).ptr;
+        if (self.head == tail) return null;
+
+        self._dma.syncForCpuAll(self.buf); // TODO: should not invalidate all
+        defer self.head = (self.head +% unit) % buf_size;
+        return self.buf.slice(Event)[self.head / unit];
+    }
+
+    /// Synchronize the head pointer with IOMMU.
+    pub fn sync(self: *EventLog) void {
+        self._vi.writei(EventLogHead, self.head);
     }
 };
 
@@ -440,9 +479,15 @@ const Event = packed union {
     page_tab_hardware_error: packed struct(u128) {
         _: u128,
     },
-    /// Not implemented yet.
+    /// IOMMU reads an invalid command.
+    /// Halts command processing.
     illegal_command_error: packed struct(u128) {
-        _: u128,
+        /// Reserved.
+        _0: u60 = 0,
+        /// Event code.
+        code: EventCode = .illegal_command_error,
+        /// SPA of the invalid command.
+        address: u64,
     },
     /// Not implemented yet.
     command_hardware_error: packed struct(u128) {
@@ -464,6 +509,11 @@ const Event = packed union {
     event_counter_zero: packed struct(u128) {
         _: u128,
     },
+
+    pub fn getCode(self: Event) EventCode {
+        const generic: *const EventGeneric = @ptrCast(&self);
+        return generic.code;
+    }
 
     comptime {
         std.debug.assert(@sizeOf(Event) == @sizeOf(u128));
