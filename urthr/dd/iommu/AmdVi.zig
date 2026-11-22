@@ -7,10 +7,13 @@ const Self = @This();
 const Vi = mmio.Module(.{ .natural = u64 }, .{
     Reg(0x0000, TableBase),
     Reg(0x0008, CmdBufBase),
+    Reg(0x0010, EventLogBase),
     Reg(0x0018, Control),
     Reg(0x0030, Efr),
     Reg(0x2000, CmdHead),
     Reg(0x2008, CmdTail),
+    Reg(0x2010, EventLogHead),
+    Reg(0x2018, EventLogTail),
     Reg(0x2020, Status),
 });
 
@@ -21,6 +24,8 @@ vi: Vi,
 dt: DmaMemory,
 /// Command buffer.
 cmdbuf: CmdBuf,
+/// Event log.
+evlog: EventLog,
 
 /// Managed DMA allocator.
 allocator: DmaAllocator,
@@ -33,6 +38,7 @@ pub fn new(base: usize, allocator: DmaAllocator) Self {
         .vi = .new(base),
         .dt = undefined,
         .cmdbuf = undefined,
+        .evlog = undefined,
         .allocator = allocator,
     };
 }
@@ -52,6 +58,12 @@ pub fn init(self: *Self) Error!void {
     self.vi.write(CmdBufBase, .init(self.cmdbuf.buf.bus, CmdBuf.nents));
     self.vi.writei(CmdHead, 0);
     self.vi.writei(CmdTail, 0);
+
+    // Initialize event log.
+    self.evlog = try EventLog.init(self.allocator);
+    self.vi.write(EventLogBase, .init(self.evlog.buf.bus, EventLog.nents));
+    self.vi.writei(EventLogHead, 0);
+    self.vi.writei(EventLogTail, 0);
 }
 
 // =============================================================
@@ -331,6 +343,118 @@ const CmdOpcode = enum(u4) {
 };
 
 // =============================================================
+// Event Log
+// =============================================================
+
+/// IOMMU event log.
+const EventLog = struct {
+    /// DMA memory for the event log.
+    buf: DmaMemory,
+    /// Head offset from the base of the event log.
+    head: usize,
+    /// Tail offset from the base of the event log.
+    tail: usize,
+
+    /// Size in bytes of the event log.
+    const buf_size = 4096;
+    /// The number of log entries in the event log.
+    pub const nents = buf_size / @sizeOf(Event);
+
+    pub fn init(allocator: DmaAllocator) Error!EventLog {
+        const buf = try allocator.allocBytes(buf_size, .normal);
+        @memset(buf.slice(u8), 0);
+        allocator.syncForDeviceAll(buf);
+
+        return .{
+            .buf = buf,
+            .head = 0,
+            .tail = 0,
+        };
+    }
+};
+
+/// IOMMU event log entry.
+const Event = packed union {
+    /// Not implemented yet.
+    illegal_dev_table_entry: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    io_page_fault: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    dev_tab_hardware_error: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    page_tab_hardware_error: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    illegal_command_error: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    command_hardware_error: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    iotlb_inv_timeout: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    invalid_device_request: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    invalid_ppr_request: packed struct(u128) {
+        _: u128,
+    },
+    /// Not implemented yet.
+    event_counter_zero: packed struct(u128) {
+        _: u128,
+    },
+
+    comptime {
+        std.debug.assert(@sizeOf(Event) == @sizeOf(u128));
+    }
+};
+
+/// Generic Event Log Buffer Entry.
+const EventGeneric = packed struct(u128) {
+    /// First opcode dependent operand.
+    operand1: u60,
+    /// Event code.
+    code: EventCode,
+    /// Second opcode dependent operand.
+    operand2: u64,
+};
+
+const EventCode = enum(u4) {
+    /// ILLEGAL_DEV_TABLE_ENTRY.
+    illegal_dev_table_entry = 0b0001,
+    /// IO_PAGE_FAULT.
+    io_page_fault = 0b0010,
+    /// DEV_TAB_HARDWARE_ERROR.
+    dev_tab_hardware_error = 0b0011,
+    /// PAGE_TAB_HARDWARE_ERROR.
+    page_tab_hardware_error = 0b0100,
+    /// ILLEGAL_COMMAND_ERROR.
+    illegal_command_error = 0b0101,
+    /// COMMAND_HARDWARE_ERROR.
+    command_hardware_error = 0b0110,
+    /// IOTLB_INV_TIMEOUT.
+    iotlb_inv_timeout = 0b0111,
+    /// INVALID_DEVICE_REQUEST.
+    invalid_device_request = 0b1000,
+    /// INVALID_PPR_REQUEST.
+    invalid_ppr_request = 0b1001,
+    /// EVENT_COUNTER_ZERO.
+    event_counter_zero = 0b1010,
+};
+
+// =============================================================
 // Registers
 // =============================================================
 
@@ -382,6 +506,34 @@ const CmdBufBase = packed struct(u64) {
         rtt.expectEqual(0, phys % 4096);
         rtt.expectEqual(0, len % 256);
         rtt.expect(std.math.isPowerOfTwo(len));
+        rtt.expect(0b1000 <= comlen and comlen <= 0b1111);
+        return .{
+            .base = @intCast(phys),
+            .len = @intCast(comlen),
+        };
+    }
+};
+
+/// Event Log Base Address Register.
+const EventLogBase = packed struct(u64) {
+    /// Event log base address. Bits [11:0] must be zero.
+    base: u52,
+    /// Reserved.
+    _52: u4 = 0,
+    /// Event log length.
+    len: u4,
+    /// Reserved.
+    _60: u4 = 0,
+
+    /// Create a event log buffer base address register value.
+    ///
+    /// `phys` is the bus address of the event log buffer.
+    /// `len` is the number of event log entries.
+    pub fn init(phys: usize, len: usize) EventLogBase {
+        rtt.expectEqual(0, phys % 4096);
+        rtt.expectEqual(0, len % 256);
+        rtt.expect(std.math.isPowerOfTwo(len));
+        const comlen: usize = @ctz(len);
         rtt.expect(0b1000 <= comlen and comlen <= 0b1111);
         return .{
             .base = @intCast(phys),
@@ -640,7 +792,7 @@ const Glx = enum(u2) {
 };
 
 // =============================================================
-// Command and Event Status Register
+// Command and Event Log Pointer Registers
 
 /// Command Buffer Head Pointer Register.
 const CmdHead = packed struct(u64) {
@@ -657,6 +809,25 @@ const CmdTail = packed struct(u64) {
     /// Reserved.
     _19: u45 = 0,
 };
+
+/// Event Log Head Pointer Register.
+const EventLogHead = packed struct(u64) {
+    /// Event log head pointer. Bits [4:0] must be zero.
+    ptr: u19,
+    /// Reserved.
+    _19: u45 = 0,
+};
+
+/// Event Log Tail Pointer Register.
+const EventLogTail = packed struct(u64) {
+    /// Event log tail pointer. Bits [4:0] must be zero.
+    ptr: u19,
+    /// Reserved.
+    _19: u45 = 0,
+};
+
+// =============================================================
+// Command and Event Status Register
 
 /// IOMMU Status Register.
 const Status = packed struct(u64) {
