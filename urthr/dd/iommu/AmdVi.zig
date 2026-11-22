@@ -30,7 +30,10 @@ evlog: EventLog,
 /// Managed DMA allocator.
 allocator: DmaAllocator,
 
-pub const Error = common.mem.Error;
+pub const Error = common.mem.Error || error{
+    /// Command buffer's ring buffer is full.
+    RingFull,
+};
 
 /// Create a new AMD-Vi instance.
 pub fn new(base: usize, allocator: DmaAllocator) Self {
@@ -79,23 +82,23 @@ pub fn init(self: *Self) Error!void {
     if (urd.enable_rtt) {
         // Check if command queue is working.
         {
-            self.cmdbuf.push(.{ .completion_wait = .{
+            try self.cmdbuf.push(.{ .completion_wait = .{
                 .s = false,
                 .i = false,
                 .f = false,
                 .store_address = 0,
                 .store_data = 0,
-            } }) catch unreachable;
+            } });
             self.cmdbuf.sync();
-            self.cmdbuf.barrier() catch unreachable;
+            try self.cmdbuf.barrier();
             rtt.expectEqual(@sizeOf(Cmd) * 2, self.vi.read(CmdHead).ptr);
         }
 
         // Check if event logging is working.
         {
-            self.cmdbuf.push(@bitCast(@as(u128, 0xDEADBEEF))) catch unreachable;
+            try self.cmdbuf.push(@bitCast(@as(u128, 0xDEADBEEF)));
             self.cmdbuf.sync();
-            self.cmdbuf.barrier() catch unreachable;
+            try self.cmdbuf.barrier();
 
             if (self.evlog.pop()) |ev| {
                 const code = ev.getCode();
@@ -108,6 +111,27 @@ pub fn init(self: *Self) Error!void {
             // TODO: should restart halting command processing.
         }
     }
+}
+
+/// Invalidate caches of the DeviceID.
+///
+/// Blocks until the request is processed by IOMMU.
+pub fn inv(self: *Self, deviceid: DeviceId) Error!void {
+    try self.cmdbuf.push(.{ .invalidate_devtab_entry = .{
+        .deviceid = deviceid,
+    } });
+    self.cmdbuf.sync();
+    try self.cmdbuf.barrier();
+}
+
+/// Blocks until the request is processed by IOMMU.
+/// Invalidate all caches.
+pub fn invall(self: *Self) Error!void {
+    rtt.expectEqual(true, self.vi.read(Efr).ia_sup);
+
+    try self.cmdbuf.push(.{ .invalidate_iommu_all = .{} });
+    self.cmdbuf.sync();
+    try self.cmdbuf.barrier();
 }
 
 // =============================================================
@@ -307,11 +331,11 @@ const CmdBuf = struct {
     /// Push a command into the command buffer.
     ///
     /// Tail pointer is not advanced until `sync()` is called.
-    pub fn push(self: *CmdBuf, cmd: Cmd) error{Full}!void {
+    pub fn push(self: *CmdBuf, cmd: Cmd) Error!void {
         const head = self._vi.read(CmdHead).ptr;
         const next_tail = (self.tail +% unit) % buf_size;
         if (next_tail == head) {
-            return error.Full;
+            return Error.RingFull;
         }
 
         const cmds = self.buf.slice(Cmd);
@@ -326,7 +350,7 @@ const CmdBuf = struct {
     }
 
     /// Blocks until all commands in the command buffer have completed.
-    pub fn barrier(self: *CmdBuf) error{Full}!void {
+    pub fn barrier(self: *CmdBuf) Error!void {
         try self.push(.{ .completion_wait = .{
             .s = true,
             .i = false,
@@ -370,10 +394,19 @@ const Cmd = packed union {
         /// Store data.
         store_data: u64,
     },
-
-    /// Not implemented yet.
+    /// Invalidate Device Table entry of DeviceID from its internal caches.
+    ///
+    /// This command does not invalidate translation cache entries.
+    /// When removing a device from a domain, SW must issue INVALIDATE_IOMMU_PAGES for the associated DomainID.
     invalidate_devtab_entry: packed struct(u128) {
-        _: u128,
+        /// DeviceID.
+        deviceid: DeviceId,
+        /// Reserved.
+        _16: u44 = 0,
+        /// Opcode.
+        code: CmdOpcode = .invalidate_devtab_entry,
+        /// Reserved.
+        _64: u64 = 0,
     },
     /// Not implemented yet.
     invalidate_iommu_pages: packed struct(u128) {
@@ -395,9 +428,14 @@ const Cmd = packed union {
     complete_ppr_request: packed struct(u128) {
         _: u128,
     },
-    /// Not implemented yet.
+    /// Clear all address translation and interrupt remapping information from its translation caches.
     invalidate_iommu_all: packed struct(u128) {
-        _: u128,
+        /// Reserved.
+        _0: u60 = 0,
+        /// Opcode.
+        code: CmdOpcode = .invalidate_iommu_all,
+        /// Reserved.
+        _64: u64 = 0,
     },
     /// Not implemented yet.
     insert_guest_event: packed struct(u128) {
