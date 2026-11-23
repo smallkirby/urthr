@@ -31,6 +31,10 @@ evlog: EventLog,
 allocator: DmaAllocator,
 
 pub const Error = common.mem.Error || error{
+    /// The DVA is already mapped.
+    AlreadyMapped,
+    /// Invalid argument.
+    InvalidArgument,
     /// Command buffer's ring buffer is full.
     RingFull,
 };
@@ -361,6 +365,271 @@ const IntCtl = enum(u2) {
     unmapped = 0b01,
     /// Fixed and arbitrated interrupts remapped.
     remap = 0b10,
+};
+
+// =============================================================
+// Page table
+// =============================================================
+
+const PageTable = struct {
+    /// Root of the table tree.
+    root: *Node,
+    /// Number of translation levels.
+    mode: PagingMode,
+
+    /// Managed GPA.
+    allocator: Allocator,
+    /// Managed DMA allocator.
+    dma: DmaAllocator,
+
+    /// Size in bytes of a page table.
+    const table_size = 4096;
+    /// Number of entries in a page table.
+    const num_entries = table_size / @sizeOf(PageEntry);
+
+    /// Size of page.
+    const Granule = enum {
+        @"4kb",
+
+        /// Size in bytes for the granule.
+        pub fn size(self: Granule) usize {
+            return switch (self) {
+                .@"4kb" => 4096,
+            };
+        }
+    };
+
+    /// Access permission of a mapping.
+    const Perm = struct {
+        /// Device can read.
+        read: bool,
+        /// Device can write.
+        write: bool,
+    };
+
+    /// Arguments of a mapping.
+    const MapArgument = struct {
+        /// DVA to map.
+        dva: usize,
+        /// SPA to map.
+        spa: usize,
+        /// Size in bytes to map.
+        size: usize,
+        /// Access permission of the mapping.
+        perm: Perm,
+    };
+
+    /// Options of a mapping.
+    const MapOptions = struct {
+        /// Size of the pages to map.
+        granule: Granule = .@"4kb",
+    };
+
+    /// Single page table representation.
+    const Node = struct {
+        /// DMA memory of the table.
+        buf: DmaMemory,
+        /// Level of this table. Level 1 points to a 4KiB page.
+        level: u3,
+        /// Child page tables.
+        /// null if the entry is a leaf or absent.
+        children: [num_entries]?*Node,
+
+        /// Allocate a zeroed table. All entries are absent.
+        fn new(allocator: Allocator, dma: DmaAllocator, level: u3) Error!*Node {
+            const node = try allocator.create(Node);
+            errdefer allocator.destroy(node);
+
+            const buf = try dma.allocBytes(table_size, .normal);
+            errdefer dma.freeBytes(buf);
+            @memset(buf.slice(u8), 0);
+            dma.syncForDeviceAll(buf);
+
+            node.* = .{
+                .buf = buf,
+                .level = level,
+                .children = @splat(null),
+            };
+
+            return node;
+        }
+
+        /// Free this table and all of its children.
+        fn destroy(self: *Node, allocator: Allocator, dma: DmaAllocator) void {
+            for (self.children) |child| {
+                if (child) |c| {
+                    c.destroy(allocator, dma);
+                }
+            }
+            dma.freeBytes(self.buf);
+            allocator.destroy(self);
+        }
+    };
+
+    /// Create a page table that has only the empty root table.
+    pub fn init(mode: PagingMode, allocator: Allocator, dma: DmaAllocator) Error!PageTable {
+        rtt.expect(mode != .disable);
+
+        const root = try Node.new(
+            allocator,
+            dma,
+            @backingInt(mode),
+        );
+        return .{
+            .root = root,
+            .mode = mode,
+            .allocator = allocator,
+            .dma = dma,
+        };
+    }
+
+    /// Free all the tables.
+    pub fn deinit(self: *PageTable) void {
+        self.root.destroy(self.allocator, self.dma);
+    }
+
+    /// Bus address of the root table.
+    pub fn rootAddr(self: PageTable) usize {
+        return self.root.buf.bus;
+    }
+
+    /// Map the given DVA to SPA using the given granule size..
+    ///
+    /// This function does not invalidate the IOTLB.
+    fn mapImpl(self: *PageTable, arg: MapArgument, opts: MapOptions) Error!void {
+        const spa = arg.spa;
+        const dva = arg.dva;
+        const size = arg.size;
+        const granule = opts.granule.size();
+
+        if (spa % granule != 0) {
+            return Error.InvalidArgument;
+        }
+        if (dva % granule != 0) {
+            return Error.InvalidArgument;
+        }
+        if (size % granule != 0) {
+            return Error.InvalidArgument;
+        }
+        if (size != 0 and !self.isInRange(dva + size - 1)) {
+            return Error.InvalidArgument;
+        }
+
+        for (0..size / granule) |i| {
+            const dva_cur = dva + i * granule;
+            const spa_cur = spa + i * granule;
+            const node = try self.lookupSpawn(dva_cur);
+            const idx = index(dva_cur, node.level);
+
+            const ent = &node.buf.slice(PageEntry)[idx];
+            if (ent.pr) return Error.AlreadyMapped;
+
+            ent.* = .{
+                .pr = true,
+                .next_level = .leaf,
+                .address = @as(u40, @intCast(spa_cur >> 12)),
+                .ir = arg.perm.read,
+                .iw = arg.perm.write,
+            };
+            self.dma.syncForDeviceAny(ent);
+        }
+    }
+
+    /// Lookup the page table entry for the given DVA.
+    ///
+    /// If the descriptor does not exist, spawn a new table descriptor recursively.
+    fn lookupSpawn(self: *PageTable, dva: usize) Error!*Node {
+        var node = self.root;
+        while (node.level > 1) {
+            const idx = index(dva, node.level);
+
+            node = node.children[idx] orelse blk: {
+                const child = try Node.new(
+                    self.allocator,
+                    self.dma,
+                    node.level - 1,
+                );
+
+                const ent = &node.buf.slice(PageEntry)[idx];
+                ent.* = .{
+                    .pr = true,
+                    .next_level = .lvl(child.level),
+                    .address = @as(u40, @intCast(child.buf.bus >> 12)),
+                    .ir = true,
+                    .iw = true,
+                };
+                self.dma.syncForDeviceAny(ent);
+                node.children[idx] = child;
+
+                break :blk child;
+            };
+        }
+
+        return node;
+    }
+
+    /// Index of the entry in the table of the given level.
+    fn index(dva: usize, level: u3) usize {
+        const shift: u6 = @intCast(12 + 9 * (@as(u7, level) - 1));
+        return (dva >> shift) & (num_entries - 1);
+    }
+
+    /// Check if the DVA can be translated with this page table.
+    fn isInRange(self: *const PageTable, dva: usize) bool {
+        const avail_width: u7 = 12 + 9 * @as(u7, @backingInt(self.mode));
+        return avail_width >= 64 or (dva >> @intCast(avail_width)) == 0;
+    }
+};
+
+/// I/O page table entry layout for host translations.
+///
+/// Level 1 points to a 4KiB page and higher levels point to the next page table or a larger leaf page.
+const PageEntry = packed struct(u64) {
+    /// Present.
+    pr: bool,
+    /// Reserved.
+    _1: u4 = 0,
+    /// Accessed.
+    accessed: bool = false,
+    /// Dirty.
+    /// Used only for PTE.
+    dirty: bool = false,
+    /// Reserved.
+    _7: u2 = 0,
+    /// Next page translation level.
+    next_level: NextLevel,
+    /// SPA of the page for PTE / SPA of the next page descriptor.
+    address: u40,
+    /// Reserved.
+    _52: u5 = 0,
+    /// Page Migration State. Used only when Tiered Memory Page Migration is supported.
+    /// Used only for PTE.
+    migration_state: u2 = 0,
+    /// Must be 0 for GVA-to-SPA translation.
+    /// Used only for PTE.
+    u: bool = false,
+    /// Force Coherent.
+    /// Used only for PTE.
+    fc: bool = false,
+    /// Read permission.
+    ir: bool,
+    /// Write permission.
+    iw: bool,
+    /// Ignored.
+    _63: u1 = 0,
+
+    const NextLevel = enum(u3) {
+        /// Points to a leaf page with a size determined by the page table level.
+        leaf = 0b000,
+        /// Points to a leaf page with a size determined by lower bits of `address`.
+        override = 0b111,
+
+        _,
+
+        pub fn lvl(n: u3) NextLevel {
+            return @fromBackingInt(@intCast(n));
+        }
+    };
 };
 
 // =============================================================
@@ -1301,8 +1570,10 @@ const Status = packed struct(u64) {
 
 const std = @import("std");
 const log = std.log.scoped(.amdvi);
+const Allocator = std.mem.Allocator;
 const common = @import("common");
 const rtt = common.rtt;
+const util = common.util;
 const mmio = common.io.mmio;
 const Reg = common.io.Reg;
 const DmaAllocator = common.mem.DmaAllocator;
