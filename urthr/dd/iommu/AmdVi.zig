@@ -170,6 +170,8 @@ fn restart(self: *Self) void {
 
 /// DeviceID derived from Peripheral RequesterID.
 pub const DeviceId = u16;
+/// DomainID type.
+pub const Domain = u16;
 
 /// The number of device table entries in a table.
 const num_dt_ents = std.math.pow(usize, 2, @bitSizeOf(DeviceId));
@@ -238,7 +240,7 @@ const DevTableEntry = packed struct(u256) {
 
     /// DomainID.
     /// 16-bit integer chosen by SW that the IOMMU must use to tag its internal translation caches and mark event log entries.
-    domainid: u16,
+    domainid: Domain,
     /// GCR3 Table Root Pointer.
     gcr3tbl_root_lo: u16,
     /// IOTLB enable.
@@ -309,7 +311,7 @@ const DevTableEntry = packed struct(u256) {
     snoop_attr: u8,
 
     /// Construct a DTE that translates a device address using the given I/O page table.
-    pub fn translated(root: usize, mode: PagingMode, domain: u16) DevTableEntry {
+    pub fn translated(root: usize, mode: PagingMode, domain: Domain) DevTableEntry {
         return std.mem.zeroInit(DevTableEntry, .{
             .v = true,
             .tv = true,
@@ -621,13 +623,92 @@ const EventLog = struct {
 
 /// IOMMU event log entry.
 const Event = packed union {
-    /// Not implemented yet.
+    /// Envounters a Device Table entry that it does not support or that is formatted incorrectly.
     illegal_dev_table_entry: packed struct(u128) {
-        _: u128,
+        /// DeviceID that caused the Device Table lookup.
+        deviceid: DeviceId,
+        /// Guest PASID[19:16] from the transaction when GN=1.
+        pasid_hi: u4,
+        /// Reserved.
+        _20: u7 = 0,
+        vnr: bool,
+        /// Reserved.
+        _28: u1 = 0,
+        /// Virtualized Event Log.
+        vevent: bool,
+        /// Virtualized PPR Log.
+        vppr: bool,
+        /// Virtualized Command Buffer.
+        vcmd: bool,
+        /// Guest PASID[15:0] from the transaction when GN=1.
+        pasid_lo: u16,
+        /// Guest / nested.
+        gn: bool,
+        /// Reserved.
+        _49: u2 = 0,
+        /// Interrupt.
+        i: bool,
+        /// Reserved.
+        _52: u1 = 0,
+        /// Read / write.
+        rw: enum(u1) { read = 0, write = 1 },
+        /// Reserved.
+        _54: u1 = 0,
+        /// Reserved bit not zero or invalid level encoding.
+        rz: bool,
+        /// Transaction that caused the Device Table lookup was a translation request.
+        tr: bool,
+        /// Reserved.
+        _57: u3 = 0,
+        /// Event code.
+        code: EventCode = .illegal_dev_table_entry,
+        /// DVA that the device was attempting to access.
+        address: u64,
     },
-    /// Not implemented yet.
+    /// Lookups in the page tables for a device and encounters an error condition.
     io_page_fault: packed struct(u128) {
-        _: u128,
+        /// DeviceID that caused the Device Table lookup.
+        deviceid: DeviceId,
+        /// The guest PASID [19:16] from the PASID TLP prefix when GN=1.
+        pasid: u4,
+        /// Reserved.
+        _20: u7 = 0,
+        /// vIOMMU Non-Recoverable.
+        vnr: bool,
+        /// Reserved.
+        _28: u1 = 0,
+        /// Virtualized Event Log.
+        vevent: bool,
+        /// Virtualized PPR Log.
+        vppr: bool,
+        /// Virtualized Command Buffer.
+        vcmd: bool,
+        /// DomainID / PASID[15:0].
+        dp: Domain,
+        /// Guest / nested.
+        gn: bool,
+        /// No execute.
+        nx: bool,
+        /// User / supervisor.
+        us: enum(u1) { supervisor = 0, user = 1 },
+        /// Interrupt.
+        i: bool,
+        /// Present.
+        pr: bool,
+        /// Read / write.
+        rw: enum(u1) { read = 0, write = 1 },
+        /// Permission indicator.
+        pe: enum(u1) { ok = 0, noaccess = 1 },
+        /// Reserved bit not zero or invalid level encoding.
+        rz: bool,
+        /// Transaction that caused the Device Table lookup was a translation request.
+        tr: bool,
+        /// Reserved.
+        _25: u3 = 0,
+        /// Event code.
+        code: EventCode = .io_page_fault,
+        /// DVA that the peripheral was attempting to access.
+        address: u64,
     },
     /// Not implemented yet.
     dev_tab_hardware_error: packed struct(u128) {
@@ -647,17 +728,47 @@ const Event = packed union {
         /// SPA of the invalid command.
         address: u64,
     },
-    /// Not implemented yet.
+    /// IOMMU detects a HW error while accessing the command buffer.
     command_hardware_error: packed struct(u128) {
-        _: u128,
+        /// Reserved.
+        _0: u57 = 0,
+        /// Type of HW event.
+        type: EventType,
+        /// Reserved.
+        _27: u1 = 0,
+        /// Event code.
+        code: EventCode = .command_hardware_error,
+        /// SPA that the IOMMU attempted to access.
+        address: u64,
     },
     /// Not implemented yet.
     iotlb_inv_timeout: packed struct(u128) {
         _: u128,
     },
-    /// Not implemented yet.
+    /// IOMMU receives a request from a device that the device is not allowed to perform.
     invalid_device_request: packed struct(u128) {
-        _: u128,
+        /// DeviceID that caused the page table lookup.
+        deviceid: DeviceId,
+        /// PASID[19:16].
+        pasid_hi: u4,
+        /// Reserved.
+        _20: u12 = 0,
+        /// PASID[15:0].
+        pasid_lo: u16,
+        /// Guest / nested.
+        gn: bool,
+        /// User / supervisor.
+        us: enum(u1) { supervisor = 0, user = 1 },
+        /// Reserved.
+        _18: u6 = 0,
+        /// Transaction that caused the Device Table lookup was a translation request.
+        tr: bool,
+        /// Type of HW event.
+        type: u3,
+        /// Event code.
+        code: EventCode = .invalid_device_request,
+        /// The address that the device attempted to translate or access.
+        address: u64,
     },
     /// Not implemented yet.
     invalid_ppr_request: packed struct(u128) {
@@ -668,6 +779,48 @@ const Event = packed union {
         _: u128,
     },
 
+    /// Print the event log entry in human-readable form.
+    pub fn dump(self: Event) void {
+        switch (self.getCode()) {
+            .illegal_dev_table_entry => {
+                const e = self.illegal_dev_table_entry;
+                log.warn("ILLEGAL_DEV_TABLE_ENTRY: DeviceID={X:0>4} addr=0x{X} {t} rz={} tr={} i={}", .{
+                    e.deviceid, e.address, e.rw, e.rz, e.tr, e.i,
+                });
+            },
+            .io_page_fault => {
+                const e = self.io_page_fault;
+                log.warn("IO_PAGE_FAULT: DeviceID={X:0>4} domain={d} addr=0x{X} {t} pr={} pe={t} rz={} tr={} i={}", .{
+                    e.deviceid, e.dp, e.address, e.rw, e.pr, e.pe, e.rz, e.tr, e.i,
+                });
+            },
+            .illegal_command_error => {
+                const e = self.illegal_command_error;
+                log.warn("ILLEGAL_COMMAND_ERROR: addr=0x{X}", .{
+                    e.address,
+                });
+            },
+            .command_hardware_error => {
+                const e = self.command_hardware_error;
+                log.warn("COMMAND_HARDWARE_ERROR: type={t} addr=0x{X}", .{
+                    e.type, e.address,
+                });
+            },
+            .invalid_device_request => {
+                const e = self.invalid_device_request;
+                log.warn("INVALID_DEVICE_REQUEST: DeviceID={X:0>4} type={d} tr={} addr=0x{X}", .{
+                    e.deviceid, e.type, e.tr, e.address,
+                });
+            },
+            else => |c| {
+                log.warn("Event Log: {t}, value=0x{X:0>32}", .{
+                    c, @as(u128, @bitCast(self)),
+                });
+            },
+        }
+    }
+
+    /// Get the event code of the event.
     pub fn getCode(self: Event) EventCode {
         const generic: *const EventGeneric = @ptrCast(&self);
         return generic.code;
@@ -709,6 +862,20 @@ const EventCode = enum(u4) {
     invalid_ppr_request = 0b1001,
     /// EVENT_COUNTER_ZERO.
     event_counter_zero = 0b1010,
+
+    _,
+};
+
+/// Event Log Type field encoding.
+const EventType = enum(u2) {
+    /// Invalida COMPLETION_WAIT store address in an SNP-enabled system.
+    invalid_store_addr = 0b00,
+    /// Master Abort.
+    master_abort = 0b01,
+    /// Target Abort.
+    target_abort = 0b10,
+    /// Data Error.
+    data_error = 0b11,
 };
 
 // =============================================================
