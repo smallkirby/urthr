@@ -21,7 +21,7 @@ const Vi = mmio.Module(.{ .natural = u64 }, .{
 vi: Vi,
 
 /// Device table.
-dt: DmaMemory,
+dt: DeviceTable,
 /// Command buffer.
 cmdbuf: CmdBuf,
 /// Event log.
@@ -49,12 +49,10 @@ pub fn new(base: usize, allocator: DmaAllocator) Self {
 /// Initialize IOMMU with all devices passed through.
 pub fn init(self: *Self) Error!void {
     // Allocate device table pages.
-    self.dt = try self.allocator.alloc(DevTableEntry, num_dt_ents, .normal);
-    @memset(self.dt.slice(DevTableEntry), std.mem.zeroes(DevTableEntry));
-    self.allocator.syncForDeviceAll(self.dt);
+    self.dt = try DeviceTable.init(self.allocator);
 
     // Set the address of cleared device table.
-    self.vi.write(TableBase, .init(self.dt.bus, self.dt.size));
+    self.vi.write(TableBase, .init(self.dt.buf.bus, self.dt.buf.size));
 
     // Initialize command buffer.
     self.cmdbuf = try CmdBuf.init(self.vi, self.allocator);
@@ -133,6 +131,12 @@ pub fn invall(self: *Self) Error!void {
     try self.cmdbuf.barrier();
 }
 
+/// Set device table entry.
+pub fn setTableEntry(self: *Self, id: DeviceId, dte: DevTableEntry) Error!void {
+    self.dt.set(id, dte);
+    try self.inv(id);
+}
+
 /// Restart the IOMMU command processing after the IOMMU halts it.
 ///
 /// All the commands in the command buffer are discarded.
@@ -169,6 +173,33 @@ pub const DeviceId = u16;
 
 /// The number of device table entries in a table.
 const num_dt_ents = std.math.pow(usize, 2, @bitSizeOf(DeviceId));
+
+/// Device table.
+const DeviceTable = struct {
+    /// Device table buffer.
+    buf: DmaMemory,
+
+    /// Managed DMA allocator.
+    _dma: DmaAllocator,
+
+    pub fn init(allocator: DmaAllocator) Error!DeviceTable {
+        const buf = try allocator.alloc(DevTableEntry, num_dt_ents, .normal);
+        @memset(buf.slice(DevTableEntry), std.mem.zeroes(DevTableEntry));
+        allocator.syncForDeviceAll(buf);
+
+        return .{
+            .buf = buf,
+            ._dma = allocator,
+        };
+    }
+
+    /// Set a device table entry.
+    pub fn set(self: *DeviceTable, id: DeviceId, dte: DevTableEntry) void {
+        const entry = &self.buf.slice(DevTableEntry)[id];
+        entry.* = dte;
+        self._dma.syncForDeviceAny(entry);
+    }
+};
 
 /// Device Table Entry.
 const DevTableEntry = packed struct(u256) {
@@ -252,7 +283,7 @@ const DevTableEntry = packed struct(u256) {
     /// Host Page Table Mode Hint.
     hpt_mode: u1,
     /// Interrupt control.
-    int_ctl: u2,
+    int_ctl: IntCtl,
     /// LINT0 pass-through.
     lint0pass: bool,
     /// LINT1 pass-through.
@@ -276,6 +307,20 @@ const DevTableEntry = packed struct(u256) {
     mode0fc: bool,
     ///
     snoop_attr: u8,
+
+    /// Construct a DTE that translates a device address using the given I/O page table.
+    pub fn translated(root: usize, mode: PagingMode, domain: u16) DevTableEntry {
+        return std.mem.zeroInit(DevTableEntry, .{
+            .v = true,
+            .tv = true,
+            .ir = true,
+            .iw = true,
+            .mode = mode,
+            .pgtbl_root = @as(u40, @intCast(root >> 12)),
+            .domainid = domain,
+            .int_ctl = .unmapped,
+        });
+    }
 };
 
 /// Host Access Dirty.
@@ -304,6 +349,16 @@ const PagingMode = enum(u3) {
     @"5" = 0b101,
     /// 6 Level Page Table (64-bit GPA)
     @"6" = 0b110,
+};
+
+/// Interrupt control.
+const IntCtl = enum(u2) {
+    /// Fixed and arbitrated interrupts target aborted.
+    abort = 0b00,
+    /// Fixed and arbitrated interrupts are forwarded unmapped.
+    unmapped = 0b01,
+    /// Fixed and arbitrated interrupts remapped.
+    remap = 0b10,
 };
 
 // =============================================================

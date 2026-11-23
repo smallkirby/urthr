@@ -90,8 +90,9 @@ pub const Device = struct {
 /// `wanted` is the device-specific features the driver requested.
 pub fn selectFeatures(offered: u64, wanted: u64) u64 {
     const feature_version_1: u64 = 1 << 32; // VIRTIO_F_VERSION_1
+    const feature_access_platform: u64 = 1 << 33; // VIRTIO_F_ACCESS_PLATFORM
 
-    return offered & (wanted | feature_version_1);
+    return offered & (wanted | feature_version_1 | feature_access_platform);
 }
 
 /// Virtio device ID.
