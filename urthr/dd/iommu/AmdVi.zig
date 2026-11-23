@@ -114,23 +114,71 @@ pub fn init(self: *Self) Error!void {
     }
 }
 
-/// Invalidate caches of the DeviceID.
+/// Scope of invalidation.
+pub const InvScope = union(enum) {
+    /// Device Table entry cache of the device.
+    ///
+    /// This does not invalidate translation cache entries.
+    device: DeviceId,
+    /// Translation cache of the DVA range in the domain.
+    pages: struct {
+        /// Domain of the translation cache entries.
+        domain: Domain,
+        /// DVA to invalidate.
+        dva: usize,
+        /// Size in bytes.
+        size: usize,
+    },
+    /// All the translation cache of the domain.
+    domain: Domain,
+    /// All the caches of the IOMMU.
+    all,
+};
+
+/// Invalidate the IOMMU caches of the given scope.
 ///
 /// Blocks until the request is processed by IOMMU.
-pub fn inv(self: *Self, deviceid: DeviceId) Error!void {
-    try self.cmdbuf.push(.{ .invalidate_devtab_entry = .{
-        .deviceid = deviceid,
-    } });
-    self.cmdbuf.sync();
-    try self.cmdbuf.barrier();
-}
+pub fn invalidate(self: *Self, scope: InvScope) Error!void {
+    switch (scope) {
+        .device => |deviceid| {
+            try self.cmdbuf.push(.{ .invalidate_devtab_entry = .{
+                .deviceid = deviceid,
+            } });
+        },
+        .pages => |p| {
+            rtt.expectEqual(0, p.dva % page_size);
+            rtt.expectEqual(0, p.size % page_size);
 
-/// Blocks until the request is processed by IOMMU.
-/// Invalidate all caches.
-pub fn invall(self: *Self) Error!void {
-    rtt.expectEqual(true, self.vi.read(Efr).ia_sup);
+            const npages = p.size / page_size;
+            if (npages > inv_pages_max) {
+                return self.invalidate(.{ .domain = p.domain });
+            }
 
-    try self.cmdbuf.push(.{ .invalidate_iommu_all = .{} });
+            for (0..npages) |i| {
+                try self.cmdbuf.push(.{ .invalidate_iommu_pages = .{
+                    .domain = p.domain,
+                    .s = .single,
+                    .pde = true,
+                    .address = @as(u52, @intCast((p.dva + i * page_size) >> 12)),
+                } });
+            }
+        },
+        .domain => |domain| {
+            try self.cmdbuf.push(.{
+                .invalidate_iommu_pages = .{
+                    .domain = domain,
+                    .s = .encode,
+                    .pde = true,
+                    .address = std.math.maxInt(u51), // all addresses
+                },
+            });
+        },
+        .all => {
+            rtt.expectEqual(true, self.vi.read(Efr).ia_sup);
+            try self.cmdbuf.push(.{ .invalidate_iommu_all = .{} });
+        },
+    }
+
     self.cmdbuf.sync();
     try self.cmdbuf.barrier();
 }
@@ -138,7 +186,7 @@ pub fn invall(self: *Self) Error!void {
 /// Set device table entry.
 pub fn setTableEntry(self: *Self, id: DeviceId, dte: DevTableEntry) Error!void {
     self.dt.set(id, dte);
-    try self.inv(id);
+    try self.invalidate(.{ .device = id });
 }
 
 /// Restart the IOMMU command processing after the IOMMU halts it.
@@ -177,6 +225,12 @@ pub const DeviceId = u16;
 /// DomainID type.
 pub const Domain = u16;
 
+/// Max number of pages to invalidate one by one.
+///
+/// Larger requests invalidate the whole domain.
+const inv_pages_max = 16;
+/// Size in bytes of an IOMMU page.
+const page_size = 4096;
 /// The number of device table entries in a table.
 const num_dt_ents = std.math.pow(usize, 2, @bitSizeOf(DeviceId));
 
@@ -760,9 +814,34 @@ const Cmd = packed union {
         /// Reserved.
         _64: u64 = 0,
     },
-    /// Not implemented yet.
+    /// Invalidate a range of entries in its translation cache for the specified DomainID.
     invalidate_iommu_pages: packed struct(u128) {
-        _: u128,
+        /// PASID. Must be zero when two-level translation is not enabled.
+        pasid: u20 = 0,
+        /// Reserved.
+        _20: u12 = 0,
+        /// DomainID.
+        domain: Domain,
+        /// Reserved.
+        _48: u12 = 0,
+        /// Opcode.
+        code: CmdOpcode = .invalidate_iommu_pages,
+        /// Size.
+        s: enum(u1) {
+            /// 4KiB.
+            single = 0,
+            /// Size of the invalidation is determined by the first zero bit in the address.
+            encode = 1,
+        },
+        /// Page directory entries.
+        /// If set, the cached page directory and page translation entries are flushed.
+        pde: bool,
+        /// Guest / nested.
+        gn: bool = false,
+        /// Reserved.
+        _67: u9 = 0,
+        /// Address to invalidate.
+        address: u52,
     },
     /// Not implemented yet.
     invalidate_iotbl_pages: packed struct(u128) {
