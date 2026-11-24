@@ -15,6 +15,11 @@ pub fn build(b: *std.Build) !void {
         "Target board type",
     ) orelse .rpi4b;
 
+    const bob = BoardOptionBuilder{
+        .b = b,
+        .target = board_type,
+    };
+
     const log_level = b.option(
         std.log.Level,
         "log_level",
@@ -40,10 +45,11 @@ pub fn build(b: *std.Build) !void {
         "Path to serial interface device.",
     ) orelse null;
 
-    const sdcard = b.option(
+    const sdcard = bob.option(
         []const u8,
         "sdcard",
         "Path to SD card to install the kernel image.",
+        &.{ .rpi4b, .rpi5 },
     ) orelse null;
 
     const allow_init_exit = b.option(
@@ -70,16 +76,18 @@ pub fn build(b: *std.Build) !void {
         "Port of GDB server for QEMU.",
     ) orelse 1234;
 
-    const kvm = b.option(
+    const kvm = bob.option(
         bool,
         "kvm",
         "Enable KVM acceleration in QEMU.",
+        &.{.q35},
     ) orelse false;
 
-    const init_args = b.option(
+    const init_args = bob.option(
         []const u8,
         "init_args",
         "Command line arguments passed to initial process.",
+        &.{ .virt, .q35, .rv64virt },
     ) orelse null;
 
     const enable_rtt = b.option(
@@ -129,15 +137,17 @@ pub fn build(b: *std.Build) !void {
         "Enable graphical display window in QEMU.",
     ) orelse false;
 
-    var sdin: ?LazyPath = if (b.option(
+    var sdin: ?LazyPath = if (bob.option(
         []const u8,
         "sdin",
         "Path to SD card image file for QEMU.",
+        &.{ .rpi4b, .rpi5, .virt, .rv64virt },
     )) |p| b.graph.cwdRelativePath(p) else null;
-    const sdcreate = b.option(
+    const sdcreate = bob.option(
         bool,
         "sdcreate",
         "Create an SD card image file and use it for this run.",
+        &.{ .rpi4b, .rpi5, .virt, .rv64virt },
     ) orelse false;
     if (sdcreate and sdin != null) {
         std.log.err("Cannot specify both --sdin and --sdcreate options.", .{});
@@ -1193,6 +1203,29 @@ fn generateTraceDomains(s: []const u8, b: *std.Build) ![][]const u8 {
     return domains[0..count];
 }
 
+const BoardOptionBuilder = struct {
+    b: *std.Build,
+    target: board.BoardType,
+
+    /// Declare a build option that is available only on the specified boards.
+    fn option(
+        self: *const BoardOptionBuilder,
+        comptime T: type,
+        name: []const u8,
+        desc: []const u8,
+        comptime supported: []const board.BoardType,
+    ) ?T {
+        const value = self.b.option(T, name, desc) orelse return null;
+        if (std.mem.indexOfScalar(board.BoardType, supported, self.target) == null) {
+            std.debug.panic(
+                "Option '{s}' is not supported on board {s}.",
+                .{ name, @tagName(self.target) },
+            );
+        }
+        return value;
+    }
+};
+
 const ImportPair = struct {
     name: []const u8,
     module: ?*std.Build.Module,
@@ -1285,11 +1318,6 @@ const Qemu = struct {
     const Args = std.array_list.Aligned(Arg, null);
 
     pub fn command(self: Qemu, allocator: Allocator) ![]const Arg {
-        if (self.append) |_| switch (self.machine) {
-            .virt, .q35, .rv64virt => {},
-            else => @panic("Command line arguments cannot be specified for this board."),
-        };
-
         const machine_name = switch (self.machine) {
             .rpi4b => "raspi4b",
             .rpi5 => "raspi5",
