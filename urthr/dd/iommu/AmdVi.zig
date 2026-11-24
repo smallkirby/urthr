@@ -26,6 +26,8 @@ dt: DeviceTable,
 cmdbuf: CmdBuf,
 /// Event log.
 evlog: EventLog,
+/// Next DomainID to be allocated.
+next_domain: Domain,
 
 /// Managed DMA allocator.
 allocator: DmaAllocator,
@@ -47,6 +49,7 @@ pub fn new(base: usize, allocator: DmaAllocator) Self {
         .cmdbuf = undefined,
         .evlog = undefined,
         .allocator = allocator,
+        .next_domain = 1,
     };
 }
 
@@ -189,6 +192,80 @@ pub fn setTableEntry(self: *Self, id: DeviceId, dte: DevTableEntry) Error!void {
     try self.invalidate(.{ .device = id });
 }
 
+/// I/O domain.
+///
+/// A domain owns one I/O page table.
+pub const IoDomain = struct {
+    /// AMD-vi that owns this domain.
+    vi: *Self,
+    /// DomainID.
+    id: Domain,
+    /// I/O page table.
+    pgtbl: PageTable,
+
+    /// Destroy the I/O domain and free its resources.
+    ///
+    /// All devices attached to this domain must have been detached beforehand.
+    pub fn destroy(self: *IoDomain, allocator: Allocator) void {
+        self.pgtbl.deinit();
+        allocator.destroy(self);
+    }
+
+    /// Attach the device to the domain.
+    pub fn attach(self: *IoDomain, device: DeviceId) Error!void {
+        try self.vi.setTableEntry(device, .translated(
+            self.pgtbl.rootAddr(),
+            self.pgtbl.mode,
+            self.id,
+        ));
+    }
+
+    /// Map the DVA to SPA in the domain.
+    ///
+    /// Blocks until the IOMMU has invalidated its cache.
+    pub fn map(self: *IoDomain, arg: PageTable.MapArgument) Error!void {
+        try self.pgtbl.mapImpl(arg, .{});
+        try self.vi.invalidate(.{ .pages = .{
+            .domain = self.id,
+            .dva = arg.dva,
+            .size = arg.size,
+        } });
+    }
+
+    /// Unmap the DVA range in the domain.
+    ///
+    /// Blocks until the IOMMU has invalidated its cache.
+    pub fn unmap(self: *IoDomain, dva: usize, size: usize) Error!void {
+        try self.pgtbl.unmapImpl(dva, size, .@"4kb");
+        try self.vi.invalidate(.{ .pages = .{
+            .domain = self.id,
+            .dva = dva,
+            .size = size,
+        } });
+    }
+};
+
+/// Create a new domain that has an empty I/O page table.
+pub fn createDomain(self: *Self, allocator: Allocator) Error!*IoDomain {
+    if (self.next_domain == std.math.maxInt(Domain)) {
+        return Error.OutOfMemory;
+    }
+
+    const domain = try allocator.create(IoDomain);
+    errdefer allocator.destroy(domain);
+    domain.* = .{
+        .vi = self,
+        .id = self.next_domain,
+        .pgtbl = try .init(.@"4", allocator, self.allocator),
+    };
+    self.next_domain += 1;
+
+    return domain;
+}
+
+// =============================================================
+// Internals
+
 /// Restart the IOMMU command processing after the IOMMU halts it.
 ///
 /// All the commands in the command buffer are discarded.
@@ -223,6 +300,8 @@ fn restart(self: *Self) void {
 /// DeviceID derived from Peripheral RequesterID.
 pub const DeviceId = u16;
 /// DomainID type.
+///
+/// Chosen by SW that IOMMU must use to tag its internal translation caches and mark event log entries.
 pub const Domain = u16;
 
 /// Max number of pages to invalidate one by one.
@@ -587,6 +666,48 @@ const PageTable = struct {
             };
             self.dma.syncForDeviceAny(ent);
         }
+    }
+
+    /// Unmap the given DVA range.
+    ///
+    /// Pages that are not mapped are skipped.
+    /// This function does not invalidate the IOTLB.
+    fn unmapImpl(self: *PageTable, dva: usize, size: usize, mg: Granule) Error!void {
+        const granule = mg.size();
+
+        if (dva % granule != 0) {
+            return Error.InvalidArgument;
+        }
+        if (size % granule != 0) {
+            return Error.InvalidArgument;
+        }
+
+        for (0..size / granule) |i| {
+            const dva_cur = dva + i * granule;
+            const node = self.lookup(dva_cur) orelse continue;
+            const idx = index(dva_cur, node.level);
+
+            const ent = &node.buf.slice(PageEntry)[idx];
+            ent.* = std.mem.zeroes(PageEntry);
+            self.dma.syncForDeviceAny(ent);
+        }
+    }
+
+    /// Get the bottom-level table that covers the given DVA.
+    ///
+    /// Returns null if the table does not exist.
+    fn lookup(self: *const PageTable, dva: usize) ?*Node {
+        if (!self.isInRange(dva)) {
+            return null;
+        }
+
+        var node = self.root;
+        while (node.level > 1) {
+            const idx = index(dva, node.level);
+            node = node.children[idx] orelse return null;
+        }
+
+        return node;
     }
 
     /// Lookup the page table entry for the given DVA.
