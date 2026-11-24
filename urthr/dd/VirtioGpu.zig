@@ -71,7 +71,7 @@ pub fn init(dev: virtio.Device, dma: DmaAllocator, allocator: Allocator) Error!S
     log.info("#scanouts: {d}, #capsets: {d}", .{ config.num_scanouts, config.num_capsets });
 
     // Setup the request queue.
-    dev.setupQueue(queue_index) catch |err| return switch (err) {
+    dev.setupQueue(queue_index, dma) catch |err| return switch (err) {
         virtio.Error.OutOfMemory => Error.OutOfMemory,
         else => Error.DeviceError,
     };

@@ -15,8 +15,6 @@ queues: QueueMap,
 /// Feature bits negotiated with the device.
 features: u64 = 0,
 
-/// Page allocator for DMA operations.
-page_allocator: PageAllocator,
 /// Memory allocator.
 allocator: Allocator,
 
@@ -87,8 +85,6 @@ pub fn init(
     expected: virtio.DeviceId,
     /// Device-specific feature bits the driver wants to enable.
     wanted_features: anytype,
-    /// Page allocator.
-    page_allocator: PageAllocator,
     /// General-purpose allocator.
     allocator: Allocator,
 ) virtio.Error!?*Self {
@@ -124,7 +120,6 @@ pub fn init(
         .device_id = device_id,
         .version = version,
         .queues = QueueMap.init(allocator),
-        .page_allocator = page_allocator,
         .allocator = allocator,
     };
 
@@ -194,7 +189,7 @@ const vtable = virtio.Device.Vtable{
 };
 
 /// Setup a virtqueue.
-fn setupQueue(ctx: *anyopaque, index: u32) virtio.Error!void {
+fn setupQueue(ctx: *anyopaque, index: u32, dma: DmaAllocator) virtio.Error!void {
     const self: *Self = @ptrCast(@alignCast(ctx));
 
     // Select the queue.
@@ -222,18 +217,18 @@ fn setupQueue(ctx: *anyopaque, index: u32) virtio.Error!void {
     log.debug("vq#{d}: max_size={d}, using={d}", .{ index, max_size, queue_size });
 
     // Allocate virtqueue.
-    const vq = try virtio.Virtqueue.create(queue_size, self.allocator, self.page_allocator);
-    errdefer vq.destroy(self.page_allocator, self.allocator);
+    const vq = try virtio.Virtqueue.create(queue_size, self.allocator, dma);
+    errdefer vq.destroy(self.allocator);
 
     // Set queue addresses.
-    const desc_addr = self.page_allocator.translateP(vq.getDescAddr());
+    const desc_addr = vq.getDescBus();
 
     if (self.version == .legacy) {
         self.module.writei(QueueAlign, virtio.page_size);
         self.module.writei(QueuePfn, @as(u32, @intCast(desc_addr / virtio.page_size)));
     } else {
-        const avail_addr = self.page_allocator.translateP(vq.getAvailAddr());
-        const used_addr = self.page_allocator.translateP(vq.getUsedAddr());
+        const avail_addr = vq.getAvailBus();
+        const used_addr = vq.getUsedBus();
 
         self.module.writei(QueueDescLow, @as(u32, @truncate(desc_addr)));
         self.module.writei(QueueDescHigh, @as(u32, @truncate(desc_addr >> 32)));
@@ -448,6 +443,6 @@ const bits = common.bits;
 const mmio = common.io.mmio;
 const Reg = common.io.Reg;
 const Mrk = common.io.Mrk;
-const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
 const dd = @import("dd");
 const virtio = dd.virtio;

@@ -152,14 +152,16 @@ pub fn initPeripherals2() urd.mem.Error!void {
                 base,
                 .entropy,
                 0,
-                urd.mem.page,
                 urd.mem.bin,
             )) |result| if (result) |dev| dev else {
                 continue;
             } else |_| {
                 continue;
             };
-            devices.virtio_rng = dd.VirtioRng.init(dev.interface()) catch continue;
+            devices.virtio_rng = dd.VirtioRng.init(
+                dev.interface(),
+                mem.dma.interface(0),
+            ) catch continue;
 
             log.info("Found virtio-rng device#{d}", .{i});
             break;
@@ -184,7 +186,6 @@ pub fn initPeripherals3() common.mem.Error!void {
                 base,
                 .block,
                 dd.VirtioBlk.Features{ .flush = true },
-                urd.mem.page,
                 urd.mem.bin,
             )) |result| if (result) |dev| dev else {
                 continue;

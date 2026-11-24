@@ -112,7 +112,7 @@ pub fn init(dev: virtio.Device, dma: DmaAllocator, allocator: Allocator) Error!S
     rtt.expectEqual(sector_size, config.blk_size);
 
     // Setup the request queue.
-    dev.setupQueue(queue_index) catch |err| return switch (err) {
+    dev.setupQueue(queue_index, dma) catch |err| return switch (err) {
         virtio.Error.OutOfMemory => Error.OutOfMemory,
         else => Error.DeviceError,
     };

@@ -409,7 +409,6 @@ fn bringUpVirtioPci(
         caps,
         barmap,
         wanted_features,
-        urd.mem.page,
         urd.mem.bin,
     ) catch |err| {
         log.warn("Failed to initialize virtio-pci device: {t}", .{err});
@@ -496,6 +495,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         const msix = bringup.msix;
         const netdev = dd.net.VirtioNet.new(
             bringup.dev.interface(),
+            mem.dma.interface(0),
             urd.mem.page,
             urd.mem.bin,
         ) catch |err| {

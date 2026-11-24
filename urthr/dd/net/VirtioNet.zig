@@ -90,18 +90,18 @@ const NetHdr = extern struct {
 /// Create a new network device for a virtio-net controller.
 ///
 /// Memory allocated for this driver will be managed by the given allocators.
-pub fn new(dev: virtio.Device, page_allocator: PageAllocator, allocator: Allocator) Error!*net.Device {
+pub fn new(dev: virtio.Device, dma: DmaAllocator, page_allocator: PageAllocator, allocator: Allocator) Error!*net.Device {
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
     const netdev = try allocator.create(net.Device);
     errdefer allocator.destroy(netdev);
 
     // Setup the RX and TX queues.
-    dev.setupQueue(rxq_idx) catch |err| return switch (err) {
+    dev.setupQueue(rxq_idx, dma) catch |err| return switch (err) {
         virtio.Error.OutOfMemory => Error.OutOfMemory,
         else => Error.DeviceError,
     };
-    dev.setupQueue(txq_idx) catch |err| return switch (err) {
+    dev.setupQueue(txq_idx, dma) catch |err| return switch (err) {
         virtio.Error.OutOfMemory => Error.OutOfMemory,
         else => Error.DeviceError,
     };
@@ -254,6 +254,7 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.vnet);
 const arch = @import("arch").impl;
 const common = @import("common");
+const DmaAllocator = common.mem.DmaAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const urd = @import("urthr");
 const net = urd.net;

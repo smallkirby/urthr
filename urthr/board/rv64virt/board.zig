@@ -153,7 +153,6 @@ pub fn initPeripherals3() common.mem.Error!void {
             base,
             .block,
             dd.VirtioBlk.Features{ .flush = true },
-            urd.mem.page,
             urd.mem.bin,
         )) |result| if (result) |dev| dev else {
             continue;
@@ -183,7 +182,6 @@ pub fn initPeripherals3() common.mem.Error!void {
             base,
             .gpu,
             dd.VirtioGpu.Features{},
-            urd.mem.page,
             urd.mem.bin,
         )) |result| if (result) |dev| dev else {
             continue;

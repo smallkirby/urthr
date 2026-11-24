@@ -29,7 +29,7 @@ pub const Device = struct {
 
     pub const Vtable = struct {
         /// Setup a virtqueue indexed by `index`.
-        setupQueue: *const fn (ptr: *anyopaque, index: u32) Error!void,
+        setupQueue: *const fn (ptr: *anyopaque, index: u32, dma: DmaAllocator) Error!void,
         /// Get a virtqueue by index.
         getQueue: *const fn (ptr: *anyopaque, index: u32) ?*Virtqueue,
         /// Notify the device that new there're new buffers in the virtqueue.
@@ -45,8 +45,10 @@ pub const Device = struct {
     };
 
     /// Setup a virtqueue indexed by `index`.
-    pub fn setupQueue(self: Device, index: u32) Error!void {
-        return self.vtable.setupQueue(self.ptr, index);
+    ///
+    /// The virtqueue is allocated by the given DMA allocator.
+    pub fn setupQueue(self: Device, index: u32, dma: DmaAllocator) Error!void {
+        return self.vtable.setupQueue(self.ptr, index, dma);
     }
 
     /// Get a virtqueue by index.
@@ -258,10 +260,12 @@ pub const Virtqueue = struct {
     /// Descriptor table.
     descs: [*]volatile Desc,
     /// Backing memory (physically contiguous).
-    memory: []u8,
+    memory: DmaMemory,
+    /// Managed DMA allocator.
+    dma: DmaAllocator,
 
     /// Create a new virtqueue.
-    pub fn create(size: u16, allocator: Allocator, page_allocator: PageAllocator) Error!*Virtqueue {
+    pub fn create(size: u16, allocator: Allocator, dma: DmaAllocator) Error!*Virtqueue {
         // Calculate memory requirements.
         const desc_size = @sizeOf(Desc) * size;
         const avail_size = @sizeOf(u16) * 3 + @sizeOf(u16) * size; // flags + idx + ring + used_event
@@ -281,11 +285,12 @@ pub const Virtqueue = struct {
         );
 
         // Allocate contiguous memory.
-        const memory = page_allocator.allocBytesV(total_size) catch return Error.OutOfMemory;
-        errdefer page_allocator.freeBytesV(memory);
-        @memset(memory, 0);
+        const memory = dma.allocBytes(total_size, .normal) catch return Error.OutOfMemory;
+        errdefer dma.freeBytes(memory);
+        @memset(memory.slice(u8), 0);
+        dma.syncForDeviceAll(memory);
 
-        const base_addr = @intFromPtr(memory.ptr);
+        const base_addr = memory.cpu;
         const descs: [*]volatile Desc = @ptrFromInt(base_addr);
 
         // Initialize free descriptor chain.
@@ -305,30 +310,31 @@ pub const Virtqueue = struct {
             .free_head = 0,
             .last_used_idx = 0,
             .memory = memory,
+            .dma = dma,
         };
 
         return vq;
     }
 
     /// Destroy the virtqueue.
-    pub fn destroy(self: *Virtqueue, page_allocator: PageAllocator, allocator: Allocator) void {
-        page_allocator.freeBytesV(self.memory);
+    pub fn destroy(self: *Virtqueue, allocator: Allocator) void {
+        self.dma.freeBytes(self.memory);
         allocator.destroy(self);
     }
 
-    /// Get virtual address of descriptor table.
-    pub fn getDescAddr(self: *const Virtqueue) u64 {
-        return @intFromPtr(self.descs);
+    /// Get bus address of descriptor table.
+    pub fn getDescBus(self: *const Virtqueue) u64 {
+        return self.memory.bus;
     }
 
-    /// Get virtual address of available ring.
-    pub fn getAvailAddr(self: *const Virtqueue) u64 {
-        return self.avail_base;
+    /// Get bus address of available ring.
+    pub fn getAvailBus(self: *const Virtqueue) u64 {
+        return self.memory.busaddr(self.avail_base);
     }
 
-    /// Get virtual address of used ring.
-    pub fn getUsedAddr(self: *const Virtqueue) u64 {
-        return self.used_base;
+    /// Get bus address of used ring.
+    pub fn getUsedBus(self: *const Virtqueue) u64 {
+        return self.memory.busaddr(self.used_base);
     }
 
     /// Add a buffer chain to the queue.
@@ -414,4 +420,5 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const arch = @import("arch").impl;
 const common = @import("common");
-const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;

@@ -20,8 +20,6 @@ notify_addrs: NotifyMap,
 /// Feature bits negotiated with the device.
 features: u64 = 0,
 
-/// Page allocator for DMA operations.
-page_allocator: PageAllocator,
 /// Memory allocator.
 allocator: Allocator,
 
@@ -96,8 +94,6 @@ pub fn init(
     barmap: BarMap,
     /// Device-specific feature bits the driver wants to enable.
     wanted_features: anytype,
-    /// Page allocator.
-    page_allocator: PageAllocator,
     /// General-purpose memory allocator.
     allocator: Allocator,
 ) virtio.Error!?*Self {
@@ -131,7 +127,6 @@ pub fn init(
         .dcfg = base_dcfg,
         .queues = .init(allocator),
         .notify_addrs = .init(allocator),
-        .page_allocator = page_allocator,
         .allocator = allocator,
     };
 
@@ -213,7 +208,7 @@ const vtable = virtio.Device.Vtable{
 };
 
 /// Setup a virtqueue.
-fn setupQueue(ctx: *anyopaque, index: u32) virtio.Error!void {
+fn setupQueue(ctx: *anyopaque, index: u32, dma: DmaAllocator) virtio.Error!void {
     const self: *Self = @ptrCast(@alignCast(ctx));
 
     // Select the queue.
@@ -239,14 +234,14 @@ fn setupQueue(ctx: *anyopaque, index: u32) virtio.Error!void {
     const vq = try virtio.Virtqueue.create(
         queue_size,
         self.allocator,
-        self.page_allocator,
+        dma,
     );
-    errdefer vq.destroy(self.page_allocator, self.allocator);
+    errdefer vq.destroy(self.allocator);
 
     // Set queue addresses.
-    self.ccfg.writei(QueueDesc, self.page_allocator.translateP(vq.getDescAddr()));
-    self.ccfg.writei(QueueDriver, self.page_allocator.translateP(vq.getAvailAddr()));
-    self.ccfg.writei(QueueDevice, self.page_allocator.translateP(vq.getUsedAddr()));
+    self.ccfg.writei(QueueDesc, vq.getDescBus());
+    self.ccfg.writei(QueueDriver, vq.getAvailBus());
+    self.ccfg.writei(QueueDevice, vq.getUsedBus());
     self.ccfg.write(QueueEnable, .{ .value = .enable });
 
     // Cache the notification address to avoid selecting the queue every time.
@@ -529,7 +524,7 @@ const common = @import("common");
 const bits = common.bits;
 const mmio = common.io.mmio;
 const Reg = common.io.Reg;
-const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
 const dd = @import("dd");
 const pci = dd.pci;
 const virtio = dd.virtio;

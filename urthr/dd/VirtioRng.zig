@@ -18,9 +18,9 @@ dev: virtio.Device,
 const queue_index = 0;
 
 /// Initialize a virtio RNG device.
-pub fn init(dev: virtio.Device) Error!Self {
+pub fn init(dev: virtio.Device, dma: DmaAllocator) Error!Self {
     // Setup the request queue.
-    dev.setupQueue(queue_index) catch |err| return switch (err) {
+    dev.setupQueue(queue_index, dma) catch |err| return switch (err) {
         virtio.Error.OutOfMemory => Error.OutOfMemory,
         else => Error.DeviceError,
     };
@@ -78,5 +78,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const common = @import("common");
 const PageAllocator = common.mem.PageAllocator;
+const DmaAllocator = common.mem.DmaAllocator;
 const arch = @import("arch").impl;
 const virtio = @import("virtio.zig");

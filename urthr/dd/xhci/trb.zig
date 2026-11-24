@@ -216,7 +216,7 @@ pub const CmdCompletionTrb = packed struct(u128) {
 
     /// Get the pointer to the Command TRB that generated this event.
     pub fn commandTrb(self: *const volatile CmdCompletionTrb, dma: DmaMemory) *const volatile Trb {
-        return @ptrFromInt(dma.translate(@as(u64, self.command_trb) << 4));
+        return @ptrFromInt(dma.cpuaddr(@as(u64, self.command_trb) << 4));
     }
 };
 

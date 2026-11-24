@@ -23,8 +23,13 @@ pub const DmaMemory = struct {
     size: usize,
 
     /// Translate the given bus address to a CPU address.
-    pub fn translate(self: DmaMemory, bus: usize) usize {
+    pub fn cpuaddr(self: DmaMemory, bus: usize) usize {
         return self.cpu + (bus - self.bus);
+    }
+
+    /// Translate the given CPU address to a bus address.
+    pub fn busaddr(self: DmaMemory, cpu: usize) usize {
+        return self.bus + (cpu - self.cpu);
     }
 
     /// Cast the CPU address of the memory to a pointer of the given type.
