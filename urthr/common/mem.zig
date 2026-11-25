@@ -17,6 +17,7 @@ pub const DmaAllocator = @import("mem/DmaAllocator.zig");
 pub const IoAllocator = @import("mem/IoAllocator.zig");
 pub const PageAllocator = @import("mem/PageAllocator.zig");
 pub const RangeAllocator = @import("mem/range_allocator.zig").RangeAllocator;
+pub const SpanAllocator = @import("mem/SpanAllocator.zig");
 
 /// Size in bytes of 4KiB.
 pub const size_4kib = 4 * units.kib;
@@ -129,6 +130,7 @@ pub const Attribute = enum {
 
 test {
     _ = @import("mem/range_allocator.zig");
+    _ = SpanAllocator;
 }
 
 // =============================================================

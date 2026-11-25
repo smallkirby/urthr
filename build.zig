@@ -1014,6 +1014,7 @@ pub fn build(b: *std.Build) !void {
         "common_test",
         b.path("urthr/common.zig"),
         &.{
+            .{ .name = "common", .module = null },
             .{ .name = "options", .module = options_module },
         },
         optimize,

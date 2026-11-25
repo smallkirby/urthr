@@ -1,5 +1,11 @@
 //! Allocator of contiguous ranges.
 //!
+//! Elements in the managed range are represented and tracked by bitmap,
+//! meaning that the size of internal metadata increases with the number of units managed.
+//!
+//! Unlike `SpanAllocator`, all elements in the range are individually tracked.
+//! Use `SpanAllocator` to utilize only sub-ranges without tracking individual elements.
+//!
 //! This allocator does not manage any memory by itself.
 
 pub const Error = error{
