@@ -6,7 +6,7 @@ const Self = @This();
 
 pub const Error = error{
     /// No free range that satisfies the request.
-    OutOfSpace,
+    NotAvailable,
     /// Memory allocation for internal metadata failed.
     OutOfMemory,
 };
@@ -92,7 +92,7 @@ pub fn alloc(self: *Self, size: usize, alignment: usize) Error!usize {
         return addr;
     }
 
-    return Error.OutOfSpace;
+    return Error.NotAvailable;
 }
 
 /// Free the allocated range `[addr, addr + size)`.
@@ -234,7 +234,7 @@ test "out of space" {
     defer a.deinit();
 
     _ = try a.alloc(0x2000, 0x1000);
-    try testing.expectError(Error.OutOfSpace, a.alloc(0x1000, 0x1000));
+    try testing.expectError(Error.NotAvailable, a.alloc(0x1000, 0x1000));
 }
 
 test "reserve" {
@@ -249,7 +249,7 @@ test "reserve" {
     // [0x2000, 0x4000), [0x6000, 0xA000)
     try testing.expectEqual(0x2000, try a.alloc(0x2000, 0x1000));
     try testing.expectEqual(0x6000, try a.alloc(0x4000, 0x1000));
-    try testing.expectError(Error.OutOfSpace, a.alloc(0x1000, 0x1000));
+    try testing.expectError(Error.NotAvailable, a.alloc(0x1000, 0x1000));
 }
 
 // =============================================================

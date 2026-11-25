@@ -203,10 +203,20 @@ pub const IoDomain = struct {
     /// I/O page table.
     pgtbl: PageTable,
 
+    /// IOVA allocator of this domain.
+    iova: SpanAllocator,
+    /// DMA memory allocated, keyed by DVA.
+    allocs: std.AutoHashMapUnmanaged(usize, DmaMemory),
+    /// Managed GPA.
+    allocator: Allocator,
+
     /// Destroy the I/O domain and free its resources.
     ///
     /// All devices attached to this domain must have been detached beforehand.
-    pub fn destroy(self: *IoDomain, allocator: Allocator) void {
+    pub fn destroy(self: *IoDomain) void {
+        const allocator = self.allocator;
+        self.allocs.deinit(allocator);
+        self.iova.deinit();
         self.pgtbl.deinit();
         allocator.destroy(self);
     }
@@ -243,6 +253,84 @@ pub const IoDomain = struct {
             .size = size,
         } });
     }
+
+    // =============================================================
+    // DmaAllocator interface
+
+    /// Get a DMA allocator interface.
+    ///
+    /// Memory allocated by this DMA allocator is accessible by the devices in this domain.
+    /// DVA is allocated from the domain's IOVA allocator,
+    /// and is ensured to be physically and virtually contiguous.
+    pub fn interface(self: *IoDomain) DmaAllocator {
+        return .{
+            .ptr = self,
+            .vtable = &vtable,
+            .offset = 0,
+        };
+    }
+
+    const vtable = DmaAllocator.Vtable{
+        .allocPages = dmaAllocPages,
+        .freePages = dmaFreePages,
+        .sync = dmaSync,
+    };
+
+    /// Allocate physically contiguous system memory and map it to selected IOVA.
+    fn dmaAllocPages(ctx: *anyopaque, num_pages: usize, attr: Attribute) common.mem.Error!DmaMemory {
+        const self: *IoDomain = @ptrCast(@alignCast(ctx));
+        const base = self.vi.allocator;
+
+        // Allocate physically contiguous memory.
+        const memory = try base.allocPages(num_pages, attr);
+        errdefer base.freePages(memory);
+
+        // Allocate IOVA.
+        const iova = try self.iova.alloc(memory.size, page_size);
+        errdefer self.iova.free(iova, memory.size);
+        try self.allocs.put(self.allocator, iova, memory);
+        errdefer _ = self.allocs.remove(iova);
+
+        // Map the IOVA to the allocated system physical memory.
+        self.map(.{
+            .dva = iova,
+            .spa = memory.bus - base.offset,
+            .size = memory.size,
+            .perm = .{ .read = true, .write = true },
+        }) catch return error.OutOfMemory;
+
+        return .{
+            .cpu = memory.cpu,
+            .bus = iova,
+            .size = memory.size,
+        };
+    }
+
+    /// Unmap and free previously allocated DMA memory.
+    fn dmaFreePages(ctx: *anyopaque, memory: DmaMemory) void {
+        const self: *IoDomain = @ptrCast(@alignCast(ctx));
+        const base = self.vi.allocator;
+
+        // Find the allocated system memory entry and unmap it from the IOMMU.
+        const entry = self.allocs.fetchRemove(memory.bus) orelse {
+            log.warn("Freeing unknown DMA memory: IOVA=0x{X}", .{memory.bus});
+            return;
+        };
+        self.unmap(memory.bus, memory.size) catch |err| {
+            log.warn("Failed to unmap DMA memory: {t}", .{err});
+        };
+        // Free the IOVA.
+        self.iova.free(memory.bus, memory.size);
+        // Free the backing system memory.
+        base.freePages(entry.value);
+    }
+
+    /// Synchronize the DMA memory.
+    fn dmaSync(ctx: *anyopaque, cpu: usize, size: usize, dir: DmaAllocator.Direction) void {
+        const self: *IoDomain = @ptrCast(@alignCast(ctx));
+        const base = self.vi.allocator;
+        base.vtable.sync(base.ptr, cpu, size, dir);
+    }
 };
 
 /// Create a new domain that has an empty I/O page table.
@@ -250,18 +338,46 @@ pub fn createDomain(self: *Self, allocator: Allocator) Error!*IoDomain {
     if (self.next_domain == std.math.maxInt(Domain)) {
         return Error.OutOfMemory;
     }
-
     const domain = try allocator.create(IoDomain);
     errdefer allocator.destroy(domain);
+
+    var pgtbl: PageTable = try .init(.@"4", allocator, self.allocator);
+    errdefer pgtbl.deinit();
+    var iova: SpanAllocator = try .init(allocator, iova_min, iova_max);
+    errdefer iova.deinit();
+
+    // Reserve pre-defined IOVA ranges.
+    for (iova_reserved) |r| {
+        try iova.reserve(r.start, r.end);
+    }
+
     domain.* = .{
         .vi = self,
         .id = self.next_domain,
-        .pgtbl = try .init(.@"4", allocator, self.allocator),
+        .pgtbl = pgtbl,
+        .iova = iova,
+        .allocs = .empty,
+        .allocator = allocator,
     };
     self.next_domain += 1;
 
     return domain;
 }
+
+/// Lowest IOVA that can be allocated.
+const iova_min = page_size;
+/// End of IOVA space of a 4-level I/O page table. Exclusive.
+const iova_max = 1 << 48;
+
+/// Reserved IOVA ranges.
+///
+/// ref. https://github.com/torvalds/linux/blob/4dce97c6c265544342e716e62fd24bbb232590c5/drivers/iommu/amd/iommu.c#L54
+const iova_reserved = [_]common.Range{
+    // MSI range.
+    .{ .start = 0x0000_FEE0_0000, .end = 0x0000_FEF0_0000 },
+    // HyperTransport reserved region.
+    .{ .start = 0x00FD_0000_0000, .end = 0x0100_0000_0000 },
+};
 
 // =============================================================
 // Internals
@@ -1776,6 +1892,8 @@ const rtt = common.rtt;
 const util = common.util;
 const mmio = common.io.mmio;
 const Reg = common.io.Reg;
+const Attribute = common.mem.Attribute;
 const DmaAllocator = common.mem.DmaAllocator;
+const SpanAllocator = common.mem.SpanAllocator;
 const DmaMemory = DmaAllocator.DmaMemory;
 const urd = @import("urthr");
