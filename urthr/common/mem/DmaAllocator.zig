@@ -59,11 +59,14 @@ pub const Vtable = struct {
     /// If the direction is `cpu`, the implementation must ensure that any changes made by the device to the memory are visible to the CPU.
     /// Otherwise, the implementation must ensure that any changes made by the CPU to the memory are visible to the device.
     sync: *const fn (ctx: *anyopaque, cpu: usize, size: usize, dir: Direction) void,
+};
 
-    pub const Direction = enum {
-        cpu,
-        device,
-    };
+/// Target of a synchronization.
+pub const Direction = enum {
+    /// Visible to CPU.
+    cpu,
+    /// Visible to the device.
+    device,
 };
 
 /// Allocate the given number of pages.

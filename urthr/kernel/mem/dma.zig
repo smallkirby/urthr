@@ -43,7 +43,7 @@ fn freePages(_: *anyopaque, memory: DmaMemory) void {
     mem.page.freePagesP(ptr[0..memory.size]);
 }
 
-fn sync(_: *anyopaque, cpu: usize, size: usize, dir: DmaAllocator.Vtable.Direction) void {
+fn sync(_: *anyopaque, cpu: usize, size: usize, dir: DmaAllocator.Direction) void {
     const p = @as([*]u8, @ptrFromInt(cpu))[0..size];
     switch (dir) {
         .cpu => board.sync.invalidateData(p),
