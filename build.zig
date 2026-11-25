@@ -83,6 +83,13 @@ pub fn build(b: *std.Build) !void {
         &.{.q35},
     ) orelse false;
 
+    const iommu = bob.option(
+        bool,
+        "iommu",
+        "Attach an IOMMU and put devices behind it.",
+        &.{.q35},
+    ) orelse false;
+
     const init_args = bob.option(
         []const u8,
         "init_args",
@@ -984,6 +991,7 @@ pub fn build(b: *std.Build) !void {
             .gdb_port = gdb,
             .append = init_args,
             .kvm = kvm,
+            .iommu = iommu,
         };
 
         // Run QEMU through a wrapper script.
@@ -1307,6 +1315,8 @@ const Qemu = struct {
     append: ?[]const u8,
     /// Enable KVM acceleration.
     kvm: bool = false,
+    /// Attach an IOMMU and put devices behind it.
+    iommu: bool = false,
 
     const Arg = union(enum) {
         /// Simple string.
@@ -1323,7 +1333,7 @@ const Qemu = struct {
             .rpi4b => "raspi4b",
             .rpi5 => "raspi5",
             .virt => "virt-9.0,gic-version=3,secure=on,virtualization=on",
-            .q35 => "q35",
+            .q35 => if (self.iommu) "q35,kernel-irqchip=split" else "q35",
             .rv64virt => "virt",
         };
 
@@ -1366,12 +1376,26 @@ const Qemu = struct {
                     "4",
                     "-bios",
                     "/usr/share/ovmf/OVMF.fd", // TODO
-                    "-drive",
                 });
-                try args.append(allocator, .{ .prefixed_file = .{
-                    .prefix = "format=raw,if=virtio,media=disk,file=",
-                    .path = self.drive.?,
-                } });
+                if (self.iommu) {
+                    try appendStrings(&args, allocator, &.{
+                        "-device",
+                        "virtio-blk-pci,drive=disk0,iommu_platform=on,disable-legacy=on,bootindex=0",
+                        "-device",
+                        "amd-iommu,dma-remap=on,intremap=on",
+                        "-drive",
+                    });
+                    try args.append(allocator, .{ .prefixed_file = .{
+                        .prefix = "format=raw,if=none,id=disk0,file=",
+                        .path = self.drive.?,
+                    } });
+                } else {
+                    try appendStrings(&args, allocator, &.{"-drive"});
+                    try args.append(allocator, .{ .prefixed_file = .{
+                        .prefix = "format=raw,if=virtio,media=disk,file=",
+                        .path = self.drive.?,
+                    } });
+                }
             },
             else => {},
         }
@@ -1501,18 +1525,24 @@ const Qemu = struct {
                 "-device",
                 "virtio-gpu-pci",
             }),
-            .q35 => try appendStrings(&args, allocator, &.{
-                "-device",
-                "nec-usb-xhci,id=xhci",
-                "-device",
-                "usb-kbd",
-                "-netdev",
-                "user,id=net0",
-                "-device",
-                "virtio-net-pci,netdev=net0",
-                "-device",
-                "virtio-gpu-pci",
-            }),
+            .q35 => {
+                const virtio_opts = if (self.iommu)
+                    ",iommu_platform=on,disable-legacy=on"
+                else
+                    "";
+                try appendStrings(&args, allocator, &.{
+                    "-device",
+                    "nec-usb-xhci,id=xhci",
+                    "-device",
+                    "usb-kbd",
+                    "-netdev",
+                    "user,id=net0",
+                    "-device",
+                    try std.fmt.allocPrint(allocator, "virtio-net-pci,netdev=net0{s}", .{virtio_opts}),
+                    "-device",
+                    try std.fmt.allocPrint(allocator, "virtio-gpu-pci{s}", .{virtio_opts}),
+                });
+            },
             .rv64virt => if (self.graphic == .display) try appendStrings(&args, allocator, &.{
                 "-device",
                 "virtio-gpu-device",

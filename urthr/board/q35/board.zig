@@ -17,6 +17,8 @@ var devices = struct {
     xhc: ?*dd.usb.Xhc = null,
     /// PCIe ECAM.
     ecam: ?dd.pci.EcamHost = null,
+    /// AMD-Vi IOMMU.
+    amdvi: ?dd.iommu.AmdVi = null,
 
     /// GOP framebuffer console instance.
     fb_console: FbConsole = undefined,
@@ -256,6 +258,40 @@ pub fn initPeripherals1() common.mem.Error!void {
             @panic("Invalid MCFG structure.");
         };
 
+        // Initialize AMD-Vi IOMMU.
+        outer: {
+            const ivrsp = xsdt.find(.ivrs) orelse {
+                log.warn("IVRS not found.", .{});
+                break :outer;
+            };
+            const ivrs = try acpi.ivrs.parse(ivrsp, allocator) orelse {
+                log.warn("Invalid IVRS structure.", .{});
+                break :outer;
+            };
+            if (ivrs.ivhds.len == 0) {
+                log.warn("No IOMMU definition found in IVRS.", .{});
+                break :outer;
+            }
+
+            const base = try mem.phys.reserveAndRemap(
+                "AMD-Vi",
+                ivrs.ivhds[0].base,
+                0x4000, // TODO: should allocate 512K if PCSup=1
+                null,
+                .device,
+            );
+            var amdvi: dd.iommu.AmdVi = .new(base, mem.dma.interface(0));
+            amdvi.init() catch |err| {
+                log.warn("Failed to initialize AMD-Vi: {t}", .{err});
+                break :outer;
+            };
+
+            devices.amdvi = amdvi;
+        }
+        if (devices.amdvi == null) {
+            log.warn("IOMMU is disabled.", .{});
+        }
+
         // Find PCIe ECAM region.
         if (mcfg.entries.len == 0) {
             @panic("No PCIe ECAM region found.");
@@ -450,7 +486,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         // Initialize virtio-blk device.
         devices.virtio_blk = dd.VirtioBlk.init(
             result.dev.interface(),
-            mem.dma.interface(0),
+            getDmaAllocator(result.addr),
             urd.mem.bin,
         ) catch |err| {
             log.warn("Failed to initialize virtio-blk: {t}", .{err});
@@ -495,8 +531,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         const msix = bringup.msix;
         const netdev = dd.net.VirtioNet.new(
             bringup.dev.interface(),
-            mem.dma.interface(0),
-            urd.mem.page,
+            getDmaAllocator(bringup.addr),
             urd.mem.bin,
         ) catch |err| {
             log.warn("Failed to initialize virtio-net: {t}", .{err});
@@ -546,7 +581,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         // Initialize virtio-gpu device.
         devices.virtio_gpu = dd.VirtioGpu.init(
             result.dev.interface(),
-            mem.dma.interface(0),
+            getDmaAllocator(result.addr),
             urd.mem.bin,
         ) catch |err| {
             log.warn("Failed to initialize virtio-gpu: {t}", .{err});
@@ -651,7 +686,11 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         log.debug("xHC: BAR#{}: 0x{X} (size=0x{X}) -> 0x{X}", .{ bar.index, phys, bar.size(), base });
 
         // Initialize xHC driver.
-        devices.xhc = dd.usb.Xhc.init(base, vector, mem.dma.interface(0)) catch |err| {
+        devices.xhc = dd.usb.Xhc.init(
+            base,
+            vector,
+            getDmaAllocator(xhcdev.addr),
+        ) catch |err| {
             log.err("xHC initialization failed: {t}", .{err});
             break :outer;
         };
@@ -759,6 +798,32 @@ pub fn getRandom(buf: []u8) void {
     }
 }
 
+/// Get a DMA allocator for the PCI device.
+///
+/// If the IOMMU is available, the device is attached to a new domain.
+fn getDmaAllocator(addr: dd.pci.DevAddr) DmaAllocator {
+    const default = mem.dma.interface(0);
+
+    if (devices.amdvi) |*vi| {
+        const domain = vi.createDomain(urd.mem.bin) catch |err| {
+            log.warn("Failed to create IOMMU domain for {X:0>4}: {t}", .{
+                addr.bdf(), err,
+            });
+            return default;
+        };
+        domain.attach(addr.bdf()) catch |err| {
+            log.warn("Failed to attach {X:0>4} to IOMMU domain: {t}", .{
+                addr.bdf(), err,
+            });
+            return default;
+        };
+
+        return domain.interface();
+    } else {
+        return default;
+    }
+}
+
 /// Get the block device interface.
 pub fn getBlockDevice() ?common.block.Device {
     return if (devices.virtio_blk) |*dev|
@@ -849,6 +914,7 @@ const units = common.units;
 const util = common.util;
 const Console = common.Console;
 const FbConsole = common.FbConsole;
+const DmaAllocator = common.mem.DmaAllocator;
 const IoAllocator = common.mem.IoAllocator;
 const PageAllocator = common.mem.PageAllocator;
 const Pair = common.Pair;

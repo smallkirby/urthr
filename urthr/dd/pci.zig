@@ -75,6 +75,13 @@ pub const DevAddr = struct {
     device: DeviceNum = 0,
     /// Function number.
     function: FunctionNum = 0,
+
+    /// Get the 16-bit integer representation of the BDF.
+    pub fn bdf(self: DevAddr) u16 {
+        return (@as(u16, self.bus) << 8) |
+            (@as(u16, self.device) << 3) |
+            (@as(u16, self.function) << 0);
+    }
 };
 
 /// PCIe host controller.

@@ -228,6 +228,7 @@ pub const IoDomain = struct {
             self.pgtbl.mode,
             self.id,
         ));
+        log.info("Device {X:0>4} attached to IOMMU domain {d}", .{ device, self.id });
     }
 
     /// Map the DVA to SPA in the domain.
