@@ -15,15 +15,15 @@ pub const Error = error{
 /// Virtio device instance.
 dev: virtio.Device,
 /// RX buffers.
-rx_buffers: [num_rx_bufs]RxBuffer,
+rx_buffers: [num_rx_bufs]DmaMemory,
 /// Maps a descriptor ID currently posted to the RX queue to its index into `rx_buffers`.
 desc_to_buf: [num_rx_bufs]usize,
 /// TX buffer.
 ///
 /// Currently, transmission is synchronous and only one packet can be transmitted at a time.
-tx_buffer: []u8,
-/// Page allocator for DMA-capable memory.
-page_allocator: PageAllocator,
+tx_buffer: DmaMemory,
+/// DMA allocator for the buffers.
+dma: DmaAllocator,
 
 /// Index of the RX queue.
 ///
@@ -52,14 +52,6 @@ comptime {
 pub const pci_device_id_legacy: u16 = 0x1000;
 /// PCI device ID of a modern virtio-net device.
 pub const pci_device_id_modern: u16 = 0x1041;
-
-/// A single pre-allocated RX buffer.
-const RxBuffer = struct {
-    /// Virtual address of the buffer.
-    virt: usize,
-    /// Physical address of the buffer.
-    phys: u64,
-};
 
 /// Virtio-net per-packet header.
 ///
@@ -90,7 +82,7 @@ const NetHdr = extern struct {
 /// Create a new network device for a virtio-net controller.
 ///
 /// Memory allocated for this driver will be managed by the given allocators.
-pub fn new(dev: virtio.Device, dma: DmaAllocator, page_allocator: PageAllocator, allocator: Allocator) Error!*net.Device {
+pub fn new(dev: virtio.Device, dma: DmaAllocator, allocator: Allocator) Error!*net.Device {
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
     const netdev = try allocator.create(net.Device);
@@ -111,10 +103,10 @@ pub fn new(dev: virtio.Device, dma: DmaAllocator, page_allocator: PageAllocator,
         .dev = dev,
         .rx_buffers = undefined,
         .desc_to_buf = undefined,
-        .tx_buffer = try page_allocator.allocBytesV(buffer_size),
-        .page_allocator = page_allocator,
+        .tx_buffer = try dma.allocBytes(buffer_size, .normal),
+        .dma = dma,
     };
-    errdefer page_allocator.freeBytesV(self.tx_buffer);
+    errdefer dma.freeBytes(self.tx_buffer);
 
     // Populate RX buffers and post them to the device.
     try self.fillRxQueue();
@@ -145,14 +137,11 @@ fn fillRxQueue(self: *Self) Error!void {
     const vq = self.dev.getQueue(rxq_idx) orelse return Error.DeviceError;
 
     for (&self.rx_buffers, 0..) |*buf, index| {
-        const mem = try self.page_allocator.allocBytesV(buffer_size);
-        buf.* = .{
-            .virt = @intFromPtr(mem.ptr),
-            .phys = self.page_allocator.translateP(@intFromPtr(mem.ptr)),
-        };
+        buf.* = try self.dma.allocBytes(buffer_size, .normal);
+        self.dma.syncForDeviceAll(buf.*);
 
         const id = vq.addBuf(&[_]virtio.Buffer{.{
-            .addr = buf.phys,
+            .addr = buf.bus,
             .len = buffer_size,
             .write = true,
         }}) catch return Error.DeviceError;
@@ -186,7 +175,9 @@ fn pollImpl(dev: *net.Device) net.Error!?net.Device.PollResult {
     // Remove virtio-net header and return the packet data.
     const index = self.desc_to_buf[id];
     const buf = self.rx_buffers[index];
-    const ptr: [*]const u8 = @ptrFromInt(buf.virt + @sizeOf(NetHdr));
+    const ptr: [*]const u8 = @ptrFromInt(buf.cpu + @sizeOf(NetHdr));
+    self.dma.syncForCpu(buf.cpu, len);
+
     return .{
         .data = ptr[0 .. len - @sizeOf(NetHdr)],
         .handle = index,
@@ -198,9 +189,10 @@ fn releaseRxBufImpl(dev: *net.Device, handle: usize) void {
     const self: *Self = @ptrCast(@alignCast(dev.ctx));
     const vq = self.dev.getQueue(rxq_idx) orelse return;
     const buf = self.rx_buffers[handle];
+    self.dma.syncForDeviceAll(buf);
 
     const id = vq.addBuf(&[_]virtio.Buffer{.{
-        .addr = buf.phys,
+        .addr = buf.bus,
         .len = buffer_size,
         .write = true,
     }}) catch |err| {
@@ -223,12 +215,14 @@ fn transmitImpl(dev: *net.Device, _: net.Protocol, buf: *net.NetBuffer) net.Erro
 
     // Prepend virtio-net header to the packet.
     const hdr: NetHdr = .{};
-    @memcpy(self.tx_buffer[0..@sizeOf(NetHdr)], std.mem.asBytes(&hdr));
-    @memcpy(self.tx_buffer[@sizeOf(NetHdr)..][0..data.len], data);
+    const tx = self.tx_buffer.slice(u8);
+    @memcpy(tx[0..@sizeOf(NetHdr)], std.mem.asBytes(&hdr));
+    @memcpy(tx[@sizeOf(NetHdr)..][0..data.len], data);
+    self.dma.syncForDevice(self.tx_buffer.cpu, @sizeOf(NetHdr) + data.len);
 
     // Add the TX buffer to the queue.
     _ = vq.addBuf(&[_]virtio.Buffer{.{
-        .addr = self.page_allocator.translateP(@intFromPtr(self.tx_buffer.ptr)),
+        .addr = self.tx_buffer.bus,
         .len = @intCast(@sizeOf(NetHdr) + data.len),
         .write = false,
     }}) catch return net.Error.Unavailable;
@@ -255,7 +249,7 @@ const log = std.log.scoped(.vnet);
 const arch = @import("arch").impl;
 const common = @import("common");
 const DmaAllocator = common.mem.DmaAllocator;
-const PageAllocator = common.mem.PageAllocator;
+const DmaMemory = DmaAllocator.DmaMemory;
 const urd = @import("urthr");
 const net = urd.net;
 const MacAddr = net.ether.MacAddr;
