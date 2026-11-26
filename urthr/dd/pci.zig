@@ -76,6 +76,15 @@ pub const DevAddr = struct {
     /// Function number.
     function: FunctionNum = 0,
 
+    /// Construct a device address from 16-bit integer representation.
+    pub fn from(n: u16) DevAddr {
+        return .{
+            .bus = @truncate(n >> 8),
+            .device = @truncate(n >> 3),
+            .function = @truncate(n),
+        };
+    }
+
     /// Get the 16-bit integer representation of the BDF.
     pub fn bdf(self: DevAddr) u16 {
         return (@as(u16, self.bus) << 8) |
@@ -446,6 +455,8 @@ pub const BarType = enum {
 
 /// PCI Capability IDs.
 pub const CapId = enum(u8) {
+    /// MSI
+    msi = 0x05,
     /// Vendor-specific.
     vndr = 0x09,
     /// MSI-X
@@ -481,6 +492,93 @@ pub fn findCapability(host: Host, addr: DevAddr, cap_id: CapId) ?u8 {
         offset = header.next;
     } else return null;
 }
+
+// =========================================================
+// MSI
+
+/// MSI Capability structure.
+const MsiCap = packed struct(u32) {
+    /// Capability ID.
+    id: CapId = .msi,
+    /// Next Capability Pointer.
+    next: u8,
+
+    /// MSI Enable.
+    enable: bool,
+    /// Multiple Message Capable.
+    /// log2 of the number of requested vectors.
+    multi_msg_capable: u3,
+    /// Multiple Message Enable.
+    /// log2 of the number of allocated vectors.
+    multi_msg_enable: u3,
+    /// 64-bit Address Capable.
+    addr64: bool,
+    /// Per-Vector Masking Capable.
+    per_vector_mask: bool,
+    /// Reserved.
+    _24: u7 = 0,
+};
+
+/// MSI configuration.
+pub const MsiConfig = struct {
+    /// Offset of the MSI capability in the config space.
+    cap_offset: u8,
+    /// Whether the device supports 64-bit message address.
+    addr64: bool,
+};
+
+/// Parse MSI configuration.
+///
+/// Returns null if MSI capability is not found.
+pub fn parseMsiConfig(host: Host, addr: DevAddr) ?MsiConfig {
+    const offset = findCapability(host, addr, .msi) orelse return null;
+    const cap = host.getIo(addr).readAs(offset, MsiCap);
+
+    return .{
+        .cap_offset = offset,
+        .addr64 = cap.addr64,
+    };
+}
+
+/// Enable MSI for the device with a single vector.
+pub fn enableMsi(host: Host, addr: DevAddr, cap_offset: u8) void {
+    host.getIo(addr).modifyAs(cap_offset, MsiCap, .{
+        .multi_msg_enable = 0,
+        .enable = true,
+    });
+}
+
+/// Disable MSI for the device.
+pub fn disableMsi(host: Host, addr: DevAddr, cap_offset: u8) void {
+    host.getIo(addr).modifyAs(cap_offset, MsiCap, .{
+        .enable = false,
+    });
+}
+
+/// Setter for MSI message address and data.
+pub const MsiAccessor = struct {
+    /// PCI host controller.
+    host: Host,
+    /// Target device address BDF.
+    addr: DevAddr,
+    /// MSI configuration information.
+    config: MsiConfig,
+
+    /// Set the message address and data.
+    pub fn setMessage(self: MsiAccessor, addr: u64, data: u16) void {
+        const io = self.host.getIo(self.addr);
+        const base: u12 = self.config.cap_offset;
+
+        io.write(base + 0x4, bits.extract(u32, addr, 0));
+        if (self.config.addr64) {
+            io.write(base + 0x8, bits.extract(u32, addr, 32));
+            io.write(base + 0xC, @as(u32, data));
+        } else {
+            rtt.expectEqual(0, bits.extract(u32, addr, 32));
+            io.write(base + 0x8, @as(u32, data));
+        }
+    }
+};
 
 // =========================================================
 // MSI-X

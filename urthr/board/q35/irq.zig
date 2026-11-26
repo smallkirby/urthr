@@ -10,6 +10,8 @@ pub const IntVector = enum(u8) {
     virtio_blk = 0x42,
     /// virtio-gpu interrupt.
     virtio_gpu = 0x43,
+    /// AMD-Vi event interrupt.
+    amdvi = 0x44,
     /// TLB shootdown IPI.
     tlb_shootdown = 0x60,
     /// Reschedule IPI.

@@ -380,6 +380,63 @@ const iova_reserved = [_]common.Range{
     .{ .start = 0x00FD_0000_0000, .end = 0x0100_0000_0000 },
 };
 
+/// Register the IRQ handler.
+///
+/// The interrupt message must be configured in the MSI capability of the IOMMU.
+pub fn registerIrq(self: *Self, vector: urd.exception.Vector) void {
+    urd.exception.setHandler(vector, .{
+        .function = handleIrq,
+        .ctx = self,
+    }) catch {
+        @panic("Failed to set IRQ handler for AMD-Vi");
+    };
+
+    self.vi.modify(Control, .{
+        .event_int_en = true,
+    });
+}
+
+/// IRQ handler function.
+fn handleIrq(_: urd.exception.Vector, ctx: ?*anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ctx.?));
+    const status = self.vi.read(Status); // RW1C
+
+    // Acknowledge the interrupt first.
+    self.vi.writez(Status, .{
+        .event_log_int = true, // RW1C
+    });
+
+    // Drain the event log.
+    while (self.evlog.pop()) |ev| {
+        ev.dump();
+    }
+    self.evlog.sync();
+
+    // Recover from overflow.
+    if (status.event_overflow) {
+        log.warn("Event log overflowed.", .{});
+
+        self.vi.modify(Control, .{
+            .event_log_en = false,
+        });
+        self.vi.waitFor(Status, .{
+            .event_log_run = false,
+        }, null);
+
+        self.evlog.head = 0;
+        self.vi.writei(EventLogHead, 0);
+        self.vi.writei(EventLogTail, 0);
+
+        self.vi.writez(Status, .{
+            .event_overflow = true, // RW1C
+        });
+        self.vi.modify(Control, .{
+            .event_log_en = true,
+            .event_int_en = true,
+        });
+    }
+}
+
 // =============================================================
 // Internals
 

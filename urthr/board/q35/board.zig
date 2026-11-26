@@ -22,6 +22,9 @@ var devices = struct {
 
     /// GOP framebuffer console instance.
     fb_console: FbConsole = undefined,
+
+    /// DeviceID of the IOMMU PCI function.
+    amdvi_devid: u16 = 0,
 }{};
 
 /// Stash the loader-provided boot info for later use.
@@ -287,6 +290,7 @@ pub fn initPeripherals1() common.mem.Error!void {
             };
 
             devices.amdvi = amdvi;
+            devices.amdvi_devid = ivrs.ivhds[0].deviceid;
         }
         if (devices.amdvi == null) {
             log.warn("IOMMU is disabled.", .{});
@@ -472,6 +476,33 @@ pub fn initPeripherals2() (urd.mem.Error || net.Error)!void {}
 /// This function is called after initial task is spawned.
 /// This function can spawn new threads.
 pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
+    // AMD-Vi event interrupt.
+    if (devices.ecam) |*e| outer: {
+        const vi = if (devices.amdvi) |*v| v else break :outer;
+        const hc = e.interface();
+        const vector = @backingInt(irq.IntVector.amdvi);
+
+        const deviceid = devices.amdvi_devid;
+        const addr = dd.pci.DevAddr.from(deviceid);
+
+        // Set MSI address and data.
+        const msi = dd.pci.parseMsiConfig(hc, addr) orelse {
+            log.warn("AMD-Vi: MSI capability not found.", .{});
+            break :outer;
+        };
+        const msg = arch.msi.buildMessage(vector, arch.lapic.getId());
+        const accessor = dd.pci.MsiAccessor{
+            .host = hc,
+            .addr = addr,
+            .config = msi,
+        };
+        accessor.setMessage(msg.addr, @truncate(msg.data));
+
+        // Enable MSI and register IRQ.
+        dd.pci.enableMsi(hc, addr, msi.cap_offset);
+        vi.registerIrq(vector);
+    }
+
     // virtio-blk
     if (devices.ecam) |*e| outer: {
         // Scan for a virtio-blk device.
