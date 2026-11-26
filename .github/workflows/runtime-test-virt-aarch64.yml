@@ -22,7 +22,6 @@ jobs:
       fail-fast: false
       matrix:
         BUILD_TYPE: [Debug, ReleaseSafe, ReleaseFast]
-      max-parallel: 1
 
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +37,8 @@ jobs:
             wget \
             tar \
             xz-utils \
-            qemu-system-arm \
             qemu-utils \
             cpp \
-            libcapstone-dev \
             fdisk \
             dosfstools \
             mtools

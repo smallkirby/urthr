@@ -15,22 +15,22 @@ env:
 jobs:
   runtime_test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/urthr:latest
     strategy:
       fail-fast: false
       matrix:
         BUILD_TYPE: [Debug, ReleaseSafe, ReleaseFast]
-      max-parallel: 1
+        IOMMU: [false, true]
 
     steps:
-      - uses: actions/checkout@v3
-        with:
-          lfs: true
+      - uses: actions/checkout@v4
 
       - name: Install dependency
         run: |
-          sudo apt update
-          sudo apt install -y \
+          apt update
+          apt install -y \
             git \
             sudo \
             binutils \
@@ -38,9 +38,11 @@ jobs:
             wget \
             tar \
             xz-utils \
+            cpp \
             mtools \
             dosfstools \
-            qemu-system-x86
+            parted \
+            python3
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -52,7 +54,8 @@ jobs:
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
             -Dboard=q35 \
-            -Dqemu=/usr/bin \
+            -Dqemu=$QEMU_DIR/bin \
+            -Diommu=${{ matrix.IOMMU }} \
             -Drtt \
             -Drestart \
             -Dinit=/bin/utest \
@@ -66,7 +69,8 @@ jobs:
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
             -Dboard=q35 \
-            -Dqemu=/usr/bin \
+            -Dqemu=$QEMU_DIR/bin \
+            -Diommu=${{ matrix.IOMMU }} \
             -Drtt \
             -Drestart \
             -Dinit=/bin/utest \
