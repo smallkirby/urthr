@@ -16,6 +16,7 @@ fi
 arch=$1
 shift
 
+echo_normal "QEMU command: $*"
 "$@"
 status=$?
 
