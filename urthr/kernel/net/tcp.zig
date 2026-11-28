@@ -104,16 +104,20 @@ fn inputImpl(
     var notify: ?*Socket = null; // listener socket to be woken up at end
     sock.lock();
     defer {
-        sock.unlock();
-
-        if (wakeup) {
+        if (wakeup and sock.state != .free) {
             sock.wake();
         }
+        sock.unlock();
+
         if (notify) |listener| {
             listener.lock(); // to prevent lost wakeup for accept()
             defer listener.unlock();
             if (listener.state == .listen) listener.wake();
         }
+    }
+
+    if (!sock.matches(local, remote)) {
+        return;
     }
 
     // Handle the listening socket for a new connection request.
@@ -499,14 +503,16 @@ pub fn open() net.Error!usize {
 
 /// Bind a TCP socket to the given local endpoint.
 pub fn bind(desc: usize, local: Endpoint) net.Error!void {
+    // Reap expired sockets first.
+    sock_table.reap();
+
     const sock = sock_table.get(desc);
+    sock.lock();
+    defer sock.unlock();
 
     if (sock.state != .closed) {
         return net.Error.Unavailable;
     }
-
-    // Reap expired sockets first.
-    sock_table.reap();
 
     var lc = local;
     if (lc.port == 0) {
@@ -575,6 +581,9 @@ pub fn accept(desc: usize, nonblock: bool) net.Error!usize {
 pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
     const sock = sock_table.get(desc);
 
+    sock.lock();
+    defer sock.unlock();
+
     if (sock.state != .closed) {
         log.err("connect: invalid socket state: {t}", .{sock.state});
         return net.Error.Unavailable;
@@ -628,20 +637,15 @@ pub fn connect(desc: usize, remote: Endpoint) net.Error!void {
 
 /// Wait until a TCP socket is established.
 fn waitSockEstablished(sock: *Socket) net.Error!void {
-    var state = sock.state;
+    rtt.expect(sock._lock.isLocked());
+
     while (true) {
-        sock.wait();
-
-        if (sock.state == state) {
-            continue;
-        }
-        state = sock.state;
-
-        switch (state) {
-            .syn_received => continue,
-            .established => break,
+        switch (sock.state) {
+            .syn_sent, .syn_received => sock.cv.wait(&sock._lock),
+            .established, .close_wait => return,
+            .free => return net.Error.Unavailable,
             else => {
-                log.err("connection failed: unexpected state: {t}", .{state});
+                log.err("connection failed: unexpected state: {t}", .{sock.state});
                 sock.update(.closed);
                 return net.Error.Unavailable;
             },
@@ -655,6 +659,9 @@ fn waitSockEstablished(sock: *Socket) net.Error!void {
 pub fn close(desc: usize) void {
     const sock = sock_table.get(desc);
 
+    sock.lock();
+    defer sock.unlock();
+
     switch (sock.state) {
         .free => {
             return log.warn("close: socket already closed", .{});
@@ -666,6 +673,13 @@ pub fn close(desc: usize) void {
             sock.update(.closed);
             // Close all children sockets.
             while (sock_table.takeUnaccepted(sock)) |child| {
+                child.lock();
+                defer child.unlock();
+
+                if (!child.orphaned or child.state == .free) {
+                    continue;
+                }
+
                 output(child, .reset, &.{}) catch {};
                 child.update(.closed);
                 sock_table.release(child);
@@ -714,6 +728,10 @@ pub fn send(desc: usize, data: []const u8, nonblock: bool) net.Error!usize {
             var sent: usize = 0;
             var cap: usize = 0;
             while (sent < data.len) {
+                if (sock.state != .established and sock.state != .close_wait) {
+                    return net.Error.Unavailable;
+                }
+
                 cap = sock.snd.wnd - (sock.snd.nxt - sock.snd.una);
 
                 if (cap == 0) {
@@ -989,22 +1007,25 @@ const SocketTable = struct {
 
     /// Find a free socket to open.
     fn allocate(self: *Self) net.Error!*Socket {
-        const ie = self.lock.lockDisableIrq();
-        defer self.lock.unlockRestoreIrq(ie);
-
         for (0..2) |attempt| {
-            for (&self.sockets) |*s| {
-                if (s.state == .free) {
-                    s.* = std.mem.zeroInit(Socket, .{
-                        .state = .closed,
-                        .buf = try urd.mem.bin.alloc(u8, buf_size),
-                    });
+            {
+                const ie = self.lock.lockDisableIrq();
+                defer self.lock.unlockRestoreIrq(ie);
 
-                    return s;
+                for (&self.sockets) |*s| {
+                    if (s.state == .free) {
+                        s.reinit(std.mem.zeroInit(Socket, .{
+                            .state = .closed,
+                            .buf = try urd.mem.bin.alloc(u8, buf_size),
+                        }));
+
+                        return s;
+                    }
                 }
             }
 
-            if (attempt == 0) self.reapLocked();
+            // No free socket found. Reap sockets and retry once.
+            if (attempt == 0) self.reap();
         }
 
         return net.Error.OutOfMemory;
@@ -1012,38 +1033,28 @@ const SocketTable = struct {
 
     /// Release sockets that have been gracefully closed.
     fn reap(self: *Self) void {
-        const ie = self.lock.lockDisableIrq();
-        defer self.lock.unlockRestoreIrq(ie);
-        self.reapLocked();
-    }
-
-    /// Release sockets that have been gracefully closed.
-    ///
-    /// The lock of the table must be held.
-    fn reapLocked(self: *Self) void {
-        rtt.expect(self.lock.isLocked());
-        const now = urd.time.getCurrentTimestamp();
+        rtt.expect(!self.lock.isLocked());
 
         for (&self.sockets) |*s| {
             if (!s.orphaned) continue;
 
-            const done = switch (s.state) {
-                .closed => true,
-                .time_wait => now - s.shutdown_since >= time_wait_duration,
-                .fin_wait2 => now - s.shutdown_since >= fin_wait2_duration,
-                else => false,
-            };
-            if (done) self.release(s);
+            s.lock();
+            defer s.unlock();
+
+            if (s.isReapable()) {
+                self.release(s);
+            }
         }
     }
 
     /// Release a socket.
     ///
-    /// If a thread is waiting for the socket, wake it up.
-    fn release(_: *Self, socket: *Socket) void {
+    /// If threads are waiting for the socket, wake them up.
+    fn release(self: *Self, socket: *Socket) void {
+        rtt.expect(socket._lock.isLocked());
         const allocator = urd.mem.bin;
 
-        // Notify the waiting thread if any to unblock it.
+        // Notify the waiting threads if any to unblock them.
         socket.cv.broadcast();
 
         // Free the queue.
@@ -1053,9 +1064,11 @@ const SocketTable = struct {
         allocator.free(socket.buf);
 
         // Invalidate the socket.
-        socket.* = std.mem.zeroInit(Socket, .{
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+        socket.reinit(std.mem.zeroInit(Socket, .{
             .state = .free,
-        });
+        }));
     }
 
     /// Get a socket by its descriptor.
@@ -1071,21 +1084,14 @@ const SocketTable = struct {
 
         var cand: ?*Socket = null;
         for (&self.sockets) |*s| {
-            if (s.state == .free) continue;
+            if (!s.matches(local, remote)) {
+                continue;
+            }
 
-            const local_match =
-                s.local.port == local.port and
-                (s.local.ip.eql(local.ip) or s.local.ip.eql(.any) or local.ip.eql(.any));
-            const remote_match =
-                remote.eql(s.remote) or
-                s.remote.eql(.empty) or
-                remote.eql(.empty);
-            if (local_match and remote_match) {
-                if (s.state != .listen) {
-                    return s;
-                } else {
-                    cand = s;
-                }
+            if (s.state != .listen) {
+                return s;
+            } else {
+                cand = s;
             }
         } else return cand;
     }
@@ -1128,6 +1134,8 @@ const SocketTable = struct {
     }
 
     /// Take any connection off the accept queue of the listening socket, regardless of its state.
+    ///
+    /// The taken socket is marked as orphaned.
     fn takeUnaccepted(self: *Self, listener: *Socket) ?*Socket {
         const ie = self.lock.lockDisableIrq();
         defer self.lock.unlockRestoreIrq(ie);
@@ -1135,6 +1143,7 @@ const SocketTable = struct {
         for (&self.sockets) |*s| {
             if (s.listener == listener and s.state != .free) {
                 s.listener = null;
+                s.orphaned = true;
                 return s;
             }
         }
@@ -1210,19 +1219,49 @@ const Socket = struct {
     /// Serializes socket state access.
     _lock: Mutex,
 
-    pub fn wait(self: *Socket) void {
-        rtt.expect(self.state != .free);
-
-        self._lock.lock();
-        defer self._lock.unlock();
-
-        self.cv.wait(&self._lock);
-    }
-
+    /// Wake up all threads waiting on this socket.
     pub fn wake(self: *Socket) void {
         rtt.expect(self.state != .free);
+        self.cv.broadcast();
+    }
 
-        self.cv.signal();
+    /// Reinitialize the socket except for the fields which might be in use by other threads.
+    ///
+    /// TODO: in the first place, must not use the slot that might be referenced.
+    fn reinit(self: *Socket, value: Socket) void {
+        inline for (@typeInfo(Socket).@"struct".field_names) |name| {
+            if (comptime !std.mem.eql(u8, name, "_lock") and !std.mem.eql(u8, name, "cv")) {
+                @field(self, name) = @field(value, name);
+            }
+        }
+    }
+
+    /// Check if a segment from the remote to the local endpoint is destined to this socket.
+    fn matches(self: *const Socket, local: Endpoint, remote: Endpoint) bool {
+        if (self.state == .free) return false;
+
+        const local_match =
+            self.local.port == local.port and
+            (self.local.ip.eql(local.ip) or self.local.ip.eql(.any) or local.ip.eql(.any));
+        const remote_match =
+            remote.eql(self.remote) or
+            self.remote.eql(.empty) or
+            remote.eql(.empty);
+
+        return local_match and remote_match;
+    }
+
+    /// Check if the socket closed by application can be reaped.
+    fn isReapable(self: *const Socket) bool {
+        if (!self.orphaned) return false;
+
+        const now = urd.time.getCurrentTimestamp();
+        return switch (self.state) {
+            .closed => true,
+            .time_wait => now - self.shutdown_since >= time_wait_duration,
+            .fin_wait2 => now - self.shutdown_since >= fin_wait2_duration,
+            else => false,
+        };
     }
 
     pub fn lock(self: *Socket) void {
