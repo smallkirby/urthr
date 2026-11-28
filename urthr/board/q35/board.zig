@@ -526,10 +526,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
 
         // Register MSI-X.
         const msix = result.msix;
-        const msg = arch.msi.buildMessage(
-            vector,
-            arch.lapic.getId(),
-        );
+        const msg = getMsiMessage(result.addr, vector);
         const table = dd.pci.MsixTable{
             .base = result.barmap.get(msix.table_bar) + msix.table_offset,
         };
@@ -571,10 +568,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         urd.net.registerDevice(netdev);
 
         // Register MSI-X.
-        const msg = arch.msi.buildMessage(
-            vector,
-            arch.lapic.getId(),
-        );
+        const msg = getMsiMessage(bringup.addr, vector);
         const table = dd.pci.MsixTable{
             .base = bringup.barmap.get(msix.table_bar) + msix.table_offset,
         };
@@ -622,10 +616,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
 
         // Register MSI-X.
         const msix = result.msix;
-        const msg = arch.msi.buildMessage(
-            vector,
-            arch.lapic.getId(),
-        );
+        const msg = getMsiMessage(result.addr, vector);
         const table = dd.pci.MsixTable{
             .base = result.barmap.get(msix.table_bar) + msix.table_offset,
         };
@@ -727,7 +718,7 @@ pub fn initPeripherals3() (urd.mem.Error || net.Error)!void {
         };
 
         // Register MSI-X.
-        const msg = arch.msi.buildMessage(vector, arch.lapic.getId());
+        const msg = getMsiMessage(xhcdev.addr, vector);
         const msix = dd.pci.parseMsixConfig(hc, xhcdev.addr) orelse {
             log.err("Failed to parse MSI-X configuration for xHC.", .{});
             break :outer;
@@ -853,6 +844,31 @@ fn getDmaAllocator(addr: dd.pci.DevAddr) DmaAllocator {
     } else {
         return default;
     }
+}
+
+/// Get an MSI message that delivers the vector to the current CPU.
+///
+/// If the IOMMU is available, the interrupt of the device is remapped.
+fn getMsiMessage(addr: dd.pci.DevAddr, vector: u8) arch.msi.Message {
+    const default = arch.msi.buildMessage(
+        vector,
+        arch.lapic.getId(),
+    );
+    const vi = if (devices.amdvi) |*v| v else return default;
+    const deviceid = addr.bdf();
+
+    const index = vi.allocInterrupt(
+        deviceid,
+        arch.lapic.getId(),
+        vector,
+    ) catch |err| {
+        log.warn("Failed to enable interrupt remapping for {X:0>4}: {t}", .{
+            deviceid, err,
+        });
+        return default;
+    };
+
+    return dd.iommu.AmdVi.buildMessage(index);
 }
 
 /// Get the block device interface.

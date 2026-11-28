@@ -22,6 +22,8 @@ vi: Vi,
 
 /// Device table.
 dt: DeviceTable,
+/// Interrupt remapping.
+ir: Ir,
 /// Command buffer.
 cmdbuf: CmdBuf,
 /// Event log.
@@ -37,6 +39,8 @@ pub const Error = common.mem.Error || error{
     AlreadyMapped,
     /// Invalid argument.
     InvalidArgument,
+    /// No resource is available.
+    NoResource,
     /// Command buffer's ring buffer is full.
     RingFull,
 };
@@ -50,6 +54,7 @@ pub fn new(base: usize, allocator: DmaAllocator) Self {
         .evlog = undefined,
         .allocator = allocator,
         .next_domain = 1,
+        .ir = undefined,
     };
 }
 
@@ -61,14 +66,17 @@ pub fn init(self: *Self) Error!void {
     // Set the address of cleared device table.
     self.vi.write(TableBase, .init(self.dt.buf.bus, self.dt.buf.size));
 
+    // Initialize interrupt remapping management.
+    self.ir = .init(self.dt, self.allocator);
+
     // Initialize command buffer.
-    self.cmdbuf = try CmdBuf.init(self.vi, self.allocator);
+    self.cmdbuf = try .init(self.vi, self.allocator);
     self.vi.write(CmdBufBase, .init(self.cmdbuf.buf.bus, CmdBuf.nents));
     self.vi.writei(CmdHead, 0);
     self.vi.writei(CmdTail, 0);
 
     // Initialize event log.
-    self.evlog = try EventLog.init(self.vi, self.allocator);
+    self.evlog = try .init(self.vi, self.allocator);
     self.vi.write(EventLogBase, .init(self.evlog.buf.bus, EventLog.nents));
     self.vi.writei(EventLogHead, 0);
     self.vi.writei(EventLogTail, 0);
@@ -132,6 +140,8 @@ pub const InvScope = union(enum) {
         /// Size in bytes.
         size: usize,
     },
+    /// Interrupt remapping table cache of the device.
+    interrupt: DeviceId,
     /// All the translation cache of the domain.
     domain: Domain,
     /// All the caches of the IOMMU.
@@ -165,6 +175,11 @@ pub fn invalidate(self: *Self, scope: InvScope) Error!void {
                     .address = @as(u52, @intCast((p.dva + i * page_size) >> 12)),
                 } });
             }
+        },
+        .interrupt => |deviceid| {
+            try self.cmdbuf.push(.{ .invalidate_interrupt_table = .{
+                .deviceid = deviceid,
+            } });
         },
         .domain => |domain| {
             try self.cmdbuf.push(.{
@@ -223,11 +238,13 @@ pub const IoDomain = struct {
 
     /// Attach the device to the domain.
     pub fn attach(self: *IoDomain, device: DeviceId) Error!void {
-        try self.vi.setTableEntry(device, .translated(
+        var dte = self.vi.dt.get(device);
+        dte.setTranslation(
             self.pgtbl.rootAddr(),
             self.pgtbl.mode,
             self.id,
-        ));
+        );
+        try self.vi.setTableEntry(device, dte);
         log.info("Device {X:0>4} attached to IOMMU domain {d}", .{ device, self.id });
     }
 
@@ -364,6 +381,36 @@ pub fn createDomain(self: *Self, allocator: Allocator) Error!*IoDomain {
 
     return domain;
 }
+
+/// Allocate an interrupt remapping entry of the device and enable it.
+///
+/// Returns the index of the entry, which can be used as MSI data of the device.
+pub fn allocInterrupt(self: *Self, device: DeviceId, dest: u8, vector: u8) Error!u8 {
+    const index = try self.ir.assign(device, dest, vector);
+    errdefer self.ir.release(device, index) catch {};
+
+    try self.invalidate(.{ .device = device });
+    try self.invalidate(.{ .interrupt = device });
+
+    return index;
+}
+
+/// Disable the interrupt remapping entry.
+pub fn freeInterrupt(self: *Self, device: DeviceId, index: u8) Error!void {
+    try self.ir.release(device, index);
+    try self.invalidate(.{ .interrupt = device });
+}
+
+/// Build an MSI message in the remappable format.
+pub fn buildMessage(index: u8) arch.msi.Message {
+    return .{
+        .addr = msi_addr,
+        .data = index,
+    };
+}
+
+/// MSI address.
+const msi_addr = 0xFEE0_0000;
 
 /// Lowest IOVA that can be allocated.
 const iova_min = page_size;
@@ -506,6 +553,11 @@ const DeviceTable = struct {
         };
     }
 
+    /// Get a copy of the device table entry.
+    pub fn get(self: *const DeviceTable, id: DeviceId) DevTableEntry {
+        return self.buf.slice(DevTableEntry)[id];
+    }
+
     /// Set a device table entry.
     pub fn set(self: *DeviceTable, id: DeviceId, dte: DevTableEntry) void {
         const entry = &self.buf.slice(DevTableEntry)[id];
@@ -578,6 +630,7 @@ const DevTableEntry = packed struct(u256) {
     /// Interrupt map valid.
     iv: bool,
     /// Interrupt table length.
+    /// log2 of the interrupt table length.
     int_tab_len: u4,
     /// Ignore unmapped interrupts.
     ig: bool,
@@ -621,18 +674,29 @@ const DevTableEntry = packed struct(u256) {
     ///
     snoop_attr: u8,
 
-    /// Construct a DTE that translates a device address using the given I/O page table.
-    pub fn translated(root: usize, mode: PagingMode, domain: Domain) DevTableEntry {
-        return std.mem.zeroInit(DevTableEntry, .{
-            .v = true,
-            .tv = true,
-            .ir = true,
-            .iw = true,
-            .mode = mode,
-            .pgtbl_root = @as(u40, @intCast(root >> 12)),
-            .domainid = domain,
-            .int_ctl = .unmapped,
-        });
+    /// Set the translation fields so that a device address is translated using the given I/O page table.
+    pub fn setTranslation(self: *DevTableEntry, root: usize, mode: PagingMode, domain: Domain) void {
+        // TODO: should be atomic (at least word-sized writes)
+        self.ir = true;
+        self.iw = true;
+        self.mode = mode;
+        self.pgtbl_root = @intCast(root >> 12);
+        self.domainid = domain;
+        self.tv = true;
+        self.v = true;
+    }
+
+    /// Set the interrupt remapping fields.
+    pub fn setRemap(self: *DevTableEntry, table: usize, len: usize) void {
+        rtt.expectEqual(0, table % IrTable.alignment);
+        rtt.expect(std.math.isPowerOfTwo(len));
+
+        // TODO: should be atomic (at least word-sized writes)
+        self.int_tab_root = @intCast(table >> 6);
+        self.int_tab_len = @intCast(std.math.log2_int(usize, len));
+        self.ig = false;
+        self.int_ctl = .remap;
+        self.iv = true;
     }
 };
 
@@ -982,6 +1046,206 @@ const PageEntry = packed struct(u64) {
 };
 
 // =============================================================
+// Interrupt remapping
+// =============================================================
+
+/// Interrupt remapping management.
+const Ir = struct {
+    /// Interrupt remapping state of devices.
+    states: [max_devices]?State,
+    /// Device table.
+    dt: DeviceTable,
+
+    /// Managed DMA allocator.
+    allocator: DmaAllocator,
+
+    /// Interrupt remapping state of a device.
+    const State = struct {
+        /// Device that owns the table.
+        device: DeviceId,
+        /// Interrupt remapping table.
+        table: IrTable,
+        /// Allocated entries.
+        used: Mask,
+    };
+
+    /// Bitmask of the used entries in an interrupt remapping table.
+    const Mask = @Int(.unsigned, IrTable.len);
+
+    /// Max number of devices that can use interrupt remapping.
+    const max_devices = 16;
+
+    pub fn init(dt: DeviceTable, allocator: DmaAllocator) Ir {
+        return .{
+            .states = @splat(null),
+            .dt = dt,
+            .allocator = allocator,
+        };
+    }
+
+    /// Allocate an interrupt remapping entry of the device.
+    ///
+    /// If the device has no table, new table is created for the device.
+    ///
+    /// Returns the index of the entry.
+    pub fn assign(self: *Ir, device: DeviceId, dest: u8, vector: u8) Error!u8 {
+        const state = try self.getState(device);
+        const free = ~state.used;
+        if (free == 0) return Error.NoResource;
+
+        const index: u8 = @ctz(free);
+        state.table.set(index, dest, vector);
+        state.used |= @as(Mask, 1) << @intCast(index);
+
+        return index;
+    }
+
+    /// Disable the interrupt remapping entry.
+    pub fn release(self: *Ir, device: DeviceId, index: u8) Error!void {
+        const state = self.find(device) orelse {
+            return Error.InvalidArgument;
+        };
+        rtt.expect(index < IrTable.len);
+
+        state.table.clear(index);
+        state.used &= ~(@as(Mask, 1) << @intCast(index));
+    }
+
+    /// Get the interrupt remapping state of the device.
+    ///
+    /// If the device has no state, enable interrupt remapping for the device.
+    fn getState(self: *Ir, device: DeviceId) Error!*State {
+        if (self.find(device)) |state| {
+            return state;
+        }
+        const slot = try self.allocSlot();
+
+        // Allocate a new interrupt remapping table for the device.
+        const table = try IrTable.init(self.allocator);
+        errdefer self.allocator.free(table.data);
+
+        // Set the table to the device table entry.
+        var dte = self.dt.get(device);
+        dte.setRemap(table.data.bus, IrTable.len);
+        self.dt.set(device, dte);
+
+        slot.* = .{
+            .device = device,
+            .table = table,
+            .used = 0,
+        };
+        return &slot.*.?;
+    }
+
+    /// Find the interrupt remapping state of the device.
+    fn find(self: *Ir, device: DeviceId) ?*State {
+        for (&self.states) |*slot| {
+            if (slot.*) |*state| {
+                if (state.device == device) return state;
+            }
+        }
+        return null;
+    }
+
+    /// Find a free slot for an interrupt remapping state.
+    fn allocSlot(self: *Ir) Error!*?State {
+        for (&self.states) |*slot| {
+            if (slot.* == null) return slot;
+        }
+        return Error.NoResource;
+    }
+};
+
+/// Interrupt remapping table.
+const IrTable = struct {
+    /// Table memory.
+    data: DmaMemory,
+
+    /// Managed DMA allocator.
+    dma: DmaAllocator,
+
+    /// The number of entries in the table.
+    const len = 16;
+    /// Required alignment in bytes of the table.
+    const alignment = 128;
+
+    /// Create an empty interrupt remapping table.
+    pub fn init(dma: DmaAllocator) Error!IrTable {
+        const data = try dma.allocBytes(len * @sizeOf(Irte), .normal);
+        @memset(data.slice(u8), 0);
+        dma.syncForDeviceAll(data);
+
+        return IrTable{
+            .data = data,
+            .dma = dma,
+        };
+    }
+
+    /// Set an interrupt remapping table entry.
+    ///
+    /// Remapping is immediately enabled.
+    pub fn set(self: *const IrTable, index: usize, dest: u8, vector: u8) void {
+        rtt.expect(index < len);
+
+        self.data.slice(Irte)[index] = .{
+            .en = true,
+            .sup_iopf = false,
+            .int_type = .fixed,
+            .rq_eoi = false,
+            .dm = .physical,
+            .dest = dest,
+            .vector = vector,
+        };
+        self.dma.syncForDeviceAny(&self.data.slice(Irte)[index]);
+    }
+
+    /// Disable an interrupt remapping table entry.
+    pub fn clear(self: *const IrTable, index: usize) void {
+        rtt.expect(index < len);
+
+        self.data.slice(Irte)[index] = std.mem.zeroes(Irte);
+        self.dma.syncForDeviceAny(&self.data.slice(Irte)[index]);
+    }
+
+    comptime {
+        std.debug.assert(std.math.isPowerOfTwo(len));
+    }
+};
+
+/// Interrupt remapping table entry.
+const Irte = packed struct(u32) {
+    /// Interrupt is remapped. If unset, interrupt is target aborted.
+    en: bool,
+    /// When set, suppress logging when use of this remapping entry causes an IO_PAGE_FAULT.
+    sup_iopf: bool,
+    /// Interrupt type.
+    int_type: enum(u3) {
+        /// Target core is fixed.
+        fixed = 0b000,
+        /// Target core is arbitrated.
+        arb = 0b001,
+        _,
+    },
+    /// Request EOI.
+    rq_eoi: bool,
+    /// Destination mode.
+    dm: enum(u1) {
+        /// Physical destination mode.
+        physical = 0,
+        /// Logical destination mode.
+        logical = 1,
+    },
+    /// Guest mode.
+    guest_mode: u1 = 0,
+    /// Specifies the APIC logical or physical address to send the interrupt to.
+    dest: u8,
+    /// Specifies the interrupt vector for the interrupt.
+    vector: u8,
+    /// Reserved.
+    _24: u8 = 0,
+};
+
+// =============================================================
 // Command
 // =============================================================
 
@@ -1142,9 +1406,16 @@ const Cmd = packed union {
     invalidate_iotbl_pages: packed struct(u128) {
         _: u128,
     },
-    /// Not implemented yet.
+    /// Invalidate all cached interrupt information for the device.
     invalidate_interrupt_table: packed struct(u128) {
-        _: u128,
+        /// DeviceID.
+        deviceid: DeviceId,
+        /// Reserved.
+        _16: u44 = 0,
+        /// Opcode.
+        code: CmdOpcode = .invalidate_interrupt_table,
+        /// Reserved.
+        _64: u64 = 0,
     },
     /// Not implemented yet.
     prefetch_iommu_pages: packed struct(u128) {
@@ -1945,6 +2216,7 @@ const Status = packed struct(u64) {
 const std = @import("std");
 const log = std.log.scoped(.amdvi);
 const Allocator = std.mem.Allocator;
+const arch = @import("arch").impl;
 const common = @import("common");
 const rtt = common.rtt;
 const util = common.util;
