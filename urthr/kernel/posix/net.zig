@@ -41,17 +41,20 @@ fn socketInet(typ: SockType) ReturnType {
     };
     defer file.unref();
 
-    // Update file flags.
-    if (typ.nonblock) {
+    return installSocket(file, typ.nonblock, typ.cloexec);
+}
+
+/// Assign the socket file to a new file descriptor.
+fn installSocket(file: *fs.File, nonblock: bool, cloexec: bool) ReturnType {
+    if (nonblock) {
         file.status_flags.nonblock = true;
     }
 
-    // Assign the socket file to a file descriptor.
     const cur = sched.getCurrent();
     const fd = cur.fs.fdtbl.allocAt(
         0,
         file,
-        .{ .cloexec = typ.cloexec },
+        .{ .cloexec = cloexec },
     ) catch return .err(.mfile);
 
     return .success(@intCast(fd));
@@ -122,6 +125,142 @@ pub fn sysBind(fd: usize, addr: *SockAddr, addrlen: u32) ReturnType {
     };
 
     return .success(0);
+}
+
+// =============================================================
+// listen
+
+/// syscall: listen
+pub fn sysListen(fd: usize, backlog: i32) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+
+    if (file.getType() != .socket) {
+        return .err(.notsock);
+    }
+
+    SocketFs.listen(
+        file,
+        @intCast(@max(backlog, 0)),
+    ) catch |err| return switch (err) {
+        fs.Error.Unsupported => .err(.opnotsupp),
+        fs.Error.InvalidArgument => .err(.inval),
+        else => .err(.addrinuse),
+    };
+
+    return .success(0);
+}
+
+// =============================================================
+// accept
+
+/// syscall: accept
+pub fn sysAccept(fd: usize, addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32) ReturnType {
+    return accept(fd, addr, addrlen, .{});
+}
+
+/// syscall: accept4
+pub fn sysAccept4(fd: usize, addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32, flags: Accept4Flags) ReturnType {
+    if (flags._0 != 0 or flags._12 != 0 or flags._20 != 0) {
+        return .err(.inval);
+    }
+
+    return accept(fd, addr, addrlen, flags);
+}
+
+/// Common implementation of accept.
+fn accept(fd: usize, addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32, flags: Accept4Flags) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+
+    // Accept the incoming connection.
+    const conn = SocketFs.accept(file) catch |err| return switch (err) {
+        fs.Error.NotSocket => .err(.notsock),
+        fs.Error.WouldBlock => .err(.again),
+        fs.Error.Unsupported => .err(.opnotsupp),
+        fs.Error.OutOfMemory => .err(.nomem),
+        else => .err(.inval),
+    };
+    defer conn.unref();
+
+    // Fill the peer address if requested.
+    if (addr != null) {
+        const peer = SocketFs.getEndpoint(conn, .remote) catch {
+            return .err(.notconn);
+        };
+        putSockAddr(addr, addrlen, peer) catch {
+            return .err(.fault);
+        };
+    }
+
+    return installSocket(conn, flags.nonblock, flags.cloexec);
+}
+
+/// Flags for accept4.
+const Accept4Flags = packed struct(u32) {
+    /// Reserved.
+    _0: u11 = 0,
+    /// Non-blocking mode.
+    nonblock: bool = false,
+    /// Reserved.
+    _12: u7 = 0,
+    /// Close-on-exec mode.
+    cloexec: bool = false,
+    /// Reserved.
+    _20: u12 = 0,
+};
+
+// =============================================================
+// getsockname / getpeername
+
+/// syscall: getsockname
+pub fn sysGetSockName(fd: usize, addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32) ReturnType {
+    return getEndpoint(fd, addr, addrlen, .local);
+}
+
+/// syscall: getpeername
+pub fn sysGetPeerName(fd: usize, addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32) ReturnType {
+    return getEndpoint(fd, addr, addrlen, .remote);
+}
+
+/// Common implementation of getsockname and getpeername.
+fn getEndpoint(fd: usize, addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32, host: SocketFs.Host) ReturnType {
+    const file = getFile(fd) catch return .err(.badf);
+    defer file.unref();
+
+    if (file.getType() != .socket) {
+        return .err(.notsock);
+    }
+    if (addr == null or addrlen == null) {
+        return .err(.fault);
+    }
+
+    const ep = SocketFs.getEndpoint(file, host) catch |err| return switch (err) {
+        fs.Error.NotConnected => .err(.notconn),
+        else => .err(.inval),
+    };
+    putSockAddr(addr, addrlen, ep) catch {
+        return .err(.fault);
+    };
+
+    return .success(0);
+}
+
+/// Write the endpoint information to the user buffer.
+fn putSockAddr(addr: ?*align(1) SockAddr, addrlen: ?*align(1) u32, ep: SocketFs.Endpoint) uaccess.Error!void {
+    const sa = addr orelse return;
+    const lenp = addrlen orelse return error.Fault;
+
+    const cap = try uaccess.getUser(u32, lenp);
+    const ksa: SockAddr = .{ .ipv4 = .{
+        .port = urd.net.util.toNetEndian(ep.port),
+        .addr = ep.addr.toBytes(),
+    } };
+    try uaccess.copyToUser(
+        sa,
+        std.mem.asBytes(&ksa)[0..@min(cap, @sizeOf(SockAddr))],
+    );
+    try uaccess.putUser(u32, lenp, @sizeOf(SockAddr));
 }
 
 // =============================================================
@@ -511,6 +650,7 @@ fn getFile(fd: usize) error{BadFileDescriptor}!*fs.File {
 
 const std = @import("std");
 const urd = @import("urthr");
+const uaccess = urd.uaccess;
 const fs = urd.fs;
 const SocketFs = fs.SocketFs;
 const sched = urd.sched;

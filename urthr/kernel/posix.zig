@@ -125,6 +125,8 @@ pub const ErrorEnum = enum(i64) {
     notempty = -39,
     /// Too many symbolic links encountered.
     loop = -40,
+    /// Socket operation on non-socket.
+    notsock = -88,
     /// Protocol not available.
     noprotoopt = -92,
     /// Operation not supported.
@@ -133,6 +135,8 @@ pub const ErrorEnum = enum(i64) {
     eafnosupport = -97,
     /// Address already in use.
     addrinuse = -98,
+    /// Socket is not connected.
+    notconn = -107,
     /// Operation timed out.
     timedout = -110,
     /// Connection refused.
