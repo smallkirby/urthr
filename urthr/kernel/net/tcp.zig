@@ -1045,7 +1045,9 @@ const SocketTable = struct {
 
         // Free the queue.
         var cur = socket.rq.first;
-        while (cur) |node| : (cur = node.next) {
+        while (cur) |node| {
+            cur = node.next;
+
             const entry: *const RetransmitEntry = @fieldParentPtr("_node", node);
             allocator.free(entry.data);
             allocator.destroy(entry);
@@ -1260,7 +1262,9 @@ const Socket = struct {
     /// Clean up all entries in the retransmission queue that have been acknowledged.
     pub fn rtclean(self: *Socket) void {
         var cur = self.rq.first;
-        while (cur) |node| : (cur = node.next) {
+        while (cur) |node| {
+            cur = node.next;
+
             const entry: *const RetransmitEntry = @fieldParentPtr("_node", node);
 
             var consume = entry.data.len;
