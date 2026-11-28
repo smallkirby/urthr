@@ -54,6 +54,8 @@ pub const Error = error{
     ConnectionRefused,
     /// The file descriptor does not refer to a socket.
     NotSocket,
+    /// The socket is not connected.
+    NotConnected,
     /// The source and destination are on different filesystems.
     CrossDevice,
     /// Too many symbolic links were encountered while resolving a path.

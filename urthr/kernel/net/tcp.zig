@@ -100,11 +100,20 @@ fn inputImpl(
         }
     };
 
-    var wakeup = false;
+    var wakeup = false; // wake up the socket at end
+    var notify: ?*Socket = null; // listener socket to be woken up at end
     sock.lock();
     defer {
         sock.unlock();
-        if (wakeup) sock.wake();
+
+        if (wakeup) {
+            sock.wake();
+        }
+        if (notify) |listener| {
+            listener.lock(); // to prevent lost wakeup for accept()
+            defer listener.unlock();
+            if (listener.state == .listen) listener.wake();
+        }
     }
 
     // Handle the listening socket for a new connection request.
@@ -125,20 +134,34 @@ fn inputImpl(
                 );
             }
             if (flags.syn) {
-                sock.local = local;
-                sock.remote = remote;
-                sock.rcv = .{
-                    .wnd = @intCast(sock.buf.len),
+                // Drop the request if the accept queue is full.
+                if (sock_table.countUnaccepted(sock) >= sock.qlen) {
+                    return;
+                }
+                // Drop the request if no child socket can be allocated.
+                const child = sock_table.allocate() catch {
+                    return;
+                };
+                // Spawn a new child socket for the incoming connection.
+                child.listener = sock;
+                child.local = local;
+                child.remote = remote;
+                child.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
+                child.rcv = .{
+                    .wnd = @intCast(child.buf.len),
                     .nxt = seg.seq + 1,
                 };
-                sock.irs = seg.seq;
-                sock.iss = rng().int(u32);
+                child.irs = seg.seq;
+                child.iss = rng().int(u32);
 
-                try output(sock, .sync_ack, &.{});
+                output(child, .sync_ack, &.{}) catch {
+                    sock_table.release(child);
+                    return;
+                };
 
-                sock.snd.nxt = sock.iss + 1; // +1 for SYN
-                sock.snd.una = sock.iss;
-                sock.update(.syn_received);
+                child.snd.nxt = child.iss + 1; // +1 for SYN
+                child.snd.una = child.iss;
+                child.update(.syn_received);
                 return;
             }
             // Ignore.
@@ -246,6 +269,7 @@ fn inputImpl(
             if (sock.snd.una <= seg.ack and seg.ack <= sock.snd.nxt) {
                 sock.update(.established);
                 wakeup = true;
+                notify = sock.listener;
             } else {
                 return outputSegment(
                     local,
@@ -494,30 +518,54 @@ pub fn bind(desc: usize, local: Endpoint) net.Error!void {
     sock.update(.closed);
 }
 
-/// Listen for incoming connection requests on a TCP socket.
+/// Maximum number of child sockets waiting to be accepted by one listening socket.
+const max_qlen = 128;
+
+/// Mark a TCP socket as listening for incoming connection requests.
 ///
-/// This function blocks until a connection request is received.
-/// This function does not create a new socket for the accepted connection.
-pub fn listen(desc: usize) net.Error!void {
+/// If this socket is not bound, ephemeral port is selected automatically.
+///
+/// This function does not block.
+pub fn listen(desc: usize, qlen: u32) net.Error!void {
     const sock = sock_table.get(desc);
 
-    if (sock.state != .closed) {
-        return net.Error.Unavailable;
+    sock.lock();
+    defer sock.unlock();
+
+    switch (sock.state) {
+        .closed, .listen => {},
+        else => return net.Error.Unavailable,
     }
 
+    if (sock.local.port == 0) {
+        sock.local.port = selectDynamicPort();
+    }
+    sock.qlen = @intCast(std.math.clamp(qlen, 1, max_qlen));
     sock.remote = .empty;
     sock.update(.listen);
+}
 
-    // Wait until a connection is established.
-    try waitSockEstablished(sock);
+/// Take an established connection from the accept queue of the listening socket.
+///
+/// Returns the descriptor of the new socket.
+pub fn accept(desc: usize, nonblock: bool) net.Error!usize {
+    const sock = sock_table.get(desc);
 
-    // Set MSS for the established connection.
-    const iface = net.ip.ifaceLookup(sock.remote.ip) orelse {
-        log.err("connection failed: no interface for remote IP: {f}", .{sock.remote.ip});
-        sock.update(.closed);
-        return net.Error.Unavailable;
-    };
-    sock.mss = iface.base.device.?.mtu - @sizeOf(net.ip.Header) - @sizeOf(Header);
+    sock.lock();
+    defer sock.unlock();
+
+    while (true) {
+        if (sock.state != .listen) {
+            return net.Error.Unavailable;
+        }
+        if (sock_table.takeAcceptable(sock)) |child| {
+            return sock_table.indexOf(child);
+        }
+        if (nonblock) {
+            return net.Error.WouldBlock;
+        }
+        sock.cv.wait(&sock._lock);
+    }
 }
 
 /// Connect a TCP socket to the given remote endpoint.
@@ -605,8 +653,21 @@ pub fn close(desc: usize) void {
     const sock = sock_table.get(desc);
 
     switch (sock.state) {
-        .free => return log.warn("close: socket already closed", .{}),
-        .closed, .listen, .syn_sent => sock.update(.closed),
+        .free => {
+            return log.warn("close: socket already closed", .{});
+        },
+        .closed, .syn_sent => {
+            sock.update(.closed);
+        },
+        .listen => {
+            sock.update(.closed);
+            // Close all children sockets.
+            while (sock_table.takeUnaccepted(sock)) |child| {
+                output(child, .reset, &.{}) catch {};
+                child.update(.closed);
+                sock_table.release(child);
+            }
+        },
         .syn_received, .established, .close_wait => {
             var graceful = sock.buf.len == sock.rcv.wnd;
             if (graceful) {
@@ -763,6 +824,9 @@ pub const socket_backend = fs.SocketFs.Backend{
     .close = sockClose,
     .connect = sockConnect,
     .bind = sockBind,
+    .listen = sockListen,
+    .accept = sockAccept,
+    .getEndpoint = sockGetEndpoint,
 };
 
 /// Read bytes from a TCP socket, reporting the connected peer's endpoint.
@@ -818,6 +882,7 @@ fn pollReadable(desc: usize) bool {
     return switch (sock.state) {
         .established => sock.buf.len - sock.rcv.wnd > 0,
         .close_wait, .last_ack => true,
+        .listen => sock_table.hasAcceptable(sock),
         else => false,
     };
 }
@@ -832,6 +897,41 @@ fn pollWritable(desc: usize) bool {
     return switch (sock.state) {
         .established => sock.snd.wnd - (sock.snd.nxt - sock.snd.una) > 0,
         else => false,
+    };
+}
+
+/// Mark a TCP socket as listening for incoming connections.
+fn sockListen(desc: usize, qlen: u32) fs.Error!void {
+    listen(desc, qlen) catch return fs.Error.InvalidArgument;
+}
+
+/// Accept a connection on a listening TCP socket.
+fn sockAccept(desc: usize, nonblock: bool) fs.Error!usize {
+    return accept(desc, nonblock) catch |err| switch (err) {
+        error.WouldBlock => fs.Error.WouldBlock,
+        else => fs.Error.InvalidArgument,
+    };
+}
+
+/// Get the endpoint information of the TCP socket.
+fn sockGetEndpoint(desc: usize, host: fs.SocketFs.Host) fs.Error!fs.SocketFs.Endpoint {
+    const sock = sock_table.get(desc);
+
+    sock.lock();
+    defer sock.unlock();
+
+    return switch (host) {
+        .local => .{
+            .addr = sock.local.ip,
+            .port = sock.local.port,
+        },
+        .remote => switch (sock.state) {
+            .syn_received, .established, .fin_wait1, .fin_wait2, .close_wait, .closing, .last_ack, .time_wait => .{
+                .addr = sock.remote.ip,
+                .port = sock.remote.port,
+            },
+            else => fs.Error.NotConnected,
+        },
     };
 }
 
@@ -941,7 +1041,7 @@ const SocketTable = struct {
         const allocator = urd.mem.bin;
 
         // Notify the waiting thread if any to unblock it.
-        socket.cv.signal();
+        socket.cv.broadcast();
 
         // Free the queue.
         var cur = socket.rq.first;
@@ -990,6 +1090,57 @@ const SocketTable = struct {
                 }
             }
         } else return cand;
+    }
+
+    /// Count the number of children sockets that are waiting to be accepted.
+    fn countUnaccepted(self: *Self, listener: *Socket) usize {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        var count: usize = 0;
+        for (&self.sockets) |*s| {
+            if (s.listener == listener) count += 1;
+        }
+        return count;
+    }
+
+    /// Check if the listening socket has an acceptable connection waiting to be accepted.
+    fn hasAcceptable(self: *Self, listener: *Socket) bool {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        for (&self.sockets) |*s| {
+            if (s.listener == listener and s.isAcceptable()) return true;
+        }
+        return false;
+    }
+
+    /// Take an established connection off the accept queue of the listening socket.
+    fn takeAcceptable(self: *Self, listener: *Socket) ?*Socket {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        for (&self.sockets) |*s| {
+            if (s.listener == listener and s.isAcceptable()) {
+                s.listener = null;
+                return s;
+            }
+        }
+        return null;
+    }
+
+    /// Take any connection off the accept queue of the listening socket, regardless of its state.
+    fn takeUnaccepted(self: *Self, listener: *Socket) ?*Socket {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+
+        for (&self.sockets) |*s| {
+            if (s.listener == listener and s.state != .free) {
+                s.listener = null;
+                return s;
+            }
+        }
+        return null;
     }
 
     /// Get the index of the given socket in the table.
@@ -1042,6 +1193,13 @@ const Socket = struct {
     /// Receive buffer.
     buf: []u8,
 
+    /// Maximum number of connections waiting to be accepted.
+    ///
+    /// Valid only when this socket is listening.
+    qlen: u16 = 0,
+    /// If not null, this socket is a child of this listening socket
+    /// and has not yet been accepted by the application.
+    listener: ?*Socket = null,
     /// The application has closed the socket and we're responsible for releasing it.
     orphaned: bool = false,
     /// Timestamp of when the socket entered the FIN-WAIT-2 or TIME-WAIT state.
@@ -1120,6 +1278,11 @@ const Socket = struct {
         }
     }
 
+    /// Whether this socket can be accepted by the application.
+    pub fn isAcceptable(self: *const Socket) bool {
+        return self.state == .established or self.state == .close_wait;
+    }
+
     pub fn update(self: *Socket, state: State) void {
         trace("socket#{d} state change: {t} -> {t}", .{ sock_table.indexOf(self), self.state, state });
         switch (state) {
@@ -1173,6 +1336,10 @@ fn timerFn(_: *urd.time.Timer) void {
             const elapsed = timestamp - entry.time_last;
 
             if (timestamp - entry.time_first > retransmit_deadline_sec * std.time.ns_per_s) {
+                if (sock.listener != null) {
+                    sock.listener = null;
+                    sock.orphaned = true;
+                }
                 sock.state = .closed;
                 sock.wake();
                 continue;

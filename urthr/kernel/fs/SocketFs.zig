@@ -28,6 +28,16 @@ pub const Backend = struct {
     connect: *const fn (desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void,
     /// Bind the socket identified by `desc` to the given local endpoint.
     bind: *const fn (desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void,
+    /// Mark the socket identified by `desc` as listening for incoming connections.
+    ///
+    /// Accepted connections must be queued up to `qlen` connections.
+    listen: *const fn (desc: usize, qlen: u32) fs.Error!void,
+    /// Take an established connection from the accept queue of the socket.
+    ///
+    /// Returns the descriptor of the new socket.
+    accept: *const fn (desc: usize, nonblock: bool) fs.Error!usize,
+    /// Get endpoint information of the socket.
+    getEndpoint: *const fn (desc: usize, host: Host) fs.Error!Endpoint,
 };
 
 /// A remote endpoint address.
@@ -36,6 +46,14 @@ pub const Endpoint = struct {
     addr: net.ip.IpAddr,
     /// Port of the endpoint.
     port: u16,
+};
+
+/// Host kind.
+pub const Host = enum {
+    /// Local host.
+    local,
+    /// Remote host.
+    remote,
 };
 
 /// Result of receiving data from a socket.
@@ -130,6 +148,32 @@ pub fn connect(file: *fs.File, ip: net.ip.IpAddr, port: u16) fs.Error!void {
 pub fn bind(file: *fs.File, ip: net.ip.IpAddr, port: u16) fs.Error!void {
     const ctx = try ctxFromFile(file);
     return ctx.backend.bind(ctx.desc, ip, port);
+}
+
+/// Mark the given socket file as listening for incoming connections.
+pub fn listen(file: *fs.File, qlen: u32) fs.Error!void {
+    const ctx = try ctxFromFile(file);
+    return ctx.backend.listen(ctx.desc, qlen);
+}
+
+/// Accept a connection on the given listening socket file.
+///
+/// Returns a new socket file for the accepted connection.
+pub fn accept(file: *fs.File) fs.Error!*fs.File {
+    const ctx = try ctxFromFile(file);
+    const nonblock = file.status_flags.nonblock;
+
+    const desc = try ctx.backend.accept(ctx.desc, nonblock);
+    return fs.createSocket(ctx.backend, desc) catch |err| {
+        ctx.backend.close(desc);
+        return err;
+    };
+}
+
+/// Get the endpoint information of the given socket file.
+pub fn getEndpoint(file: *fs.File, host: Host) fs.Error!Endpoint {
+    const ctx = try ctxFromFile(file);
+    return ctx.backend.getEndpoint(ctx.desc, host);
 }
 
 /// Send data via the given socket file, optionally to an explicit destination.

@@ -248,6 +248,9 @@ pub const socket_backend = fs.SocketFs.Backend{
     .close = sockClose,
     .connect = sockConnect,
     .bind = sockBind,
+    .listen = sockListen,
+    .accept = sockAccept,
+    .getEndpoint = sockGetEndpoint,
 };
 
 /// Receives a UDP packet along with the sender's endpoint.
@@ -314,6 +317,33 @@ fn sockBind(desc: usize, ip: net.ip.IpAddr, port: u16) fs.Error!void {
     }) catch return fs.Error.Unsupported;
 }
 
+/// UDP sockets cannot listen.
+fn sockListen(_: usize, _: u32) fs.Error!void {
+    return fs.Error.Unsupported;
+}
+
+/// UDP sockets cannot accept connections.
+fn sockAccept(_: usize, _: bool) fs.Error!usize {
+    return fs.Error.Unsupported;
+}
+
+/// Get the endpoint information of the UDP socket.
+fn sockGetEndpoint(desc: usize, host: fs.SocketFs.Host) fs.Error!fs.SocketFs.Endpoint {
+    const sock = sock_table.get(desc);
+    const ie = sock.lock.lockDisableIrq();
+    defer sock.lock.unlockRestoreIrq(ie);
+
+    const ep = switch (host) {
+        .local => sock.ep,
+        .remote => sock.remote,
+    };
+    if (host == .remote and ep.eql(.empty)) {
+        return fs.Error.NotConnected;
+    }
+
+    return .{ .addr = ep.ip, .port = ep.port };
+}
+
 // =============================================================
 // Internals
 
@@ -327,6 +357,10 @@ const Endpoint = struct {
     port: Port,
 
     const empty = Endpoint{ .ip = .any, .port = 0 };
+
+    pub fn eql(self: Endpoint, other: Endpoint) bool {
+        return self.ip.eql(other.ip) and self.port == other.port;
+    }
 };
 
 /// Packet data waiting for being received by the socket.
