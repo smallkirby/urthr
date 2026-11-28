@@ -74,9 +74,21 @@ pub const Protocol = enum(u16) {
 };
 
 /// Initialize network subsystem.
-pub fn init() Allocator.Error!void {
+pub fn init() (Error || Allocator.Error)!void {
     try arp.cache.init(urd.mem.bin);
     try tcp.init();
+
+    // Register the loopback device.
+    {
+        const lo = try Loopback.new(urd.mem.bin);
+        const iface = try ip.Interface.create(
+            .comptimeParse("127.0.0.1"),
+            .comptimeParse("255.0.0.0"),
+            urd.mem.bin,
+        );
+        try lo.appendInterface(iface);
+        registerDevice(lo);
+    }
 }
 
 /// Start running the network subsystem and register devices.
@@ -97,6 +109,8 @@ pub fn run() (Error || urd.task.Error)!void {
     {
         var iter = device_list.iter();
         while (iter.next()) |device| {
+            if (device.dev_type == .loopback) continue;
+
             if (device.findInterface(.ipv4)) |iface| {
                 // Query DHCP server on this interface.
                 log.info("Starting DHCP query...", .{});

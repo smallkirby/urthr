@@ -392,6 +392,12 @@ pub fn routeLookup(dest: IpAddr) ?*Route {
     var ret: ?*Route = null;
 
     for (routes.items) |*route| {
+        // Don't send limited broadcast via loopback device.
+        if (dest.eql(.limited_broadcast)) {
+            const device = route.iface.base.device orelse continue;
+            if (device.dev_type == .loopback) continue;
+        }
+
         if (dest.subnet(route.netmask).eql(route.network) or dest.eql(.limited_broadcast)) {
             if (ret) |candidate| {
                 if (route.netmask.gte(candidate.netmask)) {

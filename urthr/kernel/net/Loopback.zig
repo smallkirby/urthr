@@ -36,7 +36,6 @@ pub fn new(allocator: Allocator) net.Error!*Device {
 ///
 /// The packet is immediately looped back to the input path without any L2 framing.
 fn transmitImpl(dev: *Device, prot: Protocol, buf: *NetBuffer) net.Error!void {
-    log.debug("Output to loopback: prot={}", .{prot});
     try net.handleInput(dev, prot, buf.data());
 }
 
