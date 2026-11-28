@@ -188,12 +188,21 @@ fn inputImpl(
             return; // drop
         },
 
+        .time_wait => {
+            // Re-acknowledge a retransmitted FIN and restart the timer.
+            if (flags.fin) {
+                try output(sock, .ackn, &.{});
+                sock.shutdown_since = urd.time.getCurrentTimestamp();
+            }
+            return;
+        },
+
         else => {},
     }
 
     // Check the segment is acceptable according to the RCV.WND and RCV.NXT variables.
     switch (sock.state) {
-        .syn_received, .established, .close_wait, .last_ack => {
+        .syn_received, .established, .close_wait, .last_ack, .fin_wait1, .fin_wait2, .closing => {
             const acceptable = if (seg.len == 0)
                 (sock.rcv.wnd == 0 and seg.seq == sock.rcv.nxt) or
                     (sock.rcv.nxt == seg.seq and seg.seq < sock.rcv.nxt + sock.rcv.wnd)
@@ -203,16 +212,9 @@ fn inputImpl(
                         (sock.rcv.nxt <= seg.seq + seg.len - 1 and seg.seq + seg.len - 1 < sock.rcv.nxt + sock.rcv.wnd));
 
             if (!acceptable) {
-                if (flags.rst) try outputSegment(
-                    local,
-                    remote,
-                    seg.ack,
-                    0,
-                    0,
-                    .reset,
-                    &.{},
-                );
-
+                if (!flags.rst and seg.len != 0) {
+                    try output(sock, .ackn, &.{});
+                }
                 return;
             }
         },
@@ -286,6 +288,22 @@ fn inputImpl(
             }
         },
 
+        .fin_wait1, .fin_wait2, .closing => {
+            if (sock.snd.una < seg.ack and seg.ack <= sock.snd.nxt) {
+                sock.snd.una = seg.ack;
+                sock.rtclean();
+            }
+
+            // Our FIN has been acknowledged.
+            if (seg.ack == sock.snd.nxt) {
+                switch (sock.state) {
+                    .fin_wait1 => sock.update(.fin_wait2),
+                    .closing => sock.update(.time_wait),
+                    else => {},
+                }
+            }
+        },
+
         else => {},
     }
 
@@ -314,6 +332,14 @@ fn inputImpl(
 
         .close_wait, .last_ack => {}, // ignore data in closing states
 
+        .fin_wait1, .fin_wait2 => if (dlen != 0) {
+            // Data can never be read since the socket has been already closed.
+            try output(sock, .reset, &.{});
+            sock.update(.closed);
+            sock_table.release(sock);
+            return;
+        },
+
         else => {},
     }
 
@@ -325,9 +351,14 @@ fn inputImpl(
         sock.rcv.nxt = seg.seq + @as(u32, @intCast(dlen)) + 1; // +1 for FIN
         try output(sock, .ackn, &.{});
 
-        if (sock.state == .syn_received or sock.state == .established) {
-            sock.update(.close_wait);
-            wakeup = true;
+        switch (sock.state) {
+            .syn_received, .established => {
+                sock.update(.close_wait);
+                wakeup = true;
+            },
+            .fin_wait1 => sock.update(.closing),
+            .fin_wait2 => sock.update(.time_wait),
+            else => {},
         }
     }
 }
@@ -447,6 +478,9 @@ pub fn bind(desc: usize, local: Endpoint) net.Error!void {
         return net.Error.Unavailable;
     }
 
+    // Reap expired sockets first.
+    sock_table.reap();
+
     var lc = local;
     if (lc.port == 0) {
         lc.port = selectDynamicPort();
@@ -565,28 +599,39 @@ fn waitSockEstablished(sock: *Socket) net.Error!void {
 }
 
 /// Close a TCP socket.
+///
+/// The socket is released once the connection has been shut down.
 pub fn close(desc: usize) void {
     const sock = sock_table.get(desc);
 
     switch (sock.state) {
         .free => return log.warn("close: socket already closed", .{}),
         .closed, .listen, .syn_sent => sock.update(.closed),
-        .syn_received, .established => {
-            output(sock, .reset, &.{}) catch {};
-            sock.update(.close_wait);
+        .syn_received, .established, .close_wait => {
+            var graceful = sock.buf.len == sock.rcv.wnd;
+            if (graceful) {
+                output(sock, .fin_ack, &.{}) catch |err| {
+                    graceful = err != error.OutOfMemory; // failed to push to RT queue
+                };
+            }
+
+            if (graceful) {
+                sock.snd.nxt += 1; // +1 for FIN
+                sock.update(if (sock.state == .close_wait) .last_ack else .fin_wait1);
+            } else {
+                // If there's unread data or failed to send FIN, send RST and close immediately.
+                output(sock, .reset, &.{}) catch {};
+                sock.update(.closed);
+            }
         },
-        .close_wait => {
-            output(sock, .fin_ack, &.{}) catch {};
-            sock.snd.nxt += 1; // +1 for FIN
-            sock.update(.last_ack);
-        },
-        .last_ack => {}, // already sent FIN-ACK
-        else => return log.err("close: invalid socket state: {t}", .{sock.state}),
+        // Already shutting down.
+        .last_ack, .fin_wait1, .fin_wait2, .closing, .time_wait => {},
     }
 
     if (sock.state == .closed) {
         sock_table.release(sock);
     } else {
+        sock.orphaned = true;
         sock.wake();
     }
 }
@@ -834,7 +879,7 @@ const SocketTable = struct {
     lock: SpinLock = .{},
 
     /// Maximum number of sockets to be open at the same time.
-    const max_sockets = 10;
+    const max_sockets = 64;
 
     /// Size of the receive buffer for each socket in bytes.
     const buf_size = 65335;
@@ -844,16 +889,49 @@ const SocketTable = struct {
         const ie = self.lock.lockDisableIrq();
         defer self.lock.unlockRestoreIrq(ie);
 
-        for (&self.sockets) |*s| {
-            if (s.state == .free) {
-                s.* = std.mem.zeroInit(Socket, .{
-                    .state = .closed,
-                    .buf = try urd.mem.bin.alloc(u8, buf_size),
-                });
+        for (0..2) |attempt| {
+            for (&self.sockets) |*s| {
+                if (s.state == .free) {
+                    s.* = std.mem.zeroInit(Socket, .{
+                        .state = .closed,
+                        .buf = try urd.mem.bin.alloc(u8, buf_size),
+                    });
 
-                return s;
+                    return s;
+                }
             }
-        } else return net.Error.OutOfMemory;
+
+            if (attempt == 0) self.reapLocked();
+        }
+
+        return net.Error.OutOfMemory;
+    }
+
+    /// Release sockets that have been gracefully closed.
+    fn reap(self: *Self) void {
+        const ie = self.lock.lockDisableIrq();
+        defer self.lock.unlockRestoreIrq(ie);
+        self.reapLocked();
+    }
+
+    /// Release sockets that have been gracefully closed.
+    ///
+    /// The lock of the table must be held.
+    fn reapLocked(self: *Self) void {
+        rtt.expect(self.lock.isLocked());
+        const now = urd.time.getCurrentTimestamp();
+
+        for (&self.sockets) |*s| {
+            if (!s.orphaned) continue;
+
+            const done = switch (s.state) {
+                .closed => true,
+                .time_wait => now - s.shutdown_since >= time_wait_duration,
+                .fin_wait2 => now - s.shutdown_since >= fin_wait2_duration,
+                else => false,
+            };
+            if (done) self.release(s);
+        }
     }
 
     /// Release a socket.
@@ -964,6 +1042,11 @@ const Socket = struct {
     /// Receive buffer.
     buf: []u8,
 
+    /// The application has closed the socket and we're responsible for releasing it.
+    orphaned: bool = false,
+    /// Timestamp of when the socket entered the FIN-WAIT-2 or TIME-WAIT state.
+    shutdown_since: urd.time.Ktimestamp = 0,
+
     /// Retransmission queue.
     rq: std.DoublyLinkedList,
     /// Wait queue.
@@ -1039,9 +1122,20 @@ const Socket = struct {
 
     pub fn update(self: *Socket, state: State) void {
         trace("socket#{d} state change: {t} -> {t}", .{ sock_table.indexOf(self), self.state, state });
+        switch (state) {
+            .fin_wait2, .time_wait => {
+                self.shutdown_since = urd.time.getCurrentTimestamp();
+            },
+            else => {},
+        }
         self.state = state;
     }
 };
+
+/// Duration in nanoseconds to stay in the TIME-WAIT state.
+const time_wait_duration = 2 * std.time.ns_per_s;
+/// Duration in nanoseconds to wait for the FIN after the application has closed the socket.
+const fin_wait2_duration = 60 * std.time.ns_per_s;
 
 /// Default retransmission timeout in nanoseconds.
 const default_rto = 200 * std.time.ns_per_us;
@@ -1070,7 +1164,7 @@ const RetransmitEntry = struct {
 /// Called periodically to check retransmission queue.
 fn timerFn(_: *urd.time.Timer) void {
     for (&sock_table.sockets) |*sock| {
-        if (sock.state == .free) continue;
+        if (sock.state == .free or sock.state == .time_wait) continue;
 
         var cur = sock.rq.first;
         while (cur) |node| : (cur = node.next) {
@@ -1116,13 +1210,14 @@ const State = enum {
     syn_received,
     /// Connection is established.
     established,
-    /// Waiting for a connection termination request from the remote host.
+    /// Waiting for a connection termination request from the remote host,
+    /// or an acknowledgment of the connection termination request previously sent.
     fin_wait1,
-    /// Waiting for a connection termination request from the remote host after having sent a connection termination request.
+    /// Waiting for a connection termination request from the remote host after the termination request from the local host has been acknowledged.
     fin_wait2,
     /// Waiting for a connection termination request from the local host.
     close_wait,
-    /// Waiting for a connection termination request from both the local and remote host.
+    /// Waiting for a connection termination request acknowledgement from the remote host.
     closing,
     /// Waiting for a final acknowledgment after having sent a connection termination request.
     last_ack,
