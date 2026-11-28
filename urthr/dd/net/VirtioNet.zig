@@ -16,6 +16,8 @@ pub const Error = error{
 dev: virtio.Device,
 /// RX buffers.
 rx_buffers: [num_rx_bufs]DmaMemory,
+/// Lock to protect the RX queue.
+rx_lock: urd.sync.SpinLock = .{},
 /// Maps a descriptor ID currently posted to the RX queue to its index into `rx_buffers`.
 desc_to_buf: [num_rx_bufs]usize,
 /// TX buffer.
@@ -167,13 +169,19 @@ fn pollImpl(dev: *net.Device) net.Error!?net.Device.PollResult {
     const self: *Self = @ptrCast(@alignCast(dev.ctx));
     const vq = self.dev.getQueue(rxq_idx) orelse return null;
 
-    const id, const len = vq.getUsed() orelse return null;
+    const used = blk: {
+        const ie = self.rx_lock.lockDisableIrq();
+        defer self.rx_lock.unlockRestoreIrq(ie);
+
+        const id, const len = vq.getUsed() orelse return null;
+        break :blk .{ self.desc_to_buf[id], len };
+    };
+    const index, const len = used;
     if (len < @sizeOf(NetHdr)) {
         return null;
     }
 
     // Remove virtio-net header and return the packet data.
-    const index = self.desc_to_buf[id];
     const buf = self.rx_buffers[index];
     const ptr: [*]const u8 = @ptrFromInt(buf.cpu + @sizeOf(NetHdr));
     self.dma.syncForCpu(buf.cpu, len);
@@ -191,15 +199,20 @@ fn releaseRxBufImpl(dev: *net.Device, handle: usize) void {
     const buf = self.rx_buffers[handle];
     self.dma.syncForDeviceAll(buf);
 
-    const id = vq.addBuf(&[_]virtio.Buffer{.{
-        .addr = buf.bus,
-        .len = buffer_size,
-        .write = true,
-    }}) catch |err| {
-        log.err("failed to refil RX buffer: {t}", .{err});
-        return;
-    };
-    self.desc_to_buf[id] = handle;
+    {
+        const ie = self.rx_lock.lockDisableIrq();
+        defer self.rx_lock.unlockRestoreIrq(ie);
+
+        const id = vq.addBuf(&[_]virtio.Buffer{.{
+            .addr = buf.bus,
+            .len = buffer_size,
+            .write = true,
+        }}) catch |err| {
+            log.err("failed to refil RX buffer: {t}", .{err});
+            return;
+        };
+        self.desc_to_buf[id] = handle;
+    }
     self.dev.notifyQueue(rxq_idx);
 }
 
