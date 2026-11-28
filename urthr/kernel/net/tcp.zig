@@ -282,6 +282,7 @@ fn inputImpl(
             if (seg.ack == sock.snd.nxt) {
                 sock.state = .closed;
                 sock_table.release(sock);
+                return;
             }
         },
 
@@ -295,7 +296,7 @@ fn inputImpl(
         .established => if (dlen != 0) {
             if (sock.rcv.nxt != seg.seq or sock.rcv.wnd < dlen) {
                 // No support for out-of-order segments.
-                try output(sock, .ackn, &.{});
+                return output(sock, .ackn, &.{});
             }
 
             // Copy data to the receive buffer.
@@ -321,7 +322,7 @@ fn inputImpl(
         if (sock.state == .closed or sock.state == .listen) {
             return; // drop
         }
-        sock.rcv.nxt = seg.seq + 1; // +1 for FIN
+        sock.rcv.nxt = seg.seq + @as(u32, @intCast(dlen)) + 1; // +1 for FIN
         try output(sock, .ackn, &.{});
 
         if (sock.state == .syn_received or sock.state == .established) {
