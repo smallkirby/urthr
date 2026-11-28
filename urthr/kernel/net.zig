@@ -76,7 +76,6 @@ pub const Protocol = enum(u16) {
 /// Initialize network subsystem.
 pub fn init() (Error || Allocator.Error)!void {
     try arp.cache.init(urd.mem.bin);
-    try tcp.init();
 
     // Register the loopback device.
     {
@@ -104,6 +103,9 @@ pub fn run() (Error || urd.task.Error)!void {
     // Start the worker threads.
     _ = try urd.task.kspawn("net-rx", rxworker, .{});
     _ = try urd.task.kspawn("net-tx", txworker, .{});
+
+    // Start the TCP subsystem.
+    try tcp.run();
 
     // Obtain an IP address via DHCP.
     {

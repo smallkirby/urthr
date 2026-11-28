@@ -142,6 +142,9 @@ fn inputImpl(
                 const child = sock_table.allocate() catch {
                     return;
                 };
+                child.lock();
+                defer child.unlock();
+
                 // Spawn a new child socket for the incoming connection.
                 child.listener = sock;
                 child.local = local;
@@ -483,9 +486,9 @@ const Endpoint = struct {
 // Socket
 // =============================================================
 
-/// Initialize TCP protocol stack.
-pub fn init() Allocator.Error!void {
-    try urd.time.schedulePeriodic(retransmit_interval_us, timerFn);
+/// Start the worker thread of TCP protocol stack.
+pub fn run() urd.task.Error!void {
+    _ = try urd.task.kspawn("tcp-timer", timerWorker, .{});
 }
 
 /// Open a TCP socket.
@@ -1044,14 +1047,7 @@ const SocketTable = struct {
         socket.cv.broadcast();
 
         // Free the queue.
-        var cur = socket.rq.first;
-        while (cur) |node| {
-            cur = node.next;
-
-            const entry: *const RetransmitEntry = @fieldParentPtr("_node", node);
-            allocator.free(entry.data);
-            allocator.destroy(entry);
-        }
+        socket.rtpurge();
 
         // Free the receive buffer.
         allocator.free(socket.buf);
@@ -1259,6 +1255,21 @@ const Socket = struct {
         self.rq.append(&entry._node);
     }
 
+    /// Free all entries in the retransmission queue.
+    pub fn rtpurge(self: *Socket) void {
+        const allocator = urd.mem.bin;
+
+        var cur = self.rq.first;
+        while (cur) |node| {
+            cur = node.next;
+
+            const entry: *const RetransmitEntry = @fieldParentPtr("_node", node);
+            allocator.free(entry.data);
+            allocator.destroy(entry);
+        }
+        self.rq = .{};
+    }
+
     /// Clean up all entries in the retransmission queue that have been acknowledged.
     pub fn rtclean(self: *Socket) void {
         var cur = self.rq.first;
@@ -1328,42 +1339,60 @@ const RetransmitEntry = struct {
     _node: std.DoublyLinkedList.Node = .{},
 };
 
-/// Called periodically to check retransmission queue.
-fn timerFn(_: *urd.time.Timer) void {
-    for (&sock_table.sockets) |*sock| {
-        if (sock.state == .free or sock.state == .time_wait) continue;
+/// Worker thread that periodically checks the retransmission queue of the sockets.
+fn timerWorker() void {
+    while (true) {
+        urd.time.sleepUs(retransmit_interval_us);
 
-        var cur = sock.rq.first;
-        while (cur) |node| : (cur = node.next) {
-            const entry: *RetransmitEntry = @fieldParentPtr("_node", node);
-            const timestamp = urd.time.getCurrentTimestamp();
-            const elapsed = timestamp - entry.time_last;
+        for (&sock_table.sockets) |*sock| {
+            if (sock.state == .free or sock.state == .time_wait) continue;
 
-            if (timestamp - entry.time_first > retransmit_deadline_sec * std.time.ns_per_s) {
-                if (sock.listener != null) {
-                    sock.listener = null;
-                    sock.orphaned = true;
-                }
-                sock.state = .closed;
-                sock.wake();
-                continue;
+            sock.lock();
+            defer sock.unlock();
+
+            if (sock.state == .free or sock.state == .time_wait) continue;
+            retransmit(sock);
+        }
+    }
+}
+
+/// Retransmit the segments whose timeout has expired.
+///
+/// The lock of the socket must be held.
+fn retransmit(sock: *Socket) void {
+    rtt.expect(sock._lock.isLocked());
+
+    var cur = sock.rq.first;
+    while (cur) |node| : (cur = node.next) {
+        const entry: *RetransmitEntry = @fieldParentPtr("_node", node);
+        const timestamp = urd.time.getCurrentTimestamp();
+
+        // Give up the connection when the retransmission deadline has been exceeded.
+        if (timestamp -| entry.time_first > retransmit_deadline_sec * std.time.ns_per_s) {
+            sock.rtpurge();
+            if (sock.listener != null) {
+                sock.listener = null;
+                sock.orphaned = true;
             }
+            sock.update(.closed);
+            sock.wake();
+            return;
+        }
 
-            if (elapsed >= entry.rto) {
-                outputSegment(
-                    sock.local,
-                    sock.remote,
-                    entry.seq,
-                    sock.rcv.nxt,
-                    sock.rcv.wnd,
-                    entry.flags,
-                    entry.data,
-                ) catch {};
+        if (timestamp -| entry.time_last >= entry.rto) {
+            outputSegment(
+                sock.local,
+                sock.remote,
+                entry.seq,
+                sock.rcv.nxt,
+                sock.rcv.wnd,
+                entry.flags,
+                entry.data,
+            ) catch {};
 
-                // Exponential backoff.
-                entry.time_last = timestamp;
-                entry.rto = @min(entry.rto * 2, 60 * std.time.ns_per_s);
-            }
+            // Exponential backoff.
+            entry.time_last = timestamp;
+            entry.rto = @min(entry.rto * 2, 60 * std.time.ns_per_s);
         }
     }
 }
